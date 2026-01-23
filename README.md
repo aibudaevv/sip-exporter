@@ -1,6 +1,6 @@
 # SIP-exporter
 ## Install  
-`docker pull frzq/sip-exporter:0.1.0`
+`docker pull frzq/sip-exporter:0.2.0`
 ## Configure  
 Environment variables:  
 * `SIP_EXPORTER_INTERFACE` - net interface (required)
