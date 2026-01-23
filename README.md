@@ -1,4 +1,11 @@
 # SIP-exporter
+## Install  
+`docker pull frzq/sip-exporter:0.1.0`
+## Configure  
+Environment variables:  
+* `SIP_EXPORTER_INTERFACE` - net interface (required)
+* `SIP_EXPORTER_HTTP_PORT` - http port for prometheus (default 2112)  
+SIP/SIPS port 5060/5061.
 ## Metrics
 ### SIP request metrics
 `sip_exporter_publish_total`: total number of received SIP PUBLISH requests.  

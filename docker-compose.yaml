@@ -4,10 +4,8 @@ services:
     container_name: sip-exporter
     restart: unless-stopped
     environment:
-      - SIP_EXPORTER_LOGGER_LEVEL=debug
       - SIP_EXPORTER_HTTP_PORT=2112
       - SIP_EXPORTER_INTERFACE=lo
-      - SIP_EXPORTER_OBJECT_FILE_PATH=/usr/local/bin/sip.o
     privileged: true # require!
     ports:
       - "2112:2112"
