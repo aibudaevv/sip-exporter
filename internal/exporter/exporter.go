@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/ringbuf"
-	"gitlab.com/sip-exporter/internal/metrics"
+	constant "gitlab.com/sip-exporter/internal"
+	"gitlab.com/sip-exporter/internal/service"
 	"golang.org/x/sys/unix"
 	"log"
 	"net"
@@ -22,7 +23,7 @@ const ETH_P_ALL = 0x0003
 
 type (
 	exporter struct {
-		m          metrics.Metricser
+		m          service.Metricser
 		collection *ebpf.Collection
 		sock       int
 		reader     *ringbuf.Reader
@@ -34,7 +35,7 @@ type (
 	}
 )
 
-func NewExporter(m metrics.Metricser) Exporter {
+func NewExporter(m service.Metricser) Exporter {
 	return &exporter{
 		m:        m,
 		messages: make(chan []byte, 10_000),
@@ -206,18 +207,24 @@ func (e *exporter) handleMessage(line []byte) error {
 		return fmt.Errorf("method of status is empty in '%s'", string(line))
 	}
 
-	e.m.StatusOrCode(methodOrStatus)
+	go e.m.StatusOrCode(methodOrStatus)
 
-	//methodOrStatusStr := string(methodOrStatus)
+	methodOrStatusStr := string(methodOrStatus)
 
-	//if methodOrStatusStr == constant.Invite || methodOrStatusStr == constant.Bye {
-	//	return e.session()
-	//}
+	switch methodOrStatusStr {
+	case constant.Invite:
+		if err := e.handleInvite(line); err != nil {
+			log.Println(err.Error())
+			e.m.SystemError()
+		}
+	case constant.Bye:
+	case constant.StatusOK:
+	}
 
 	return nil
 }
 
-func (e *exporter) session() error {
+func (e *exporter) handleInvite(line []byte) error {
 
 	return nil
 }

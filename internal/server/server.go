@@ -6,7 +6,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"gitlab.com/sip-exporter/internal/config"
 	"gitlab.com/sip-exporter/internal/exporter"
-	"gitlab.com/sip-exporter/internal/metrics"
+	"gitlab.com/sip-exporter/internal/service"
 	"log"
 	"net/http"
 	"os"
@@ -29,7 +29,7 @@ type (
 )
 
 func NewServer() Server {
-	return &server{exporter: exporter.NewExporter(metrics.NewMetricser())}
+	return &server{exporter: exporter.NewExporter(service.NewMetricser())}
 }
 
 func (s *server) Run(cfg *config.App) error {

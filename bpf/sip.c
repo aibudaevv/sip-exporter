@@ -7,7 +7,7 @@
 #define IPPROTO_UDP  17
 #define UDP_PORT_SIP 5060
 #define UDP_PORT_SIPS 5061
-#define FIXED_SIZE   528
+#define FIXED_SIZE   400
 //#define FIXED_SIZE   512
 #define SIP_MIN_LEN  40
 
@@ -61,9 +61,8 @@ int bpf_socket_filter(struct __sk_buff *skb) {
     ports_ptr[0] = src_port;
     ports_ptr[1] = dest_port;
 
-    // fixed 256 bytes (offset 8)
     __u8 *data_start = buf + 8;
-    ret = bpf_skb_load_bytes(skb, 0, data_start, 256);  // ← fixed size 256!
+    ret = bpf_skb_load_bytes(skb, 0, data_start, 300);
     if (ret < 0) {
 //        bpf_printk("load failed");
         bpf_ringbuf_discard(buf, 0);
