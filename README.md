@@ -1,4 +1,12 @@
 # SIP-exporter
+High-performance eBPF-based SIP monitoring service that captures and exports telephony metrics to Prometheus.  
+Zero-copy packet processing directly in the Linux kernel for <1μs latency on 10Gbps+ SIP traffic.  
+### Core Technology: eBPF
+This service uses eBPF (extended Berkeley Packet Filter) attached to network sockets (XDP-like filtering) to  
+intercept SIP packets (UDP/5060-5061) at L4 without overhead of iptables/nftables or userspace daemons like tcpdump.  
+### Architecture
+SIP Traffic → NIC → eBPF socket filter → ringbuf → Go poller → SIP parser → Prometheus
+
 ## Install  
 `docker pull frzq/sip-exporter:0.2.0`
 ## Configure  
