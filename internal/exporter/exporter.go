@@ -9,6 +9,7 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	constant "gitlab.com/sip-exporter/internal"
 	"gitlab.com/sip-exporter/internal/service"
+	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
 	"log"
 	"net"
@@ -66,7 +67,7 @@ func (e *exporter) Initialize(interfaceName, path string) error {
 
 	reader, err := ringbuf.NewReader(rbMap)
 	if err != nil {
-		log.Fatalf("failed to create ringbuf reader: %v", err)
+		return fmt.Errorf("failed to create ringbuf reader: %v", err)
 	}
 
 	e.reader = reader
@@ -89,7 +90,7 @@ func (e *exporter) Initialize(interfaceName, path string) error {
 
 	err = unix.Bind(sock, sa)
 	if err != nil {
-		log.Fatalf("Failed to bind AF_PACKET socket to %s: %v", ifaceName, err)
+		return fmt.Errorf("failed to bind AF_PACKET socket to %s: %v", ifaceName, err)
 	}
 
 	progFD := prog.FD()
@@ -97,7 +98,8 @@ func (e *exporter) Initialize(interfaceName, path string) error {
 		return fmt.Errorf("failed to attach BPF program: %v", err)
 	}
 
-	log.Printf("eBPF program attached to AF_PACKET socket on interface %s, monitoring SIP traffic...", ifaceName)
+	zap.L().Info("eBPF program attached to AF_PACKET socket on interface and monitoring SIP traffic...",
+		zap.String("interface", interfaceName))
 
 	go e.readPackets()
 	go e.readEBPF(reader)
@@ -115,15 +117,13 @@ func (e *exporter) Close() {
 	if e.sock != 0 {
 		unix.Close(e.sock)
 	}
-
-	log.Println("exporter closed")
 }
 
 func (e *exporter) readPackets() {
 	for packet := range e.messages {
 		if err := e.parse(packet); err != nil {
 			e.m.SystemError()
-			log.Printf("parse error: %v\n", err)
+			zap.L().Error("parse err", zap.Error(err))
 		}
 	}
 }
@@ -133,12 +133,13 @@ func (e *exporter) readEBPF(reader *ringbuf.Reader) {
 		record, err := reader.Read()
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
+				//FIXME: ???
 				log.Println("Ring buffer closed, exiting...")
 				return
 			}
 
 			e.m.SystemError()
-			log.Printf("Error reading from ringbuf: %v", err)
+			zap.L().Error("reading from ringbuf", zap.Error(err))
 			continue
 		}
 
@@ -157,7 +158,12 @@ func (e *exporter) parse(packet []byte) error {
 	srcPort := binary.LittleEndian.Uint16(packet[4:6])
 	dstPort := binary.LittleEndian.Uint16(packet[6:8])
 
-	log.Printf("SIP %d->%d real size=%d, userspace size=%d\n", srcPort, dstPort, pktLen, len(packet))
+	zap.L().Debug("packet",
+		zap.Uint16("source port", srcPort),
+		zap.Uint16("destination port", dstPort),
+		zap.Uint32("real size", pktLen),
+		zap.Int("userspace size", len(packet)))
+
 	packetData := packet[8:]
 
 	if len(packetData) < 14 {
@@ -214,7 +220,7 @@ func (e *exporter) handleMessage(line []byte) error {
 	switch methodOrStatusStr {
 	case constant.Invite:
 		if err := e.handleInvite(line); err != nil {
-			log.Println(err.Error())
+			zap.L().Error("handle invite", zap.Error(err))
 			e.m.SystemError()
 		}
 	case constant.Bye:

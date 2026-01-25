@@ -3,7 +3,7 @@ package service
 import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"log"
+	"go.uber.org/zap"
 )
 
 type (
@@ -226,7 +226,7 @@ func (m *metrics) StatusOrCode(in []byte) {
 	case "603":
 		m.statusDeclineTotal.Inc()
 	default:
-		log.Printf("unknown method or status: '%s'", string(in))
+		zap.L().Warn("unknown method or status", zap.ByteString("in", in))
 	}
 }
 

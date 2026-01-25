@@ -17,7 +17,6 @@ type (
 func GetConfig() (*App, error) {
 	cfg := &App{}
 
-	cfg.Interface = "lo"
 	if err := cleanenv.ReadEnv(cfg); err != nil {
 		helpText := "error read env"
 		help, _ := cleanenv.GetDescription(cfg, &helpText)
