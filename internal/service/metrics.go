@@ -45,7 +45,9 @@ type (
 		sessions                          prometheus.Gauge
 	}
 	Metricser interface {
-		StatusOrCode(in []byte)
+		Request(in []byte)
+		Response(in []byte)
+		UpdateSession(size int)
 		SystemError()
 	}
 )
@@ -160,35 +162,13 @@ func NewMetricser() Metricser {
 	}
 }
 
-func (m *metrics) StatusOrCode(in []byte) {
+func (m *metrics) UpdateSession(size int) {
+	m.sessions.Set(float64(size))
+}
+
+func (m *metrics) Response(in []byte) {
 	defer m.sipPacketsTotal.Inc()
 	switch string(in) {
-	case "PUBLISH":
-		m.requestPublishTotal.Inc()
-	case "PRACK":
-		m.requestPrackTotal.Inc()
-	case "NOTIFY":
-		m.requestNotifyTotal.Inc()
-	case "SUBSCRIBE":
-		m.requestSubscribeTotal.Inc()
-	case "REFER":
-		m.requestReferTotal.Inc()
-	case "INFO":
-		m.requestInfoTotal.Inc()
-	case "UPDATE":
-		m.requestUpdateTotal.Inc()
-	case "REGISTER":
-		m.requestRegisterTotal.Inc()
-	case "OPTIONS":
-		m.requestOptionsTotal.Inc()
-	case "CANCEL":
-		m.requestCancelTotal.Inc()
-	case "BYE":
-		m.requestByeTotal.Inc()
-	case "ACK":
-		m.requestACKTotal.Inc()
-	case "INVITE":
-		m.requestInviteTotal.Inc()
 	case "100":
 		m.statusTryingTotal.Inc()
 	case "180":
@@ -226,7 +206,41 @@ func (m *metrics) StatusOrCode(in []byte) {
 	case "603":
 		m.statusDeclineTotal.Inc()
 	default:
-		zap.L().Warn("unknown method or status", zap.ByteString("in", in))
+		zap.L().Warn("unknown response", zap.ByteString("in", in))
+	}
+}
+
+func (m *metrics) Request(in []byte) {
+	defer m.sipPacketsTotal.Inc()
+	switch string(in) {
+	case "PUBLISH":
+		m.requestPublishTotal.Inc()
+	case "PRACK":
+		m.requestPrackTotal.Inc()
+	case "NOTIFY":
+		m.requestNotifyTotal.Inc()
+	case "SUBSCRIBE":
+		m.requestSubscribeTotal.Inc()
+	case "REFER":
+		m.requestReferTotal.Inc()
+	case "INFO":
+		m.requestInfoTotal.Inc()
+	case "UPDATE":
+		m.requestUpdateTotal.Inc()
+	case "REGISTER":
+		m.requestRegisterTotal.Inc()
+	case "OPTIONS":
+		m.requestOptionsTotal.Inc()
+	case "CANCEL":
+		m.requestCancelTotal.Inc()
+	case "BYE":
+		m.requestByeTotal.Inc()
+	case "ACK":
+		m.requestACKTotal.Inc()
+	case "INVITE":
+		m.requestInviteTotal.Inc()
+	default:
+		zap.L().Warn("unknown request", zap.ByteString("in", in))
 	}
 }
 

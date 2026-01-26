@@ -4,49 +4,39 @@ import (
 	"sync"
 )
 
-type dialogState int
-
-const (
-	initiated dialogState = iota
-	trying
-	ringing
-	confirmed
-	terminated
-	expired
-)
-
 type (
 	dialogs struct {
 		m       sync.Mutex
-		storage map[string]dialogState
+		storage map[string]struct{}
 	}
 	Dialoger interface {
-		Create(callID, fromTag string)
-		Del(callID string)
+		Create(dialogID string)
+		Delete(dialogID string)
 		Size() int
 	}
 )
 
 func NewDialoger() Dialoger {
 	return &dialogs{
-		storage: make(map[string]dialogState, 1000),
+		storage: make(map[string]struct{}, 10_000),
 	}
 }
 
-func (c *dialogs) Del(callID string) {
+func (c *dialogs) Delete(dialogID string) {
 	c.m.Lock()
 	defer c.m.Unlock()
 
-	delete(c.storage, callID)
+	delete(c.storage, dialogID)
 }
 
-func (c *dialogs) Create(callID, fromTag string) {
+func (c *dialogs) Create(dialogID string) {
 	c.m.Lock()
 	defer c.m.Unlock()
 
-	//key := fmt.Sprintf("%s:%s", callID, fromTag)
-
-	//c.storage[key] = invite
+	_, b := c.storage[dialogID]
+	if !b {
+		c.storage[dialogID] = struct{}{}
+	}
 }
 
 func (c *dialogs) Size() int {
