@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sys/unix"
 	"net"
 	"syscall"
+	"time"
 )
 
 var (
@@ -109,8 +110,21 @@ func (e *exporter) Initialize(interfaceName, path string) error {
 
 	go e.readPackets()
 	go e.readEBPF(reader)
+	go e.sipDialogMetricsUpdate()
 
 	return nil
+}
+
+func (e *exporter) sipDialogMetricsUpdate() {
+	ticker := time.NewTicker(1 * time.Second)
+	for {
+		<-ticker.C
+		s := e.services.dialoger.Size()
+
+		zap.L().Debug("update metrics", zap.Int("size dialogs", s))
+
+		e.services.metricser.UpdateSession(s)
+	}
 }
 
 func (e *exporter) Close() {
@@ -271,8 +285,8 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 
 	if packet.IsResponse {
 		go e.services.metricser.Response(packet.ResponseStatus)
-		switch packet.ResponseStatus {
-		case []byte("200"):
+		switch {
+		case bytes.Equal(packet.ResponseStatus, []byte("200")):
 			if bytes.Equal(packet.CSeq.Method, []byte("INVITE")) {
 				dialogID, errd := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag)
 				if errd != nil {
@@ -280,6 +294,15 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 				}
 
 				e.services.dialoger.Create(dialogID)
+			}
+
+			if bytes.Equal(packet.CSeq.Method, []byte("BYE")) {
+				dialogID, errd := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag)
+				if errd != nil {
+					return err
+				}
+
+				e.services.dialoger.Delete(dialogID)
 			}
 		}
 	} else {

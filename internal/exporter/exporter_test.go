@@ -9,17 +9,17 @@ import (
 func TestNormalizeDialogID(t *testing.T) {
 	tt := []struct {
 		expected    string
-		callID      string
-		fromTag     string
-		toTag       string
+		callID      []byte
+		fromTag     []byte
+		toTag       []byte
 		description string
 	}{
 		{
 			description: "positive",
 			expected:    "583ce713cb324f27bd614e594db53cc2:8Xy7r28Ne5ZSQ:e2540aafe5474bd7a5f9059b0ffccfec",
-			callID:      "583ce713cb324f27bd614e594db53cc2",
-			fromTag:     "e2540aafe5474bd7a5f9059b0ffccfec",
-			toTag:       "8Xy7r28Ne5ZSQ",
+			callID:      []byte("583ce713cb324f27bd614e594db53cc2"),
+			fromTag:     []byte("e2540aafe5474bd7a5f9059b0ffccfec"),
+			toTag:       []byte("8Xy7r28Ne5ZSQ"),
 		},
 	}
 

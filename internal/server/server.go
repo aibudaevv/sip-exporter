@@ -29,7 +29,7 @@ type (
 )
 
 func NewServer() Server {
-	return &server{exporter: exporter.NewExporter(service.NewMetricser())}
+	return &server{exporter: exporter.NewExporter(service.NewMetricser(), service.NewDialoger())}
 }
 
 func (s *server) Run(cfg *config.App) error {

@@ -47,6 +47,7 @@ type (
 	Metricser interface {
 		Request(in []byte)
 		Response(in []byte)
+		UpdateSession(size int)
 		SystemError()
 	}
 )
@@ -159,6 +160,10 @@ func NewMetricser() Metricser {
 			Name: "sip_exporter_180_total",
 		}),
 	}
+}
+
+func (m *metrics) UpdateSession(size int) {
+	m.sessions.Set(float64(size))
 }
 
 func (m *metrics) Response(in []byte) {
