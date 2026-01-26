@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/ringbuf"
-	"gitlab.com/sip-exporter/internal/metrics"
+	"gitlab.com/sip-exporter/internal/dto"
+	"gitlab.com/sip-exporter/internal/service"
+	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
-	"log"
 	"net"
 	"syscall"
+	"time"
 )
 
 var (
@@ -22,11 +24,15 @@ const ETH_P_ALL = 0x0003
 
 type (
 	exporter struct {
-		m          metrics.Metricser
 		collection *ebpf.Collection
 		sock       int
 		reader     *ringbuf.Reader
 		messages   chan []byte
+		services   services
+	}
+	services struct {
+		metricser service.Metricser
+		dialoger  service.Dialoger
 	}
 	Exporter interface {
 		Initialize(interfaceName, path string) error
@@ -34,9 +40,12 @@ type (
 	}
 )
 
-func NewExporter(m metrics.Metricser) Exporter {
+func NewExporter(m service.Metricser, d service.Dialoger) Exporter {
 	return &exporter{
-		m:        m,
+		services: services{
+			metricser: m,
+			dialoger:  d,
+		},
 		messages: make(chan []byte, 10_000),
 	}
 }
@@ -65,7 +74,7 @@ func (e *exporter) Initialize(interfaceName, path string) error {
 
 	reader, err := ringbuf.NewReader(rbMap)
 	if err != nil {
-		log.Fatalf("failed to create ringbuf reader: %v", err)
+		return fmt.Errorf("failed to create ringbuf reader: %v", err)
 	}
 
 	e.reader = reader
@@ -88,7 +97,7 @@ func (e *exporter) Initialize(interfaceName, path string) error {
 
 	err = unix.Bind(sock, sa)
 	if err != nil {
-		log.Fatalf("Failed to bind AF_PACKET socket to %s: %v", ifaceName, err)
+		return fmt.Errorf("failed to bind AF_PACKET socket to %s: %v", ifaceName, err)
 	}
 
 	progFD := prog.FD()
@@ -96,12 +105,26 @@ func (e *exporter) Initialize(interfaceName, path string) error {
 		return fmt.Errorf("failed to attach BPF program: %v", err)
 	}
 
-	log.Printf("eBPF program attached to AF_PACKET socket on interface %s, monitoring SIP traffic...", ifaceName)
+	zap.L().Info("eBPF program attached to AF_PACKET socket on interface and monitoring SIP traffic...",
+		zap.String("interface", interfaceName))
 
 	go e.readPackets()
 	go e.readEBPF(reader)
+	go e.sipDialogMetricsUpdate()
 
 	return nil
+}
+
+func (e *exporter) sipDialogMetricsUpdate() {
+	ticker := time.NewTicker(1 * time.Second)
+	for {
+		<-ticker.C
+		s := e.services.dialoger.Size()
+
+		zap.L().Debug("update metrics", zap.Int("size dialogs", s))
+
+		e.services.metricser.UpdateSession(s)
+	}
 }
 
 func (e *exporter) Close() {
@@ -114,15 +137,13 @@ func (e *exporter) Close() {
 	if e.sock != 0 {
 		unix.Close(e.sock)
 	}
-
-	log.Println("exporter closed")
 }
 
 func (e *exporter) readPackets() {
 	for packet := range e.messages {
-		if err := e.parse(packet); err != nil {
-			e.m.SystemError()
-			log.Printf("parse error: %v\n", err)
+		if err := e.parseRawPacket(packet); err != nil {
+			e.services.metricser.SystemError()
+			zap.L().Error("parse err", zap.Error(err))
 		}
 	}
 }
@@ -132,12 +153,13 @@ func (e *exporter) readEBPF(reader *ringbuf.Reader) {
 		record, err := reader.Read()
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
-				log.Println("Ring buffer closed, exiting...")
+				//FIXME: ???
+				zap.L().Info("Ring buffer closed, exiting...")
 				return
 			}
 
-			e.m.SystemError()
-			log.Printf("Error reading from ringbuf: %v", err)
+			e.services.metricser.SystemError()
+			zap.L().Error("reading from ringbuf", zap.Error(err))
 			continue
 		}
 
@@ -146,17 +168,24 @@ func (e *exporter) readEBPF(reader *ringbuf.Reader) {
 			continue
 		}
 
+		fmt.Println(string(packet))
+		//zap.L().Debug("read packet", zap.ByteString("packet", packet))
 		e.messages <- packet
 	}
 }
 
 // parsing raw L2 packet
-func (e *exporter) parse(packet []byte) error {
+func (e *exporter) parseRawPacket(packet []byte) error {
 	pktLen := binary.LittleEndian.Uint32(packet[0:4])
 	srcPort := binary.LittleEndian.Uint16(packet[4:6])
 	dstPort := binary.LittleEndian.Uint16(packet[6:8])
 
-	log.Printf("SIP %d->%d real size=%d, userspace size=%d\n", srcPort, dstPort, pktLen, len(packet))
+	zap.L().Debug("packet",
+		zap.Uint16("source port", srcPort),
+		zap.Uint16("destination port", dstPort),
+		zap.Uint32("real size", pktLen),
+		zap.Int("userspace size", len(packet)))
+
 	packetData := packet[8:]
 
 	if len(packetData) < 14 {
@@ -179,84 +208,160 @@ func (e *exporter) parse(packet []byte) error {
 
 	// SIP message
 	sipData := packetData[sipOffset:]
-	scanner := bytes.NewReader(sipData)
-
-	var line []byte
-	for {
-		b, err := scanner.ReadByte()
-		if err != nil {
-			break
-		}
-		if b != '\r' {
-			line = append(line, b)
-		}
-	}
-
-	if len(line) > 0 {
-		if err := e.handleMessage(line); err != nil {
+	if len(sipData) > 0 {
+		if err := e.handleMessage(sipData); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
-func (e *exporter) handleMessage(line []byte) error {
-	methodOrStatus := e.getMethodOrStatus(line)
-	if methodOrStatus == nil {
-		return fmt.Errorf("method of status is empty in '%s'", string(line))
+func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
+	lines := bytes.Split(raw, []byte("\r\n"))
+	if len(lines) == 0 {
+		return dto.Packet{}, fmt.Errorf("split return empty result, raw: %b", raw)
 	}
 
-	e.m.StatusOrCode(methodOrStatus)
+	p := dto.Packet{}
+	if bytes.HasPrefix(lines[0], []byte("SIP/2.0")) {
+		p.IsResponse = true
+		p.ResponseStatus = bytes.TrimPrefix(lines[0], []byte("SIP/2.0 "))[:3]
+	} else {
+		parts := bytes.SplitN(lines[0], []byte(" "), 3)
+		if len(parts) >= 2 {
+			p.IsResponse = false
+			p.Method = bytes.TrimSpace(parts[0])
+		}
+	}
 
-	//methodOrStatusStr := string(methodOrStatus)
+	for i, line := range lines {
+		if i == 0 {
+			continue
+		}
+		header, value := splitHeader(line)
 
-	//if methodOrStatusStr == constant.Invite || methodOrStatusStr == constant.Bye {
-	//	return e.session()
-	//}
+		switch {
+		case bytes.Equal(header, []byte("From")):
+			tag := extractTag(value)
+			if tag == nil {
+				return dto.Packet{}, fmt.Errorf("fail extact tag from '%b'", value)
+			}
+
+			p.From.Tag = tag
+		case bytes.Equal(header, []byte("To")):
+			p.To.Tag = extractTag(value)
+		case bytes.Equal(header, []byte("Call-ID")):
+			p.CallID = value
+		case bytes.Equal(header, []byte("CSeq")):
+			id, method := extractCSeq(value)
+			if id == nil || method == nil {
+				return dto.Packet{}, fmt.Errorf("fail extract CSeq from '%b'", value)
+			}
+
+			p.CSeq.Method = method
+			p.CSeq.ID = id
+		}
+	}
+	return p, nil
+}
+
+func (e *exporter) handleMessage(rawPacket []byte) error {
+	packet, err := e.sipPacketParse(rawPacket)
+	if err != nil {
+		return err
+	}
+
+	if packet.IsResponse {
+		go e.services.metricser.Response(packet.ResponseStatus)
+		switch {
+		case bytes.Equal(packet.ResponseStatus, []byte("200")):
+			zap.L().Debug("handle message", zap.ByteString("200 OK cseq method", packet.CSeq.Method))
+
+			if bytes.Equal(packet.CSeq.Method, []byte("INVITE")) {
+				dialogID, errd := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag)
+				if errd != nil {
+					return err
+				}
+
+				zap.L().Debug("handle message", zap.String("create session", dialogID))
+				e.services.dialoger.Create(dialogID)
+			}
+
+			if bytes.Equal(packet.CSeq.Method, []byte("BYE")) {
+				dialogID, errd := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag)
+				if errd != nil {
+					return err
+				}
+
+				zap.L().Debug("handle message", zap.String("delete session", dialogID))
+
+				e.services.dialoger.Delete(dialogID)
+			}
+		}
+	} else {
+		go e.services.metricser.Request(packet.Method)
+	}
 
 	return nil
 }
 
-func (e *exporter) session() error {
-
-	return nil
+func splitHeader(line []byte) ([]byte, []byte) {
+	i := bytes.IndexByte(line, ':')
+	if i == -1 {
+		return nil, nil
+	}
+	return bytes.TrimSpace(line[:i]), bytes.TrimSpace(line[i+1:])
 }
 
-func (e *exporter) getMethodOrStatus(firstLine []byte) []byte {
-	line := bytes.TrimSpace(firstLine)
-	if len(line) == 0 {
+func extractTag(value []byte) []byte {
+	tagIdx := bytes.Index(value, []byte(";tag="))
+	if tagIdx == -1 {
 		return nil
 	}
 
-	parts := bytes.Split(line, []byte{' '})
-	if len(parts) >= 3 {
-		isRes := isResponse(parts)
-		if isRes {
-			return getStatus(parts)
-		}
+	start := tagIdx + 5
+	end := start
 
-		return getMethodName(parts)
+	for end < len(value) &&
+		value[end] != ';' &&
+		value[end] != '\r' &&
+		value[end] != '\n' &&
+		value[end] != ' ' &&
+		value[end] != '>' {
+		end++
 	}
 
-	return nil
+	return value[start:end]
 }
 
-func getMethodName(parts [][]byte) []byte {
-	return parts[0]
-}
-
-func getStatus(parts [][]byte) []byte {
-	return parts[1]
-}
-
-func isResponse(parts [][]byte) bool {
-	if len(parts) >= 2 && bytes.Equal(parts[0], []byte("SIP/2.0")) {
-		return true
+func normalizeDialogID(callID, fromTag, toTag []byte) (string, error) {
+	if bytes.Equal(fromTag, []byte("")) || bytes.Equal(toTag, []byte("")) {
+		return "", fmt.Errorf("from tag or to tag is empty. Call-ID: '%s', From tag: '%s', To tag: '%s'",
+			callID, fromTag, toTag)
 	}
 
-	return false
+	var minTag, maxTag []byte
+	if bytes.Compare(fromTag, toTag) <= 0 {
+		minTag = fromTag
+		maxTag = toTag
+	} else {
+		minTag = toTag
+		maxTag = fromTag
+	}
+
+	return fmt.Sprintf("%s:%s:%s", callID, minTag, maxTag), nil
 }
 
 func htons(i uint16) uint16 {
 	return (i<<8)&0xFF00 | i>>8
+}
+
+func extractCSeq(value []byte) ([]byte, []byte) {
+	arr := bytes.Split(value, []byte(" "))
+	if len(arr) < 2 {
+		return nil, nil
+	}
+
+	return arr[0], arr[1]
 }

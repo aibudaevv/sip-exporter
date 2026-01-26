@@ -1,12 +1,25 @@
 # SIP-exporter
+High-performance eBPF-based SIP monitoring service that captures and exports telephony metrics to Prometheus.  
+Zero-copy packet processing directly in the Linux kernel for <1μs latency on 10Gbps+ SIP traffic.  
+### Core Technology: eBPF
+This service uses eBPF (extended Berkeley Packet Filter) attached to network sockets (XDP-like filtering) to  
+intercept SIP packets (UDP/5060-5061) at L4 without overhead of iptables/nftables or userspace daemons like tcpdump.  
+### Architecture
+SIP Traffic → NIC → eBPF socket filter → ringbuf → Go poller → SIP parser → Prometheus
+
 ## Install  
 `docker pull frzq/sip-exporter:0.2.0`
-## Configure  
+### Configure  
 Environment variables:  
 * `SIP_EXPORTER_INTERFACE` - net interface (required)
 * `SIP_EXPORTER_HTTP_PORT` - http port for prometheus (default 2112)  
-SIP/SIPS port 5060/5061.
+* `SIP_EXPORTER_LOGGER_LEVEL` - log level (default info)
+Start docker container in privileged mode is true and host mode. SIP/SIPS port 5060/5061.
 ## Metrics
+### Generic SIP traffic metric
+`sip_exporter_packets_total`: total number of parsed SIP packets (requests + responses).  
+`sip_exporter_sessions`: active sip dialogs. (unique session it key call-id:from.tag:to.tag) 
+
 ### SIP request metrics
 `sip_exporter_publish_total`: total number of received SIP PUBLISH requests.  
 `sip_exporter_prack_total`: total number of received SIP PRACK requests.  
@@ -42,7 +55,3 @@ SIP/SIPS port 5060/5061.
 `sip_exporter_603_total`: total number of SIP 603 Decline responses.  
 ### System metrics  
 `sip_exporter_system_error_total`: total number internal sip exporter error.
-### Generic SIP traffic metric
-`sip_exporter_packets_total`: total number of parsed SIP packets (requests + responses).  
-### Docker  
-Start docker container in privileged mode is true and host mode.  
