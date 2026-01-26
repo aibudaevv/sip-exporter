@@ -12,7 +12,6 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
 	"net"
-	"strings"
 	"syscall"
 )
 
@@ -24,11 +23,15 @@ const ETH_P_ALL = 0x0003
 
 type (
 	exporter struct {
-		m          service.Metricser
 		collection *ebpf.Collection
 		sock       int
 		reader     *ringbuf.Reader
 		messages   chan []byte
+		services   services
+	}
+	services struct {
+		metricser service.Metricser
+		dialoger  service.Dialoger
 	}
 	Exporter interface {
 		Initialize(interfaceName, path string) error
@@ -36,9 +39,12 @@ type (
 	}
 )
 
-func NewExporter(m service.Metricser) Exporter {
+func NewExporter(m service.Metricser, d service.Dialoger) Exporter {
 	return &exporter{
-		m:        m,
+		services: services{
+			metricser: m,
+			dialoger:  d,
+		},
 		messages: make(chan []byte, 10_000),
 	}
 }
@@ -122,7 +128,7 @@ func (e *exporter) Close() {
 func (e *exporter) readPackets() {
 	for packet := range e.messages {
 		if err := e.parseRawPacket(packet); err != nil {
-			e.m.SystemError()
+			e.services.metricser.SystemError()
 			zap.L().Error("parse err", zap.Error(err))
 		}
 	}
@@ -138,7 +144,7 @@ func (e *exporter) readEBPF(reader *ringbuf.Reader) {
 				return
 			}
 
-			e.m.SystemError()
+			e.services.metricser.SystemError()
 			zap.L().Error("reading from ringbuf", zap.Error(err))
 			continue
 		}
@@ -257,13 +263,30 @@ func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
 	return p, nil
 }
 
-func extractCSeq(value []byte) ([]byte, []byte) {
-	arr := bytes.Split(value, []byte(" "))
-	if len(arr) < 2 {
-		return nil, nil
+func (e *exporter) handleMessage(rawPacket []byte) error {
+	packet, err := e.sipPacketParse(rawPacket)
+	if err != nil {
+		return err
 	}
 
-	return arr[0], arr[1]
+	if packet.IsResponse {
+		go e.services.metricser.Response(packet.ResponseStatus)
+		switch packet.ResponseStatus {
+		case []byte("200"):
+			if bytes.Equal(packet.CSeq.Method, []byte("INVITE")) {
+				dialogID, errd := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag)
+				if errd != nil {
+					return err
+				}
+
+				e.services.dialoger.Create(dialogID)
+			}
+		}
+	} else {
+		go e.services.metricser.Request(packet.Method)
+	}
+
+	return nil
 }
 
 func splitHeader(line []byte) ([]byte, []byte) {
@@ -295,41 +318,14 @@ func extractTag(value []byte) []byte {
 	return value[start:end]
 }
 
-func (e *exporter) handleMessage(pack []byte) error {
-	//methodOrStatus := e.getMethodOrStatus(pack)
-	//if methodOrStatus == nil {
-	//	return fmt.Errorf("method of status is empty in '%s'", string(pack))
-	//}
-
-	//go e.m.StatusOrCode(methodOrStatus)
-
-	//methodOrStatusStr := string(methodOrStatus)
-
-	//switch methodOrStatusStr {
-	//case constant.Invite:
-	//	if err := e.handleInvite(pack); err != nil {
-	//		zap.L().Error("handle 200 OK", zap.Error(err))
-	//		e.m.SystemError()
-	//	}
-	//case constant.StatusOK:
-	//	if err := e.handleOK(pack); err != nil {
-	//		zap.L().Error("handle 200 OK", zap.Error(err))
-	//		e.m.SystemError()
-	//	}
-	//case constant.Bye:
-	//}
-
-	return nil
-}
-
-func normalizeDialogID(callID, fromTag, toTag string) (string, error) {
-	if fromTag == "" || toTag == "" {
+func normalizeDialogID(callID, fromTag, toTag []byte) (string, error) {
+	if bytes.Equal(fromTag, []byte("")) || bytes.Equal(toTag, []byte("")) {
 		return "", fmt.Errorf("from tag or to tag is empty. Call-ID: '%s', From tag: '%s', To tag: '%s'",
 			callID, fromTag, toTag)
 	}
 
-	var minTag, maxTag string
-	if strings.Compare(fromTag, toTag) <= 0 {
+	var minTag, maxTag []byte
+	if bytes.Compare(fromTag, toTag) <= 0 {
 		minTag = fromTag
 		maxTag = toTag
 	} else {
@@ -342,4 +338,13 @@ func normalizeDialogID(callID, fromTag, toTag string) (string, error) {
 
 func htons(i uint16) uint16 {
 	return (i<<8)&0xFF00 | i>>8
+}
+
+func extractCSeq(value []byte) ([]byte, []byte) {
+	arr := bytes.Split(value, []byte(" "))
+	if len(arr) < 2 {
+		return nil, nil
+	}
+
+	return arr[0], arr[1]
 }
