@@ -7,8 +7,8 @@
 #define IPPROTO_UDP  17
 #define UDP_PORT_SIP 5060
 #define UDP_PORT_SIPS 5061
-#define FIXED_SIZE   400
-//#define FIXED_SIZE   512
+//#define FIXED_SIZE   420
+#define FIXED_SIZE   512
 #define SIP_MIN_LEN  40
 
 struct {
@@ -50,7 +50,7 @@ int bpf_socket_filter(struct __sk_buff *skb) {
 
     void *buf = bpf_ringbuf_reserve(&rb, FIXED_SIZE, 0);
     if (!buf) {
-//        bpf_printk("reserve failed");
+        bpf_printk("reserve failed");
         return 0;
     }
 
@@ -62,9 +62,9 @@ int bpf_socket_filter(struct __sk_buff *skb) {
     ports_ptr[1] = dest_port;
 
     __u8 *data_start = buf + 8;
-    ret = bpf_skb_load_bytes(skb, 0, data_start, 300);
+    ret = bpf_skb_load_bytes(skb, 0, data_start, 334);
     if (ret < 0) {
-//        bpf_printk("load failed");
+        bpf_printk("load failed");
         bpf_ringbuf_discard(buf, 0);
         return 0;
     }

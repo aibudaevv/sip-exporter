@@ -33,7 +33,10 @@ func (c *dialogs) Create(dialogID string) {
 	c.m.Lock()
 	defer c.m.Unlock()
 
-	c.storage[dialogID] = struct{}{}
+	_, b := c.storage[dialogID]
+	if !b {
+		c.storage[dialogID] = struct{}{}
+	}
 }
 
 func (c *dialogs) Size() int {

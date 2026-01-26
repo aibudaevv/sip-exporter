@@ -208,24 +208,12 @@ func (e *exporter) parseRawPacket(packet []byte) error {
 
 	// SIP message
 	sipData := packetData[sipOffset:]
-	scanner := bytes.NewReader(sipData)
-
-	var pack []byte
-	for {
-		b, err := scanner.ReadByte()
-		if err != nil {
-			break
-		}
-		if b != '\r' {
-			pack = append(pack, b)
-		}
-	}
-
-	if len(pack) > 0 {
-		if err := e.handleMessage(pack); err != nil {
+	if len(sipData) > 0 {
+		if err := e.handleMessage(sipData); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -252,6 +240,7 @@ func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
 			continue
 		}
 		header, value := splitHeader(line)
+
 		switch {
 		case bytes.Equal(header, []byte("From")):
 			tag := extractTag(value)
@@ -287,12 +276,15 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 		go e.services.metricser.Response(packet.ResponseStatus)
 		switch {
 		case bytes.Equal(packet.ResponseStatus, []byte("200")):
+			zap.L().Debug("handle message", zap.ByteString("200 OK cseq method", packet.CSeq.Method))
+
 			if bytes.Equal(packet.CSeq.Method, []byte("INVITE")) {
 				dialogID, errd := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag)
 				if errd != nil {
 					return err
 				}
 
+				zap.L().Debug("handle message", zap.String("create session", dialogID))
 				e.services.dialoger.Create(dialogID)
 			}
 
@@ -301,6 +293,8 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 				if errd != nil {
 					return err
 				}
+
+				zap.L().Debug("handle message", zap.String("delete session", dialogID))
 
 				e.services.dialoger.Delete(dialogID)
 			}
