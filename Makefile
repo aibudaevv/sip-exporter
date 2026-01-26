@@ -1,6 +1,8 @@
 version := $(shell cat VERSION)
 .DEFAULT_GOAL := docker_build
 
+.PHONY: test
+
 build: ebpf_compile go_build
 docker_build:
 	docker build  --progress=plain --no-cache -t sip-exporter:${version} .
@@ -13,4 +15,4 @@ clean:
 ebpf_log:
 	sudo cat /sys/kernel/debug/tracing/trace_pipe
 test:
-	go test ./...
+	go test -v 	 ./...

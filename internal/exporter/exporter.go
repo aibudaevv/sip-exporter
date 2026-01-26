@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/ringbuf"
-	constant "gitlab.com/sip-exporter/internal"
+	"gitlab.com/sip-exporter/internal/dto"
 	"gitlab.com/sip-exporter/internal/service"
 	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
-	"log"
 	"net"
+	"strings"
 	"syscall"
 )
 
@@ -121,7 +121,7 @@ func (e *exporter) Close() {
 
 func (e *exporter) readPackets() {
 	for packet := range e.messages {
-		if err := e.parse(packet); err != nil {
+		if err := e.parseRawPacket(packet); err != nil {
 			e.m.SystemError()
 			zap.L().Error("parse err", zap.Error(err))
 		}
@@ -134,7 +134,7 @@ func (e *exporter) readEBPF(reader *ringbuf.Reader) {
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
 				//FIXME: ???
-				log.Println("Ring buffer closed, exiting...")
+				zap.L().Info("Ring buffer closed, exiting...")
 				return
 			}
 
@@ -148,12 +148,14 @@ func (e *exporter) readEBPF(reader *ringbuf.Reader) {
 			continue
 		}
 
+		fmt.Println(string(packet))
+		//zap.L().Debug("read packet", zap.ByteString("packet", packet))
 		e.messages <- packet
 	}
 }
 
 // parsing raw L2 packet
-func (e *exporter) parse(packet []byte) error {
+func (e *exporter) parseRawPacket(packet []byte) error {
 	pktLen := binary.LittleEndian.Uint32(packet[0:4])
 	srcPort := binary.LittleEndian.Uint16(packet[4:6])
 	dstPort := binary.LittleEndian.Uint16(packet[6:8])
@@ -188,86 +190,154 @@ func (e *exporter) parse(packet []byte) error {
 	sipData := packetData[sipOffset:]
 	scanner := bytes.NewReader(sipData)
 
-	var line []byte
+	var pack []byte
 	for {
 		b, err := scanner.ReadByte()
 		if err != nil {
 			break
 		}
 		if b != '\r' {
-			line = append(line, b)
+			pack = append(pack, b)
 		}
 	}
 
-	if len(line) > 0 {
-		if err := e.handleMessage(line); err != nil {
+	if len(pack) > 0 {
+		if err := e.handleMessage(pack); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (e *exporter) handleMessage(line []byte) error {
-	methodOrStatus := e.getMethodOrStatus(line)
-	if methodOrStatus == nil {
-		return fmt.Errorf("method of status is empty in '%s'", string(line))
+func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
+	lines := bytes.Split(raw, []byte("\r\n"))
+	if len(lines) == 0 {
+		return dto.Packet{}, fmt.Errorf("split return empty result, raw: %b", raw)
 	}
 
-	go e.m.StatusOrCode(methodOrStatus)
-
-	methodOrStatusStr := string(methodOrStatus)
-
-	switch methodOrStatusStr {
-	case constant.Invite:
-		if err := e.handleInvite(line); err != nil {
-			zap.L().Error("handle invite", zap.Error(err))
-			e.m.SystemError()
+	p := dto.Packet{}
+	if bytes.HasPrefix(lines[0], []byte("SIP/2.0")) {
+		p.IsResponse = true
+		p.ResponseStatus = bytes.TrimPrefix(lines[0], []byte("SIP/2.0 "))[:3]
+	} else {
+		parts := bytes.SplitN(lines[0], []byte(" "), 3)
+		if len(parts) >= 2 {
+			p.IsResponse = false
+			p.Method = bytes.TrimSpace(parts[0])
 		}
-	case constant.Bye:
-	case constant.StatusOK:
 	}
 
-	return nil
+	for i, line := range lines {
+		if i == 0 {
+			continue
+		}
+		header, value := splitHeader(line)
+		switch {
+		case bytes.Equal(header, []byte("From")):
+			tag := extractTag(value)
+			if tag == nil {
+				return dto.Packet{}, fmt.Errorf("fail extact tag from '%b'", value)
+			}
+
+			p.From.Tag = tag
+		case bytes.Equal(header, []byte("To")):
+			p.To.Tag = extractTag(value)
+		case bytes.Equal(header, []byte("Call-ID")):
+			p.CallID = value
+		case bytes.Equal(header, []byte("CSeq")):
+			id, method := extractCSeq(value)
+			if id == nil || method == nil {
+				return dto.Packet{}, fmt.Errorf("fail extract CSeq from '%b'", value)
+			}
+
+			p.CSeq.Method = method
+			p.CSeq.ID = id
+		}
+	}
+	return p, nil
 }
 
-func (e *exporter) handleInvite(line []byte) error {
+func extractCSeq(value []byte) ([]byte, []byte) {
+	arr := bytes.Split(value, []byte(" "))
+	if len(arr) < 2 {
+		return nil, nil
+	}
 
-	return nil
+	return arr[0], arr[1]
 }
 
-func (e *exporter) getMethodOrStatus(firstLine []byte) []byte {
-	line := bytes.TrimSpace(firstLine)
-	if len(line) == 0 {
+func splitHeader(line []byte) ([]byte, []byte) {
+	i := bytes.IndexByte(line, ':')
+	if i == -1 {
+		return nil, nil
+	}
+	return bytes.TrimSpace(line[:i]), bytes.TrimSpace(line[i+1:])
+}
+
+func extractTag(value []byte) []byte {
+	tagIdx := bytes.Index(value, []byte(";tag="))
+	if tagIdx == -1 {
 		return nil
 	}
 
-	parts := bytes.Split(line, []byte{' '})
-	if len(parts) >= 3 {
-		isRes := isResponse(parts)
-		if isRes {
-			return getStatus(parts)
-		}
+	start := tagIdx + 5
+	end := start
 
-		return getMethodName(parts)
+	for end < len(value) &&
+		value[end] != ';' &&
+		value[end] != '\r' &&
+		value[end] != '\n' &&
+		value[end] != ' ' &&
+		value[end] != '>' {
+		end++
 	}
+
+	return value[start:end]
+}
+
+func (e *exporter) handleMessage(pack []byte) error {
+	//methodOrStatus := e.getMethodOrStatus(pack)
+	//if methodOrStatus == nil {
+	//	return fmt.Errorf("method of status is empty in '%s'", string(pack))
+	//}
+
+	//go e.m.StatusOrCode(methodOrStatus)
+
+	//methodOrStatusStr := string(methodOrStatus)
+
+	//switch methodOrStatusStr {
+	//case constant.Invite:
+	//	if err := e.handleInvite(pack); err != nil {
+	//		zap.L().Error("handle 200 OK", zap.Error(err))
+	//		e.m.SystemError()
+	//	}
+	//case constant.StatusOK:
+	//	if err := e.handleOK(pack); err != nil {
+	//		zap.L().Error("handle 200 OK", zap.Error(err))
+	//		e.m.SystemError()
+	//	}
+	//case constant.Bye:
+	//}
 
 	return nil
 }
 
-func getMethodName(parts [][]byte) []byte {
-	return parts[0]
-}
-
-func getStatus(parts [][]byte) []byte {
-	return parts[1]
-}
-
-func isResponse(parts [][]byte) bool {
-	if len(parts) >= 2 && bytes.Equal(parts[0], []byte("SIP/2.0")) {
-		return true
+func normalizeDialogID(callID, fromTag, toTag string) (string, error) {
+	if fromTag == "" || toTag == "" {
+		return "", fmt.Errorf("from tag or to tag is empty. Call-ID: '%s', From tag: '%s', To tag: '%s'",
+			callID, fromTag, toTag)
 	}
 
-	return false
+	var minTag, maxTag string
+	if strings.Compare(fromTag, toTag) <= 0 {
+		minTag = fromTag
+		maxTag = toTag
+	} else {
+		minTag = toTag
+		maxTag = fromTag
+	}
+
+	return fmt.Sprintf("%s:%s:%s", callID, minTag, maxTag), nil
 }
 
 func htons(i uint16) uint16 {

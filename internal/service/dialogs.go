@@ -1,17 +1,19 @@
 package service
 
 import (
-	"fmt"
 	"sync"
 )
 
-const (
-	invite = iota
-	early
-	confirmed
-)
-
 type dialogState int
+
+const (
+	initiated dialogState = iota
+	trying
+	ringing
+	confirmed
+	terminated
+	expired
+)
 
 type (
 	dialogs struct {
@@ -42,9 +44,9 @@ func (c *dialogs) Create(callID, fromTag string) {
 	c.m.Lock()
 	defer c.m.Unlock()
 
-	key := fmt.Sprintf("%s:%s", callID, fromTag)
+	//key := fmt.Sprintf("%s:%s", callID, fromTag)
 
-	c.storage[key] = invite
+	//c.storage[key] = invite
 }
 
 func (c *dialogs) Size() int {
