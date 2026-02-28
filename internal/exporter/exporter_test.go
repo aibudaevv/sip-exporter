@@ -41,6 +41,21 @@ func TestSIPPacketParse(t *testing.T) {
 		input        []byte
 	}{
 		{
+			input: []byte("SIP/2.0 401 Unauthorized\r\n" +
+				"Via: SIP/2.0/UDP 192.168.0.89:55147;rport=55147;branch=z9hG4bKPjda81fdbda2a5464898d03d02ed894a2d\r\n"),
+			//"From: <sip:1000@192.168.0.89>;tag=f91725d523814ead93f3503cbe665f2f\r\n" +
+			//"To: <sip:1000@192.168.0.89>;tag=r9cpmKK0870HS\r\n" +
+			//"Call-ID: c2a9e17343284b48a3863c5281688c5b\r\n" +
+			//"CSeq: 33849 REGISTER\r\n" +
+			//"User-Agent: FreeSWITCH-mod_sofia/1.10.9-release-21-a615e85afc~64bit\r\n" +
+			//"Allow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY, PUBLISH, SUBSCRIBE\r\n"),
+			description: "Unauthorized positive",
+			expectedData: dto.Packet{
+				IsResponse:     true,
+				ResponseStatus: []byte("401"),
+			},
+		},
+		{
 			input: []byte("INVITE sip:1001@192.168.0.89 SIP/2.0\r\n" +
 				"Via: SIP/2.0/UDP 192.168.0.89:49375;rport;branch=z9hG4bKPjdad03fa8a00c49fb9b08469cc8c2215b\r\n" +
 				"Max-Forwards: 70\r\n" +

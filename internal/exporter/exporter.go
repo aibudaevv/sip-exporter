@@ -2,7 +2,6 @@ package exporter
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"github.com/cilium/ebpf"
@@ -154,7 +153,7 @@ func (e *exporter) readEBPF(reader *ringbuf.Reader) {
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
 				//FIXME: ???
-				zap.L().Info("Ring buffer closed, exiting...")
+				zap.L().Info("ring buffer closed, exiting...")
 				return
 			}
 
@@ -168,7 +167,7 @@ func (e *exporter) readEBPF(reader *ringbuf.Reader) {
 			continue
 		}
 
-		fmt.Println(string(packet))
+		//fmt.Println(string(packet))
 		//zap.L().Debug("read packet", zap.ByteString("packet", packet))
 		e.messages <- packet
 	}
@@ -176,42 +175,15 @@ func (e *exporter) readEBPF(reader *ringbuf.Reader) {
 
 // parsing raw L2 packet
 func (e *exporter) parseRawPacket(packet []byte) error {
-	pktLen := binary.LittleEndian.Uint32(packet[0:4])
-	srcPort := binary.LittleEndian.Uint16(packet[4:6])
-	dstPort := binary.LittleEndian.Uint16(packet[6:8])
-
-	zap.L().Debug("packet",
-		zap.Uint16("source port", srcPort),
-		zap.Uint16("destination port", dstPort),
-		zap.Uint32("real size", pktLen),
-		zap.Int("userspace size", len(packet)))
-
-	packetData := packet[8:]
-
-	if len(packetData) < 14 {
-		return fmt.Errorf("no ethernet header")
+	if len(packet) < 8 {
+		return fmt.Errorf("wrong len packet %d", len(packet))
 	}
 
-	// IP header (0x45 it IPv4)
-	ipVersionIHL := packetData[14]
-	if ipVersionIHL == 0 {
-		return fmt.Errorf("invalid IP header: %02x", ipVersionIHL)
-	}
+	//fmt.Println(string(packet))
+	//zap.L().Debug("packet raw", zap.ByteString("packet", packet))
 
-	ipIHL := ipVersionIHL & 0x0F
-	ipHeaderLen := int(ipIHL) * 4
-
-	sipOffset := 14 + ipHeaderLen + 8 // Eth + IP + UDP
-	if len(packetData) < sipOffset {
-		return fmt.Errorf("headers too long: %d", sipOffset)
-	}
-
-	// SIP message
-	sipData := packetData[sipOffset:]
-	if len(sipData) > 0 {
-		if err := e.handleMessage(sipData); err != nil {
-			return err
-		}
+	if err := e.handleMessage(packet); err != nil {
+		return err
 	}
 
 	return nil
@@ -223,6 +195,7 @@ func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
 		return dto.Packet{}, fmt.Errorf("split return empty result, raw: %b", raw)
 	}
 
+	//zap.L().Debug("BREAKPOINT #1", zap.ByteString("RAW", raw))
 	p := dto.Packet{}
 	if bytes.HasPrefix(lines[0], []byte("SIP/2.0")) {
 		p.IsResponse = true
@@ -239,6 +212,7 @@ func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
 		if i == 0 {
 			continue
 		}
+
 		header, value := splitHeader(line)
 
 		switch {
@@ -263,6 +237,7 @@ func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
 			p.CSeq.ID = id
 		}
 	}
+
 	return p, nil
 }
 
@@ -284,7 +259,7 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 					return err
 				}
 
-				zap.L().Debug("handle message", zap.String("create session", dialogID))
+				zap.L().Debug("create sip dialog", zap.String("create session", dialogID))
 				e.services.dialoger.Create(dialogID)
 			}
 
@@ -294,10 +269,12 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 					return err
 				}
 
-				zap.L().Debug("handle message", zap.String("delete session", dialogID))
+				zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
 
 				e.services.dialoger.Delete(dialogID)
 			}
+		default:
+			e.services.metricser.Response(packet.ResponseStatus)
 		}
 	} else {
 		go e.services.metricser.Request(packet.Method)

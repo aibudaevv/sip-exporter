@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"gitlab.com/sip-exporter/internal/config"
@@ -48,7 +49,9 @@ func (s *server) Run(cfg *config.App) error {
 
 	go func() {
 		if err := h.ListenAndServe(); err != nil {
-			zap.L().Fatal("listen", zap.Error(err))
+			if !errors.Is(err, http.ErrServerClosed) {
+				zap.L().Fatal("listen", zap.Error(err))
+			}
 		}
 	}()
 

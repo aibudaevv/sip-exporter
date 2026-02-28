@@ -8,6 +8,7 @@ import (
 
 type (
 	metrics struct {
+		proxyAuthenticationRequired       prometheus.Counter
 		statusBusyHereTotal               prometheus.Counter
 		statusTemporarilyUnavailableTotal prometheus.Counter
 		statusOKTotal                     prometheus.Counter
@@ -56,6 +57,9 @@ func NewMetricser() Metricser {
 	return &metrics{
 		sessions: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "sip_exporter_sessions",
+		}),
+		proxyAuthenticationRequired: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "sip_exporter_proxy_authentication_required_total",
 		}),
 		systemErrorTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_system_error_total",
@@ -191,6 +195,8 @@ func (m *metrics) Response(in []byte) {
 		m.statusForbiddenTotal.Inc()
 	case "404":
 		m.statusNotFoundTotal.Inc()
+	case "407":
+		m.proxyAuthenticationRequired.Inc()
 	case "408":
 		m.statusRequestTimeoutTotal.Inc()
 	case "480":
