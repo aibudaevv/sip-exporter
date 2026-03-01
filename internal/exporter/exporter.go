@@ -152,7 +152,6 @@ func (e *exporter) readEBPF(reader *ringbuf.Reader) {
 		record, err := reader.Read()
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
-				//FIXME: ???
 				zap.L().Info("ring buffer closed, exiting...")
 				return
 			}
@@ -167,9 +166,29 @@ func (e *exporter) readEBPF(reader *ringbuf.Reader) {
 			continue
 		}
 
-		//fmt.Println(string(packet))
-		//zap.L().Debug("read packet", zap.ByteString("packet", packet))
-		e.messages <- packet
+		// Логирование размера пакета
+		zap.L().Debug("ringbuf packet", zap.Int("raw_len", len(packet)))
+
+		// Обрезаем пакет по окончанию SIP-сообщения (двойной CRLF)
+		// или по первому нулевому байту
+		cutLen := len(packet)
+		for i := 0; i < len(packet); i++ {
+			if packet[i] == 0 {
+				cutLen = i
+				break
+			}
+		}
+
+		// Если не нашли ноль, ищем конец SIP-заголовка
+		if cutLen == len(packet) {
+			if idx := bytes.Index(packet, []byte("\r\n\r\n")); idx != -1 {
+				cutLen = idx + 4
+			}
+		}
+
+		zap.L().Debug("packet trimmed", zap.Int("cut_len", cutLen))
+
+		e.messages <- packet[:cutLen]
 	}
 }
 
@@ -180,7 +199,7 @@ func (e *exporter) parseRawPacket(packet []byte) error {
 	}
 
 	//fmt.Println(string(packet))
-	//zap.L().Debug("packet raw", zap.ByteString("packet", packet))
+	zap.L().Debug("packet raw", zap.ByteString("packet", packet))
 
 	if err := e.handleMessage(packet); err != nil {
 		return err
@@ -246,6 +265,8 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 	if err != nil {
 		return err
 	}
+
+	zap.L().Debug("parsed packet", zap.Any("packet", packet))
 
 	if packet.IsResponse {
 		go e.services.metricser.Response(packet.ResponseStatus)
