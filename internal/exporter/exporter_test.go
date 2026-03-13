@@ -1,9 +1,10 @@
 package exporter
 
 import (
+	"testing"
+
 	"github.com/stretchr/testify/require"
 	"gitlab.com/sip-exporter/internal/dto"
-	"testing"
 )
 
 func TestNormalizeDialogID(t *testing.T) {

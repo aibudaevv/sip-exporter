@@ -4,16 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"gitlab.com/sip-exporter/internal/config"
-	"gitlab.com/sip-exporter/internal/exporter"
-	"gitlab.com/sip-exporter/internal/service"
-	"go.uber.org/zap"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"gitlab.com/sip-exporter/internal/config"
+	"gitlab.com/sip-exporter/internal/exporter"
+	"gitlab.com/sip-exporter/internal/service"
+	"go.uber.org/zap"
 )
 
 const (

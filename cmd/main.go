@@ -1,10 +1,11 @@
 package main
 
 import (
+	"log"
+
 	"gitlab.com/sip-exporter/internal/config"
 	"gitlab.com/sip-exporter/internal/server"
 	pkgLog "gitlab.com/sip-exporter/pkg/log"
-	"log"
 )
 
 func main() {

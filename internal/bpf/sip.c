@@ -7,18 +7,6 @@
 #define IPPROTO_UDP  17
 #define UDP_PORT_SIP 5060
 #define UDP_PORT_SIPS 5061
-#define MAX_SIP_SIZE 512
-
-// Структура события: длина + данные
-struct sip_event {
-    __u32 len;
-    __u8 data[MAX_SIP_SIZE];
-};
-
-struct {
-    __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 1 << 16);
-} rb SEC(".maps");
 
 SEC("socket")
 int bpf_socket_filter(struct __sk_buff *skb) {
@@ -89,103 +77,9 @@ int bpf_socket_filter(struct __sk_buff *skb) {
         return 0;
     }
 
-    __u32 sip_payload_offset = ip_offset + ip_header_len + 8;
-
-    if (skb->len <= sip_payload_offset) {
-        return 0;
-    }
-
-    __u32 sip_payload_len = skb->len - sip_payload_offset;
-
-    bpf_printk("SIP matched: %u->%u, len=%u", src_port, dest_port, sip_payload_len);
-
-    struct sip_event *e;
-    e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
-    if (!e) {
-        bpf_printk("failed reserve memory");
-        return 0;
-    }
-
-    // Сохраняем фактическую длину (ограниченную MAX_SIP_SIZE)
-    e->len = sip_payload_len;
-    if (e->len > MAX_SIP_SIZE) {
-        e->len = MAX_SIP_SIZE;
-    }
-
-    // Копируем блоками по 64 байта
-    // Копируем блок, если в нём есть хотя бы 1 байт данных
-    if (sip_payload_offset + 1 <= skb->len) {
-        __u32 len = 64;
-        if (sip_payload_offset + len > skb->len) {
-            len = skb->len - sip_payload_offset;
-        }
-        ret = bpf_skb_load_bytes(skb, sip_payload_offset, e->data, len);
-        if (ret < 0) goto discard;
-    }
-    if (sip_payload_offset + 65 <= skb->len) {
-        __u32 len = 64;
-        if (sip_payload_offset + 64 + len > skb->len) {
-            len = skb->len - sip_payload_offset - 64;
-        }
-        ret = bpf_skb_load_bytes(skb, sip_payload_offset + 64, (void *)e->data + 64, len);
-        if (ret < 0) goto discard;
-    }
-    if (sip_payload_offset + 129 <= skb->len) {
-        __u32 len = 64;
-        if (sip_payload_offset + 128 + len > skb->len) {
-            len = skb->len - sip_payload_offset - 128;
-        }
-        ret = bpf_skb_load_bytes(skb, sip_payload_offset + 128, (void *)e->data + 128, len);
-        if (ret < 0) goto discard;
-    }
-    if (sip_payload_offset + 193 <= skb->len) {
-        __u32 len = 64;
-        if (sip_payload_offset + 192 + len > skb->len) {
-            len = skb->len - sip_payload_offset - 192;
-        }
-        ret = bpf_skb_load_bytes(skb, sip_payload_offset + 192, (void *)e->data + 192, len);
-        if (ret < 0) goto discard;
-    }
-    if (sip_payload_offset + 257 <= skb->len) {
-        __u32 len = 64;
-        if (sip_payload_offset + 256 + len > skb->len) {
-            len = skb->len - sip_payload_offset - 256;
-        }
-        ret = bpf_skb_load_bytes(skb, sip_payload_offset + 256, (void *)e->data + 256, len);
-        if (ret < 0) goto discard;
-    }
-    if (sip_payload_offset + 321 <= skb->len) {
-        __u32 len = 64;
-        if (sip_payload_offset + 320 + len > skb->len) {
-            len = skb->len - sip_payload_offset - 320;
-        }
-        ret = bpf_skb_load_bytes(skb, sip_payload_offset + 320, (void *)e->data + 320, len);
-        if (ret < 0) goto discard;
-    }
-    if (sip_payload_offset + 385 <= skb->len) {
-        __u32 len = 64;
-        if (sip_payload_offset + 384 + len > skb->len) {
-            len = skb->len - sip_payload_offset - 384;
-        }
-        ret = bpf_skb_load_bytes(skb, sip_payload_offset + 384, (void *)e->data + 384, len);
-        if (ret < 0) goto discard;
-    }
-    if (sip_payload_offset + 449 <= skb->len) {
-        __u32 len = 64;
-        if (sip_payload_offset + 448 + len > skb->len) {
-            len = skb->len - sip_payload_offset - 448;
-        }
-        ret = bpf_skb_load_bytes(skb, sip_payload_offset + 448, (void *)e->data + 448, len);
-        if (ret < 0) goto discard;
-    }
-
-submit:
-    bpf_ringbuf_submit(e, 0);
-    return 0;
-
-discard:
-    bpf_ringbuf_discard(e, 0);
-    return 0;
+    // Возвращаем полную длину пакета
+    bpf_printk("SIP packet: %u->%u, skb->len=%u", src_port, dest_port, skb->len);
+    return skb->len;
 }
 
 char _license[] SEC("license") = "GPL";

@@ -2,46 +2,55 @@ package service
 
 import (
 	"sync"
+	"time"
 )
 
 type (
 	dialogs struct {
 		m       sync.Mutex
-		storage map[string]struct{}
+		storage map[string]time.Time // dialogID -> expiresAt
 	}
 	Dialoger interface {
-		Create(dialogID string)
+		Create(dialogID string, expiresAt time.Time)
 		Delete(dialogID string)
 		Size() int
+		Cleanup()
 	}
 )
 
 func NewDialoger() Dialoger {
 	return &dialogs{
-		storage: make(map[string]struct{}, 10_000),
+		storage: make(map[string]time.Time, 10_000),
 	}
 }
 
 func (c *dialogs) Delete(dialogID string) {
 	c.m.Lock()
 	defer c.m.Unlock()
-
 	delete(c.storage, dialogID)
 }
 
-func (c *dialogs) Create(dialogID string) {
+func (c *dialogs) Create(dialogID string, expiresAt time.Time) {
 	c.m.Lock()
 	defer c.m.Unlock()
-
-	_, b := c.storage[dialogID]
-	if !b {
-		c.storage[dialogID] = struct{}{}
+	if _, exists := c.storage[dialogID]; !exists {
+		c.storage[dialogID] = expiresAt
 	}
 }
 
 func (c *dialogs) Size() int {
 	c.m.Lock()
 	defer c.m.Unlock()
-
 	return len(c.storage)
+}
+
+func (c *dialogs) Cleanup() {
+	c.m.Lock()
+	defer c.m.Unlock()
+	now := time.Now()
+	for id, expiresAt := range c.storage {
+		if now.After(expiresAt) {
+			delete(c.storage, id)
+		}
+	}
 }
