@@ -5,8 +5,14 @@
 
 #define ETH_P_IP     0x0800
 #define IPPROTO_UDP  17
-#define UDP_PORT_SIP 5060
-#define UDP_PORT_SIPS 5061
+
+// Map для хранения SIP портов (настраивается из userspace)
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 2);
+	__type(key, __u32);
+	__type(value, __u16);
+} sip_ports SEC(".maps");
 
 SEC("socket")
 int bpf_socket_filter(struct __sk_buff *skb) {
@@ -72,8 +78,17 @@ int bpf_socket_filter(struct __sk_buff *skb) {
     __u16 src_port = (__u16)((udp_raw[0] << 8) | udp_raw[1]);
     __u16 dest_port = (__u16)((udp_raw[2] << 8) | udp_raw[3]);
 
-    if (src_port != UDP_PORT_SIP && src_port != UDP_PORT_SIPS &&
-        dest_port != UDP_PORT_SIP && dest_port != UDP_PORT_SIPS) {
+    // Читаем порты из map
+    __u32 key_sip = 0;
+    __u32 key_sips = 1;
+    __u16 *sip_port = bpf_map_lookup_elem(&sip_ports, &key_sip);
+    __u16 *sips_port = bpf_map_lookup_elem(&sip_ports, &key_sips);
+    
+    __u16 port1 = sip_port ? *sip_port : 5060;
+    __u16 port2 = sips_port ? *sips_port : 5061;
+
+    if (src_port != port1 && src_port != port2 &&
+        dest_port != port1 && dest_port != port2) {
         return 0;
     }
 

@@ -8,10 +8,12 @@ import (
 
 type (
 	App struct {
-		LogLevel      string `env:"SIP_EXPORTER_LOGGER_LEVEL" env-default:"info"`
-		Port          string `env:"SIP_EXPORTER_HTTP_PORT" env-default:"2112"`
-		Interface     string `env:"SIP_EXPORTER_INTERFACE" env-required:"true"`
-		BPFBinaryPath string `env:"SIP_EXPORTER_OBJECT_FILE_PATH" env-default:"/usr/local/bin/sip.o"`
+		LogLevel           string `env:"SIP_EXPORTER_LOGGER_LEVEL" env-default:"info"`
+		Port               string `env:"SIP_EXPORTER_HTTP_PORT" env-default:"2112"`
+		Interface          string `env:"SIP_EXPORTER_INTERFACE" env-required:"true"`
+		BPFBinaryPath      string `env:"SIP_EXPORTER_OBJECT_FILE_PATH" env-default:"/usr/local/bin/sip.o"`
+		SIPPort            int    `env:"SIP_EXPORTER_SIP_PORT" env-default:"5060"`
+		SIPSPort           int    `env:"SIP_EXPORTER_SIPS_PORT" env-default:"5061"`
 	}
 )
 

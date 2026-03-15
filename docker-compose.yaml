@@ -6,6 +6,8 @@ services:
     environment:
       - SIP_EXPORTER_HTTP_PORT=2112
       - SIP_EXPORTER_INTERFACE=lo
+      - SIP_EXPORTER_SIP_PORT=5060
+      - SIP_EXPORTER_SIPS_PORT=5061
     privileged: true # require!
     ports:
       - "2112:2112"

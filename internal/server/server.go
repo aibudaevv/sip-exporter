@@ -35,7 +35,7 @@ func NewServer() Server {
 }
 
 func (s *server) Run(cfg *config.App) error {
-	if err := s.exporter.Initialize(cfg.Interface, cfg.BPFBinaryPath); err != nil {
+	if err := s.exporter.Initialize(cfg.Interface, cfg.BPFBinaryPath, cfg.SIPPort, cfg.SIPSPort); err != nil {
 		return fmt.Errorf("failed initialized exporter: %w", err)
 	}
 

@@ -36,7 +36,7 @@ type (
 		dialoger  service.Dialoger
 	}
 	Exporter interface {
-		Initialize(interfaceName, path string) error
+		Initialize(interfaceName string, path string, sipPort, sipsPort int) error
 		Close()
 	}
 )
@@ -51,7 +51,7 @@ func NewExporter(m service.Metricser, d service.Dialoger) Exporter {
 	}
 }
 
-func (e *exporter) Initialize(interfaceName, path string) error {
+func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPort int) error {
 	if syscall.Geteuid() != 0 {
 		return ErrUserNotRoot
 	}
@@ -66,6 +66,21 @@ func (e *exporter) Initialize(interfaceName, path string) error {
 	prog := collection.Programs["bpf_socket_filter"]
 	if prog == nil {
 		return fmt.Errorf("failed to find BPF program: bpf_socket_filter")
+	}
+
+	// Настраиваем SIP порты в eBPF map
+	sipPortsMap := collection.Maps["sip_ports"]
+	if sipPortsMap == nil {
+		return fmt.Errorf("failed to find sip_ports map")
+	}
+
+	keySIP := uint32(0)
+	keySIPS := uint32(1)
+	if err := sipPortsMap.Update(keySIP, uint16(sipPort), ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("failed to set SIP port: %w", err)
+	}
+	if err := sipPortsMap.Update(keySIPS, uint16(sipsPort), ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("failed to set SIPS port: %w", err)
 	}
 
 	// Create AF_PACKET socket with SOCK_RAW
@@ -98,7 +113,9 @@ func (e *exporter) Initialize(interfaceName, path string) error {
 	}
 
 	zap.L().Info("eBPF program attached to AF_PACKET socket",
-		zap.String("interface", interfaceName))
+		zap.String("interface", interfaceName),
+		zap.Int("sip_port", sipPort),
+		zap.Int("sips_port", sipsPort))
 
 	go e.readPackets()
 	go e.readSocket()

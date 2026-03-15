@@ -9,12 +9,16 @@ SIP Traffic → NIC → eBPF socket filter → ringbuf → Go poller → SIP par
 
 ## Install  
 `docker pull frzq/sip-exporter:0.2.0`
-### Configure  
-Environment variables:  
+### Configure
+Environment variables:
 * `SIP_EXPORTER_INTERFACE` - net interface (required)
-* `SIP_EXPORTER_HTTP_PORT` - http port for prometheus (default 2112)  
+* `SIP_EXPORTER_HTTP_PORT` - http port for prometheus (default 2112)
 * `SIP_EXPORTER_LOGGER_LEVEL` - log level (default info)
-Start docker container in privileged mode is true and host mode. SIP/SIPS port 5060/5061.
+* `SIP_EXPORTER_SIP_PORT` - SIP port (default 5060)
+* `SIP_EXPORTER_SIPS_PORT` - SIPS port (default 5061)
+* `SIP_EXPORTER_OBJECT_FILE_PATH` - path to eBPF object file (default /usr/local/bin/sip.o)
+
+Start docker container in privileged mode is true and host mode.
 ## Metrics
 ### Generic SIP traffic metric
 `sip_exporter_packets_total`: total number of parsed SIP packets (requests + responses).  
