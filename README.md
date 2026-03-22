@@ -2,8 +2,8 @@
 High-performance eBPF-based SIP monitoring service that captures and exports telephony metrics to Prometheus.
 Zero-copy packet processing directly in the Linux kernel for <1μs latency on 10Gbps+ SIP traffic.
 
-[![Go Test](https://github.com/sip-exporter/sip-exporter/actions/workflows/go.yml/badge.svg)](https://github.com/sip-exporter/sip-exporter/actions/workflows/go.yml)
-[![Go Report Card](https://goreportcard.com/badge/gitlab.com/sip-exporter)](https://goreportcard.com/report/gitlab.com/sip-exporter)
+[![Go Test](https://github.com/aibudaevv/sip-exporter/actions/workflows/go.yml/badge.svg)](https://github.com/aibudaevv/sip-exporter/actions/workflows/go.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/aibudaevv/sip-exporter)](https://goreportcard.com/report/github.com/aibudaevv/sip-exporter)
 
 ### Core Technology: eBPF
 This service uses eBPF (extended Berkeley Packet Filter) attached to network sockets (XDP-like filtering) to
