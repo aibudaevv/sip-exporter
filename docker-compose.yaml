@@ -1,6 +1,6 @@
 services:
   sip-exporter:
-    image: sip-exporter:0.1.0
+    image: sip-exporter:0.4.0
     container_name: sip-exporter
     restart: unless-stopped
     environment:
@@ -9,8 +9,6 @@ services:
       - SIP_EXPORTER_SIP_PORT=5060
       - SIP_EXPORTER_SIPS_PORT=5061
     privileged: true # require!
-    ports:
-      - "2112:2112"
     volumes:
       - '/etc/localtime:/etc/localtime:ro'
       - '/etc/timezone:/etc/timezone:ro'
