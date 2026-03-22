@@ -1,6 +1,6 @@
 # SIP-exporter
 High-performance eBPF-based SIP monitoring service that captures and exports telephony metrics to Prometheus.
-Zero-copy packet processing directly in the Linux kernel for <1μs latency on 10Gbps+ SIP traffic.
+Designed for sub-microsecond packet processing with zero-copy capture directly in the Linux kernel.
 
 [![Go Test](https://github.com/aibudaevv/sip-exporter/actions/workflows/go.yml/badge.svg)](https://github.com/aibudaevv/sip-exporter/actions/workflows/go.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/aibudaevv/sip-exporter)](https://goreportcard.com/report/github.com/aibudaevv/sip-exporter)
@@ -15,6 +15,18 @@ intercept SIP packets (UDP/5060-5061) at L4 without overhead of iptables/nftable
 ```
 SIP Traffic → NIC → eBPF socket filter → ringbuf → Go poller → SIP parser → Prometheus
 ```
+
+## Performance
+
+Go benchmark results (Intel i7-8665U):
+
+| Operation | Latency | Throughput | Memory |
+|-----------|---------|------------|--------|
+| Packet parsing (L2→SIP) | ~124 ns | 8M pkt/sec | 32 B/op |
+| SIP header parsing | ~1.2 μs | 800k pkt/sec | 350 B/op |
+| Full processing (with metrics) | ~3 μs | 300k pkt/sec | 1000 B/op |
+
+*Note: Benchmarks measure userspace processing only. Actual latency depends on kernel eBPF overhead and system load.*
 
 ## Install
 `docker pull frzq/sip-exporter:0.4.0`
