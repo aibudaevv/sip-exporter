@@ -117,6 +117,24 @@ make docker_build
 docker-compose up -d
 ```
 
+## Integration
+
+### Grafana Dashboard
+Import the pre-built dashboard into your Grafana instance:
+
+1. Open Grafana → Dashboards → Import
+2. Upload `examples/grafana-dashboard.json` or copy the JSON content
+3. Select your Prometheus datasource
+
+The dashboard includes:
+- 📊 Active SIP Sessions (gauge)
+- 📈 SIP Packets Rate
+- 📈 SIP Requests by Method (INVITE, BYE, REGISTER, etc.)
+- 📈 SIP Responses by Status (1xx, 2xx, 4xx, 5xx, 6xx)
+- 🚨 System Errors
+
+Dashboard file: [`examples/grafana-dashboard.json`](examples/grafana-dashboard.json)
+
 ## License
 This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
 
