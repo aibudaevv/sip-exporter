@@ -2,17 +2,19 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"gitlab.com/sip-exporter/internal/config"
-	"gitlab.com/sip-exporter/internal/exporter"
-	"gitlab.com/sip-exporter/internal/metrics"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"gitlab.com/sip-exporter/internal/config"
+	"gitlab.com/sip-exporter/internal/exporter"
+	"gitlab.com/sip-exporter/internal/service"
+	"go.uber.org/zap"
 )
 
 const (
@@ -29,11 +31,11 @@ type (
 )
 
 func NewServer() Server {
-	return &server{exporter: exporter.NewExporter(metrics.NewMetricser())}
+	return &server{exporter: exporter.NewExporter(service.NewMetricser(), service.NewDialoger())}
 }
 
 func (s *server) Run(cfg *config.App) error {
-	if err := s.exporter.Initialize(cfg.Interface, cfg.BPFBinaryPath); err != nil {
+	if err := s.exporter.Initialize(cfg.Interface, cfg.BPFBinaryPath, cfg.SIPPort, cfg.SIPSPort); err != nil {
 		return fmt.Errorf("failed initialized exporter: %w", err)
 	}
 
@@ -48,7 +50,9 @@ func (s *server) Run(cfg *config.App) error {
 
 	go func() {
 		if err := h.ListenAndServe(); err != nil {
-			log.Fatal(err)
+			if !errors.Is(err, http.ErrServerClosed) {
+				zap.L().Fatal("listen", zap.Error(err))
+			}
 		}
 	}()
 
@@ -57,7 +61,7 @@ func (s *server) Run(cfg *config.App) error {
 
 	<-quit
 
-	log.Println("get OS signal")
+	zap.L().Info("received signal from OS for shutdown")
 
 	ctx, cancel := context.WithTimeout(context.Background(), shutDownTimeout)
 	defer cancel()
@@ -68,6 +72,6 @@ func (s *server) Run(cfg *config.App) error {
 		return err
 	}
 
-	log.Println("server gracefully shutdown")
+	zap.L().Info("sip-exporter gracefully shutdown")
 	return nil
 }
