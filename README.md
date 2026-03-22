@@ -1,14 +1,20 @@
 # SIP-exporter
-High-performance eBPF-based SIP monitoring service that captures and exports telephony metrics to Prometheus.  
-Zero-copy packet processing directly in the Linux kernel for <1μs latency on 10Gbps+ SIP traffic.  
-### Core Technology: eBPF
-This service uses eBPF (extended Berkeley Packet Filter) attached to network sockets (XDP-like filtering) to  
-intercept SIP packets (UDP/5060-5061) at L4 without overhead of iptables/nftables or userspace daemons like tcpdump.  
-### Architecture
-SIP Traffic → NIC → eBPF socket filter → ringbuf → Go poller → SIP parser → Prometheus
+High-performance eBPF-based SIP monitoring service that captures and exports telephony metrics to Prometheus.
+Zero-copy packet processing directly in the Linux kernel for <1μs latency on 10Gbps+ SIP traffic.
 
-## Install  
-`docker pull frzq/sip-exporter:0.2.0`
+[![Go Test](https://github.com/sip-exporter/sip-exporter/actions/workflows/go.yml/badge.svg)](https://github.com/sip-exporter/sip-exporter/actions)
+
+### Core Technology: eBPF
+This service uses eBPF (extended Berkeley Packet Filter) attached to network sockets (XDP-like filtering) to
+intercept SIP packets (UDP/5060-5061) at L4 without overhead of iptables/nftables or userspace daemons like tcpdump.
+
+### Architecture
+```
+SIP Traffic → NIC → eBPF socket filter → ringbuf → Go poller → SIP parser → Prometheus
+```
+
+## Install
+`docker pull frzq/sip-exporter:0.4.0`
 ### Configure
 Environment variables:
 * `SIP_EXPORTER_INTERFACE` - net interface (required)
@@ -57,5 +63,56 @@ Start docker container in privileged mode is true and host mode.
 `sip_exporter_503_total`: total number of SIP 503 Service Unavailable responses.  
 `sip_exporter_600_total`: total number of SIP 600 Busy Everywhere responses.  
 `sip_exporter_603_total`: total number of SIP 603 Decline responses.  
-### System metrics  
-`sip_exporter_system_error_total`: total number internal sip exporter error.
+### System metrics
+`sip_exporter_system_error_total`: total number internal SIP exporter error.
+
+## Development
+
+### Requirements
+- Go 1.24+
+- Clang/LLVM (for eBPF compilation)
+- Linux kernel with eBPF support
+- Root privileges (required for eBPF and packet socket)
+
+### Build
+```bash
+# Build eBPF and Go binary
+make build
+
+# Compile eBPF only
+make ebpf_compile
+
+# Build Go binary only
+make go_build
+
+# Run tests
+make test
+```
+
+### Test Coverage
+The project has comprehensive MC/DC test coverage:
+
+| Package | Coverage |
+|---------|----------|
+| `internal/config` | 100.0% |
+| `internal/service` | 100.0% |
+| `pkg/log` | 95.5% |
+| `internal/server` | 90.5% |
+| `internal/exporter` | 60.2% |
+
+Run coverage report:
+```bash
+go test -cover ./...
+```
+
+### Docker
+```bash
+# Build image
+make docker_build
+
+# Run with Docker Compose
+docker-compose up -d
+```
+
+## Changelog
+See [CHANGELOG.md](CHANGELOG.md) for version history.
