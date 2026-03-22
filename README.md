@@ -4,6 +4,15 @@ Zero-copy packet processing directly in the Linux kernel for <1μs latency on 10
 
 [![Go Test](https://github.com/aibudaevv/sip-exporter/actions/workflows/go.yml/badge.svg)](https://github.com/aibudaevv/sip-exporter/actions/workflows/go.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/aibudaevv/sip-exporter)](https://goreportcard.com/report/github.com/aibudaevv/sip-exporter)
+[![GitHub Release](https://img.shields.io/github/v/release/aibudaevv/sip-exporter?sort=semver)](https://github.com/aibudaevv/sip-exporter/releases)
+[![License](https://img.shields.io/github/license/aibudaevv/sip-exporter)](https://github.com/aibudaevv/sip-exporter/blob/main/LICENSE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/aibudaevv/sip-exporter)](https://github.com/aibudaevv/sip-exporter/blob/main/go.mod)
+[![GitHub stars](https://img.shields.io/github/stars/aibudaevv/sip-exporter?style=social)](https://github.com/aibudaevv/sip-exporter/stargazers)
+[![Last Commit](https://img.shields.io/github/last-commit/aibudaevv/sip-exporter)](https://github.com/aibudaevv/sip-exporter/commits/main)
+[![Commit Activity](https://img.shields.io/github/commit-activity/m/aibudaevv/sip-exporter)](https://github.com/aibudaevv/sip-exporter/commits/main)
+[![Issues](https://img.shields.io/github/issues/aibudaevv/sip-exporter)](https://github.com/aibudaevv/sip-exporter/issues)
+[![Pull Requests](https://img.shields.io/github/issues-pr/aibudaevv/sip-exporter)](https://github.com/aibudaevv/sip-exporter/pulls)
+[![Repo Size](https://img.shields.io/github/repo-size/aibudaevv/sip-exporter)](https://github.com/aibudaevv/sip-exporter)
 
 ### Core Technology: eBPF
 This service uses eBPF (extended Berkeley Packet Filter) attached to network sockets (XDP-like filtering) to
