@@ -117,5 +117,16 @@ make docker_build
 docker-compose up -d
 ```
 
+## License
+This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
+
+See [LICENSE](LICENSE) for full text.
+
+### Commercial Use
+- ✅ Free for personal and educational use
+- ✅ Free for commercial use with conditions
+- ⚠️ If you modify and run as a public service, you must open-source your modifications
+- 📧 For commercial licensing without AGPL requirements, contact the author
+
 ## Changelog
 See [CHANGELOG.md](CHANGELOG.md) for version history.
