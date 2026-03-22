@@ -13,5 +13,3 @@ services:
       - '/etc/localtime:/etc/localtime:ro'
       - '/etc/timezone:/etc/timezone:ro'
     network_mode: "host"  # Required for capturing network packets
-    ports:
-      - "2112:2112"  # Prometheus metrics endpoint
