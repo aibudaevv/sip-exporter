@@ -2,17 +2,19 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"gitlab.com/sip-exporter/internal/config"
-	"gitlab.com/sip-exporter/internal/exporter"
-	"gitlab.com/sip-exporter/internal/service"
-	"go.uber.org/zap"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"gitlab.com/sip-exporter/internal/config"
+	"gitlab.com/sip-exporter/internal/exporter"
+	"gitlab.com/sip-exporter/internal/service"
+	"go.uber.org/zap"
 )
 
 const (
@@ -33,7 +35,7 @@ func NewServer() Server {
 }
 
 func (s *server) Run(cfg *config.App) error {
-	if err := s.exporter.Initialize(cfg.Interface, cfg.BPFBinaryPath); err != nil {
+	if err := s.exporter.Initialize(cfg.Interface, cfg.BPFBinaryPath, cfg.SIPPort, cfg.SIPSPort); err != nil {
 		return fmt.Errorf("failed initialized exporter: %w", err)
 	}
 
@@ -48,7 +50,9 @@ func (s *server) Run(cfg *config.App) error {
 
 	go func() {
 		if err := h.ListenAndServe(); err != nil {
-			zap.L().Fatal("listen", zap.Error(err))
+			if !errors.Is(err, http.ErrServerClosed) {
+				zap.L().Fatal("listen", zap.Error(err))
+			}
 		}
 	}()
 

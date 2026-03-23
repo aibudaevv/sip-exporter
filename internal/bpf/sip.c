@@ -5,72 +5,96 @@
 
 #define ETH_P_IP     0x0800
 #define IPPROTO_UDP  17
-#define UDP_PORT_SIP 5060
-#define UDP_PORT_SIPS 5061
-//#define FIXED_SIZE   420
-#define FIXED_SIZE   512
-#define SIP_MIN_LEN  40
 
+// Map для хранения SIP портов (настраивается из userspace)
 struct {
-    __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 1 << 16);
-} rb SEC(".maps");
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 2);
+	__type(key, __u32);
+	__type(value, __u16);
+} sip_ports SEC(".maps");
 
 SEC("socket")
 int bpf_socket_filter(struct __sk_buff *skb) {
-    __u8 ip_header[20];
-    int ret, ip_offset = 0;
-
-    if (skb->len >= 14) {
-        __u16 eth_type;
-        ret = bpf_skb_load_bytes(skb, 12, &eth_type, 2);
-        if (ret == 0 && eth_type == bpf_htons(ETH_P_IP)) ip_offset = 14;
+    if (skb->len < 14) {
+        return 0;
     }
 
+    int ret;
+    int ip_offset = 0;
+    __u16 eth_type;
+
+    ret = bpf_skb_load_bytes(skb, 12, &eth_type, 2);
+    if (ret < 0) return 0;
+
+    if (eth_type == bpf_htons(0x8100)) {
+        if (skb->len < 18) return 0;
+        ret = bpf_skb_load_bytes(skb, 16, &eth_type, 2);
+        if (ret < 0) return 0;
+        ip_offset = 18;
+    } else {
+        ip_offset = 14;
+    }
+
+    if (eth_type != bpf_htons(ETH_P_IP)) {
+        return 0;
+    }
+
+    if (skb->len < ip_offset + 20) {
+        return 0;
+    }
+
+    __u8 ip_header[20];
     ret = bpf_skb_load_bytes(skb, ip_offset, ip_header, 20);
     if (ret < 0) return 0;
 
-    if ((ip_header[0] >> 4) != 4) return 0;
+    if ((ip_header[0] >> 4) != 4) {
+        return 0;
+    }
+
     __u8 ihl = ip_header[0] & 0x0F;
-    if (ihl < 5 || ihl * 4 > 60 || ip_header[9] != IPPROTO_UDP) return 0;
+    __u8 ip_header_len = ihl * 4;
+
+    if (ihl < 5 || ihl > 15) {
+        return 0;
+    }
+
+    if (skb->len < ip_offset + ip_header_len) {
+        return 0;
+    }
+
+    if (ip_header[9] != IPPROTO_UDP) {
+        return 0;
+    }
+
+    if (skb->len < ip_offset + ip_header_len + 8) {
+        return 0;
+    }
 
     __u8 udp_raw[4];
-    ret = bpf_skb_load_bytes(skb, ip_offset + ihl * 4, udp_raw, 4);
+    ret = bpf_skb_load_bytes(skb, ip_offset + ip_header_len, udp_raw, 4);
     if (ret < 0) return 0;
 
-    __u16 src_port = ((__u16)udp_raw[0] << 8 | udp_raw[1]);
-    __u16 dest_port = ((__u16)udp_raw[2] << 8 | udp_raw[3]);
+    __u16 src_port = (__u16)((udp_raw[0] << 8) | udp_raw[1]);
+    __u16 dest_port = (__u16)((udp_raw[2] << 8) | udp_raw[3]);
 
-    if (src_port != UDP_PORT_SIP && src_port != UDP_PORT_SIPS &&
-        dest_port != UDP_PORT_SIP && dest_port != UDP_PORT_SIPS) return 0;
+    // Читаем порты из map
+    __u32 key_sip = 0;
+    __u32 key_sips = 1;
+    __u16 *sip_port = bpf_map_lookup_elem(&sip_ports, &key_sip);
+    __u16 *sips_port = bpf_map_lookup_elem(&sip_ports, &key_sips);
+    
+    __u16 port1 = sip_port ? *sip_port : 5060;
+    __u16 port2 = sips_port ? *sips_port : 5061;
 
-    if (skb->len < SIP_MIN_LEN) return 0;
-
-     bpf_printk("SIP matched: %u->%u len=%d", src_port, dest_port, skb->len);
-
-    void *buf = bpf_ringbuf_reserve(&rb, FIXED_SIZE, 0);
-    if (!buf) {
-        bpf_printk("reserve failed");
+    if (src_port != port1 && src_port != port2 &&
+        dest_port != port1 && dest_port != port2) {
         return 0;
     }
 
-    // metadata (8 bytes)
-    __u32 *pkt_len_ptr = (__u32*)buf;
-    __u16 *ports_ptr = (__u16*)(buf + 4);
-    *pkt_len_ptr = skb->len;
-    ports_ptr[0] = src_port;
-    ports_ptr[1] = dest_port;
-
-    __u8 *data_start = buf + 8;
-    ret = bpf_skb_load_bytes(skb, 0, data_start, 334);
-    if (ret < 0) {
-        bpf_printk("load failed");
-        bpf_ringbuf_discard(buf, 0);
-        return 0;
-    }
-
-    bpf_ringbuf_submit(buf, 0);
-    return 0;
+    // Возвращаем полную длину пакета
+    bpf_printk("SIP packet: %u->%u, skb->len=%u", src_port, dest_port, skb->len);
+    return skb->len;
 }
 
 char _license[] SEC("license") = "GPL";

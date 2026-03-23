@@ -8,6 +8,7 @@ import (
 
 type (
 	metrics struct {
+		proxyAuthenticationRequired       prometheus.Counter
 		statusBusyHereTotal               prometheus.Counter
 		statusTemporarilyUnavailableTotal prometheus.Counter
 		statusOKTotal                     prometheus.Counter
@@ -56,108 +57,147 @@ func NewMetricser() Metricser {
 	return &metrics{
 		sessions: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "sip_exporter_sessions",
+			Help: "Number of active SIP dialogs",
+		}),
+		proxyAuthenticationRequired: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "sip_exporter_proxy_authentication_required_total",
+			Help: "Total number of 407 Proxy Authentication Required responses",
 		}),
 		systemErrorTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_system_error_total",
+			Help: "Total number of internal SIP exporter errors",
 		}),
 		statusBusyHereTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_486_total",
+			Help: "Total number of 486 Busy Here responses",
 		}),
 		statusTemporarilyUnavailableTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_480_total",
+			Help: "Total number of 480 Temporarily Unavailable responses",
 		}),
 		requestMessageTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_message_total",
+			Help: "Total number of MESSAGE requests",
 		}),
 		requestPublishTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_publish_total",
+			Help: "Total number of PUBLISH requests",
 		}),
 		requestPrackTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_prack_total",
+			Help: "Total number of PRACK requests",
 		}),
 		requestNotifyTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_notify_total",
+			Help: "Total number of NOTIFY requests",
 		}),
 		requestSubscribeTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_subscribe_total",
+			Help: "Total number of SUBSCRIBE requests",
 		}),
 		requestReferTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_refer_total",
+			Help: "Total number of REFER requests",
 		}),
 		requestInfoTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_info_total",
+			Help: "Total number of INFO requests",
 		}),
 		requestUpdateTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_update_total",
+			Help: "Total number of UPDATE requests",
 		}),
 		requestRegisterTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_register_total",
+			Help: "Total number of REGISTER requests",
 		}),
 		requestOptionsTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_options_total",
+			Help: "Total number of OPTIONS requests",
 		}),
 		requestCancelTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_cancel_total",
+			Help: "Total number of CANCEL requests",
 		}),
 		requestByeTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_bye_total",
+			Help: "Total number of BYE requests",
 		}),
 		requestACKTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_ack_total",
+			Help: "Total number of ACK requests",
 		}),
 		statusDeclineTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_603_total",
+			Help: "Total number of 603 Decline responses",
 		}),
 		statusBusyEverywhereTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_600_total",
+			Help: "Total number of 600 Busy Everywhere responses",
 		}),
 		statusServiceUnavailableTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_503_total",
+			Help: "Total number of 503 Service Unavailable responses",
 		}),
 		statusServerInternalTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_500_total",
+			Help: "Total number of 500 Server Internal Error responses",
 		}),
 		statusRequestTimeoutTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_408_total",
+			Help: "Total number of 408 Request Timeout responses",
 		}),
 		statusForbiddenTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_403_total",
+			Help: "Total number of 403 Forbidden responses",
 		}),
 		statusUnauthorizedTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_401_total",
+			Help: "Total number of 401 Unauthorized responses",
 		}),
 		statusBadRequestTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_400_total",
+			Help: "Total number of 400 Bad Request responses",
 		}),
 		statusMovedTemporarilyTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_302_total",
+			Help: "Total number of 302 Moved Temporarily responses",
 		}),
 		statusMultipleChoiceTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_300_total",
+			Help: "Total number of 300 Multiple Choices responses",
 		}),
 		statusAcceptedTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_202_total",
+			Help: "Total number of 202 Accepted responses",
 		}),
 		statusTryingTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_100_total",
+			Help: "Total number of 100 Trying responses",
 		}),
 		sipPacketsTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_packets_total",
+			Help: "Total number of SIP packets processed",
 		}),
 		requestInviteTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_invite_total",
+			Help: "Total number of INVITE requests",
 		}),
 		statusOKTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_200_total",
+			Help: "Total number of 200 OK responses",
 		}),
 		statusNotFoundTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_404_total",
+			Help: "Total number of 404 Not Found responses",
 		}),
 		statusSessionProgressTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_183_total",
+			Help: "Total number of 183 Session Progress responses",
 		}),
 		statusRingingTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "sip_exporter_180_total",
+			Help: "Total number of 180 Ringing responses",
 		}),
 	}
 }
@@ -191,6 +231,8 @@ func (m *metrics) Response(in []byte) {
 		m.statusForbiddenTotal.Inc()
 	case "404":
 		m.statusNotFoundTotal.Inc()
+	case "407":
+		m.proxyAuthenticationRequired.Inc()
 	case "408":
 		m.statusRequestTimeoutTotal.Inc()
 	case "480":

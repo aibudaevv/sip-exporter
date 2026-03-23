@@ -28,7 +28,7 @@ func setHandler(l zapcore.Level) error {
 	encoderCfg.EncoderConfig.MessageKey = "message"
 	encoderCfg.EncoderConfig.CallerKey = "caller"
 	encoderCfg.Level = atom
-	//encoderCfg.Encoding = "json"
+	// encoderCfg.Encoding = "json"
 
 	logger, err := encoderCfg.Build()
 	if err != nil {

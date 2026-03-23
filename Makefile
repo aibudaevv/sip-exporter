@@ -16,3 +16,9 @@ ebpf_log:
 	sudo cat /sys/kernel/debug/tracing/trace_pipe
 test:
 	go test -v 	 ./...
+lint: vet imports
+	golangci-lint run
+vet:
+	go vet -unsafeptr ./...
+imports: vet
+	goimports -l -w .
