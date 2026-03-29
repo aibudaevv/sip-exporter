@@ -13,9 +13,11 @@ import (
 type mockMetricser struct {
 	requestCalled      []byte
 	responseCalled     []byte
+	responseIsInvite   bool
 	sessionUpdated     int
 	systemErrorCalled  bool
 	packetsIncremented int
+	invite200OKCalled  bool
 }
 
 func (m *mockMetricser) Request(in []byte) {
@@ -23,9 +25,14 @@ func (m *mockMetricser) Request(in []byte) {
 	m.packetsIncremented++
 }
 
-func (m *mockMetricser) Response(in []byte) {
+func (m *mockMetricser) Response(in []byte, isInviteResponse bool) {
 	m.responseCalled = in
+	m.responseIsInvite = isInviteResponse
 	m.packetsIncremented++
+}
+
+func (m *mockMetricser) Invite200OK() {
+	m.invite200OKCalled = true
 }
 
 func (m *mockMetricser) UpdateSession(size int) {
@@ -552,6 +559,8 @@ func TestHandleMessage_Response200_INVITE(t *testing.T) {
 		return len(mm.responseCalled) > 0
 	}, 100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, []byte("200"), mm.responseCalled)
+	require.True(t, mm.responseIsInvite)
+	require.True(t, mm.invite200OKCalled)
 	require.Len(t, md.created, 1)
 }
 
@@ -578,7 +587,36 @@ func TestHandleMessage_Response200_BYE(t *testing.T) {
 		return len(mm.responseCalled) > 0
 	}, 100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, []byte("200"), mm.responseCalled)
+	require.False(t, mm.responseIsInvite)
+	require.False(t, mm.invite200OKCalled)
 	require.Len(t, md.deleted, 1)
+}
+
+func TestHandleMessage_Response200_REGISTER(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+	}
+
+	input := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: test-call\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	err := e.handleMessage(input)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		return len(mm.responseCalled) > 0
+	}, 100*time.Millisecond, 10*time.Millisecond)
+	require.Equal(t, []byte("200"), mm.responseCalled)
+	require.False(t, mm.responseIsInvite)
+	require.False(t, mm.invite200OKCalled)
 }
 
 func TestHandleMessage_Response401(t *testing.T) {
@@ -600,7 +638,99 @@ func TestHandleMessage_Response401(t *testing.T) {
 
 	err := e.handleMessage(input)
 	require.NoError(t, err)
+	
+	// Response вызывается в goroutine, ждём выполнения
+	time.Sleep(10 * time.Millisecond)
+	
 	require.Equal(t, []byte("401"), mm.responseCalled)
+	require.False(t, mm.responseIsInvite)
+}
+
+func TestHandleMessage_Response302_INVITE(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+	}
+
+	input := []byte("SIP/2.0 302 Moved Temporarily\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: test-call\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	err := e.handleMessage(input)
+	require.NoError(t, err)
+	
+	// Response вызывается в goroutine, ждём выполнения
+	time.Sleep(10 * time.Millisecond)
+	
+	require.Equal(t, []byte("302"), mm.responseCalled)
+	require.True(t, mm.responseIsInvite)
+}
+
+// Интеграционный тест на изменение SER через handleMessage
+func TestHandleMessage_SER_Integration(t *testing.T) {
+	m := &mockMetricser{}
+	d := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: m,
+			dialoger:  d,
+		},
+	}
+
+	// 10 INVITE запросов
+	for i := 0; i < 10; i++ {
+		input := []byte("INVITE sip:test SIP/2.0\r\n" +
+			"From: <sip:user@domain>;tag=abc\r\n" +
+			"To: <sip:other@domain>\r\n" +
+			"Call-ID: test-" + string(rune('0'+i)) + "\r\n" +
+			"CSeq: 1 INVITE\r\n")
+		err := e.handleMessage(input)
+		require.NoError(t, err)
+	}
+
+	// 5 ответов 200 OK на INVITE
+	for i := 0; i < 5; i++ {
+		input := []byte("SIP/2.0 200 OK\r\n" +
+			"From: <sip:user@domain>;tag=abc\r\n" +
+			"To: <sip:other@domain>;tag=xyz" + string(rune('0'+i)) + "\r\n" +
+			"Call-ID: test-" + string(rune('0'+i)) + "\r\n" +
+			"CSeq: 1 INVITE\r\n")
+		err := e.handleMessage(input)
+		require.NoError(t, err)
+	}
+
+	// 2 ответа 302 на INVITE
+	for i := 0; i < 2; i++ {
+		input := []byte("SIP/2.0 302 Moved Temporarily\r\n" +
+			"From: <sip:user@domain>;tag=abc\r\n" +
+			"To: <sip:other@domain>;tag=xyz" + string(rune('0'+i)) + "\r\n" +
+			"Call-ID: test-302-" + string(rune('0'+i)) + "\r\n" +
+			"CSeq: 1 INVITE\r\n")
+		err := e.handleMessage(input)
+		require.NoError(t, err)
+	}
+
+	// Ждём выполнения всех горутин
+	time.Sleep(50 * time.Millisecond)
+
+	// Проверяем что Invite200OK был вызван 5 раз
+	invite200OKCount := 0
+	for i := 0; i < 5; i++ {
+		if m.invite200OKCalled {
+			invite200OKCount++
+		}
+	}
+	
+	// Проверяем что response был вызван с isInviteResponse=true для INVITE
+	require.True(t, m.responseIsInvite)
 }
 
 func TestHandleMessage_ParseError(t *testing.T) {

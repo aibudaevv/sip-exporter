@@ -329,9 +329,17 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 	zap.L().Debug("parsed packet", zap.Any("packet", packet))
 
 	if packet.IsResponse {
-		go e.services.metricser.Response(packet.ResponseStatus)
-		switch {
-		case bytes.Equal(packet.ResponseStatus, []byte("200")):
+		isInviteResponse := bytes.Equal(packet.CSeq.Method, []byte("INVITE"))
+		is200OK := bytes.Equal(packet.ResponseStatus, []byte("200"))
+
+		go func() {
+			e.services.metricser.Response(packet.ResponseStatus, isInviteResponse)
+			if is200OK && isInviteResponse {
+				e.services.metricser.Invite200OK()
+			}
+		}()
+
+		if is200OK {
 			zap.L().Debug("handle message", zap.ByteString("200 OK cseq method", packet.CSeq.Method))
 
 			if bytes.Equal(packet.CSeq.Method, []byte("INVITE")) {
@@ -362,8 +370,6 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 
 				e.services.dialoger.Delete(dialogID)
 			}
-		default:
-			e.services.metricser.Response(packet.ResponseStatus)
 		}
 	} else {
 		go e.services.metricser.Request(packet.Method)

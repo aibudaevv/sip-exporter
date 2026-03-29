@@ -1,6 +1,8 @@
 package service
 
 import (
+	"sync/atomic"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
@@ -44,10 +46,18 @@ type (
 		systemErrorTotal                  prometheus.Counter
 		sipPacketsTotal                   prometheus.Counter
 		sessions                          prometheus.Gauge
+
+		// SER metrics (RFC 6076)
+		ser              prometheus.Gauge
+		inviteTotal      int64
+		invite3xxTotal   int64
+		invite200OKTotal int64
 	}
+
 	Metricser interface {
 		Request(in []byte)
-		Response(in []byte)
+		Response(in []byte, isInviteResponse bool)
+		Invite200OK()
 		UpdateSession(size int)
 		SystemError()
 	}
@@ -199,6 +209,12 @@ func NewMetricser() Metricser {
 			Name: "sip_exporter_180_total",
 			Help: "Total number of 180 Ringing responses",
 		}),
+
+		// SER metrics (RFC 6076)
+		ser: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "sip_exporter_ser",
+			Help: "Session Establishment Ratio percentage (RFC 6076)",
+		}),
 	}
 }
 
@@ -206,8 +222,9 @@ func (m *metrics) UpdateSession(size int) {
 	m.sessions.Set(float64(size))
 }
 
-func (m *metrics) Response(in []byte) {
+func (m *metrics) Response(in []byte, isInviteResponse bool) {
 	defer m.sipPacketsTotal.Inc()
+
 	switch string(in) {
 	case "100":
 		m.statusTryingTotal.Inc()
@@ -236,7 +253,7 @@ func (m *metrics) Response(in []byte) {
 	case "408":
 		m.statusRequestTimeoutTotal.Inc()
 	case "480":
-		m.statusRequestTimeoutTotal.Inc()
+		m.statusTemporarilyUnavailableTotal.Inc()
 	case "486":
 		m.statusBusyHereTotal.Inc()
 	case "500":
@@ -250,10 +267,17 @@ func (m *metrics) Response(in []byte) {
 	default:
 		zap.L().Warn("unknown response", zap.ByteString("in", in))
 	}
+
+	// Считаем 3xx для SER (RFC 6076)
+	if isInviteResponse && len(in) == 3 && in[0] == '3' {
+		atomic.AddInt64(&m.invite3xxTotal, 1)
+		m.updateSER()
+	}
 }
 
 func (m *metrics) Request(in []byte) {
 	defer m.sipPacketsTotal.Inc()
+
 	switch string(in) {
 	case "PUBLISH":
 		m.requestPublishTotal.Inc()
@@ -281,11 +305,43 @@ func (m *metrics) Request(in []byte) {
 		m.requestACKTotal.Inc()
 	case "INVITE":
 		m.requestInviteTotal.Inc()
+		atomic.AddInt64(&m.inviteTotal, 1)
+		m.updateSER()
+	case "MESSAGE":
+		m.requestMessageTotal.Inc()
 	default:
 		zap.L().Warn("unknown request", zap.ByteString("in", in))
 	}
 }
 
+func (m *metrics) Invite200OK() {
+	atomic.AddInt64(&m.invite200OKTotal, 1)
+	m.updateSER()
+}
+
 func (m *metrics) SystemError() {
 	m.systemErrorTotal.Inc()
+}
+
+// updateSER вычисляет Session Establishment Ratio по формуле RFC 6076:
+// SER = (INVITE → 200 OK) / (Total INVITE - INVITE → 3xx) × 100
+func (m *metrics) updateSER() {
+	total := atomic.LoadInt64(&m.inviteTotal)
+	if total == 0 {
+		return
+	}
+
+	threeXX := atomic.LoadInt64(&m.invite3xxTotal)
+	denominator := total - threeXX
+
+	if denominator == 0 {
+		return
+	}
+
+	ok := atomic.LoadInt64(&m.invite200OKTotal)
+	ser := float64(ok) / float64(denominator) * 100
+	
+	if m.ser != nil {
+		m.ser.Set(ser)
+	}
 }
