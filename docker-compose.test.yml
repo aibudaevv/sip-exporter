@@ -1,0 +1,74 @@
+services:
+  exporter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sip-exporter
+    privileged: true
+    network_mode: host
+    pid: host
+    volumes:
+      - /sys/kernel/debug:/sys/kernel/debug:ro
+    environment:
+      - SIP_EXPORTER_INTERFACE=${SIP_EXPORTER_INTERFACE}
+      - SIP_EXPORTER_HTTP_PORT=2112
+      - SIP_EXPORTER_SIP_PORT=5060
+      - SIP_EXPORTER_SIPS_PORT=5061
+      - SIP_EXPORTER_LOGGER_LEVEL=debug
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:2112/metrics"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
+
+  sipp-server:
+    image: pbertera/sipp:latest
+    container_name: sipp-server
+    network_mode: host
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./test/integration/sipp_scripts/ser:/scenarios:ro
+    entrypoint:
+      - sipp
+      - -sf
+      - /scenarios/uas_basic.xml
+      - -i
+      - ${HOST_IP}
+      - -p
+      - "5060"
+      - -nostdin
+    depends_on:
+      exporter:
+        condition: service_healthy
+
+  sipp-client:
+    image: pbertera/sipp:latest
+    container_name: sipp-client
+    network_mode: host
+    volumes:
+      - ./test/integration/sipp_scripts/ser:/scenarios:ro
+      - ./test/results:/results
+    entrypoint:
+      - sipp
+      - -sf
+      - /scenarios/uac_success.xml
+      - -i
+      - ${HOST_IP}
+      - -p
+      - "5061"
+      - -m
+      - "100"
+      - -timeout
+      - "30"
+      - -trace_stat
+      - -stf
+      - /results/uac_stats.csv
+      - ${HOST_IP}:5060
+    depends_on:
+      - sipp-server
+
+
+
+

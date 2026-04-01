@@ -638,10 +638,10 @@ func TestHandleMessage_Response401(t *testing.T) {
 
 	err := e.handleMessage(input)
 	require.NoError(t, err)
-	
+
 	// Response вызывается в goroutine, ждём выполнения
 	time.Sleep(10 * time.Millisecond)
-	
+
 	require.Equal(t, []byte("401"), mm.responseCalled)
 	require.False(t, mm.responseIsInvite)
 }
@@ -665,10 +665,10 @@ func TestHandleMessage_Response302_INVITE(t *testing.T) {
 
 	err := e.handleMessage(input)
 	require.NoError(t, err)
-	
+
 	// Response вызывается в goroutine, ждём выполнения
 	time.Sleep(10 * time.Millisecond)
-	
+
 	require.Equal(t, []byte("302"), mm.responseCalled)
 	require.True(t, mm.responseIsInvite)
 }
@@ -728,7 +728,7 @@ func TestHandleMessage_SER_Integration(t *testing.T) {
 			invite200OKCount++
 		}
 	}
-	
+
 	// Проверяем что response был вызван с isInviteResponse=true для INVITE
 	require.True(t, m.responseIsInvite)
 }

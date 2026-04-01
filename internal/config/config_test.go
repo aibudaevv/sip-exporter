@@ -10,12 +10,12 @@ import (
 func TestGetConfig_Defaults(t *testing.T) {
 	// Сохраняем оригинальные значения
 	originalVars := map[string]string{
-		"SIP_EXPORTER_LOGGER_LEVEL":      os.Getenv("SIP_EXPORTER_LOGGER_LEVEL"),
-		"SIP_EXPORTER_HTTP_PORT":         os.Getenv("SIP_EXPORTER_HTTP_PORT"),
-		"SIP_EXPORTER_INTERFACE":         os.Getenv("SIP_EXPORTER_INTERFACE"),
-		"SIP_EXPORTER_OBJECT_FILE_PATH":  os.Getenv("SIP_EXPORTER_OBJECT_FILE_PATH"),
-		"SIP_EXPORTER_SIP_PORT":          os.Getenv("SIP_EXPORTER_SIP_PORT"),
-		"SIP_EXPORTER_SIPS_PORT":         os.Getenv("SIP_EXPORTER_SIPS_PORT"),
+		"SIP_EXPORTER_LOGGER_LEVEL":     os.Getenv("SIP_EXPORTER_LOGGER_LEVEL"),
+		"SIP_EXPORTER_HTTP_PORT":        os.Getenv("SIP_EXPORTER_HTTP_PORT"),
+		"SIP_EXPORTER_INTERFACE":        os.Getenv("SIP_EXPORTER_INTERFACE"),
+		"SIP_EXPORTER_OBJECT_FILE_PATH": os.Getenv("SIP_EXPORTER_OBJECT_FILE_PATH"),
+		"SIP_EXPORTER_SIP_PORT":         os.Getenv("SIP_EXPORTER_SIP_PORT"),
+		"SIP_EXPORTER_SIPS_PORT":        os.Getenv("SIP_EXPORTER_SIPS_PORT"),
 	}
 	defer func() {
 		// Восстанавливаем оригинальные значения
@@ -51,12 +51,12 @@ func TestGetConfig_Defaults(t *testing.T) {
 func TestGetConfig_CustomValues(t *testing.T) {
 	// Сохраняем оригинальные значения
 	originalVars := map[string]string{
-		"SIP_EXPORTER_LOGGER_LEVEL":      os.Getenv("SIP_EXPORTER_LOGGER_LEVEL"),
-		"SIP_EXPORTER_HTTP_PORT":         os.Getenv("SIP_EXPORTER_HTTP_PORT"),
-		"SIP_EXPORTER_INTERFACE":         os.Getenv("SIP_EXPORTER_INTERFACE"),
-		"SIP_EXPORTER_OBJECT_FILE_PATH":  os.Getenv("SIP_EXPORTER_OBJECT_FILE_PATH"),
-		"SIP_EXPORTER_SIP_PORT":          os.Getenv("SIP_EXPORTER_SIP_PORT"),
-		"SIP_EXPORTER_SIPS_PORT":         os.Getenv("SIP_EXPORTER_SIPS_PORT"),
+		"SIP_EXPORTER_LOGGER_LEVEL":     os.Getenv("SIP_EXPORTER_LOGGER_LEVEL"),
+		"SIP_EXPORTER_HTTP_PORT":        os.Getenv("SIP_EXPORTER_HTTP_PORT"),
+		"SIP_EXPORTER_INTERFACE":        os.Getenv("SIP_EXPORTER_INTERFACE"),
+		"SIP_EXPORTER_OBJECT_FILE_PATH": os.Getenv("SIP_EXPORTER_OBJECT_FILE_PATH"),
+		"SIP_EXPORTER_SIP_PORT":         os.Getenv("SIP_EXPORTER_SIP_PORT"),
+		"SIP_EXPORTER_SIPS_PORT":        os.Getenv("SIP_EXPORTER_SIPS_PORT"),
 	}
 	defer func() {
 		for k, v := range originalVars {
@@ -91,12 +91,12 @@ func TestGetConfig_CustomValues(t *testing.T) {
 func TestGetConfig_RequiredInterfaceMissing(t *testing.T) {
 	// Сохраняем оригинальные значения
 	originalVars := map[string]string{
-		"SIP_EXPORTER_LOGGER_LEVEL":      os.Getenv("SIP_EXPORTER_LOGGER_LEVEL"),
-		"SIP_EXPORTER_HTTP_PORT":         os.Getenv("SIP_EXPORTER_HTTP_PORT"),
-		"SIP_EXPORTER_INTERFACE":         os.Getenv("SIP_EXPORTER_INTERFACE"),
-		"SIP_EXPORTER_OBJECT_FILE_PATH":  os.Getenv("SIP_EXPORTER_OBJECT_FILE_PATH"),
-		"SIP_EXPORTER_SIP_PORT":          os.Getenv("SIP_EXPORTER_SIP_PORT"),
-		"SIP_EXPORTER_SIPS_PORT":         os.Getenv("SIP_EXPORTER_SIPS_PORT"),
+		"SIP_EXPORTER_LOGGER_LEVEL":     os.Getenv("SIP_EXPORTER_LOGGER_LEVEL"),
+		"SIP_EXPORTER_HTTP_PORT":        os.Getenv("SIP_EXPORTER_HTTP_PORT"),
+		"SIP_EXPORTER_INTERFACE":        os.Getenv("SIP_EXPORTER_INTERFACE"),
+		"SIP_EXPORTER_OBJECT_FILE_PATH": os.Getenv("SIP_EXPORTER_OBJECT_FILE_PATH"),
+		"SIP_EXPORTER_SIP_PORT":         os.Getenv("SIP_EXPORTER_SIP_PORT"),
+		"SIP_EXPORTER_SIPS_PORT":        os.Getenv("SIP_EXPORTER_SIPS_PORT"),
 	}
 	defer func() {
 		for k, v := range originalVars {
@@ -122,12 +122,12 @@ func TestGetConfig_RequiredInterfaceMissing(t *testing.T) {
 
 func TestGetConfig_OnlySIPPortCustom(t *testing.T) {
 	originalVars := map[string]string{
-		"SIP_EXPORTER_LOGGER_LEVEL":      os.Getenv("SIP_EXPORTER_LOGGER_LEVEL"),
-		"SIP_EXPORTER_HTTP_PORT":         os.Getenv("SIP_EXPORTER_HTTP_PORT"),
-		"SIP_EXPORTER_INTERFACE":         os.Getenv("SIP_EXPORTER_INTERFACE"),
-		"SIP_EXPORTER_OBJECT_FILE_PATH":  os.Getenv("SIP_EXPORTER_OBJECT_FILE_PATH"),
-		"SIP_EXPORTER_SIP_PORT":          os.Getenv("SIP_EXPORTER_SIP_PORT"),
-		"SIP_EXPORTER_SIPS_PORT":         os.Getenv("SIP_EXPORTER_SIPS_PORT"),
+		"SIP_EXPORTER_LOGGER_LEVEL":     os.Getenv("SIP_EXPORTER_LOGGER_LEVEL"),
+		"SIP_EXPORTER_HTTP_PORT":        os.Getenv("SIP_EXPORTER_HTTP_PORT"),
+		"SIP_EXPORTER_INTERFACE":        os.Getenv("SIP_EXPORTER_INTERFACE"),
+		"SIP_EXPORTER_OBJECT_FILE_PATH": os.Getenv("SIP_EXPORTER_OBJECT_FILE_PATH"),
+		"SIP_EXPORTER_SIP_PORT":         os.Getenv("SIP_EXPORTER_SIP_PORT"),
+		"SIP_EXPORTER_SIPS_PORT":        os.Getenv("SIP_EXPORTER_SIPS_PORT"),
 	}
 	defer func() {
 		for k, v := range originalVars {
@@ -156,12 +156,12 @@ func TestGetConfig_OnlySIPPortCustom(t *testing.T) {
 
 func TestGetConfig_OnlySIPSPortCustom(t *testing.T) {
 	originalVars := map[string]string{
-		"SIP_EXPORTER_LOGGER_LEVEL":      os.Getenv("SIP_EXPORTER_LOGGER_LEVEL"),
-		"SIP_EXPORTER_HTTP_PORT":         os.Getenv("SIP_EXPORTER_HTTP_PORT"),
-		"SIP_EXPORTER_INTERFACE":         os.Getenv("SIP_EXPORTER_INTERFACE"),
-		"SIP_EXPORTER_OBJECT_FILE_PATH":  os.Getenv("SIP_EXPORTER_OBJECT_FILE_PATH"),
-		"SIP_EXPORTER_SIP_PORT":          os.Getenv("SIP_EXPORTER_SIP_PORT"),
-		"SIP_EXPORTER_SIPS_PORT":         os.Getenv("SIP_EXPORTER_SIPS_PORT"),
+		"SIP_EXPORTER_LOGGER_LEVEL":     os.Getenv("SIP_EXPORTER_LOGGER_LEVEL"),
+		"SIP_EXPORTER_HTTP_PORT":        os.Getenv("SIP_EXPORTER_HTTP_PORT"),
+		"SIP_EXPORTER_INTERFACE":        os.Getenv("SIP_EXPORTER_INTERFACE"),
+		"SIP_EXPORTER_OBJECT_FILE_PATH": os.Getenv("SIP_EXPORTER_OBJECT_FILE_PATH"),
+		"SIP_EXPORTER_SIP_PORT":         os.Getenv("SIP_EXPORTER_SIP_PORT"),
+		"SIP_EXPORTER_SIPS_PORT":        os.Getenv("SIP_EXPORTER_SIPS_PORT"),
 	}
 	defer func() {
 		for k, v := range originalVars {

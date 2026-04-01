@@ -340,7 +340,7 @@ func (m *metrics) updateSER() {
 
 	ok := atomic.LoadInt64(&m.invite200OKTotal)
 	ser := float64(ok) / float64(denominator) * 100
-	
+
 	if m.ser != nil {
 		m.ser.Set(ser)
 	}

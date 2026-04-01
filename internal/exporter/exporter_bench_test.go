@@ -296,33 +296,33 @@ func buildTestPacket(sipPayload string) []byte {
 
 	// IP header (20 байт)
 	ipOffset := 14
-	packet[ipOffset] = 0x45                    // Version + IHL
-	packet[ipOffset+1] = 0x00                  // DSCP + ECN
-	packet[ipOffset+2] = 0x00                  // Total Length (будет обновлён)
-	packet[ipOffset+3] = 0x00                  // Identification
-	packet[ipOffset+4] = 0x00                  // Flags + Fragment Offset
-	packet[ipOffset+5] = 0x00                  // TTL
-	packet[ipOffset+8] = 0x11                  // Protocol = UDP (17)
-	packet[ipOffset+10] = 0x00                 // Header checksum
-	packet[ipOffset+11] = 0x00                 // Header checksum
-	packet[ipOffset+12] = 0x7f                 // Source IP (127.0.0.1)
+	packet[ipOffset] = 0x45    // Version + IHL
+	packet[ipOffset+1] = 0x00  // DSCP + ECN
+	packet[ipOffset+2] = 0x00  // Total Length (будет обновлён)
+	packet[ipOffset+3] = 0x00  // Identification
+	packet[ipOffset+4] = 0x00  // Flags + Fragment Offset
+	packet[ipOffset+5] = 0x00  // TTL
+	packet[ipOffset+8] = 0x11  // Protocol = UDP (17)
+	packet[ipOffset+10] = 0x00 // Header checksum
+	packet[ipOffset+11] = 0x00 // Header checksum
+	packet[ipOffset+12] = 0x7f // Source IP (127.0.0.1)
 	packet[ipOffset+13] = 0x00
 	packet[ipOffset+14] = 0x00
 	packet[ipOffset+15] = 0x01
-	packet[ipOffset+16] = 0x7f                 // Dest IP (127.0.0.1)
+	packet[ipOffset+16] = 0x7f // Dest IP (127.0.0.1)
 	packet[ipOffset+17] = 0x00
 	packet[ipOffset+18] = 0x00
 	packet[ipOffset+19] = 0x01
 
 	// UDP header (8 байт)
 	udpOffset := ipOffset + 20
-	packet[udpOffset] = 0x13                   // Source Port (5060)
+	packet[udpOffset] = 0x13 // Source Port (5060)
 	packet[udpOffset+1] = 0x88
-	packet[udpOffset+2] = 0x13                   // Dest Port (5060)
+	packet[udpOffset+2] = 0x13 // Dest Port (5060)
 	packet[udpOffset+3] = 0x88
-	packet[udpOffset+4] = 0x00                   // Length (будет обновлён)
+	packet[udpOffset+4] = 0x00 // Length (будет обновлён)
 	packet[udpOffset+5] = byte(len(sipPayload) + 8)
-	packet[udpOffset+6] = 0x00                   // Checksum
+	packet[udpOffset+6] = 0x00 // Checksum
 	packet[udpOffset+7] = 0x00
 
 	// SIP payload
