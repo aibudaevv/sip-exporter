@@ -1,5 +1,5 @@
 # SIP-exporter
-High-performance eBPF-based SIP monitoring service that captures and exports telephony metrics to Prometheus.
+High-performance eBPF-based SIP monitoring service that captures and exports telephony metrics to Prometheus-compatible systems (Prometheus, VictoriaMetrics, etc.).
 Designed for sub-microsecond packet processing with zero-copy capture directly in the Linux kernel.
 
 [![Go Test](https://github.com/aibudaevv/sip-exporter/actions/workflows/go.yml/badge.svg)](https://github.com/aibudaevv/sip-exporter/actions/workflows/go.yml)
