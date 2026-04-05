@@ -14,7 +14,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// mockExporter для тестирования
+// mockExporter for testing
 type mockExporter struct {
 	initializeCalled bool
 	initializeErr    error
@@ -34,14 +34,12 @@ func TestNewServer(t *testing.T) {
 	srv := NewServer()
 	require.NotNil(t, srv)
 
-	// Проверяем что это сервер
 	s, ok := srv.(*server)
 	require.True(t, ok)
 	require.NotNil(t, s.exporter)
 }
 
 func TestServer_Run_Success(t *testing.T) {
-	// Инициализируем логгер для теста
 	logger, _ := zap.NewDevelopment()
 	zap.ReplaceGlobals(logger)
 
@@ -98,43 +96,6 @@ func TestServer_Run_InitializeError(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed initialized exporter")
-}
-
-func TestServer_Configure(t *testing.T) {
-	testCases := []struct {
-		name string
-		cfg  *config.App
-	}{
-		{
-			name: "default ports",
-			cfg: &config.App{
-				Interface:     "eth0",
-				Port:          "2112",
-				BPFBinaryPath: "/usr/local/bin/sip.o",
-				SIPPort:       5060,
-				SIPSPort:      5061,
-			},
-		},
-		{
-			name: "custom ports",
-			cfg: &config.App{
-				Interface:     "lo",
-				Port:          "9090",
-				BPFBinaryPath: "/custom/sip.o",
-				SIPPort:       6060,
-				SIPSPort:      6061,
-			},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.cfg.Interface, tc.cfg.Interface)
-			require.Equal(t, tc.cfg.Port, tc.cfg.Port)
-			require.Equal(t, tc.cfg.SIPPort, tc.cfg.SIPPort)
-			require.Equal(t, tc.cfg.SIPSPort, tc.cfg.SIPSPort)
-		})
-	}
 }
 
 func TestShutDownTimeout_Constant(t *testing.T) {

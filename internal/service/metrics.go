@@ -1,6 +1,8 @@
 package service
 
 import (
+	"sync/atomic"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
@@ -44,17 +46,25 @@ type (
 		systemErrorTotal                  prometheus.Counter
 		sipPacketsTotal                   prometheus.Counter
 		sessions                          prometheus.Gauge
+
+		// SER metrics (RFC 6076)
+		ser              prometheus.GaugeFunc
+		inviteTotal      int64
+		invite3xxTotal   int64
+		invite200OKTotal int64
 	}
+
 	Metricser interface {
 		Request(in []byte)
-		Response(in []byte)
+		Response(in []byte, isInviteResponse bool)
+		Invite200OK()
 		UpdateSession(size int)
 		SystemError()
 	}
 )
 
 func NewMetricser() Metricser {
-	return &metrics{
+	m := &metrics{
 		sessions: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "sip_exporter_sessions",
 			Help: "Number of active SIP dialogs",
@@ -200,14 +210,35 @@ func NewMetricser() Metricser {
 			Help: "Total number of 180 Ringing responses",
 		}),
 	}
+
+	// SER metrics (RFC 6076) — calculated lazily on scrape
+	m.ser = promauto.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "sip_exporter_ser",
+		Help: "Session Establishment Ratio percentage (RFC 6076)",
+	}, func() float64 {
+		total := atomic.LoadInt64(&m.inviteTotal)
+		if total == 0 {
+			return 0
+		}
+		threeXX := atomic.LoadInt64(&m.invite3xxTotal)
+		denominator := total - threeXX
+		if denominator == 0 {
+			return 0
+		}
+		ok := atomic.LoadInt64(&m.invite200OKTotal)
+		return float64(ok) / float64(denominator) * 100 //nolint:mnd // percentage formula
+	})
+
+	return m
 }
 
 func (m *metrics) UpdateSession(size int) {
 	m.sessions.Set(float64(size))
 }
 
-func (m *metrics) Response(in []byte) {
+func (m *metrics) Response(in []byte, isInviteResponse bool) {
 	defer m.sipPacketsTotal.Inc()
+
 	switch string(in) {
 	case "100":
 		m.statusTryingTotal.Inc()
@@ -236,7 +267,7 @@ func (m *metrics) Response(in []byte) {
 	case "408":
 		m.statusRequestTimeoutTotal.Inc()
 	case "480":
-		m.statusRequestTimeoutTotal.Inc()
+		m.statusTemporarilyUnavailableTotal.Inc()
 	case "486":
 		m.statusBusyHereTotal.Inc()
 	case "500":
@@ -250,10 +281,16 @@ func (m *metrics) Response(in []byte) {
 	default:
 		zap.L().Warn("unknown response", zap.ByteString("in", in))
 	}
+
+	// Count 3xx for SER (RFC 6076)
+	if isInviteResponse && len(in) == 3 && in[0] == '3' {
+		atomic.AddInt64(&m.invite3xxTotal, 1)
+	}
 }
 
 func (m *metrics) Request(in []byte) {
 	defer m.sipPacketsTotal.Inc()
+
 	switch string(in) {
 	case "PUBLISH":
 		m.requestPublishTotal.Inc()
@@ -281,9 +318,16 @@ func (m *metrics) Request(in []byte) {
 		m.requestACKTotal.Inc()
 	case "INVITE":
 		m.requestInviteTotal.Inc()
+		atomic.AddInt64(&m.inviteTotal, 1)
+	case "MESSAGE":
+		m.requestMessageTotal.Inc()
 	default:
 		zap.L().Warn("unknown request", zap.ByteString("in", in))
 	}
+}
+
+func (m *metrics) Invite200OK() {
+	atomic.AddInt64(&m.invite200OKTotal, 1)
 }
 
 func (m *metrics) SystemError() {

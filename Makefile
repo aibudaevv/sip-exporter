@@ -1,7 +1,8 @@
 version := $(shell cat VERSION)
+PWD := $(shell pwd)
 .DEFAULT_GOAL := docker_build
 
-.PHONY: test
+.PHONY: test test-e2e
 
 build: ebpf_compile go_build
 docker_build:
@@ -15,7 +16,15 @@ clean:
 ebpf_log:
 	sudo cat /sys/kernel/debug/tracing/trace_pipe
 test:
-	go test -v 	 ./...
+	go test -v ./...
+
+test-e2e:
+	go test -tags=e2e -v -count=1 ./test/e2e/...
+
+#example: make test-e2e-run TEST=TestSER_AllScenarios/100_percent
+test-e2e-run:
+	go test -tags=e2e -v -count=1 -run "$(TEST)" ./test/e2e/...
+
 lint: vet imports
 	golangci-lint run
 vet:

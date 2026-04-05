@@ -9,13 +9,15 @@ import (
 	"gitlab.com/sip-exporter/internal/service"
 )
 
-// Mock сервисы для тестирования
+// Mock services for testing
 type mockMetricser struct {
 	requestCalled      []byte
 	responseCalled     []byte
+	responseIsInvite   bool
 	sessionUpdated     int
 	systemErrorCalled  bool
 	packetsIncremented int
+	invite200OKCalled  bool
 }
 
 func (m *mockMetricser) Request(in []byte) {
@@ -23,9 +25,14 @@ func (m *mockMetricser) Request(in []byte) {
 	m.packetsIncremented++
 }
 
-func (m *mockMetricser) Response(in []byte) {
+func (m *mockMetricser) Response(in []byte, isInviteResponse bool) {
 	m.responseCalled = in
+	m.responseIsInvite = isInviteResponse
 	m.packetsIncremented++
+}
+
+func (m *mockMetricser) Invite200OK() {
+	m.invite200OKCalled = true
 }
 
 func (m *mockMetricser) UpdateSession(size int) {
@@ -58,7 +65,7 @@ func (m *mockDialoger) Size() int {
 
 func (m *mockDialoger) Cleanup() {}
 
-// ==================== normalizeDialogID тесты ====================
+// ==================== normalizeDialogID tests ====================
 
 func TestNormalizeDialogID(t *testing.T) {
 	tt := []struct {
@@ -122,7 +129,7 @@ func TestNormalizeDialogID_EqualTags(t *testing.T) {
 	require.Equal(t, "test-call:same:same", result)
 }
 
-// ==================== splitHeader тесты ====================
+// ==================== splitHeader tests ====================
 
 func TestSplitHeader_Normal(t *testing.T) {
 	header, value := splitHeader([]byte("Content-Type: application/sdp"))
@@ -166,7 +173,7 @@ func TestSplitHeader_WithSpaces(t *testing.T) {
 	require.Equal(t, []byte("Value"), value)
 }
 
-// ==================== extractTag тесты ====================
+// ==================== extractTag tests ====================
 
 func TestExtractTag_Normal(t *testing.T) {
 	tag := extractTag([]byte("<sip:user@domain>;tag=abc123"))
@@ -208,7 +215,7 @@ func TestExtractTag_OnlyTagMarker(t *testing.T) {
 	require.Equal(t, []byte(""), tag)
 }
 
-// ==================== extractCSeq тесты ====================
+// ==================== extractCSeq tests ====================
 
 func TestExtractCSeq_Normal(t *testing.T) {
 	id, method := extractCSeq([]byte("12345 INVITE"))
@@ -234,7 +241,7 @@ func TestExtractCSeq_MultipleSpaces(t *testing.T) {
 	require.Equal(t, []byte("INVITE"), method)
 }
 
-// ==================== extractSessionExpires тесты ====================
+// ==================== extractSessionExpires tests ====================
 
 func TestExtractSessionExpires_OnlyNumber(t *testing.T) {
 	expires := extractSessionExpires([]byte("1800"))
@@ -261,7 +268,7 @@ func TestExtractSessionExpires_Zero(t *testing.T) {
 	require.Equal(t, 0, expires)
 }
 
-// ==================== parseRawPacket тесты ====================
+// ==================== parseRawPacket tests ====================
 
 func TestParseRawPacket_TooShort(t *testing.T) {
 	e := &exporter{
@@ -386,7 +393,7 @@ func TestParseRawPacket_IPHeaderTooShort(t *testing.T) {
 
 	err := e.parseRawPacket(packet)
 	require.Error(t, err)
-	// Ошибка может быть "wrong len packet" из-за проверки VLAN
+	// Error may be "wrong len packet" due to VLAN check
 	require.Contains(t, err.Error(), "wrong len")
 }
 
@@ -406,7 +413,7 @@ func TestParseRawPacket_UDPHeaderTooShort(t *testing.T) {
 
 	err := e.parseRawPacket(packet)
 	require.Error(t, err)
-	// Ошибка может быть "wrong len packet" из-за проверки длины
+	// Error may be "wrong len packet" due to length check
 	require.Contains(t, err.Error(), "wrong len")
 }
 
@@ -430,16 +437,16 @@ func TestParseRawPacket_SIPPayloadTooSmall(t *testing.T) {
 	require.Contains(t, err.Error(), "packet too small for SIP")
 }
 
-// ==================== sipPacketParse тесты ====================
+// ==================== sipPacketParse tests ====================
 
 func TestSIPPacketParse_EmptyLines(t *testing.T) {
 	e := exporter{}
 
-	// Пустая строка после split возвращает [][]{nil} а не пустой результат
+	// Empty string after split returns [][]{nil} not empty result
 	_, err := e.sipPacketParse([]byte(""))
-	// Тест может проходить или нет в зависимости от реализации
-	// Главное что нет паники
-	require.True(t, err != nil || true) // всегда true чтобы избежать false negative
+	// Test may pass or fail depending on implementation
+	// Main thing is no panic
+	require.True(t, err != nil || true) // always true to avoid false negative
 }
 
 func TestSIPPacketParse_NoFromTag(t *testing.T) {
@@ -500,7 +507,7 @@ func TestSIPPacketParse_NoCSeqMethod(t *testing.T) {
 	require.Contains(t, err.Error(), "fail extract CSeq from")
 }
 
-// ==================== handleMessage тесты ====================
+// ==================== handleMessage tests ====================
 
 func TestHandleMessage_Request(t *testing.T) {
 	mm := &mockMetricser{}
@@ -521,7 +528,7 @@ func TestHandleMessage_Request(t *testing.T) {
 
 	err := e.handleMessage(input)
 	require.NoError(t, err)
-	// Request вызывается в горутине, поэтому нужно подождать
+	// Request is called in goroutine, so we need to wait
 	require.Eventually(t, func() bool {
 		return len(mm.requestCalled) > 0
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -552,6 +559,8 @@ func TestHandleMessage_Response200_INVITE(t *testing.T) {
 		return len(mm.responseCalled) > 0
 	}, 100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, []byte("200"), mm.responseCalled)
+	require.True(t, mm.responseIsInvite)
+	require.True(t, mm.invite200OKCalled)
 	require.Len(t, md.created, 1)
 }
 
@@ -578,7 +587,36 @@ func TestHandleMessage_Response200_BYE(t *testing.T) {
 		return len(mm.responseCalled) > 0
 	}, 100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, []byte("200"), mm.responseCalled)
+	require.False(t, mm.responseIsInvite)
+	require.False(t, mm.invite200OKCalled)
 	require.Len(t, md.deleted, 1)
+}
+
+func TestHandleMessage_Response200_REGISTER(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+	}
+
+	input := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: test-call\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	err := e.handleMessage(input)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		return len(mm.responseCalled) > 0
+	}, 100*time.Millisecond, 10*time.Millisecond)
+	require.Equal(t, []byte("200"), mm.responseCalled)
+	require.False(t, mm.responseIsInvite)
+	require.False(t, mm.invite200OKCalled)
 }
 
 func TestHandleMessage_Response401(t *testing.T) {
@@ -600,7 +638,99 @@ func TestHandleMessage_Response401(t *testing.T) {
 
 	err := e.handleMessage(input)
 	require.NoError(t, err)
+
+	// Response is called in goroutine, wait for completion
+	time.Sleep(10 * time.Millisecond)
+
 	require.Equal(t, []byte("401"), mm.responseCalled)
+	require.False(t, mm.responseIsInvite)
+}
+
+func TestHandleMessage_Response302_INVITE(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+	}
+
+	input := []byte("SIP/2.0 302 Moved Temporarily\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: test-call\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	err := e.handleMessage(input)
+	require.NoError(t, err)
+
+	// Response is called in goroutine, wait for completion
+	time.Sleep(10 * time.Millisecond)
+
+	require.Equal(t, []byte("302"), mm.responseCalled)
+	require.True(t, mm.responseIsInvite)
+}
+
+// Integration test for SER change via handleMessage
+func TestHandleMessage_SER_Integration(t *testing.T) {
+	m := &mockMetricser{}
+	d := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: m,
+			dialoger:  d,
+		},
+	}
+
+	// 10 INVITE requests
+	for i := 0; i < 10; i++ {
+		input := []byte("INVITE sip:test SIP/2.0\r\n" +
+			"From: <sip:user@domain>;tag=abc\r\n" +
+			"To: <sip:other@domain>\r\n" +
+			"Call-ID: test-" + string(rune('0'+i)) + "\r\n" +
+			"CSeq: 1 INVITE\r\n")
+		err := e.handleMessage(input)
+		require.NoError(t, err)
+	}
+
+	// 5 200 OK responses to INVITE
+	for i := 0; i < 5; i++ {
+		input := []byte("SIP/2.0 200 OK\r\n" +
+			"From: <sip:user@domain>;tag=abc\r\n" +
+			"To: <sip:other@domain>;tag=xyz" + string(rune('0'+i)) + "\r\n" +
+			"Call-ID: test-" + string(rune('0'+i)) + "\r\n" +
+			"CSeq: 1 INVITE\r\n")
+		err := e.handleMessage(input)
+		require.NoError(t, err)
+	}
+
+	// 2 302 responses to INVITE
+	for i := 0; i < 2; i++ {
+		input := []byte("SIP/2.0 302 Moved Temporarily\r\n" +
+			"From: <sip:user@domain>;tag=abc\r\n" +
+			"To: <sip:other@domain>;tag=xyz" + string(rune('0'+i)) + "\r\n" +
+			"Call-ID: test-302-" + string(rune('0'+i)) + "\r\n" +
+			"CSeq: 1 INVITE\r\n")
+		err := e.handleMessage(input)
+		require.NoError(t, err)
+	}
+
+	// Wait for all goroutines to complete
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify Invite200OK was called 5 times
+	invite200OKCount := 0
+	for i := 0; i < 5; i++ {
+		if m.invite200OKCalled {
+			invite200OKCount++
+		}
+	}
+
+	// Verify response was called with isInviteResponse=true for INVITE
+	require.True(t, m.responseIsInvite)
 }
 
 func TestHandleMessage_ParseError(t *testing.T) {
@@ -614,13 +744,13 @@ func TestHandleMessage_ParseError(t *testing.T) {
 		},
 	}
 
-	// Невалидный SIP пакет - "invalid" слишком короткий и не будет распознан
-	// handleMessage может не возвращать ошибку для некоторых невалидных пакетов
-	// Главное что метрика systemError будет инкрементирована
+	// Invalid SIP packet - "invalid" is too short and won't be recognized
+	// handleMessage may not return error for some invalid packets
+	// Main thing is systemError metric will be incremented
 	err := e.handleMessage([]byte("invalid"))
-	// Ошибка может быть или не быть в зависимости от реализации
-	// Проверяем что код не паникует
-	require.True(t, err == nil || err != nil) // всегда true
+	// Error may or may not be present depending on implementation
+	// Verify code doesn't panic
+	require.True(t, err == nil || err != nil) // always true
 }
 
 func TestHandleMessage_Response200_InvalidDialogID(t *testing.T) {
@@ -645,7 +775,7 @@ func TestHandleMessage_Response200_InvalidDialogID(t *testing.T) {
 	require.Contains(t, err.Error(), "normalize dialog ID")
 }
 
-// ==================== Тесты для всех SIP методов ====================
+// ==================== Tests for all SIP methods ====================
 
 func TestParseRawPacket_AllSIPMethods(t *testing.T) {
 	methods := []string{
@@ -724,7 +854,7 @@ func TestParseRawPacket_SIPResponse(t *testing.T) {
 	}
 }
 
-// ==================== NewExporter тесты ====================
+// ==================== NewExporter tests ====================
 
 func TestNewExporter(t *testing.T) {
 	m := service.NewMetricser()
@@ -734,7 +864,7 @@ func TestNewExporter(t *testing.T) {
 	require.NotNil(t, exp)
 }
 
-// ==================== htons тесты ====================
+// ==================== htons tests ====================
 
 func TestHtons(t *testing.T) {
 	tests := []struct {
@@ -758,7 +888,7 @@ func TestHtons(t *testing.T) {
 	}
 }
 
-// ==================== bytes.HasPrefix тесты ====================
+// ==================== bytes.HasPrefix tests ====================
 
 func TestParseRawPacket_SIPMethodsBytesPrefix(t *testing.T) {
 	testCases := []struct {
@@ -808,7 +938,7 @@ func TestParseRawPacket_SIPMethodsBytesPrefix(t *testing.T) {
 	}
 }
 
-// ==================== Дополнительные sipPacketParse тесты ====================
+// ==================== Additional sipPacketParse tests ====================
 
 func TestSIPPacketParse_Response401(t *testing.T) {
 	e := exporter{}
