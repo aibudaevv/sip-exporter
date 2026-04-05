@@ -250,6 +250,7 @@ Import the pre-built dashboard into your Grafana instance:
 
 The dashboard includes:
 - 📊 Active SIP Sessions (gauge)
+- 📈 SER (Session Establishment Ratio) — RFC 6076 metric
 - 📈 SIP Packets Rate
 - 📈 SIP Requests by Method (INVITE, BYE, REGISTER, etc.)
 - 📈 SIP Responses by Status (1xx, 2xx, 4xx, 5xx, 6xx)
