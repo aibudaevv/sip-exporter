@@ -138,6 +138,18 @@ SER = (INVITE → 200 OK) / (Total INVITE - INVITE → 3xx) × 100
 - Undefined when no INVITE requests have been received
 - Undefined when all INVITEs received 3xx responses (denominator = 0)
 
+**Important:** SER is a cumulative metric calculated over the entire runtime. Counters (`invite_total`, `200_total`) are never reset and accumulate over time. After sessions end, `sip_exporter_sessions` returns to 0, but SER retains its value based on all processed calls.
+
+To calculate SER over a specific time window, use PromQL with `rate()` or `increase()`:
+```promql
+# SER over last 5 minutes
+(
+  increase(sip_exporter_200_total[5m])
+  /
+  (increase(sip_exporter_invite_total[5m]) - increase(sip_exporter_302_total[5m]))
+) * 100
+```
+
 **Example values:**
 - `100` — all non-redirect INVITEs succeeded
 - `0` — all non-redirect INVITEs failed
