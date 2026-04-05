@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-// ==================== Benchmark для parseRawPacket ====================
+// ==================== Benchmark for parseRawPacket ====================
 
 func BenchmarkParseRawPacket_INVITE(b *testing.B) {
 	e := &exporter{
@@ -125,7 +125,7 @@ func BenchmarkParseRawPacket_401Unauthorized(b *testing.B) {
 	}
 }
 
-// ==================== Benchmark для sipPacketParse ====================
+// ==================== Benchmark for sipPacketParse ====================
 
 func BenchmarkSIPPacketParse_INVITE(b *testing.B) {
 	e := exporter{}
@@ -182,7 +182,7 @@ func BenchmarkSIPPacketParse_REGISTER(b *testing.B) {
 	}
 }
 
-// ==================== Benchmark для вспомогательных функций ====================
+// ==================== Benchmark for helper functions ====================
 
 func BenchmarkNormalizeDialogID(b *testing.B) {
 	callID := []byte("583ce713cb324f27bd614e594db53cc2")
@@ -231,7 +231,7 @@ func BenchmarkExtractSessionExpires(b *testing.B) {
 	}
 }
 
-// ==================== Benchmark для handleMessage ====================
+// ==================== Benchmark for handleMessage ====================
 
 func BenchmarkHandleMessage_INVITE(b *testing.B) {
 	mm := &mockMetricser{}
@@ -284,49 +284,33 @@ func BenchmarkHandleMessage_200OK_INVITE(b *testing.B) {
 
 // ==================== Helper functions ====================
 
-// buildTestPacket строит полный Ethernet+IP+UDP+SIP пакет для бенчмарков
-func buildTestPacket(sipPayload string) []byte {
-	// Ethernet header (14 байт)
-	// Destination MAC (6) + Source MAC (6) + EtherType (2 = 0x0800 IPv4)
-	packet := make([]byte, 14+20+8+len(sipPayload))
+// buildTestPacket builds full Ethernet+IP+UDP+SIP packet for benchmarks
+func buildTestPacket(sip string) []byte {
+	packet := make([]byte, 14+20+8+len(sip))
 
-	// Ethernet: EtherType = IPv4 (0x0800)
-	packet[12] = 0x08
+	// Ethernet header (14 bytes)
+	packet[12] = 0x08 // IPv4
 	packet[13] = 0x00
 
-	// IP header (20 байт)
 	ipOffset := 14
-	packet[ipOffset] = 0x45    // Version + IHL
-	packet[ipOffset+1] = 0x00  // DSCP + ECN
-	packet[ipOffset+2] = 0x00  // Total Length (будет обновлён)
-	packet[ipOffset+3] = 0x00  // Identification
-	packet[ipOffset+4] = 0x00  // Flags + Fragment Offset
-	packet[ipOffset+5] = 0x00  // TTL
-	packet[ipOffset+8] = 0x11  // Protocol = UDP (17)
-	packet[ipOffset+10] = 0x00 // Header checksum
-	packet[ipOffset+11] = 0x00 // Header checksum
-	packet[ipOffset+12] = 0x7f // Source IP (127.0.0.1)
-	packet[ipOffset+13] = 0x00
-	packet[ipOffset+14] = 0x00
-	packet[ipOffset+15] = 0x01
-	packet[ipOffset+16] = 0x7f // Dest IP (127.0.0.1)
-	packet[ipOffset+17] = 0x00
-	packet[ipOffset+18] = 0x00
-	packet[ipOffset+19] = 0x01
 
-	// UDP header (8 байт)
+	// IP header (20 bytes)
+	packet[ipOffset] = 0x45 // IPv4, IHL=5
+	packet[ipOffset+1] = 0x00
+	packet[ipOffset+2] = 0x00 // Total Length (will be updated)
+	packet[ipOffset+9] = 17   // UDP
+
 	udpOffset := ipOffset + 20
-	packet[udpOffset] = 0x13 // Source Port (5060)
-	packet[udpOffset+1] = 0x88
-	packet[udpOffset+2] = 0x13 // Dest Port (5060)
-	packet[udpOffset+3] = 0x88
-	packet[udpOffset+4] = 0x00 // Length (будет обновлён)
-	packet[udpOffset+5] = byte(len(sipPayload) + 8)
+
+	// UDP header (8 bytes)
+	packet[udpOffset] = 0x00
+	packet[udpOffset+4] = 0x00 // Length (will be updated)
+	packet[udpOffset+5] = byte(len(sip) + 8)
 	packet[udpOffset+6] = 0x00 // Checksum
 	packet[udpOffset+7] = 0x00
 
 	// SIP payload
-	copy(packet[udpOffset+8:], []byte(sipPayload))
+	copy(packet[udpOffset+8:], []byte(sip))
 
 	return packet
 }

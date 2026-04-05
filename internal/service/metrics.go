@@ -48,7 +48,7 @@ type (
 		sessions                          prometheus.Gauge
 
 		// SER metrics (RFC 6076)
-		ser              prometheus.Gauge
+		ser              prometheus.GaugeFunc
 		inviteTotal      int64
 		invite3xxTotal   int64
 		invite200OKTotal int64
@@ -64,7 +64,7 @@ type (
 )
 
 func NewMetricser() Metricser {
-	return &metrics{
+	m := &metrics{
 		sessions: promauto.NewGauge(prometheus.GaugeOpts{
 			Name: "sip_exporter_sessions",
 			Help: "Number of active SIP dialogs",
@@ -209,13 +209,27 @@ func NewMetricser() Metricser {
 			Name: "sip_exporter_180_total",
 			Help: "Total number of 180 Ringing responses",
 		}),
-
-		// SER metrics (RFC 6076)
-		ser: promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "sip_exporter_ser",
-			Help: "Session Establishment Ratio percentage (RFC 6076)",
-		}),
 	}
+
+	// SER metrics (RFC 6076) — calculated lazily on scrape
+	m.ser = promauto.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "sip_exporter_ser",
+		Help: "Session Establishment Ratio percentage (RFC 6076)",
+	}, func() float64 {
+		total := atomic.LoadInt64(&m.inviteTotal)
+		if total == 0 {
+			return 0
+		}
+		threeXX := atomic.LoadInt64(&m.invite3xxTotal)
+		denominator := total - threeXX
+		if denominator == 0 {
+			return 0
+		}
+		ok := atomic.LoadInt64(&m.invite200OKTotal)
+		return float64(ok) / float64(denominator) * 100 //nolint:mnd // percentage formula
+	})
+
+	return m
 }
 
 func (m *metrics) UpdateSession(size int) {
@@ -268,10 +282,9 @@ func (m *metrics) Response(in []byte, isInviteResponse bool) {
 		zap.L().Warn("unknown response", zap.ByteString("in", in))
 	}
 
-	// Считаем 3xx для SER (RFC 6076)
+	// Count 3xx for SER (RFC 6076)
 	if isInviteResponse && len(in) == 3 && in[0] == '3' {
 		atomic.AddInt64(&m.invite3xxTotal, 1)
-		m.updateSER()
 	}
 }
 
@@ -306,7 +319,6 @@ func (m *metrics) Request(in []byte) {
 	case "INVITE":
 		m.requestInviteTotal.Inc()
 		atomic.AddInt64(&m.inviteTotal, 1)
-		m.updateSER()
 	case "MESSAGE":
 		m.requestMessageTotal.Inc()
 	default:
@@ -316,32 +328,8 @@ func (m *metrics) Request(in []byte) {
 
 func (m *metrics) Invite200OK() {
 	atomic.AddInt64(&m.invite200OKTotal, 1)
-	m.updateSER()
 }
 
 func (m *metrics) SystemError() {
 	m.systemErrorTotal.Inc()
-}
-
-// updateSER вычисляет Session Establishment Ratio по формуле RFC 6076:
-// SER = (INVITE → 200 OK) / (Total INVITE - INVITE → 3xx) × 100
-func (m *metrics) updateSER() {
-	total := atomic.LoadInt64(&m.inviteTotal)
-	if total == 0 {
-		return
-	}
-
-	threeXX := atomic.LoadInt64(&m.invite3xxTotal)
-	denominator := total - threeXX
-
-	if denominator == 0 {
-		return
-	}
-
-	ok := atomic.LoadInt64(&m.invite200OKTotal)
-	ser := float64(ok) / float64(denominator) * 100
-
-	if m.ser != nil {
-		m.ser.Set(ser)
-	}
 }

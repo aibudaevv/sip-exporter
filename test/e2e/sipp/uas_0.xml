@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="ISO-8859-1" ?>
-<scenario name="SER Test - 0% Success Rate Server">
+<scenario name="UAS 0% Success">
     <recv request="INVITE" crlf="true"/>
     <send>
         <![CDATA[

@@ -8,7 +8,7 @@ import (
 )
 
 func TestGetConfig_Defaults(t *testing.T) {
-	// Сохраняем оригинальные значения
+	// Save original values
 	originalVars := map[string]string{
 		"SIP_EXPORTER_LOGGER_LEVEL":     os.Getenv("SIP_EXPORTER_LOGGER_LEVEL"),
 		"SIP_EXPORTER_HTTP_PORT":        os.Getenv("SIP_EXPORTER_HTTP_PORT"),
@@ -18,7 +18,7 @@ func TestGetConfig_Defaults(t *testing.T) {
 		"SIP_EXPORTER_SIPS_PORT":        os.Getenv("SIP_EXPORTER_SIPS_PORT"),
 	}
 	defer func() {
-		// Восстанавливаем оригинальные значения
+		// Restore original values
 		for k, v := range originalVars {
 			if v == "" {
 				_ = os.Unsetenv(k)
@@ -28,12 +28,12 @@ func TestGetConfig_Defaults(t *testing.T) {
 		}
 	}()
 
-	// Очищаем переменные окружения
+	// Clear environment variables
 	for k := range originalVars {
 		_ = os.Unsetenv(k)
 	}
 
-	// Устанавливаем только обязательный параметр
+	// Set only required parameter
 	_ = os.Setenv("SIP_EXPORTER_INTERFACE", "eth0")
 
 	cfg, err := GetConfig()
@@ -49,7 +49,7 @@ func TestGetConfig_Defaults(t *testing.T) {
 }
 
 func TestGetConfig_CustomValues(t *testing.T) {
-	// Сохраняем оригинальные значения
+	// Save original values
 	originalVars := map[string]string{
 		"SIP_EXPORTER_LOGGER_LEVEL":     os.Getenv("SIP_EXPORTER_LOGGER_LEVEL"),
 		"SIP_EXPORTER_HTTP_PORT":        os.Getenv("SIP_EXPORTER_HTTP_PORT"),
@@ -68,7 +68,7 @@ func TestGetConfig_CustomValues(t *testing.T) {
 		}
 	}()
 
-	// Устанавливаем кастомные значения
+	// Set custom values
 	_ = os.Setenv("SIP_EXPORTER_LOGGER_LEVEL", "debug")
 	_ = os.Setenv("SIP_EXPORTER_HTTP_PORT", "9090")
 	_ = os.Setenv("SIP_EXPORTER_INTERFACE", "lo")
@@ -89,7 +89,7 @@ func TestGetConfig_CustomValues(t *testing.T) {
 }
 
 func TestGetConfig_RequiredInterfaceMissing(t *testing.T) {
-	// Сохраняем оригинальные значения
+	// Save original values
 	originalVars := map[string]string{
 		"SIP_EXPORTER_LOGGER_LEVEL":     os.Getenv("SIP_EXPORTER_LOGGER_LEVEL"),
 		"SIP_EXPORTER_HTTP_PORT":        os.Getenv("SIP_EXPORTER_HTTP_PORT"),
@@ -108,7 +108,7 @@ func TestGetConfig_RequiredInterfaceMissing(t *testing.T) {
 		}
 	}()
 
-	// Очищаем все переменные
+	// Clear all variables
 	for k := range originalVars {
 		_ = os.Unsetenv(k)
 	}

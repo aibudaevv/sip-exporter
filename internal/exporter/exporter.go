@@ -68,7 +68,7 @@ func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPo
 		return fmt.Errorf("failed to find BPF program: bpf_socket_filter")
 	}
 
-	// Настраиваем SIP порты в eBPF map
+	// Configure SIP ports in eBPF map
 	sipPortsMap := collection.Maps["sip_ports"]
 	if sipPortsMap == nil {
 		return fmt.Errorf("failed to find sip_ports map")
@@ -207,7 +207,7 @@ func (e *exporter) parseRawPacket(packet []byte) error {
 		return fmt.Errorf("not IPv4 packet")
 	}
 
-	// IP заголовок
+	// IP header
 	if len(packet) < ipOffset+20 {
 		return fmt.Errorf("ip header too short")
 	}
@@ -220,13 +220,13 @@ func (e *exporter) parseRawPacket(packet []byte) error {
 		return fmt.Errorf("not UDP packet")
 	}
 
-	// UDP заголовок (8 байт)
+	// UDP header (8 bytes)
 	udpOffset := ipOffset + ipHeaderLen
 	if len(packet) < udpOffset+8 {
 		return fmt.Errorf("udp header too short")
 	}
 
-	// SIP данные после UDP заголовка
+	// SIP data after UDP header
 	sipOffset := udpOffset + 8
 	if sipOffset >= len(packet) {
 		return fmt.Errorf("no SIP payload")

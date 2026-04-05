@@ -7,11 +7,39 @@ Designed for sub-microsecond packet processing with zero-copy capture directly i
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](https://github.com/aibudaevv/sip-exporter/blob/main/LICENSE)
 [![Issues](https://img.shields.io/github/issues/aibudaevv/sip-exporter)](https://github.com/aibudaevv/sip-exporter/issues)
 
-### Core Technology: eBPF
+## Key Features
+
+- ⚡ **Sub-microsecond latency** — eBPF zero-copy packet capture in kernel space
+- 🐳 **Single container deployment** — no external dependencies
+- 🔧 **Configurable SIP ports** — monitor custom ports via environment variables
+- 📈 **Prometheus native** — standard `/metrics` endpoint for scraping
+
+## Quick Start
+
+```yaml
+# docker-compose.yml
+services:
+  sip-exporter:
+    image: frzq/sip-exporter:0.5.0
+    privileged: true
+    network_mode: host
+    environment:
+      - SIP_EXPORTER_INTERFACE=eth0
+```
+
+```bash
+docker-compose up -d
+curl http://localhost:2112/metrics
+```
+
+Access metrics at `http://localhost:2112/metrics`.
+
+## Core Technology
+
 This service uses eBPF (extended Berkeley Packet Filter) attached to network sockets (XDP-like filtering) to
 intercept SIP packets (UDP/5060-5061) at L4 without overhead of iptables/nftables or userspace daemons like tcpdump.
 
-### Architecture
+## Architecture
 ```
 SIP Traffic → NIC → eBPF socket filter → ringbuf → Go poller → SIP parser → Prometheus
 ```
@@ -29,7 +57,11 @@ Go benchmark results (Intel i7-8665U):
 *Note: Benchmarks measure userspace processing only. Actual latency depends on kernel eBPF overhead and system load.*
 
 ## Install
-`docker pull frzq/sip-exporter:0.4.0`
+
+```bash
+docker pull frzq/sip-exporter:0.5.0
+```
+
 ### Configure
 Environment variables:
 * `SIP_EXPORTER_INTERFACE` - net interface (required)
@@ -42,8 +74,17 @@ Environment variables:
 Start docker container in privileged mode is true and host mode.
 ## Metrics
 ### Generic SIP traffic metric
-`sip_exporter_packets_total`: total number of parsed SIP packets (requests + responses).  
-`sip_exporter_sessions`: active sip dialogs. (unique session it key call-id:from.tag:to.tag) 
+`sip_exporter_packets_total`: total number of parsed SIP packets (requests + responses).
+
+### Session metric
+`sip_exporter_sessions`: number of active SIP dialogs (RFC 3261).
+
+**How dialogs are counted:**
+- A dialog is created when a `200 OK` response is received for an `INVITE` request
+- A dialog is identified by the tuple: `{Call-ID, From tag, To tag}`
+- A dialog is terminated when a `200 OK` response is received for a `BYE` request
+- Dialog ID format: `{call-id}:{min-tag}:{max-tag}` (tags sorted lexicographically)
+- Dialogs are cleaned up every 1 second or when expired (based on `Session-Expires` header, default 30 min)
 
 ### SIP request metrics
 `sip_exporter_publish_total`: total number of received SIP PUBLISH requests.  
@@ -81,6 +122,27 @@ Start docker container in privileged mode is true and host mode.
 ### System metrics
 `sip_exporter_system_error_total`: total number internal SIP exporter error.
 
+### RFC 6076 Performance Metrics
+Metrics defined in [RFC 6076 - Session Initiation Protocol (SIP) Performance Metrics](https://datatracker.ietf.org/doc/html/rfc6076):
+
+#### Session Establishment Ratio (SER)
+`sip_exporter_ser`: percentage of successfully established sessions relative to total INVITE attempts.
+
+**Formula (RFC 6076):**
+```
+SER = (INVITE → 200 OK) / (Total INVITE - INVITE → 3xx) × 100
+```
+
+- 3xx responses (redirects) are **excluded from the denominator** — they are neither success nor failure, but a routing instruction
+- A session is counted as established only when the originating UA receives `200 OK` for its INVITE
+- Undefined when no INVITE requests have been received
+- Undefined when all INVITEs received 3xx responses (denominator = 0)
+
+**Example values:**
+- `100` — all non-redirect INVITEs succeeded
+- `0` — all non-redirect INVITEs failed
+- `undefined` — no INVITEs or all 3xx
+
 ## Development
 
 ### Requirements
@@ -105,15 +167,14 @@ make test
 ```
 
 ### Test Coverage
-The project has comprehensive MC/DC test coverage:
 
 | Package | Coverage |
 |---------|----------|
 | `internal/config` | 100.0% |
-| `internal/service` | 100.0% |
 | `pkg/log` | 95.5% |
 | `internal/server` | 90.5% |
-| `internal/exporter` | 60.2% |
+| `internal/service` | 86.5% |
+| `internal/exporter` | 61.0% |
 
 Run coverage report:
 ```bash
@@ -128,6 +189,43 @@ make docker_build
 # Run with Docker Compose
 docker-compose up -d
 ```
+
+## E2E Testing
+
+E2E tests use [SIPp](https://sipp.sourceforge.net/) via [testcontainers-go](https://golang.testcontainers.org/) to generate real SIP traffic and verify metrics.
+
+### Requirements
+- Docker
+- Root privileges (for eBPF and privileged containers)
+
+### Run E2E tests
+```bash
+# Run all E2E tests
+make test-e2e
+
+# Run specific test
+make test-e2e-run TEST=TestSER_AllScenarios/100_percent
+```
+
+### Test scenarios
+| Test | Description | Expected SER |
+|------|-------------|--------------|
+| `TestSER_AllScenarios/100_percent` | 50 INVITE → 200 OK | 100% |
+| `TestSER_AllScenarios/0_percent` | 50 INVITE → 486 Busy Here | 0% |
+| `TestSER_AllScenarios/redirect` | 50 INVITE → 302 Redirect | 0% |
+| `TestSER_AllScenarios/no_invite` | 50 OPTIONS (no INVITE) | 0% |
+| `TestSER_Mixed` | 35 success + 15 rejected | 70% |
+| `TestSER_Mixed3xx` | 25 redirect + 25 success | 100% |
+
+All tests verify that `sip_exporter_sessions` returns to 0 after completion (all dialogs properly terminated).
+
+### How it works
+1. testcontainers-go builds exporter Docker image from Dockerfile
+2. Starts exporter container with eBPF on loopback interface
+3. Starts SIPp UAS and UAC containers with `--network=host`
+4. SIPp generates SIP traffic through loopback (127.0.0.1:5060)
+5. Exporter captures packets via eBPF and updates Prometheus metrics
+6. Tests verify SER and sessions cleanup
 
 ## Integration
 

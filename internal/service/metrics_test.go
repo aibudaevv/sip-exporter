@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Глобальный metricser для всех тестов чтобы избежать дублирования регистрации
+// globalMetricser for all tests to avoid duplicate registration
 var (
 	globalMetricser     Metricser
 	globalMetricserOnce sync.Once
@@ -21,13 +21,7 @@ func getGlobalMetricser() Metricser {
 	return globalMetricser
 }
 
-func TestNewMetricser_NotNil(t *testing.T) {
-	// Используем getGlobalMetricser чтобы избежать дублирования регистрации
-	m := getGlobalMetricser()
-	require.NotNil(t, m)
-}
-
-// Тесты для Request метода - покрывают все SIP методы
+// Tests for Request method - cover all SIP methods
 func TestMetricser_Request_AllMethodsSingleRun(t *testing.T) {
 	m := getGlobalMetricser()
 	require.NotNil(t, m)
@@ -61,7 +55,7 @@ func TestMetricser_Request_AllMethodsSingleRun(t *testing.T) {
 	}
 }
 
-// Тесты для Response метода - покрывают все коды ответов
+// Tests for Response method - cover all response codes
 func TestMetricser_Response_AllCodesSingleRun(t *testing.T) {
 	m := getGlobalMetricser()
 	require.NotNil(t, m)
@@ -143,67 +137,67 @@ func TestMetricser_Combined(t *testing.T) {
 	m.SystemError()
 }
 
-// Тесты для SER (Session Establishment Ratio) по RFC 6076
-// Формула: SER = (INVITE → 200 OK) / (Total INVITE - INVITE → 3xx) × 100
+// SER (Session Establishment Ratio) tests per RFC 6076
+// Formula: SER = (INVITE → 200 OK) / (Total INVITE - INVITE → 3xx) × 100
 
 func TestMetrics_UpdateSER_NoInvites(t *testing.T) {
 	m := &metrics{}
-	m.updateSER()
-	// SER должен быть 0 когда нет INVITE
+	// SER should be 0 when no INVITE
+	require.Equal(t, 0.0, m.getSER())
 }
 
 func TestMetrics_UpdateSER_AllSuccessful(t *testing.T) {
 	m := &metrics{}
 
-	// 100 INVITE, все успешные
+	// 100 INVITE, all successful
 	atomic.StoreInt64(&m.inviteTotal, 100)
 	atomic.StoreInt64(&m.invite200OKTotal, 100)
 	atomic.StoreInt64(&m.invite3xxTotal, 0)
 
-	m.updateSER()
 	// SER = 100 / (100 - 0) * 100 = 100%
+	require.Equal(t, 100.0, m.getSER())
 }
 
 func TestMetrics_UpdateSER_HalfSuccessful(t *testing.T) {
 	m := &metrics{}
 
-	// 100 INVITE, 50 успешных
+	// 100 INVITE, 50 successful
 	atomic.StoreInt64(&m.inviteTotal, 100)
 	atomic.StoreInt64(&m.invite200OKTotal, 50)
 	atomic.StoreInt64(&m.invite3xxTotal, 0)
 
-	m.updateSER()
 	// SER = 50 / (100 - 0) * 100 = 50%
+	require.Equal(t, 50.0, m.getSER())
 }
 
 func TestMetrics_UpdateSER_With3xxExcluded(t *testing.T) {
 	m := &metrics{}
 
-	// 100 INVITE, 10 с 3xx, 45 успешных
+	// 100 INVITE, 10 with 3xx, 45 successful
 	// SER = 45 / (100 - 10) * 100 = 50%
 	atomic.StoreInt64(&m.inviteTotal, 100)
 	atomic.StoreInt64(&m.invite200OKTotal, 45)
 	atomic.StoreInt64(&m.invite3xxTotal, 10)
 
-	m.updateSER()
+	require.Equal(t, 50.0, m.getSER())
 }
 
 func TestMetrics_UpdateSER_DenominatorZero(t *testing.T) {
 	m := &metrics{}
 
-	// Все INVITE получили 3xx
+	// All INVITE received 3xx
 	atomic.StoreInt64(&m.inviteTotal, 10)
 	atomic.StoreInt64(&m.invite200OKTotal, 0)
 	atomic.StoreInt64(&m.invite3xxTotal, 10)
 
-	m.updateSER()
-	// SER должен быть 0 (знаменатель = 0)
+	// SER should be 0 (denominator = 0)
+	require.Equal(t, 0.0, m.getSER())
 }
 
 func TestMetrics_Invite200OK(t *testing.T) {
 	m := &metrics{}
 
-	// Устанавливаем начальное состояние
+	// Set initial state
 	atomic.StoreInt64(&m.inviteTotal, 10)
 	atomic.StoreInt64(&m.invite200OKTotal, 0)
 	atomic.StoreInt64(&m.invite3xxTotal, 0)
@@ -217,23 +211,21 @@ func TestMetrics_Invite200OK(t *testing.T) {
 func TestMetrics_Integration_SER(t *testing.T) {
 	m := &metrics{}
 
-	// 10 INVITE запросов
+	// 10 INVITE requests
 	for i := 0; i < 10; i++ {
 		atomic.AddInt64(&m.inviteTotal, 1)
 	}
 
-	// 5 ответов 200 OK на INVITE
+	// 5 200 OK responses to INVITE
 	for i := 0; i < 5; i++ {
 		atomic.AddInt64(&m.invite200OKTotal, 1)
 	}
 
-	// 2 ответа 3xx на INVITE
+	// 2 3xx responses to INVITE
 	atomic.AddInt64(&m.invite3xxTotal, 2)
 
-	m.updateSER()
-
-	// Ожидаем: SER = 5 / (10 - 2) * 100 = 62.5%
-	// Проверяем через public interface
+	// Expected: SER = 5 / (10 - 2) * 100 = 62.5%
+	require.Equal(t, 62.5, m.getSER())
 }
 
 func TestMetrics_SER_Values(t *testing.T) {
@@ -309,15 +301,13 @@ func TestMetrics_SER_Values(t *testing.T) {
 			atomic.StoreInt64(&m.invite200OKTotal, tt.invite200OK)
 			atomic.StoreInt64(&m.invite3xxTotal, tt.invite3xx)
 
-			m.updateSER()
-
 			got := m.getSER()
 			require.Equal(t, tt.wantSER, got)
 		})
 	}
 }
 
-// getSER возвращает текущее значение SER для тестов
+// getSER returns current SER value for tests
 func (m *metrics) getSER() float64 {
 	total := atomic.LoadInt64(&m.inviteTotal)
 	if total == 0 {
@@ -335,67 +325,61 @@ func (m *metrics) getSER() float64 {
 	return float64(ok) / float64(denominator) * 100
 }
 
-// TestMetrics_SER_FullCycle проверяет полный цикл изменения SER
+// TestMetrics_SER_FullCycle tests full SER change cycle
 func TestMetrics_SER_FullCycle(t *testing.T) {
 	m := &metrics{}
 
-	// Начальное состояние: SER = 0
+	// Initial state: SER = 0
 	require.Equal(t, 0.0, m.getSER())
 
-	// 10 INVITE запросов
+	// 10 INVITE requests
 	for i := 0; i < 10; i++ {
 		atomic.AddInt64(&m.inviteTotal, 1)
-		m.updateSER()
 	}
 	// SER = 0 / (10 - 0) * 100 = 0%
 	require.Equal(t, 0.0, m.getSER())
 
-	// 5 ответов 200 OK на INVITE
+	// 5 200 OK responses to INVITE
 	for i := 0; i < 5; i++ {
 		atomic.AddInt64(&m.invite200OKTotal, 1)
-		m.updateSER()
 	}
 	// SER = 5 / (10 - 0) * 100 = 50%
 	require.Equal(t, 50.0, m.getSER())
 
-	// 2 ответа 3xx на INVITE
+	// 2 3xx responses to INVITE
 	for i := 0; i < 2; i++ {
 		atomic.AddInt64(&m.invite3xxTotal, 1)
-		m.updateSER()
 	}
 	// SER = 5 / (10 - 2) * 100 = 62.5%
 	require.Equal(t, 62.5, m.getSER())
 
-	// Ещё 3 ответа 200 OK
+	// 3 more 200 OK responses
 	for i := 0; i < 3; i++ {
 		atomic.AddInt64(&m.invite200OKTotal, 1)
-		m.updateSER()
 	}
 	// SER = 8 / (10 - 2) * 100 = 100%
 	require.Equal(t, 100.0, m.getSER())
 }
 
-// TestMetrics_SER_RequestResponseFlow моделирует поток Request/Response
+// TestMetrics_SER_RequestResponseFlow models Request/Response flow
 func TestMetrics_SER_RequestResponseFlow(t *testing.T) {
 	m := &metrics{}
 
-	// Сценарий: 20 INVITE, из них:
-	// - 10 успешных (200 OK)
-	// - 5 перенаправлений (3xx)
-	// - 5 ошибок (4xx/5xx)
+	// Scenario: 20 INVITE, of which:
+	// - 10 successful (200 OK)
+	// - 5 redirects (3xx)
+	// - 5 errors (4xx/5xx)
 
-	// Все INVITE запросы
+	// All INVITE requests
 	for i := 0; i < 20; i++ {
 		atomic.AddInt64(&m.inviteTotal, 1)
 	}
 
-	// 10 ответов 200 OK
+	// 10 200 OK responses
 	atomic.StoreInt64(&m.invite200OKTotal, 10)
 
-	// 5 ответов 3xx
+	// 5 3xx responses
 	atomic.StoreInt64(&m.invite3xxTotal, 5)
-
-	m.updateSER()
 
 	// SER = 10 / (20 - 5) * 100 = 66.67%
 	got := m.getSER()
@@ -405,13 +389,12 @@ func TestMetrics_SER_RequestResponseFlow(t *testing.T) {
 func TestMetrics_Response_3xxWithInviteResponse(t *testing.T) {
 	m := &metrics{}
 
-	// Устанавливаем начальное состояние
+	// Set initial state
 	atomic.StoreInt64(&m.inviteTotal, 10)
 	atomic.StoreInt64(&m.invite3xxTotal, 0)
 
-	// 3xx ответ на INVITE
+	// 3xx response to INVITE
 	atomic.AddInt64(&m.invite3xxTotal, 1)
-	m.updateSER()
 
 	got := atomic.LoadInt64(&m.invite3xxTotal)
 	require.Equal(t, int64(1), got)
@@ -420,12 +403,12 @@ func TestMetrics_Response_3xxWithInviteResponse(t *testing.T) {
 func TestMetrics_Response_3xxWithoutInviteResponse(t *testing.T) {
 	m := &metrics{}
 
-	// Устанавливаем начальное состояние
+	// Set initial state
 	atomic.StoreInt64(&m.inviteTotal, 10)
 	atomic.StoreInt64(&m.invite3xxTotal, 0)
 
-	// 3xx ответ не на INVITE (не должен считаться)
-	// Не вызываем Response, просто проверяем что счётчик не изменился
+	// 3xx response not to INVITE (should not be counted)
+	// Don't call Response, just verify counter didn't change
 	got := atomic.LoadInt64(&m.invite3xxTotal)
 	require.Equal(t, int64(0), got)
 }
@@ -433,9 +416,9 @@ func TestMetrics_Response_3xxWithoutInviteResponse(t *testing.T) {
 func TestMetrics_Response_200WithInviteResponse(t *testing.T) {
 	m := &metrics{}
 
-	// 200 OK не инкрементит invite3xxTotal
+	// 200 OK doesn't increment invite3xxTotal
 	atomic.StoreInt64(&m.invite3xxTotal, 0)
-	// Не вызываем Response, просто проверяем что счётчик не изменился
+	// Don't call Response, just verify counter didn't change
 	got := atomic.LoadInt64(&m.invite3xxTotal)
 	require.Equal(t, int64(0), got)
 }
@@ -454,7 +437,7 @@ func TestMetrics_Request_NotINVITE(t *testing.T) {
 	m := &metrics{}
 
 	atomic.StoreInt64(&m.inviteTotal, 0)
-	// Request не INVITE не должен менять inviteTotal
+	// Request not INVITE shouldn't change inviteTotal
 
 	got := atomic.LoadInt64(&m.inviteTotal)
 	require.Equal(t, int64(0), got)
