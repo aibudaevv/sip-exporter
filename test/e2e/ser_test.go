@@ -16,7 +16,6 @@ func TestSER_AllScenarios(t *testing.T) {
 		uacScenario string
 		callCount   int
 		wantSER     float64
-		tolerance   float64
 	}{
 		{
 			name:        "100_percent",
@@ -24,7 +23,6 @@ func TestSER_AllScenarios(t *testing.T) {
 			uacScenario: "uac_100.xml",
 			callCount:   50,
 			wantSER:     100.0,
-			tolerance:   5.0,
 		},
 		{
 			name:        "0_percent",
@@ -32,7 +30,6 @@ func TestSER_AllScenarios(t *testing.T) {
 			uacScenario: "uac_0.xml",
 			callCount:   50,
 			wantSER:     0.0,
-			tolerance:   5.0,
 		},
 		{
 			name:        "redirect",
@@ -40,7 +37,6 @@ func TestSER_AllScenarios(t *testing.T) {
 			uacScenario: "uac_redirect.xml",
 			callCount:   50,
 			wantSER:     0.0,
-			tolerance:   5.0,
 		},
 		{
 			name:        "no_invite",
@@ -48,7 +44,6 @@ func TestSER_AllScenarios(t *testing.T) {
 			uacScenario: "uac_no_invite.xml",
 			callCount:   50,
 			wantSER:     0.0,
-			tolerance:   5.0,
 		},
 	}
 
@@ -60,8 +55,8 @@ func TestSER_AllScenarios(t *testing.T) {
 			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount)
 
 			ser := getSER(t, endpoint)
-			require.InDelta(t, tt.wantSER, ser, tt.tolerance,
-				"SER = %.2f, want %.2f ± %.2f", ser, tt.wantSER, tt.tolerance)
+			t.Logf("SER = %.2f (want %.2f)", ser, tt.wantSER)
+			require.Equal(t, tt.wantSER, ser)
 
 			sessions := getSessions(t, endpoint)
 			require.Equal(t, 0.0, sessions, "sessions should be 0 after all calls terminated")
@@ -79,8 +74,8 @@ func TestSER_Mixed(t *testing.T) {
 	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 15)
 
 	ser := getSER(t, endpoint)
-	require.InDelta(t, 70.0, ser, 10.0,
-		"SER = %.2f, want 70.0 ± 10.0", ser)
+	t.Logf("SER = %.2f (want %.2f)", ser, 70.0)
+	require.Equal(t, 70.0, ser)
 
 	sessions := getSessions(t, endpoint)
 	require.Equal(t, 0.0, sessions, "sessions should be 0 after all calls terminated")
@@ -97,8 +92,8 @@ func TestSER_Mixed3xx(t *testing.T) {
 	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25)
 
 	ser := getSER(t, endpoint)
-	require.InDelta(t, 100.0, ser, 5.0,
-		"SER = %.2f, want 100.0 ± 5.0", ser)
+	t.Logf("SER = %.2f (want %.2f)", ser, 100.0)
+	require.Equal(t, 100.0, ser)
 
 	sessions := getSessions(t, endpoint)
 	require.Equal(t, 0.0, sessions, "sessions should be 0 after all calls terminated")

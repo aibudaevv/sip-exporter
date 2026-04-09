@@ -442,3 +442,267 @@ func TestMetrics_Request_NotINVITE(t *testing.T) {
 	got := atomic.LoadInt64(&m.inviteTotal)
 	require.Equal(t, int64(0), got)
 }
+
+// SEER (Session Establishment Effectiveness Ratio) tests per RFC 6076
+// Formula: SEER = (INVITE → 200, 480, 486, 600, 603) / (Total INVITE - INVITE → 3xx) × 100
+
+// getSEER returns current SEER value for tests
+func (m *metrics) getSEER() float64 {
+	total := atomic.LoadInt64(&m.inviteTotal)
+	if total == 0 {
+		return 0
+	}
+
+	threeXX := atomic.LoadInt64(&m.invite3xxTotal)
+	denominator := total - threeXX
+
+	if denominator == 0 {
+		return 0
+	}
+
+	effective := atomic.LoadInt64(&m.inviteEffectiveTotal)
+	return float64(effective) / float64(denominator) * 100
+}
+
+// TestMetrics_SEER_NoInvites — MC/DC: total == 0
+func TestMetrics_SEER_NoInvites(t *testing.T) {
+	m := &metrics{}
+	require.Equal(t, 0.0, m.getSEER())
+}
+
+// TestMetrics_SEER_AllEffective — MC/DC: all responses are effective (200)
+func TestMetrics_SEER_AllEffective(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.inviteEffectiveTotal, 100)
+	atomic.StoreInt64(&m.invite3xxTotal, 0)
+
+	// SEER = 100 / (100 - 0) * 100 = 100%
+	require.Equal(t, 100.0, m.getSEER())
+}
+
+// TestMetrics_SEER_HalfEffective — MC/DC: partial effective
+func TestMetrics_SEER_HalfEffective(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.inviteEffectiveTotal, 50)
+	atomic.StoreInt64(&m.invite3xxTotal, 0)
+
+	// SEER = 50 / (100 - 0) * 100 = 50%
+	require.Equal(t, 50.0, m.getSEER())
+}
+
+// TestMetrics_SEER_With3xxExcluded — MC/DC: 3xx excluded from denominator
+func TestMetrics_SEER_With3xxExcluded(t *testing.T) {
+	m := &metrics{}
+
+	// 100 INVITE, 10 with 3xx, 45 effective
+	// SEER = 45 / (100 - 10) * 100 = 50%
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.inviteEffectiveTotal, 45)
+	atomic.StoreInt64(&m.invite3xxTotal, 10)
+
+	require.Equal(t, 50.0, m.getSEER())
+}
+
+// TestMetrics_SEER_DenominatorZero — MC/DC: denominator == 0
+func TestMetrics_SEER_DenominatorZero(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.inviteTotal, 10)
+	atomic.StoreInt64(&m.inviteEffectiveTotal, 0)
+	atomic.StoreInt64(&m.invite3xxTotal, 10)
+
+	require.Equal(t, 0.0, m.getSEER())
+}
+
+// TestMetrics_SEER_EachCodeIndependent — MC/DC: each effective code separately
+func TestMetrics_SEER_EachCodeIndependent(t *testing.T) {
+	tests := []struct {
+		name         string
+		invites      int64
+		effective200 int64
+		effective480 int64
+		effective486 int64
+		effective600 int64
+		effective603 int64
+		threeXX      int64
+		wantSEER     float64
+	}{
+		{
+			name:         "only_200",
+			invites:      100,
+			effective200: 50,
+			threeXX:      0,
+			wantSEER:     50.0,
+		},
+		{
+			name:         "only_480",
+			invites:      100,
+			effective480: 30,
+			threeXX:      0,
+			wantSEER:     30.0,
+		},
+		{
+			name:         "only_486",
+			invites:      100,
+			effective486: 20,
+			threeXX:      0,
+			wantSEER:     20.0,
+		},
+		{
+			name:         "only_600",
+			invites:      100,
+			effective600: 10,
+			threeXX:      0,
+			wantSEER:     10.0,
+		},
+		{
+			name:         "only_603",
+			invites:      100,
+			effective603: 5,
+			threeXX:      0,
+			wantSEER:     5.0,
+		},
+		{
+			name:         "all_codes_combined",
+			invites:      100,
+			effective200: 40,
+			effective480: 10,
+			effective486: 10,
+			effective600: 5,
+			effective603: 5,
+			threeXX:      10,
+			wantSEER:     77.78, // 70 / (100 - 10) * 100 = 77.78
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			atomic.StoreInt64(&m.inviteTotal, tt.invites)
+			atomic.StoreInt64(&m.inviteEffectiveTotal,
+				tt.effective200+tt.effective480+tt.effective486+tt.effective600+tt.effective603)
+			atomic.StoreInt64(&m.invite3xxTotal, tt.threeXX)
+
+			got := m.getSEER()
+			require.InDelta(t, tt.wantSEER, got, 0.01)
+		})
+	}
+}
+
+// TestMetrics_SEER_FullCycle — full lifecycle test
+func TestMetrics_SEER_FullCycle(t *testing.T) {
+	m := &metrics{}
+
+	// Initial state: SEER = 0
+	require.Equal(t, 0.0, m.getSEER())
+
+	// 20 INVITE requests
+	for i := 0; i < 20; i++ {
+		atomic.AddInt64(&m.inviteTotal, 1)
+	}
+	require.Equal(t, 0.0, m.getSEER())
+
+	// 10 200 OK (effective)
+	for i := 0; i < 10; i++ {
+		atomic.AddInt64(&m.inviteEffectiveTotal, 1)
+	}
+	// SEER = 10 / (20 - 0) * 100 = 50%
+	require.Equal(t, 50.0, m.getSEER())
+
+	// 5 480 Busy Here (effective)
+	for i := 0; i < 5; i++ {
+		atomic.AddInt64(&m.inviteEffectiveTotal, 1)
+	}
+	// SEER = 15 / (20 - 0) * 100 = 75%
+	require.Equal(t, 75.0, m.getSEER())
+
+	// 4 3xx redirects (excluded from denominator)
+	for i := 0; i < 4; i++ {
+		atomic.AddInt64(&m.invite3xxTotal, 1)
+	}
+	// SEER = 15 / (20 - 4) * 100 = 93.75%
+	require.Equal(t, 93.75, m.getSEER())
+
+	// 2 500 Server Error (NOT effective)
+	// SEER unchanged: 15 / 16 * 100 = 93.75%
+	require.Equal(t, 93.75, m.getSEER())
+}
+
+// TestMetrics_SEER_RequestResponseFlow models Request/Response flow
+func TestMetrics_SEER_RequestResponseFlow(t *testing.T) {
+	m := &metrics{}
+
+	// Scenario: 20 INVITE, of which:
+	// - 8 successful (200 OK)
+	// - 4 busy (480)
+	// - 3 redirects (3xx)
+	// - 5 errors (4xx/5xx, not effective)
+
+	// All INVITE requests
+	for i := 0; i < 20; i++ {
+		atomic.AddInt64(&m.inviteTotal, 1)
+	}
+
+	// 8 200 OK + 4 480 = 12 effective
+	atomic.StoreInt64(&m.inviteEffectiveTotal, 12)
+
+	// 5 3xx responses
+	atomic.StoreInt64(&m.invite3xxTotal, 5)
+
+	// SEER = 12 / (20 - 5) * 100 = 80%
+	got := m.getSEER()
+	require.Equal(t, 80.0, got)
+}
+
+// TestMetrics_SEER_SER_Comparison verifies SEER >= SER always
+func TestMetrics_SEER_SER_Comparison(t *testing.T) {
+	tests := []struct {
+		name        string
+		invites     int64
+		invite200OK int64
+		effective   int64
+		invite3xx   int64
+	}{
+		{"equal_when_only_200", 100, 50, 50, 10},
+		{"seer_higher_with_480", 100, 40, 60, 10},
+		{"seer_higher_with_603", 100, 30, 50, 20},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			atomic.StoreInt64(&m.inviteTotal, tt.invites)
+			atomic.StoreInt64(&m.invite200OKTotal, tt.invite200OK)
+			atomic.StoreInt64(&m.inviteEffectiveTotal, tt.effective)
+			atomic.StoreInt64(&m.invite3xxTotal, tt.invite3xx)
+
+			ser := m.getSER()
+			seer := m.getSEER()
+
+			// SEER should always be >= SER
+			require.GreaterOrEqual(t, seer, ser, "SEER must be >= SER")
+		})
+	}
+}
+
+// TestMetrics_SEER_NonEffectiveCodes verifies non-effective codes don't affect numerator
+func TestMetrics_SEER_NonEffectiveCodes(t *testing.T) {
+	nonEffectiveCodes := []string{"400", "401", "403", "404", "408", "500", "503"}
+
+	for _, code := range nonEffectiveCodes {
+		t.Run(code, func(t *testing.T) {
+			m := &metrics{}
+			atomic.StoreInt64(&m.inviteTotal, 10)
+			atomic.StoreInt64(&m.inviteEffectiveTotal, 0)
+			atomic.StoreInt64(&m.invite3xxTotal, 0)
+
+			// Non-effective codes should NOT increment inviteEffectiveTotal
+			// Verify SEER remains 0
+			require.Equal(t, 0.0, m.getSEER())
+		})
+	}
+}

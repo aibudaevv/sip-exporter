@@ -1,6 +1,6 @@
 services:
   sip-exporter:
-    image: frzq/sip-exporter:0.5.0
+    image: frzq/sip-exporter:latest
     container_name: sip-exporter
     restart: unless-stopped
     environment:
