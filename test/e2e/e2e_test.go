@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -70,6 +71,12 @@ type sippResult struct {
 func startExporter(ctx context.Context, t *testing.T) string {
 	t.Helper()
 
+	// ADDED: configurable exporter log level
+	exporterLogLevel := "error"
+	if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
+		exporterLogLevel = "debug"
+	}
+
 	req := testcontainers.ContainerRequest{
 		FromDockerfile: testcontainers.FromDockerfile{
 			Context:    projectRoot,
@@ -82,7 +89,7 @@ func startExporter(ctx context.Context, t *testing.T) string {
 			"SIP_EXPORTER_HTTP_PORT":    exporterPort,
 			"SIP_EXPORTER_SIP_PORT":     sippPort,
 			"SIP_EXPORTER_SIPS_PORT":    sipsPort,
-			"SIP_EXPORTER_LOGGER_LEVEL": "debug",
+			"SIP_EXPORTER_LOGGER_LEVEL": exporterLogLevel,
 		},
 		WaitingFor: wait.ForHTTP("/metrics").
 			WithPort(exporterPort).
@@ -112,6 +119,12 @@ func startExporter(ctx context.Context, t *testing.T) string {
 func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario string, callCount int) sippResult {
 	t.Helper()
 
+	// ADDED: configurable SIPp verbosity
+	var stdout, stderr io.Writer = &testWriter{t}, &testWriter{t}
+	if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") != "true" {
+		stdout, stderr = io.Discard, io.Discard
+	}
+
 	uasPath := absScenarioPath(t, uasScenario)
 	sippVol := filepath.Dir(uasPath)
 	uasScenarioFile := filepath.Base(uasScenario)
@@ -127,8 +140,8 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 		"-m", strconv.Itoa(callCount),
 		"-nostdin",
 	)
-	uasCmd.Stdout = &testWriter{t}
-	uasCmd.Stderr = &testWriter{t}
+	uasCmd.Stdout = stdout
+	uasCmd.Stderr = stderr
 	require.NoError(t, uasCmd.Start())
 
 	time.Sleep(1 * time.Second)
@@ -143,8 +156,8 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 		"-m", strconv.Itoa(callCount),
 		"127.0.0.1:"+sippPort,
 	)
-	uacCmd.Stdout = &testWriter{t}
-	uacCmd.Stderr = &testWriter{t}
+	uacCmd.Stdout = stdout
+	uacCmd.Stderr = stderr
 	require.NoError(t, uacCmd.Run())
 
 	_ = uasCmd.Wait()
@@ -168,6 +181,30 @@ func getSER(t *testing.T, endpoint string) float64 {
 	t.Logf("Metrics output:\n%s", string(body))
 
 	re := regexp.MustCompile(`^sip_exporter_ser\s+([0-9.]+)`)
+	for _, line := range strings.Split(string(body), "\n") {
+		matches := re.FindStringSubmatch(strings.TrimSpace(line))
+		if len(matches) == 2 {
+			val, err := strconv.ParseFloat(matches[1], 64)
+			require.NoError(t, err)
+			return val
+		}
+	}
+
+	return 0
+}
+
+// ADDED: getSEER reads sip_exporter_seer metric from exporter endpoint.
+func getSEER(t *testing.T, endpoint string) float64 {
+	t.Helper()
+
+	resp, err := http.Get(endpoint + "/metrics")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	re := regexp.MustCompile(`^sip_exporter_seer\s+([0-9.]+)`)
 	for _, line := range strings.Split(string(body), "\n") {
 		matches := re.FindStringSubmatch(strings.TrimSpace(line))
 		if len(matches) == 2 {

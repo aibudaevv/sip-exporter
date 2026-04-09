@@ -20,7 +20,7 @@ Designed for sub-microsecond packet processing with zero-copy capture directly i
 # docker-compose.yml
 services:
   sip-exporter:
-    image: frzq/sip-exporter:0.5.0
+    image: frzq/sip-exporter:latest
     privileged: true
     network_mode: host
     environment:
@@ -59,7 +59,7 @@ Go benchmark results (Intel i7-8665U):
 ## Install
 
 ```bash
-docker pull frzq/sip-exporter:0.5.0
+docker pull frzq/sip-exporter:latest
 ```
 
 ### Configure
@@ -138,22 +138,35 @@ SER = (INVITE → 200 OK) / (Total INVITE - INVITE → 3xx) × 100
 - Undefined when no INVITE requests have been received
 - Undefined when all INVITEs received 3xx responses (denominator = 0)
 
-**Important:** SER is a cumulative metric calculated over the entire runtime. Counters (`invite_total`, `200_total`) are never reset and accumulate over time. After sessions end, `sip_exporter_sessions` returns to 0, but SER retains its value based on all processed calls.
+**Important:** SER is a cumulative metric calculated over the entire runtime.
 
-To calculate SER over a specific time window, use PromQL with `rate()` or `increase()`:
-```promql
-# SER over last 5 minutes
-(
-  increase(sip_exporter_200_total[5m])
-  /
-  (increase(sip_exporter_invite_total[5m]) - increase(sip_exporter_302_total[5m]))
-) * 100
+#### Session Establishment Effectiveness Ratio (SEER)
+`sip_exporter_seer`: percentage of "effective" INVITE responses relative to total non-redirected INVITE attempts.
+
+**Formula (RFC 6076):**
+```
+SEER = (INVITE → 200, 480, 486, 600, 603) / (Total INVITE - INVITE → 3xx) × 100
 ```
 
+- 3xx responses (redirects) are **excluded from the denominator** — same as SER
+- Numerator includes responses that represent a clear outcome from the end user:
+  - `200 OK` — session established
+  - `480 Temporarily Unavailable` — user temporarily unavailable
+  - `486 Busy Here` — user busy
+  - `600 Busy Everywhere` — user busy everywhere
+  - `603 Decline` — user declined the call
+- Responses like `400`, `404`, `500`, `503` are **not** counted as effective — they indicate infrastructure or routing problems
+- Undefined when no INVITE requests have been received
+- Undefined when all INVITEs received 3xx responses (denominator = 0)
+
+**Important:** Like SER, SEER is cumulative.
+
+**Relationship between SER and SEER:** SEER is always >= SER, since SEER's numerator includes all responses counted by SER plus additional "effective" failure codes (480, 486, 600, 603). The gap between them indicates the proportion of calls that received a definitive user-level outcome rather than a session establishment.
+
 **Example values:**
-- `100` — all non-redirect INVITEs succeeded
-- `0` — all non-redirect INVITEs failed
-- `undefined` — no INVITEs or all 3xx
+- `100` — all non-redirect INVITEs received a clear outcome (success or explicit decline)
+- `0` — all non-redirect INVITEs received infrastructure errors
+- `undefined` — no INVITEs received or all were 3xx redirects
 
 ## Development
 
@@ -216,20 +229,23 @@ E2E tests use [SIPp](https://sipp.sourceforge.net/) via [testcontainers-go](http
 make test-e2e
 
 # Run specific test
-make test-e2e-run TEST=TestSER_AllScenarios/100_percent
+make test-e2e-run TEST=TestSER_AllScenarios
+make test-e2e-run TEST=TestSEER_AllScenarios
 ```
 
-### Test scenarios
-| Test | Description | Expected SER |
-|------|-------------|--------------|
-| `TestSER_AllScenarios/100_percent` | 50 INVITE → 200 OK | 100% |
-| `TestSER_AllScenarios/0_percent` | 50 INVITE → 486 Busy Here | 0% |
-| `TestSER_AllScenarios/redirect` | 50 INVITE → 302 Redirect | 0% |
-| `TestSER_AllScenarios/no_invite` | 50 OPTIONS (no INVITE) | 0% |
-| `TestSER_Mixed` | 35 success + 15 rejected | 70% |
-| `TestSER_Mixed3xx` | 25 redirect + 25 success | 100% |
+### Configuration
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SIP_EXPORTER_E2E_SIPP_VERBOSE` | `false` | Show SIPp container output |
+| `SIP_EXPORTER_E2E_EXPORTER_VERBOSE` | `false` | Show exporter debug logs |
 
-All tests verify that `sip_exporter_sessions` returns to 0 after completion (all dialogs properly terminated).
+```bash
+# Quiet mode (default) — one line per test
+make test-e2e
+
+# Verbose mode — full SIPp + exporter logs
+SIP_EXPORTER_E2E_SIPP_VERBOSE=true SIP_EXPORTER_E2E_EXPORTER_VERBOSE=true make test-e2e
+```
 
 ### How it works
 1. testcontainers-go builds exporter Docker image from Dockerfile
@@ -237,7 +253,7 @@ All tests verify that `sip_exporter_sessions` returns to 0 after completion (all
 3. Starts SIPp UAS and UAC containers with `--network=host`
 4. SIPp generates SIP traffic through loopback (127.0.0.1:5060)
 5. Exporter captures packets via eBPF and updates Prometheus metrics
-6. Tests verify SER and sessions cleanup
+6. Tests verify SER/SEER metrics and sessions cleanup
 
 ## Integration
 
@@ -251,6 +267,7 @@ Import the pre-built dashboard into your Grafana instance:
 The dashboard includes:
 - 📊 Active SIP Sessions (gauge)
 - 📈 SER (Session Establishment Ratio) — RFC 6076 metric
+- 📈 SEER (Session Establishment Effectiveness Ratio) — RFC 6076 metric
 - 📈 SIP Packets Rate
 - 📈 SIP Requests by Method (INVITE, BYE, REGISTER, etc.)
 - 📈 SIP Responses by Status (1xx, 2xx, 4xx, 5xx, 6xx)

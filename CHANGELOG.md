@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## 0.6.0
+### Added
+- SEER (Session Establishment Effectiveness Ratio) metric per RFC 6076 (`sip_exporter_seer`)
+- SEER tracks effective responses: 200 OK, 480, 486, 600, 603 (clear user outcomes)
+- E2E tests for SEER: all_200, all_486, all_480, all_603, all_500, redirect_only, MixedEffective, MixedWithErrors, Mixed3xx, Complex
+- SIPp scenarios for SEER: busy (480), decline (603), server_error (500)
+- SEER panel to Grafana dashboard
+- E2E test verbosity control: `SIP_EXPORTER_E2E_SIPP_VERBOSE` and `SIP_EXPORTER_E2E_EXPORTER_VERBOSE` env vars (quiet by default)
+- MC/DC unit tests for SEER metric calculation
+
+### Changed
+- E2E tests use `require.Equal` instead of `require.InDelta` — metrics are deterministic on loopback
+- Refactored `NewMetricser()`: extracted `initRequestCounters()`, `initStatusCounters()`, `initSystemCounters()`, `newSER()`, `newSEER()` for code clarity
+- Replaced duplicate SEER switch in `Response()` with `isEffectiveResponse()` helper
+- README updated with SEER documentation and e2e configuration guide
+
 ## 0.5.0
 ### Added
 - SER (Session Establishment Ratio) metric per RFC 6076 (`sip_exporter_ser`)

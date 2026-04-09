@@ -52,6 +52,10 @@ type (
 		inviteTotal      int64
 		invite3xxTotal   int64
 		invite200OKTotal int64
+
+		// SEER metrics (RFC 6076)
+		seer                 prometheus.GaugeFunc
+		inviteEffectiveTotal int64
 	}
 
 	Metricser interface {
@@ -65,154 +69,94 @@ type (
 
 func NewMetricser() Metricser {
 	m := &metrics{
-		sessions: promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "sip_exporter_sessions",
-			Help: "Number of active SIP dialogs",
-		}),
-		proxyAuthenticationRequired: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_proxy_authentication_required_total",
-			Help: "Total number of 407 Proxy Authentication Required responses",
-		}),
-		systemErrorTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_system_error_total",
-			Help: "Total number of internal SIP exporter errors",
-		}),
-		statusBusyHereTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_486_total",
-			Help: "Total number of 486 Busy Here responses",
-		}),
-		statusTemporarilyUnavailableTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_480_total",
-			Help: "Total number of 480 Temporarily Unavailable responses",
-		}),
-		requestMessageTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_message_total",
-			Help: "Total number of MESSAGE requests",
-		}),
-		requestPublishTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_publish_total",
-			Help: "Total number of PUBLISH requests",
-		}),
-		requestPrackTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_prack_total",
-			Help: "Total number of PRACK requests",
-		}),
-		requestNotifyTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_notify_total",
-			Help: "Total number of NOTIFY requests",
-		}),
-		requestSubscribeTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_subscribe_total",
-			Help: "Total number of SUBSCRIBE requests",
-		}),
-		requestReferTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_refer_total",
-			Help: "Total number of REFER requests",
-		}),
-		requestInfoTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_info_total",
-			Help: "Total number of INFO requests",
-		}),
-		requestUpdateTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_update_total",
-			Help: "Total number of UPDATE requests",
-		}),
-		requestRegisterTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_register_total",
-			Help: "Total number of REGISTER requests",
-		}),
-		requestOptionsTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_options_total",
-			Help: "Total number of OPTIONS requests",
-		}),
-		requestCancelTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_cancel_total",
-			Help: "Total number of CANCEL requests",
-		}),
-		requestByeTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_bye_total",
-			Help: "Total number of BYE requests",
-		}),
-		requestACKTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_ack_total",
-			Help: "Total number of ACK requests",
-		}),
-		statusDeclineTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_603_total",
-			Help: "Total number of 603 Decline responses",
-		}),
-		statusBusyEverywhereTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_600_total",
-			Help: "Total number of 600 Busy Everywhere responses",
-		}),
-		statusServiceUnavailableTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_503_total",
-			Help: "Total number of 503 Service Unavailable responses",
-		}),
-		statusServerInternalTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_500_total",
-			Help: "Total number of 500 Server Internal Error responses",
-		}),
-		statusRequestTimeoutTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_408_total",
-			Help: "Total number of 408 Request Timeout responses",
-		}),
-		statusForbiddenTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_403_total",
-			Help: "Total number of 403 Forbidden responses",
-		}),
-		statusUnauthorizedTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_401_total",
-			Help: "Total number of 401 Unauthorized responses",
-		}),
-		statusBadRequestTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_400_total",
-			Help: "Total number of 400 Bad Request responses",
-		}),
-		statusMovedTemporarilyTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_302_total",
-			Help: "Total number of 302 Moved Temporarily responses",
-		}),
-		statusMultipleChoiceTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_300_total",
-			Help: "Total number of 300 Multiple Choices responses",
-		}),
-		statusAcceptedTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_202_total",
-			Help: "Total number of 202 Accepted responses",
-		}),
-		statusTryingTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_100_total",
-			Help: "Total number of 100 Trying responses",
-		}),
-		sipPacketsTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_packets_total",
-			Help: "Total number of SIP packets processed",
-		}),
-		requestInviteTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_invite_total",
-			Help: "Total number of INVITE requests",
-		}),
-		statusOKTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_200_total",
-			Help: "Total number of 200 OK responses",
-		}),
-		statusNotFoundTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_404_total",
-			Help: "Total number of 404 Not Found responses",
-		}),
-		statusSessionProgressTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_183_total",
-			Help: "Total number of 183 Session Progress responses",
-		}),
-		statusRingingTotal: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "sip_exporter_180_total",
-			Help: "Total number of 180 Ringing responses",
-		}),
+		sessions: newSessionsGauge(),
 	}
+	initRequestCounters(m)
+	initStatusCounters(m)
+	initSystemCounters(m)
 
-	// SER metrics (RFC 6076) — calculated lazily on scrape
-	m.ser = promauto.NewGaugeFunc(prometheus.GaugeOpts{
+	m.ser = newSER(m)
+	m.seer = newSEER(m)
+
+	return m
+}
+
+func initRequestCounters(m *metrics) {
+	m.requestMessageTotal = newCounter("sip_exporter_message_total", "Total number of MESSAGE requests")
+	m.requestPublishTotal = newCounter("sip_exporter_publish_total", "Total number of PUBLISH requests")
+	m.requestPrackTotal = newCounter("sip_exporter_prack_total", "Total number of PRACK requests")
+	m.requestNotifyTotal = newCounter("sip_exporter_notify_total", "Total number of NOTIFY requests")
+	m.requestSubscribeTotal = newCounter("sip_exporter_subscribe_total", "Total number of SUBSCRIBE requests")
+	m.requestReferTotal = newCounter("sip_exporter_refer_total", "Total number of REFER requests")
+	m.requestInfoTotal = newCounter("sip_exporter_info_total", "Total number of INFO requests")
+	m.requestUpdateTotal = newCounter("sip_exporter_update_total", "Total number of UPDATE requests")
+	m.requestRegisterTotal = newCounter("sip_exporter_register_total", "Total number of REGISTER requests")
+	m.requestOptionsTotal = newCounter("sip_exporter_options_total", "Total number of OPTIONS requests")
+	m.requestCancelTotal = newCounter("sip_exporter_cancel_total", "Total number of CANCEL requests")
+	m.requestByeTotal = newCounter("sip_exporter_bye_total", "Total number of BYE requests")
+	m.requestACKTotal = newCounter("sip_exporter_ack_total", "Total number of ACK requests")
+	m.requestInviteTotal = newCounter("sip_exporter_invite_total", "Total number of INVITE requests")
+}
+
+func initStatusCounters(m *metrics) {
+	m.statusDeclineTotal = newCounter("sip_exporter_603_total", "Total number of 603 Decline responses")
+	m.statusBusyEverywhereTotal = newCounter("sip_exporter_600_total", "Total number of 600 Busy Everywhere responses")
+	m.statusServiceUnavailableTotal = newCounter(
+		"sip_exporter_503_total",
+		"Total number of 503 Service Unavailable responses",
+	)
+	m.statusServerInternalTotal = newCounter(
+		"sip_exporter_500_total",
+		"Total number of 500 Server Internal Error responses",
+	)
+	m.statusRequestTimeoutTotal = newCounter("sip_exporter_408_total", "Total number of 408 Request Timeout responses")
+	m.statusForbiddenTotal = newCounter("sip_exporter_403_total", "Total number of 403 Forbidden responses")
+	m.statusUnauthorizedTotal = newCounter("sip_exporter_401_total", "Total number of 401 Unauthorized responses")
+	m.statusBadRequestTotal = newCounter("sip_exporter_400_total", "Total number of 400 Bad Request responses")
+	m.statusMovedTemporarilyTotal = newCounter(
+		"sip_exporter_302_total",
+		"Total number of 302 Moved Temporarily responses",
+	)
+	m.statusMultipleChoiceTotal = newCounter("sip_exporter_300_total", "Total number of 300 Multiple Choices responses")
+	m.statusAcceptedTotal = newCounter("sip_exporter_202_total", "Total number of 202 Accepted responses")
+	m.statusTryingTotal = newCounter("sip_exporter_100_total", "Total number of 100 Trying responses")
+	m.statusOKTotal = newCounter("sip_exporter_200_total", "Total number of 200 OK responses")
+	m.statusNotFoundTotal = newCounter("sip_exporter_404_total", "Total number of 404 Not Found responses")
+	m.statusSessionProgressTotal = newCounter(
+		"sip_exporter_183_total",
+		"Total number of 183 Session Progress responses",
+	)
+	m.statusRingingTotal = newCounter("sip_exporter_180_total", "Total number of 180 Ringing responses")
+	m.statusBusyHereTotal = newCounter("sip_exporter_486_total", "Total number of 486 Busy Here responses")
+	m.statusTemporarilyUnavailableTotal = newCounter(
+		"sip_exporter_480_total",
+		"Total number of 480 Temporarily Unavailable responses",
+	)
+}
+
+func initSystemCounters(m *metrics) {
+	m.systemErrorTotal = newCounter("sip_exporter_system_error_total", "Total number of internal SIP exporter errors")
+	m.sipPacketsTotal = newCounter("sip_exporter_packets_total", "Total number of SIP packets processed")
+	m.proxyAuthenticationRequired = newCounter("sip_exporter_proxy_authentication_required_total",
+		"Total number of 407 Proxy Authentication Required responses")
+}
+
+func newSessionsGauge() prometheus.Gauge {
+	return promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "sip_exporter_sessions",
+		Help: "Number of active SIP dialogs",
+	})
+}
+
+func newCounter(name, help string) prometheus.Counter {
+	return promauto.NewCounter(prometheus.CounterOpts{
+		Name: name,
+		Help: help,
+	})
+}
+
+func newSER(m *metrics) prometheus.GaugeFunc {
+	return promauto.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "sip_exporter_ser",
 		Help: "Session Establishment Ratio percentage (RFC 6076)",
 	}, func() float64 {
@@ -228,8 +172,25 @@ func NewMetricser() Metricser {
 		ok := atomic.LoadInt64(&m.invite200OKTotal)
 		return float64(ok) / float64(denominator) * 100 //nolint:mnd // percentage formula
 	})
+}
 
-	return m
+func newSEER(m *metrics) prometheus.GaugeFunc {
+	return promauto.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "sip_exporter_seer",
+		Help: "Session Establishment Effectiveness Ratio percentage (RFC 6076)",
+	}, func() float64 {
+		total := atomic.LoadInt64(&m.inviteTotal)
+		if total == 0 {
+			return 0
+		}
+		threeXX := atomic.LoadInt64(&m.invite3xxTotal)
+		denominator := total - threeXX
+		if denominator == 0 {
+			return 0
+		}
+		effective := atomic.LoadInt64(&m.inviteEffectiveTotal)
+		return float64(effective) / float64(denominator) * 100 //nolint:mnd // percentage formula
+	})
 }
 
 func (m *metrics) UpdateSession(size int) {
@@ -285,6 +246,21 @@ func (m *metrics) Response(in []byte, isInviteResponse bool) {
 	// Count 3xx for SER (RFC 6076)
 	if isInviteResponse && len(in) == 3 && in[0] == '3' {
 		atomic.AddInt64(&m.invite3xxTotal, 1)
+	}
+
+	// ADDED: SEER numerator
+	if isInviteResponse && isEffectiveResponse(string(in)) {
+		atomic.AddInt64(&m.inviteEffectiveTotal, 1)
+	}
+}
+
+// isEffectiveResponse returns true if the response code is part of SEER numerator (RFC 6076).
+func isEffectiveResponse(code string) bool {
+	switch code {
+	case "200", "480", "486", "600", "603":
+		return true
+	default:
+		return false
 	}
 }
 
