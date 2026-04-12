@@ -27,6 +27,7 @@ type (
 		statusRequestTimeoutTotal         prometheus.Counter
 		statusServerInternalTotal         prometheus.Counter
 		statusServiceUnavailableTotal     prometheus.Counter
+		statusServerTimeoutTotal          prometheus.Counter
 		statusBusyEverywhereTotal         prometheus.Counter
 		statusDeclineTotal                prometheus.Counter
 		requestInviteTotal                prometheus.Counter
@@ -56,6 +57,10 @@ type (
 		// SEER metrics (RFC 6076)
 		seer                 prometheus.GaugeFunc
 		inviteEffectiveTotal int64
+
+		// ISA metric (RFC 6076)
+		isa                    prometheus.GaugeFunc
+		inviteIneffectiveTotal int64
 	}
 
 	Metricser interface {
@@ -77,6 +82,7 @@ func NewMetricser() Metricser {
 
 	m.ser = newSER(m)
 	m.seer = newSEER(m)
+	m.isa = newISA(m)
 
 	return m
 }
@@ -105,6 +111,7 @@ func initStatusCounters(m *metrics) {
 		"sip_exporter_503_total",
 		"Total number of 503 Service Unavailable responses",
 	)
+	m.statusServerTimeoutTotal = newCounter("sip_exporter_504_total", "Total number of 504 Server Time-out responses")
 	m.statusServerInternalTotal = newCounter(
 		"sip_exporter_500_total",
 		"Total number of 500 Server Internal Error responses",
@@ -193,6 +200,20 @@ func newSEER(m *metrics) prometheus.GaugeFunc {
 	})
 }
 
+func newISA(m *metrics) prometheus.GaugeFunc {
+	return promauto.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "sip_exporter_isa",
+		Help: "Ineffective Session Attempts percentage (RFC 6076)",
+	}, func() float64 {
+		total := atomic.LoadInt64(&m.inviteTotal)
+		if total == 0 {
+			return 0
+		}
+		ineffective := atomic.LoadInt64(&m.inviteIneffectiveTotal)
+		return float64(ineffective) / float64(total) * 100 //nolint:mnd // percentage formula
+	})
+}
+
 func (m *metrics) UpdateSession(size int) {
 	m.sessions.Set(float64(size))
 }
@@ -235,6 +256,8 @@ func (m *metrics) Response(in []byte, isInviteResponse bool) {
 		m.statusServerInternalTotal.Inc()
 	case "503":
 		m.statusServiceUnavailableTotal.Inc()
+	case "504":
+		m.statusServerTimeoutTotal.Inc()
 	case "600":
 		m.statusBusyEverywhereTotal.Inc()
 	case "603":
@@ -252,12 +275,27 @@ func (m *metrics) Response(in []byte, isInviteResponse bool) {
 	if isInviteResponse && isEffectiveResponse(string(in)) {
 		atomic.AddInt64(&m.inviteEffectiveTotal, 1)
 	}
+
+	// ADDED: ISA numerator
+	if isInviteResponse && isIneffectiveResponse(string(in)) {
+		atomic.AddInt64(&m.inviteIneffectiveTotal, 1)
+	}
 }
 
 // isEffectiveResponse returns true if the response code is part of SEER numerator (RFC 6076).
 func isEffectiveResponse(code string) bool {
 	switch code {
 	case "200", "480", "486", "600", "603":
+		return true
+	default:
+		return false
+	}
+}
+
+// isIneffectiveResponse returns true if the response code is part of ISA numerator (RFC 6076).
+func isIneffectiveResponse(code string) bool {
+	switch code {
+	case "408", "500", "503", "504":
 		return true
 	default:
 		return false
