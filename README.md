@@ -1,6 +1,6 @@
 # SIP-exporter
 High-performance eBPF-based SIP monitoring service that captures and exports telephony metrics to Prometheus-compatible systems (Prometheus, VictoriaMetrics, etc.).
-Designed for sub-microsecond packet processing with zero-copy capture directly in the Linux kernel.
+Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspace processing overhead.
 
 [![Go Test](https://github.com/aibudaevv/sip-exporter/actions/workflows/go.yml/badge.svg)](https://github.com/aibudaevv/sip-exporter/actions/workflows/go.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/aibudaevv/sip-exporter)](https://goreportcard.com/report/github.com/aibudaevv/sip-exporter)
@@ -9,7 +9,7 @@ Designed for sub-microsecond packet processing with zero-copy capture directly i
 
 ## Key Features
 
-- ⚡ **Sub-microsecond latency** — eBPF zero-copy packet capture in kernel space
+- ⚡ **Low overhead** — eBPF packet filtering in kernel space
 - 🐳 **Single container deployment** — no external dependencies
 - 🔧 **Configurable SIP ports** — monitor custom ports via environment variables
 - 📈 **Prometheus native** — standard `/metrics` endpoint for scraping
@@ -36,8 +36,9 @@ Access metrics at `http://localhost:2112/metrics`.
 
 ## Core Technology
 
-This service uses eBPF (extended Berkeley Packet Filter) attached to network sockets (XDP-like filtering) to
+This service uses eBPF (extended Berkeley Packet Filter) attached to network sockets to
 intercept SIP packets (UDP/5060-5061) at L4 without overhead of iptables/nftables or userspace daemons like tcpdump.
+Packets are transferred to userspace via Linux ringbuf for efficient processing.
 
 ## Architecture
 ```
@@ -194,6 +195,18 @@ ISA % = (INVITE → 408, 500, 503, 504) / Total INVITE × 100
 - `5` — 5% of INVITEs resulted in server failures (monitoring threshold)
 - `>15` — significant infrastructure issues requiring immediate attention
 
+#### Understanding ISA
+
+ISA measures infrastructure health, not user experience. Unlike SER/SEER which measure session establishment success, ISA tracks server-side failures that indicate system problems.
+
+| ISA Trend | What It Means | Likely Causes |
+|-----------|---------------|---------------|
+| **ISA rising** | Infrastructure is degrading | Server overload, network packet loss, failing dependencies (DB, cache), misconfigured load balancers |
+| **ISA falling** | Infrastructure is stabilizing | Servers recovering, errors decreasing, system returning to healthy state |
+| **ISA 0-5%** | Healthy system | Normal operations, no action needed |
+| **ISA 5-15%** | Warning zone | Investigate emerging issues before they escalate |
+| **ISA >15%** | Critical | Immediate diagnostics required — servers or network are failing |
+
 ## Development
 
 ### Requirements
@@ -288,7 +301,7 @@ Import the pre-built dashboard into your Grafana instance:
 
 1. Open Grafana → Dashboards → Import
 2. Upload `examples/grafana-dashboard.json` or copy the JSON content
-3. Select your Prometheus datasource
+3. Select your Prometheus or VictoriaMetrics datasource
 
 The dashboard includes:
 - 📊 Active SIP Sessions (gauge)
@@ -301,6 +314,15 @@ The dashboard includes:
 - 🚨 System Errors
 
 Dashboard file: [`examples/grafana-dashboard.json`](examples/grafana-dashboard.json)
+
+### Metrics Storage Compatibility
+
+SIP-Exporter exports metrics in Prometheus exposition format, compatible with:
+
+- **Prometheus** — pull-based monitoring
+- **VictoriaMetrics** — high-performance time-series database
+- **Grafana Cloud** — cloud-based observability
+- **Any Prometheus-compatible scraper** — the `/metrics` endpoint follows the standard format
 
 ## License
 This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
