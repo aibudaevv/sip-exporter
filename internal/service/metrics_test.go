@@ -464,6 +464,17 @@ func (m *metrics) getSEER() float64 {
 	return float64(effective) / float64(denominator) * 100
 }
 
+// getISA returns current ISA value for tests
+func (m *metrics) getISA() float64 {
+	total := atomic.LoadInt64(&m.inviteTotal)
+	if total == 0 {
+		return 0
+	}
+
+	ineffective := atomic.LoadInt64(&m.inviteIneffectiveTotal)
+	return float64(ineffective) / float64(total) * 100
+}
+
 // TestMetrics_SEER_NoInvites — MC/DC: total == 0
 func TestMetrics_SEER_NoInvites(t *testing.T) {
 	m := &metrics{}
@@ -705,4 +716,147 @@ func TestMetrics_SEER_NonEffectiveCodes(t *testing.T) {
 			require.Equal(t, 0.0, m.getSEER())
 		})
 	}
+}
+
+// TestMetrics_ISA_NoInvites — MC/DC: total == 0
+func TestMetrics_ISA_NoInvites(t *testing.T) {
+	m := &metrics{}
+	require.Equal(t, 0.0, m.getISA())
+}
+
+// TestMetrics_ISA_AllIneffective — MC/DC: all responses are ineffective (500)
+func TestMetrics_ISA_AllIneffective(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.inviteIneffectiveTotal, 100)
+
+	// ISA = 100 / 100 * 100 = 100%
+	require.Equal(t, 100.0, m.getISA())
+}
+
+// TestMetrics_ISA_HalfIneffective — MC/DC: partial ineffective
+func TestMetrics_ISA_HalfIneffective(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.inviteIneffectiveTotal, 50)
+
+	// ISA = 50 / 100 * 100 = 50%
+	require.Equal(t, 50.0, m.getISA())
+}
+
+// TestMetrics_ISA_EachCode — MC/DC: each ineffective code separately
+func TestMetrics_ISA_EachCode(t *testing.T) {
+	tests := []struct {
+		name           string
+		invites        int64
+		ineffective408 int64
+		ineffective500 int64
+		ineffective503 int64
+		ineffective504 int64
+		wantISA        float64
+	}{
+		{
+			name:           "only_408",
+			invites:        100,
+			ineffective408: 40,
+			wantISA:        40.0,
+		},
+		{
+			name:           "only_500",
+			invites:        100,
+			ineffective500: 30,
+			wantISA:        30.0,
+		},
+		{
+			name:           "only_503",
+			invites:        100,
+			ineffective503: 20,
+			wantISA:        20.0,
+		},
+		{
+			name:           "only_504",
+			invites:        100,
+			ineffective504: 10,
+			wantISA:        10.0,
+		},
+		{
+			name:           "all_codes_combined",
+			invites:        100,
+			ineffective408: 10,
+			ineffective500: 15,
+			ineffective503: 10,
+			ineffective504: 5,
+			wantISA:        40.0, // (10+15+10+5) / 100 * 100
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			atomic.StoreInt64(&m.inviteTotal, tt.invites)
+			atomic.StoreInt64(&m.inviteIneffectiveTotal,
+				tt.ineffective408+tt.ineffective500+tt.ineffective503+tt.ineffective504)
+
+			got := m.getISA()
+			require.Equal(t, tt.wantISA, got)
+		})
+	}
+}
+
+// TestMetrics_ISA_Mixed — mixed responses, verify formula with 3xx in denominator
+func TestMetrics_ISA_Mixed(t *testing.T) {
+	m := &metrics{}
+
+	// 100 INVITE, of which:
+	// - 50 effective (200, 480)
+	// - 20 ineffective (500, 503)
+	// - 20 3xx redirects
+	// - 10 other (400, 401)
+	// ISA = 20 / 100 * 100 = 20% (3xx NOT excluded)
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.inviteIneffectiveTotal, 20)
+
+	require.Equal(t, 20.0, m.getISA())
+}
+
+// TestMetrics_ISA_FullCycle — full lifecycle test
+func TestMetrics_ISA_FullCycle(t *testing.T) {
+	m := &metrics{}
+
+	// Initial state: ISA = 0
+	require.Equal(t, 0.0, m.getISA())
+
+	// 20 INVITE requests
+	for i := 0; i < 20; i++ {
+		atomic.AddInt64(&m.inviteTotal, 1)
+	}
+	require.Equal(t, 0.0, m.getISA())
+
+	// 5 500 Server Error (ineffective)
+	for i := 0; i < 5; i++ {
+		atomic.AddInt64(&m.inviteIneffectiveTotal, 1)
+	}
+	// ISA = 5 / 20 * 100 = 25%
+	require.Equal(t, 25.0, m.getISA())
+
+	// 3 408 Timeout (ineffective)
+	for i := 0; i < 3; i++ {
+		atomic.AddInt64(&m.inviteIneffectiveTotal, 1)
+	}
+	// ISA = 8 / 20 * 100 = 40%
+	require.Equal(t, 40.0, m.getISA())
+
+	// 5 200 OK (NOT ineffective)
+	// ISA unchanged: 8 / 20 * 100 = 40%
+	require.Equal(t, 40.0, m.getISA())
+
+	// 3 3xx redirects (NOT excluded from ISA denominator, changes denominator)
+	for i := 0; i < 3; i++ {
+		atomic.AddInt64(&m.invite3xxTotal, 1)
+		atomic.AddInt64(&m.inviteTotal, 1)
+	}
+	// ISA unchanged numerator, but denominator changes: 8 / 23 * 100 = 34.78%
+	require.InDelta(t, 34.78, m.getISA(), 0.01)
 }

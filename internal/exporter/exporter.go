@@ -65,13 +65,13 @@ func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPo
 
 	prog := collection.Programs["bpf_socket_filter"]
 	if prog == nil {
-		return fmt.Errorf("failed to find BPF program: bpf_socket_filter")
+		return errors.New("failed to find BPF program: bpf_socket_filter")
 	}
 
 	// Configure SIP ports in eBPF map
 	sipPortsMap := collection.Maps["sip_ports"]
 	if sipPortsMap == nil {
-		return fmt.Errorf("failed to find sip_ports map")
+		return errors.New("failed to find sip_ports map")
 	}
 
 	keySIP := uint32(0)
@@ -204,12 +204,12 @@ func (e *exporter) parseRawPacket(packet []byte) error {
 
 	// Only IPv4
 	if ethType[0] != 0x08 || ethType[1] != 0x00 {
-		return fmt.Errorf("not IPv4 packet")
+		return errors.New("not IPv4 packet")
 	}
 
 	// IP header
 	if len(packet) < ipOffset+20 {
-		return fmt.Errorf("ip header too short")
+		return errors.New("ip header too short")
 	}
 
 	ipHeader := packet[ipOffset : ipOffset+20]
@@ -217,19 +217,19 @@ func (e *exporter) parseRawPacket(packet []byte) error {
 	ipHeaderLen := int(ihl) * 4
 
 	if ipHeader[9] != 17 { // UDP
-		return fmt.Errorf("not UDP packet")
+		return errors.New("not UDP packet")
 	}
 
 	// UDP header (8 bytes)
 	udpOffset := ipOffset + ipHeaderLen
 	if len(packet) < udpOffset+8 {
-		return fmt.Errorf("udp header too short")
+		return errors.New("udp header too short")
 	}
 
 	// SIP data after UDP header
 	sipOffset := udpOffset + 8
 	if sipOffset >= len(packet) {
-		return fmt.Errorf("no SIP payload")
+		return errors.New("no SIP payload")
 	}
 
 	sipData := packet[sipOffset:]
@@ -255,7 +255,7 @@ func (e *exporter) parseRawPacket(packet []byte) error {
 		!bytes.HasPrefix(sipData, []byte("MESSAGE")) &&
 		!bytes.HasPrefix(sipData, []byte("REFER")) &&
 		!bytes.HasPrefix(sipData, []byte("SIP/2.0")) {
-		return fmt.Errorf("not a SIP packet")
+		return errors.New("not a SIP packet")
 	}
 
 	zap.L().Debug("packet raw", zap.ByteString("sip_data", sipData))
@@ -343,7 +343,10 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 			zap.L().Debug("handle message", zap.ByteString("200 OK cseq method", packet.CSeq.Method))
 
 			if bytes.Equal(packet.CSeq.Method, []byte("INVITE")) {
-				dialogID, err := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag) //nolint:govet // different scope
+				var dialogID string
+				dialogID, err = normalizeDialogID(
+					packet.CallID, packet.From.Tag, packet.To.Tag,
+				)
 				if err != nil {
 					return fmt.Errorf("normalize dialog ID: %w", err)
 				}
@@ -361,7 +364,8 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 			}
 
 			if bytes.Equal(packet.CSeq.Method, []byte("BYE")) {
-				dialogID, err := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag) //nolint:govet // different scope
+				var dialogID string
+				dialogID, err = normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag)
 				if err != nil {
 					return fmt.Errorf("normalize dialog ID: %w", err)
 				}

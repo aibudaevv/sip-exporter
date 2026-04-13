@@ -168,6 +168,32 @@ SEER = (INVITE → 200, 480, 486, 600, 603) / (Total INVITE - INVITE → 3xx) ×
 - `0` — all non-redirect INVITEs received infrastructure errors
 - `undefined` — no INVITEs received or all were 3xx redirects
 
+#### Ineffective Session Attempts (ISA)
+`sip_exporter_isa`: percentage of INVITE requests that resulted in server error or timeout responses.
+
+**Formula (RFC 6076, Section 4.8):**
+```
+ISA % = (INVITE → 408, 500, 503, 504) / Total INVITE × 100
+```
+
+- Unlike SER/SEER, 3xx responses are **NOT excluded from the denominator** — ISA measures infrastructure reliability
+- Numerator includes server-side failures that indicate system overload or malfunction:
+  - `408 Request Timeout` — downstream server did not respond
+  - `500 Server Internal Error` — internal server failure
+  - `503 Service Unavailable` — service temporarily unavailable (overload)
+  - `504 Server Time-out` — server gateway timeout
+- Responses like `400`, `401`, `403`, `404` are **not** counted — they indicate client-side issues, not server failures
+- Undefined when no INVITE requests have been received
+
+**Important:** ISA is cumulative over the entire runtime.
+
+**Relationship with SER/SEER:** ISA measures infrastructure health, while SER/SEER measure session establishment success. A rising ISA typically indicates overloaded or failing downstream servers. Unlike SER (which excludes 3xx), ISA includes all INVITEs in the denominator.
+
+**Example values:**
+- `0` — no server errors or timeouts detected
+- `5` — 5% of INVITEs resulted in server failures (monitoring threshold)
+- `>15` — significant infrastructure issues requiring immediate attention
+
 ## Development
 
 ### Requirements
@@ -268,6 +294,7 @@ The dashboard includes:
 - 📊 Active SIP Sessions (gauge)
 - 📈 SER (Session Establishment Ratio) — RFC 6076 metric
 - 📈 SEER (Session Establishment Effectiveness Ratio) — RFC 6076 metric
+- 📈 ISA (Ineffective Session Attempts) — RFC 6076 metric
 - 📈 SIP Packets Rate
 - 📈 SIP Requests by Method (INVITE, BYE, REGISTER, etc.)
 - 📈 SIP Responses by Status (1xx, 2xx, 4xx, 5xx, 6xx)
