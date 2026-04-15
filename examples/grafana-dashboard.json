@@ -529,6 +529,74 @@
       "fieldConfig": {
         "defaults": {
           "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 100
+              },
+              {
+                "color": "red",
+                "value": 500
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 12
+      },
+      "id": 13,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sip_exporter_rrd",
+          "legendFormat": "RRD",
+          "refId": "A"
+        }
+      ],
+      "title": "RRD (Registration Request Delay)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
             "mode": "palette-classic"
           },
           "custom": {
@@ -579,7 +647,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 12
+        "y": 18
       },
       "id": 5,
       "options": {
@@ -784,7 +852,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 12
+        "y": 18
       },
       "id": 6,
       "options": {
@@ -998,7 +1066,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 20
+        "y": 26
       },
       "id": 7,
       "options": {
@@ -1095,7 +1163,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 27
+        "y": 33
       },
       "id": 8,
       "options": {
