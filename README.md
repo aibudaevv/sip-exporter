@@ -231,6 +231,26 @@ SCR = (Completed Sessions) / Total INVITE × 100
 - `50` — half of all INVITEs resulted in complete call cycles
 - `0` — no sessions were fully completed (either no answers or no BYE sent)
 
+#### Registration Request Delay (RRD)
+`sip_exporter_rrd`: average delay in milliseconds between sending a REGISTER request and receiving a 200 OK response.
+
+**Formula (RFC 6076, Section 4.1):**
+```
+RRD = Average(Time of 200 OK - Time of REGISTER request)
+```
+
+- Measures the round-trip time for SIP registration transactions
+- Only successful registrations (200 OK responses) are measured
+- Returns 0 when no successful registrations have occurred
+- The metric is cumulative — it shows the average delay over the entire runtime
+
+**Important:** RRD measures registration latency, not call setup latency. Use SER/SEER for call establishment metrics.
+
+**Example values:**
+- `< 100 ms` — excellent registration performance (local network)
+- `100-500 ms` — acceptable performance (typical WAN)
+- `> 1000 ms` — potential issues (network congestion, server overload)
+
 ## Development
 
 ### Requirements

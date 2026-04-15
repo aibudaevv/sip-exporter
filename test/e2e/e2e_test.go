@@ -119,6 +119,14 @@ func startExporter(ctx context.Context, t *testing.T) string {
 	}
 	require.NoError(t, err)
 	t.Cleanup(func() {
+		if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
+			logs, logErr := container.Logs(context.Background())
+			if logErr == nil {
+				defer logs.Close()
+				logBytes, _ := io.ReadAll(logs)
+				t.Logf("Exporter logs:\n%s", strings.TrimSpace(string(logBytes)))
+			}
+		}
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer stopCancel()
 		_ = container.Stop(stopCtx, nil)

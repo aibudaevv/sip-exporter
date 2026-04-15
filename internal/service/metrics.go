@@ -65,6 +65,11 @@ type (
 		// SCR metric (RFC 6076)
 		scr                   prometheus.GaugeFunc
 		sessionCompletedTotal int64
+
+		// RRD metrics (RFC 6076 for REGISTER)
+		rrdTotal uint64               // Суммарная задержка для расчета среднего
+		rrdCount int64                // Количество измерений для среднего
+		rrd      prometheus.GaugeFunc // Метрика RRD для REGISTER
 	}
 
 	Metricser interface {
@@ -72,6 +77,7 @@ type (
 		Response(in []byte, isInviteResponse bool)
 		Invite200OK()
 		SessionCompleted()
+		UpdateRRD(delayMs float64)
 		UpdateSession(size int)
 		SystemError()
 	}
@@ -89,6 +95,7 @@ func NewMetricser() Metricser {
 	m.seer = newSEER(m)
 	m.isa = newISA(m)
 	m.scr = newSCR(m)
+	m.rrd = newRRD(m)
 
 	return m
 }
@@ -232,6 +239,26 @@ func newSCR(m *metrics) prometheus.GaugeFunc {
 		completed := atomic.LoadInt64(&m.sessionCompletedTotal)
 		return float64(completed) / float64(total) * 100 //nolint:mnd // percentage formula
 	})
+}
+
+func newRRD(m *metrics) prometheus.GaugeFunc {
+	return promauto.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "sip_exporter_rrd",
+		Help: "Registration Request Delay in milliseconds (RFC 6076)",
+	}, func() float64 {
+		count := atomic.LoadInt64(&m.rrdCount)
+		if count == 0 {
+			return 0
+		}
+		total := atomic.LoadUint64(&m.rrdTotal)
+		return float64(total) / float64(count) / 1e3 //nolint:mnd // convert microseconds to milliseconds
+	})
+}
+
+func (m *metrics) UpdateRRD(delayMs float64) {
+	atomic.AddInt64(&m.rrdCount, 1)
+	//nolint:mnd // convert milliseconds to microseconds for precision
+	atomic.AddUint64(&m.rrdTotal, uint64(delayMs*1e3))
 }
 
 func (m *metrics) UpdateSession(size int) {

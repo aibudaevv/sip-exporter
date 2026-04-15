@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"syscall"
 	"time"
 
@@ -26,10 +27,12 @@ const (
 
 type (
 	exporter struct {
-		collection *ebpf.Collection
-		sock       int
-		messages   chan []byte
-		services   services
+		collection      *ebpf.Collection
+		sock            int
+		messages        chan []byte
+		services        services
+		registerTracker map[string]time.Time
+		registerMutex   sync.RWMutex
 	}
 	services struct {
 		metricser service.Metricser
@@ -47,7 +50,8 @@ func NewExporter(m service.Metricser, d service.Dialoger) Exporter {
 			metricser: m,
 			dialoger:  d,
 		},
-		messages: make(chan []byte, 10_000),
+		messages:        make(chan []byte, 10_000),
+		registerTracker: make(map[string]time.Time),
 	}
 }
 
@@ -330,6 +334,7 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 
 	if packet.IsResponse {
 		isInviteResponse := bytes.Equal(packet.CSeq.Method, []byte("INVITE"))
+		isRegisterResponse := bytes.Equal(packet.CSeq.Method, []byte("REGISTER"))
 		is200OK := bytes.Equal(packet.ResponseStatus, []byte("200"))
 
 		go func() {
@@ -375,9 +380,25 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 				e.services.dialoger.Delete(dialogID)
 				e.services.metricser.SessionCompleted()
 			}
+
+			if isRegisterResponse {
+				if startTime, ok := e.getRegisterTime(string(packet.CallID)); ok {
+					//nolint:mnd // nanoseconds to milliseconds
+					delayMs := float64(time.Since(startTime).Nanoseconds()) / 1e6
+					e.services.metricser.UpdateRRD(delayMs)
+					e.removeRegisterTime(string(packet.CallID))
+					zap.L().Debug("RRD measured",
+						zap.String("call_id", string(packet.CallID)),
+						zap.Float64("delay_ms", delayMs))
+				}
+			}
 		}
 	} else {
 		go e.services.metricser.Request(packet.Method)
+
+		if bytes.Equal(packet.Method, []byte("REGISTER")) {
+			e.storeRegisterTime(string(packet.CallID))
+		}
 	}
 
 	return nil
@@ -454,4 +475,26 @@ func extractSessionExpires(value []byte) int {
 		return 0
 	}
 	return n
+}
+
+func (e *exporter) storeRegisterTime(callID string) {
+	e.registerMutex.Lock()
+	defer e.registerMutex.Unlock()
+	if e.registerTracker == nil {
+		e.registerTracker = make(map[string]time.Time)
+	}
+	e.registerTracker[callID] = time.Now()
+}
+
+func (e *exporter) getRegisterTime(callID string) (time.Time, bool) {
+	e.registerMutex.RLock()
+	defer e.registerMutex.RUnlock()
+	t, ok := e.registerTracker[callID]
+	return t, ok
+}
+
+func (e *exporter) removeRegisterTime(callID string) {
+	e.registerMutex.Lock()
+	defer e.registerMutex.Unlock()
+	delete(e.registerTracker, callID)
 }

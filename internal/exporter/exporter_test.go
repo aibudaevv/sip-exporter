@@ -19,6 +19,8 @@ type mockMetricser struct {
 	packetsIncremented   int
 	invite200OKCalled    bool
 	sessionCompletedFlag bool
+	rrdUpdated           bool
+	rrdDelay             float64
 }
 
 func (m *mockMetricser) Request(in []byte) {
@@ -38,6 +40,11 @@ func (m *mockMetricser) Invite200OK() {
 
 func (m *mockMetricser) SessionCompleted() {
 	m.sessionCompletedFlag = true
+}
+
+func (m *mockMetricser) UpdateRRD(delayMs float64) {
+	m.rrdUpdated = true
+	m.rrdDelay = delayMs
 }
 
 func (m *mockMetricser) UpdateSession(size int) {
@@ -624,6 +631,46 @@ func TestHandleMessage_Response200_REGISTER(t *testing.T) {
 	require.False(t, mm.invite200OKCalled)
 }
 
+func TestHandleMessage_RRD_FullCycle(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+	}
+
+	registerReq := []byte("REGISTER sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: reg-test-123\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	err := e.handleMessage(registerReq)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		return bytes.Equal(mm.requestCalled, []byte("REGISTER"))
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	time.Sleep(10 * time.Millisecond)
+
+	registerResp := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: reg-test-123\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	err = e.handleMessage(registerResp)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		return mm.rrdUpdated
+	}, 100*time.Millisecond, 10*time.Millisecond)
+	require.True(t, mm.rrdUpdated)
+	require.Greater(t, mm.rrdDelay, 0.0)
+}
+
 func TestHandleMessage_Response401(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
@@ -796,6 +843,7 @@ func TestParseRawPacket_AllSIPMethods(t *testing.T) {
 					metricser: &mockMetricser{},
 					dialoger:  &mockDialoger{},
 				},
+				registerTracker: make(map[string]time.Time),
 			}
 
 			packet := make([]byte, 200)
