@@ -373,6 +373,7 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 				zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
 
 				e.services.dialoger.Delete(dialogID)
+				e.services.metricser.SessionCompleted()
 			}
 		}
 	} else {

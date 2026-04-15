@@ -860,3 +860,199 @@ func TestMetrics_ISA_FullCycle(t *testing.T) {
 	// ISA unchanged numerator, but denominator changes: 8 / 23 * 100 = 34.78%
 	require.InDelta(t, 34.78, m.getISA(), 0.01)
 }
+
+// SCR (Session Completion Ratio) tests per RFC 6076 §4.9
+// Formula: SCR = (Successfully Completed Sessions) / (Total INVITE) × 100
+// 3xx NOT excluded from denominator (same as ISA)
+
+// getSCR returns current SCR value for tests
+func (m *metrics) getSCR() float64 {
+	total := atomic.LoadInt64(&m.inviteTotal)
+	if total == 0 {
+		return 0
+	}
+
+	completed := atomic.LoadInt64(&m.sessionCompletedTotal)
+	return float64(completed) / float64(total) * 100 //nolint:mnd // percentage formula
+}
+
+// TestMetrics_SCR_NoInvites — MC/DC: total == 0
+func TestMetrics_SCR_NoInvites(t *testing.T) {
+	m := &metrics{}
+	require.Equal(t, 0.0, m.getSCR())
+}
+
+// TestMetrics_SCR_AllCompleted — all sessions completed
+func TestMetrics_SCR_AllCompleted(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.sessionCompletedTotal, 100)
+
+	// SCR = 100 / 100 * 100 = 100%
+	require.Equal(t, 100.0, m.getSCR())
+}
+
+// TestMetrics_SCR_HalfCompleted — half sessions completed
+func TestMetrics_SCR_HalfCompleted(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.sessionCompletedTotal, 50)
+
+	// SCR = 50 / 100 * 100 = 50%
+	require.Equal(t, 50.0, m.getSCR())
+}
+
+// TestMetrics_SCR_3xxNotExcluded — 3xx NOT excluded from denominator (unlike SER)
+func TestMetrics_SCR_3xxNotExcluded(t *testing.T) {
+	m := &metrics{}
+
+	// 100 INVITE total (including 10 that got 3xx), 40 completed
+	// SCR = 40 / 100 * 100 = 40% (3xx stay in denominator)
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.sessionCompletedTotal, 40)
+
+	require.Equal(t, 40.0, m.getSCR())
+}
+
+// TestMetrics_SCR_Values — table-driven MC/DC tests
+func TestMetrics_SCR_Values(t *testing.T) {
+	tests := []struct {
+		name      string
+		invites   int64
+		completed int64
+		wantSCR   float64
+	}{
+		{
+			name:      "zero_invites",
+			invites:   0,
+			completed: 0,
+			wantSCR:   0,
+		},
+		{
+			name:      "all_completed",
+			invites:   100,
+			completed: 100,
+			wantSCR:   100,
+		},
+		{
+			name:      "half_completed",
+			invites:   100,
+			completed: 50,
+			wantSCR:   50,
+		},
+		{
+			name:      "one_of_ten",
+			invites:   10,
+			completed: 1,
+			wantSCR:   10,
+		},
+		{
+			name:      "75_percent",
+			invites:   8,
+			completed: 6,
+			wantSCR:   75,
+		},
+		{
+			name:      "25_percent",
+			invites:   200,
+			completed: 50,
+			wantSCR:   25,
+		},
+		{
+			name:      "zero_completed",
+			invites:   50,
+			completed: 0,
+			wantSCR:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			atomic.StoreInt64(&m.inviteTotal, tt.invites)
+			atomic.StoreInt64(&m.sessionCompletedTotal, tt.completed)
+
+			got := m.getSCR()
+			require.Equal(t, tt.wantSCR, got)
+		})
+	}
+}
+
+// TestMetrics_SCR_FullCycle — full lifecycle test
+func TestMetrics_SCR_FullCycle(t *testing.T) {
+	m := &metrics{}
+
+	// Initial state: SCR = 0
+	require.Equal(t, 0.0, m.getSCR())
+
+	// 20 INVITE requests
+	for i := 0; i < 20; i++ {
+		atomic.AddInt64(&m.inviteTotal, 1)
+	}
+	// SCR = 0 / 20 * 100 = 0%
+	require.Equal(t, 0.0, m.getSCR())
+
+	// 10 sessions completed (BYE→200 OK)
+	for i := 0; i < 10; i++ {
+		atomic.AddInt64(&m.sessionCompletedTotal, 1)
+	}
+	// SCR = 10 / 20 * 100 = 50%
+	require.Equal(t, 50.0, m.getSCR())
+
+	// 5 more sessions completed
+	for i := 0; i < 5; i++ {
+		atomic.AddInt64(&m.sessionCompletedTotal, 1)
+	}
+	// SCR = 15 / 20 * 100 = 75%
+	require.Equal(t, 75.0, m.getSCR())
+
+	// 3xx redirects do NOT change SCR denominator (unlike SER)
+	// SCR remains 75%
+	require.Equal(t, 75.0, m.getSCR())
+}
+
+// TestMetrics_SessionCompleted increments counter
+func TestMetrics_SessionCompleted(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.sessionCompletedTotal, 0)
+
+	m.SessionCompleted()
+	require.Equal(t, int64(1), atomic.LoadInt64(&m.sessionCompletedTotal))
+
+	m.SessionCompleted()
+	require.Equal(t, int64(2), atomic.LoadInt64(&m.sessionCompletedTotal))
+}
+
+// TestMetrics_SCR_ComparedToSER verifies SCR <= SER always
+// (completed sessions ⊆ established sessions)
+func TestMetrics_SCR_ComparedToSER(t *testing.T) {
+	tests := []struct {
+		name        string
+		invites     int64
+		invite200OK int64
+		completed   int64
+		invite3xx   int64
+	}{
+		{"equal_when_all_completed", 100, 50, 50, 0},
+		{"scr_lower_when_some_terminated", 100, 80, 60, 10},
+		{"scr_zero_when_none_completed", 100, 50, 0, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			atomic.StoreInt64(&m.inviteTotal, tt.invites)
+			atomic.StoreInt64(&m.invite200OKTotal, tt.invite200OK)
+			atomic.StoreInt64(&m.sessionCompletedTotal, tt.completed)
+			atomic.StoreInt64(&m.invite3xxTotal, tt.invite3xx)
+
+			scr := m.getSCR()
+			ser := m.getSER()
+
+			require.LessOrEqual(t, scr, ser, "SCR must be <= SER")
+		})
+	}
+}

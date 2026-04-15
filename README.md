@@ -207,6 +207,30 @@ ISA measures infrastructure health, not user experience. Unlike SER/SEER which m
 | **ISA 5-15%** | Warning zone | Investigate emerging issues before they escalate |
 | **ISA >15%** | Critical | Immediate diagnostics required — servers or network are failing |
 
+#### Session Completion Ratio (SCR)
+`sip_exporter_scr`: percentage of INVITE sessions that were fully completed (established and terminated) relative to total INVITE attempts.
+
+**Formula (RFC 6076):**
+```
+SCR = (Completed Sessions) / Total INVITE × 100
+```
+
+- Unlike SER/SEER, 3xx responses are **NOT excluded from the denominator** — SCR measures end-to-end session completion
+- A session is counted as "completed" only when:
+  1. `200 OK` was received for an `INVITE` (session established)
+  2. `200 OK` was received for a `BYE` (session terminated)
+- 3xx responses are counted as non-completed — they never result in a session
+- Undefined when no INVITE requests have been received
+
+**Important:** SCR is cumulative over the entire runtime.
+
+**Relationship with SER:** SCR is always <= SER, since only a subset of established sessions are fully completed (terminated with BYE). The gap between SER and SCR indicates the proportion of established sessions that are still active or were abandoned without BYE.
+
+**Example values:**
+- `100` — all INVITEs resulted in fully completed sessions (INVITE→200 OK + BYE→200 OK)
+- `50` — half of all INVITEs resulted in complete call cycles
+- `0` — no sessions were fully completed (either no answers or no BYE sent)
+
 ## Development
 
 ### Requirements
@@ -264,12 +288,17 @@ E2E tests use [SIPp](https://sipp.sourceforge.net/) via [testcontainers-go](http
 
 ### Run E2E tests
 ```bash
-# Run all E2E tests
+# Build Docker image and run all E2E tests
 make test-e2e
 
-# Run specific test
-make test-e2e-run TEST=TestSER_AllScenarios
+# Run specific test (image is built automatically)
+make test-e2e-run TEST=TestISA_AllScenarios
+make test-e2e-run TEST=TestSCR_AllScenarios
 make test-e2e-run TEST=TestSEER_AllScenarios
+make test-e2e-run TEST=TestSER_AllScenarios
+
+# Run specific subtest
+make test-e2e-run TEST=TestSER_AllScenarios/100_percent
 ```
 
 ### Configuration
@@ -287,12 +316,13 @@ SIP_EXPORTER_E2E_SIPP_VERBOSE=true SIP_EXPORTER_E2E_EXPORTER_VERBOSE=true make t
 ```
 
 ### How it works
-1. testcontainers-go builds exporter Docker image from Dockerfile
-2. Starts exporter container with eBPF on loopback interface
-3. Starts SIPp UAS and UAC containers with `--network=host`
-4. SIPp generates SIP traffic through loopback (127.0.0.1:5060)
-5. Exporter captures packets via eBPF and updates Prometheus metrics
-6. Tests verify SER/SEER metrics and sessions cleanup
+1. Makefile builds exporter Docker image from Dockerfile (dependency: `docker_build`)
+2. Image name is passed to tests via `SIP_EXPORTER_E2E_IMAGE` environment variable
+3. Tests start exporter container with eBPF on loopback interface (`--privileged --network host`)
+4. SIPp UAS and UAC containers are started with `--network=host`
+5. SIPp generates SIP traffic through loopback (127.0.0.1:5060)
+6. Exporter captures packets via eBPF and updates Prometheus metrics
+7. Tests verify ISA/SCR/SEER/SER metrics and sessions cleanup
 
 ## Integration
 
@@ -308,6 +338,7 @@ The dashboard includes:
 - 📈 SER (Session Establishment Ratio) — RFC 6076 metric
 - 📈 SEER (Session Establishment Effectiveness Ratio) — RFC 6076 metric
 - 📈 ISA (Ineffective Session Attempts) — RFC 6076 metric
+- 📈 SCR (Session Completion Ratio) — RFC 6076 metric
 - 📈 SIP Packets Rate
 - 📈 SIP Requests by Method (INVITE, BYE, REGISTER, etc.)
 - 📈 SIP Responses by Status (1xx, 2xx, 4xx, 5xx, 6xx)

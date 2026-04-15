@@ -11,13 +11,14 @@ import (
 
 // Mock services for testing
 type mockMetricser struct {
-	requestCalled      []byte
-	responseCalled     []byte
-	responseIsInvite   bool
-	sessionUpdated     int
-	systemErrorCalled  bool
-	packetsIncremented int
-	invite200OKCalled  bool
+	requestCalled        []byte
+	responseCalled       []byte
+	responseIsInvite     bool
+	sessionUpdated       int
+	systemErrorCalled    bool
+	packetsIncremented   int
+	invite200OKCalled    bool
+	sessionCompletedFlag bool
 }
 
 func (m *mockMetricser) Request(in []byte) {
@@ -33,6 +34,10 @@ func (m *mockMetricser) Response(in []byte, isInviteResponse bool) {
 
 func (m *mockMetricser) Invite200OK() {
 	m.invite200OKCalled = true
+}
+
+func (m *mockMetricser) SessionCompleted() {
+	m.sessionCompletedFlag = true
 }
 
 func (m *mockMetricser) UpdateSession(size int) {

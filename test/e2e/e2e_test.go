@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -23,22 +25,27 @@ import (
 )
 
 const (
-	exporterImage  = "sip-exporter:0.4.0-dev2"
 	sippImage      = "pbertera/sipp:latest"
-	exporterPort   = "2113"
-	sippPort       = "5060"
-	sipsPort       = "5061"
-	sippClientPort = "5061"
+	exporterPort   = "2119"
+	sippPort       = "15060"
+	sipsPort       = "15061"
+	sippClientPort = "15061"
 	testInterface  = "lo"
 )
 
 var projectRoot string
 var interfaceIP string
+var exporterImage string
 
 func init() {
 	_, file, _, _ := runtime.Caller(0)
 	projectRoot = filepath.Join(filepath.Dir(file), "..", "..")
 	interfaceIP = getInterfaceIP(testInterface)
+
+	exporterImage = os.Getenv("SIP_EXPORTER_E2E_IMAGE")
+	if exporterImage == "" {
+		exporterImage = "sip-exporter:latest"
+	}
 }
 
 // getInterfaceIP returns IPv4 address of network interface.
@@ -67,9 +74,13 @@ type sippResult struct {
 }
 
 // startExporter starts exporter container and returns HTTP endpoint.
-// Image is built from Dockerfile in project root.
+// Image is pre-built via Makefile (docker_build target) and passed through
+// SIP_EXPORTER_E2E_IMAGE environment variable.
 func startExporter(ctx context.Context, t *testing.T) string {
 	t.Helper()
+
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
 
 	// ADDED: configurable exporter log level
 	exporterLogLevel := "error"
@@ -78,10 +89,7 @@ func startExporter(ctx context.Context, t *testing.T) string {
 	}
 
 	req := testcontainers.ContainerRequest{
-		FromDockerfile: testcontainers.FromDockerfile{
-			Context:    projectRoot,
-			Dockerfile: "Dockerfile",
-		},
+		Image:       exporterImage,
 		Privileged:  true,
 		NetworkMode: "host",
 		Env: map[string]string{
@@ -99,16 +107,30 @@ func startExporter(ctx context.Context, t *testing.T) string {
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
 		Started:          true,
+		Logger:           log.New(io.Discard, "", 0),
 	})
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		logs, err := container.Logs(ctx)
-		if err == nil {
+	if err != nil && container != nil {
+		logs, logErr := container.Logs(ctx)
+		if logErr == nil {
 			defer logs.Close()
 			logBytes, _ := io.ReadAll(logs)
-			t.Logf("Exporter logs:\n%s", string(logBytes))
+			t.Logf("Exporter logs:\n%s", strings.TrimSpace(string(logBytes)))
 		}
+	}
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer stopCancel()
+		_ = container.Stop(stopCtx, nil)
 		_ = container.Terminate(ctx)
+		for i := 0; i < 10; i++ {
+			conn, err := net.DialTimeout("tcp", "localhost:"+exporterPort, 500*time.Millisecond)
+			if err != nil {
+				return
+			}
+			conn.Close()
+			time.Sleep(500 * time.Millisecond)
+		}
 	})
 
 	return fmt.Sprintf("http://localhost:%s", exporterPort)
@@ -118,6 +140,9 @@ func startExporter(ctx context.Context, t *testing.T) string {
 // waits for calls to complete and returns statistics.
 func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario string, callCount int) sippResult {
 	t.Helper()
+
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
 
 	// ADDED: configurable SIPp verbosity
 	var stdout, stderr io.Writer = &testWriter{t}, &testWriter{t}
@@ -177,8 +202,6 @@ func getSER(t *testing.T, endpoint string) float64 {
 
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
-
-	t.Logf("Metrics output:\n%s", string(body))
 
 	re := regexp.MustCompile(`^sip_exporter_ser\s+([0-9.]+)`)
 	for _, line := range strings.Split(string(body), "\n") {
@@ -252,6 +275,29 @@ func getSessions(t *testing.T, endpoint string) float64 {
 	require.NoError(t, err)
 
 	re := regexp.MustCompile(`^sip_exporter_sessions\s+([0-9.]+)`)
+	for _, line := range strings.Split(string(body), "\n") {
+		matches := re.FindStringSubmatch(strings.TrimSpace(line))
+		if len(matches) == 2 {
+			val, err := strconv.ParseFloat(matches[1], 64)
+			require.NoError(t, err)
+			return val
+		}
+	}
+
+	return 0
+}
+
+func getSCR(t *testing.T, endpoint string) float64 {
+	t.Helper()
+
+	resp, err := http.Get(endpoint + "/metrics")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	re := regexp.MustCompile(`^sip_exporter_scr\s+([0-9.]+)`)
 	for _, line := range strings.Split(string(body), "\n") {
 		matches := re.FindStringSubmatch(strings.TrimSpace(line))
 		if len(matches) == 2 {

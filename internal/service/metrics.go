@@ -61,12 +61,17 @@ type (
 		// ISA metric (RFC 6076)
 		isa                    prometheus.GaugeFunc
 		inviteIneffectiveTotal int64
+
+		// SCR metric (RFC 6076)
+		scr                   prometheus.GaugeFunc
+		sessionCompletedTotal int64
 	}
 
 	Metricser interface {
 		Request(in []byte)
 		Response(in []byte, isInviteResponse bool)
 		Invite200OK()
+		SessionCompleted()
 		UpdateSession(size int)
 		SystemError()
 	}
@@ -83,6 +88,7 @@ func NewMetricser() Metricser {
 	m.ser = newSER(m)
 	m.seer = newSEER(m)
 	m.isa = newISA(m)
+	m.scr = newSCR(m)
 
 	return m
 }
@@ -211,6 +217,20 @@ func newISA(m *metrics) prometheus.GaugeFunc {
 		}
 		ineffective := atomic.LoadInt64(&m.inviteIneffectiveTotal)
 		return float64(ineffective) / float64(total) * 100 //nolint:mnd // percentage formula
+	})
+}
+
+func newSCR(m *metrics) prometheus.GaugeFunc {
+	return promauto.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "sip_exporter_scr",
+		Help: "Session Completion Ratio percentage (RFC 6076)",
+	}, func() float64 {
+		total := atomic.LoadInt64(&m.inviteTotal)
+		if total == 0 {
+			return 0
+		}
+		completed := atomic.LoadInt64(&m.sessionCompletedTotal)
+		return float64(completed) / float64(total) * 100 //nolint:mnd // percentage formula
 	})
 }
 
@@ -346,4 +366,8 @@ func (m *metrics) Invite200OK() {
 
 func (m *metrics) SystemError() {
 	m.systemErrorTotal.Inc()
+}
+
+func (m *metrics) SessionCompleted() {
+	atomic.AddInt64(&m.sessionCompletedTotal, 1)
 }
