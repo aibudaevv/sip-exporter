@@ -129,6 +129,16 @@ groups:
         annotations:
           summary: "Low session completion ratio"
           description: "SCR is {{ $value | printf \"%.1f\" }}%. Many sessions are not completing normally (INVITE without BYE)."
+
+      - alert: SIPStaleDialogsHigh
+        expr: |
+          sip_exporter_sessions / sip_exporter_invite_total * 100 > 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High ratio of active SIP dialogs"
+          description: "{{ $value | printf \"%.1f\" }}% of INVITEs have active dialogs. Possible Session-Expires timeout issues or missing BYE messages. Check downstream servers."
 ```
 
 ## Grafana Dashboard

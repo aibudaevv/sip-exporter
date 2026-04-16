@@ -45,6 +45,18 @@ Packets are transferred to userspace via Linux ringbuf for efficient processing.
 SIP Traffic → NIC → eBPF socket filter → ringbuf → Go poller → SIP parser → Prometheus
 ```
 
+### Dialog Lifecycle
+
+```
+INVITE → 200 OK → Dialog Created
+                     │
+                     ├──→ BYE → 200 OK → Dialog Deleted → SCR +1
+                     │
+                     └──→ [Session-Expires timeout] → Dialog Expired → SCR +1
+```
+
+Dialogs are tracked with Session-Expires (RFC 4028). If no BYE is received before timeout, the dialog is cleaned up and counted as "completed" in SCR.
+
 ## Performance
 
 Go benchmark results (Intel i7-8665U):
@@ -85,7 +97,11 @@ Start docker container in privileged mode is true and host mode.
 - A dialog is identified by the tuple: `{Call-ID, From tag, To tag}`
 - A dialog is terminated when a `200 OK` response is received for a `BYE` request
 - Dialog ID format: `{call-id}:{min-tag}:{max-tag}` (tags sorted lexicographically)
-- Dialogs are cleaned up every 1 second or when expired (based on `Session-Expires` header, default 30 min)
+- Dialogs are cleaned up when:
+  - `200 OK` received for `BYE` request (normal termination)
+  - Session-Expires timeout reached (RFC 4028)
+- Default timeout: 1800 seconds (30 min) if `Session-Expires` header not present
+- Cleanup runs every 1 second
 
 ### SIP request metrics
 `sip_exporter_publish_total`: total number of received SIP PUBLISH requests.  
@@ -216,15 +232,16 @@ SCR = (Completed Sessions) / Total INVITE × 100
 ```
 
 - Unlike SER/SEER, 3xx responses are **NOT excluded from the denominator** — SCR measures end-to-end session completion
-- A session is counted as "completed" only when:
-  1. `200 OK` was received for an `INVITE` (session established)
-  2. `200 OK` was received for a `BYE` (session terminated)
-- 3xx responses are counted as non-completed — they never result in a session
+- A session is counted as "completed" when:
+  1. `200 OK` received for `BYE` (normal termination), **OR**
+  2. Dialog expired via Session-Expires timeout (RFC 4028)
+- Expired dialogs are counted as completed to prevent SCR inflation from "hanging" sessions
+- Default Session-Expires: 1800 seconds (30 minutes), configurable via SIP `Session-Expires` header
 - Undefined when no INVITE requests have been received
 
 **Important:** SCR is cumulative over the entire runtime.
 
-**Relationship with SER:** SCR is always <= SER, since only a subset of established sessions are fully completed (terminated with BYE). The gap between SER and SCR indicates the proportion of established sessions that are still active or were abandoned without BYE.
+**Relationship with SER:** SCR is always <= SER, since only a subset of established sessions are fully completed. The gap indicates sessions still active or abandoned without BYE.
 
 **Example values:**
 - `100` — all INVITEs resulted in fully completed sessions (INVITE→200 OK + BYE→200 OK)

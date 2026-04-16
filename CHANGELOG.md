@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 0.8.0
+### Added
+- SCR (Session Completion Ratio) metric per RFC 6076 §4.9 (`sip_exporter_scr`)
+- SCR tracks sessions completed with INVITE→200 OK→BYE→200 OK cycle
+- Session-Expires timeout cleanup: dialogs exceeding timeout are counted as completed in SCR
+- E2E tests for SCR: AllScenarios, Mixed, MixedWith3xx, Complex, SessionExpires
+- MC/DC unit tests for SCR metric calculation
+
+### Fixed
+- Memory leak in registerTracker: TTL-based cleanup (60s) prevents unbounded growth
+- Race condition in metrics: `ResponseWithMetrics()` ensures atomic SER/SEER counter updates
+- SCR undefined behavior: returns 0 when no INVITEs received
+
 ## 0.7.0
 ### Added
 - ISA (Ineffective Session Attempts) metric per RFC 6076 (`sip_exporter_isa`)
