@@ -1,8 +1,7 @@
 version := $(shell cat VERSION)
-PWD := $(shell pwd)
 .DEFAULT_GOAL := docker_build
 
-.PHONY: test test-e2e
+.PHONY: test test-e2e test-e2e-run
 
 build: ebpf_compile go_build
 docker_build:
@@ -18,12 +17,14 @@ ebpf_log:
 test:
 	go test -v ./...
 
-test-e2e:
-	go test -tags=e2e -v -count=1 ./test/e2e/...
+test-e2e: docker_build
+	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -failfast -timeout 10m ./test/e2e/...
 
 #example: make test-e2e-run TEST=TestSER_AllScenarios/100_percent
-test-e2e-run:
-	go test -tags=e2e -v -count=1 -run "$(TEST)" ./test/e2e/...
+test-e2e-run: docker_build
+	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -failfast -timeout 10m -run "$(TEST)" ./test/e2e/...
 
 lint: vet imports
 	golangci-lint run

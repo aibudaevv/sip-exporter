@@ -45,6 +45,18 @@ Packets are transferred to userspace via Linux ringbuf for efficient processing.
 SIP Traffic → NIC → eBPF socket filter → ringbuf → Go poller → SIP parser → Prometheus
 ```
 
+### Dialog Lifecycle
+
+```
+INVITE → 200 OK → Dialog Created
+                     │
+                     ├──→ BYE → 200 OK → Dialog Deleted → SCR +1
+                     │
+                     └──→ [Session-Expires timeout] → Dialog Expired → SCR +1
+```
+
+Dialogs are tracked with Session-Expires (RFC 4028). If no BYE is received before timeout, the dialog is cleaned up and counted as "completed" in SCR.
+
 ## Performance
 
 Go benchmark results (Intel i7-8665U):
@@ -85,7 +97,11 @@ Start docker container in privileged mode is true and host mode.
 - A dialog is identified by the tuple: `{Call-ID, From tag, To tag}`
 - A dialog is terminated when a `200 OK` response is received for a `BYE` request
 - Dialog ID format: `{call-id}:{min-tag}:{max-tag}` (tags sorted lexicographically)
-- Dialogs are cleaned up every 1 second or when expired (based on `Session-Expires` header, default 30 min)
+- Dialogs are cleaned up when:
+  - `200 OK` received for `BYE` request (normal termination)
+  - Session-Expires timeout reached (RFC 4028)
+- Default timeout: 1800 seconds (30 min) if `Session-Expires` header not present
+- Cleanup runs every 1 second
 
 ### SIP request metrics
 `sip_exporter_publish_total`: total number of received SIP PUBLISH requests.  
@@ -207,6 +223,51 @@ ISA measures infrastructure health, not user experience. Unlike SER/SEER which m
 | **ISA 5-15%** | Warning zone | Investigate emerging issues before they escalate |
 | **ISA >15%** | Critical | Immediate diagnostics required — servers or network are failing |
 
+#### Session Completion Ratio (SCR)
+`sip_exporter_scr`: percentage of INVITE sessions that were fully completed (established and terminated) relative to total INVITE attempts.
+
+**Formula (RFC 6076):**
+```
+SCR = (Completed Sessions) / Total INVITE × 100
+```
+
+- Unlike SER/SEER, 3xx responses are **NOT excluded from the denominator** — SCR measures end-to-end session completion
+- A session is counted as "completed" when:
+  1. `200 OK` received for `BYE` (normal termination), **OR**
+  2. Dialog expired via Session-Expires timeout (RFC 4028)
+- Expired dialogs are counted as completed to prevent SCR inflation from "hanging" sessions
+- Default Session-Expires: 1800 seconds (30 minutes), configurable via SIP `Session-Expires` header
+- Undefined when no INVITE requests have been received
+
+**Important:** SCR is cumulative over the entire runtime.
+
+**Relationship with SER:** SCR is always <= SER, since only a subset of established sessions are fully completed. The gap indicates sessions still active or abandoned without BYE.
+
+**Example values:**
+- `100` — all INVITEs resulted in fully completed sessions (INVITE→200 OK + BYE→200 OK)
+- `50` — half of all INVITEs resulted in complete call cycles
+- `0` — no sessions were fully completed (either no answers or no BYE sent)
+
+#### Registration Request Delay (RRD)
+`sip_exporter_rrd`: average delay in milliseconds between sending a REGISTER request and receiving a 200 OK response.
+
+**Formula (RFC 6076, Section 4.1):**
+```
+RRD = Average(Time of 200 OK - Time of REGISTER request)
+```
+
+- Measures the round-trip time for SIP registration transactions
+- Only successful registrations (200 OK responses) are measured
+- Returns 0 when no successful registrations have occurred
+- The metric is cumulative — it shows the average delay over the entire runtime
+
+**Important:** RRD measures registration latency, not call setup latency. Use SER/SEER for call establishment metrics.
+
+**Example values:**
+- `< 100 ms` — excellent registration performance (local network)
+- `100-500 ms` — acceptable performance (typical WAN)
+- `> 1000 ms` — potential issues (network congestion, server overload)
+
 ## Development
 
 ### Requirements
@@ -264,12 +325,17 @@ E2E tests use [SIPp](https://sipp.sourceforge.net/) via [testcontainers-go](http
 
 ### Run E2E tests
 ```bash
-# Run all E2E tests
+# Build Docker image and run all E2E tests
 make test-e2e
 
-# Run specific test
-make test-e2e-run TEST=TestSER_AllScenarios
+# Run specific test (image is built automatically)
+make test-e2e-run TEST=TestISA_AllScenarios
+make test-e2e-run TEST=TestSCR_AllScenarios
 make test-e2e-run TEST=TestSEER_AllScenarios
+make test-e2e-run TEST=TestSER_AllScenarios
+
+# Run specific subtest
+make test-e2e-run TEST=TestSER_AllScenarios/100_percent
 ```
 
 ### Configuration
@@ -287,14 +353,24 @@ SIP_EXPORTER_E2E_SIPP_VERBOSE=true SIP_EXPORTER_E2E_EXPORTER_VERBOSE=true make t
 ```
 
 ### How it works
-1. testcontainers-go builds exporter Docker image from Dockerfile
-2. Starts exporter container with eBPF on loopback interface
-3. Starts SIPp UAS and UAC containers with `--network=host`
-4. SIPp generates SIP traffic through loopback (127.0.0.1:5060)
-5. Exporter captures packets via eBPF and updates Prometheus metrics
-6. Tests verify SER/SEER metrics and sessions cleanup
+1. Makefile builds exporter Docker image from Dockerfile (dependency: `docker_build`)
+2. Image name is passed to tests via `SIP_EXPORTER_E2E_IMAGE` environment variable
+3. Tests start exporter container with eBPF on loopback interface (`--privileged --network host`)
+4. SIPp UAS and UAC containers are started with `--network=host`
+5. SIPp generates SIP traffic through loopback (127.0.0.1:5060)
+6. Exporter captures packets via eBPF and updates Prometheus metrics
+7. Tests verify ISA/SCR/SEER/SER metrics and sessions cleanup
 
 ## Integration
+
+### Alerting
+
+Pre-configured alerting examples are available in [ALERTING.md](./docs/ALERTING.md):
+
+- **Prometheus alert rules** — Critical, warning, and info alerts for SER, ISA, RRD, and more
+- **Grafana dashboard** — Ready-to-import JSON with 8 panels
+- **Alertmanager examples** — Slack, PagerDuty, and Email integrations
+- **Best practices** — Scrape intervals, retention, threshold tuning
 
 ### Grafana Dashboard
 Import the pre-built dashboard into your Grafana instance:
@@ -308,6 +384,7 @@ The dashboard includes:
 - 📈 SER (Session Establishment Ratio) — RFC 6076 metric
 - 📈 SEER (Session Establishment Effectiveness Ratio) — RFC 6076 metric
 - 📈 ISA (Ineffective Session Attempts) — RFC 6076 metric
+- 📈 SCR (Session Completion Ratio) — RFC 6076 metric
 - 📈 SIP Packets Rate
 - 📈 SIP Requests by Method (INVITE, BYE, REGISTER, etc.)
 - 📈 SIP Responses by Status (1xx, 2xx, 4xx, 5xx, 6xx)

@@ -61,6 +61,9 @@ func TestSER_AllScenarios(t *testing.T) {
 			sessions := getSessions(t, endpoint)
 			require.Equal(t, 0.0, sessions, "sessions should be 0 after all calls terminated")
 		})
+		if t.Failed() {
+			break
+		}
 	}
 }
 

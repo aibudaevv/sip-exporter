@@ -14,7 +14,7 @@ type (
 		Create(dialogID string, expiresAt time.Time)
 		Delete(dialogID string)
 		Size() int
-		Cleanup()
+		Cleanup() int
 	}
 )
 
@@ -44,13 +44,16 @@ func (c *dialogs) Size() int {
 	return len(c.storage)
 }
 
-func (c *dialogs) Cleanup() {
+func (c *dialogs) Cleanup() int {
 	c.m.Lock()
 	defer c.m.Unlock()
 	now := time.Now()
+	count := 0
 	for id, expiresAt := range c.storage {
 		if now.After(expiresAt) {
 			delete(c.storage, id)
+			count++
 		}
 	}
+	return count
 }

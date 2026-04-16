@@ -6,3 +6,12 @@ QWEN.md
 /.opencode/
 AGENTS.md
 .posts/
+
+# Test binaries
+e2e.test
+exporter.test
+
+# Session notes
+SESSION_NOTES.md
+TODO.md
+session-ses_26b6.md

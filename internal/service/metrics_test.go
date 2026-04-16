@@ -1,29 +1,20 @@
 package service
 
 import (
-	"sync"
 	"sync/atomic"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 )
 
-// globalMetricser for all tests to avoid duplicate registration
-var (
-	globalMetricser     Metricser
-	globalMetricserOnce sync.Once
-)
-
-func getGlobalMetricser() Metricser {
-	globalMetricserOnce.Do(func() {
-		globalMetricser = NewMetricser()
-	})
-	return globalMetricser
+func NewTestMetricser() Metricser {
+	reg := prometheus.NewRegistry()
+	return newMetricserWithRegistry(reg)
 }
 
-// Tests for Request method - cover all SIP methods
 func TestMetricser_Request_AllMethodsSingleRun(t *testing.T) {
-	m := getGlobalMetricser()
+	m := NewTestMetricser()
 	require.NotNil(t, m)
 
 	methods := []struct {
@@ -55,9 +46,8 @@ func TestMetricser_Request_AllMethodsSingleRun(t *testing.T) {
 	}
 }
 
-// Tests for Response method - cover all response codes
 func TestMetricser_Response_AllCodesSingleRun(t *testing.T) {
-	m := getGlobalMetricser()
+	m := NewTestMetricser()
 	require.NotNil(t, m)
 
 	codes := []struct {
@@ -96,7 +86,7 @@ func TestMetricser_Response_AllCodesSingleRun(t *testing.T) {
 }
 
 func TestMetricser_UpdateSession_VariousValues(t *testing.T) {
-	m := getGlobalMetricser()
+	m := NewTestMetricser()
 	require.NotNil(t, m)
 
 	testCases := []struct {
@@ -117,7 +107,7 @@ func TestMetricser_UpdateSession_VariousValues(t *testing.T) {
 }
 
 func TestMetricser_SystemError_Multiple(t *testing.T) {
-	m := getGlobalMetricser()
+	m := NewTestMetricser()
 	require.NotNil(t, m)
 
 	for i := 0; i < 5; i++ {
@@ -128,7 +118,7 @@ func TestMetricser_SystemError_Multiple(t *testing.T) {
 }
 
 func TestMetricser_Combined(t *testing.T) {
-	m := getGlobalMetricser()
+	m := NewTestMetricser()
 	require.NotNil(t, m)
 
 	m.Request([]byte("INVITE"))
@@ -859,4 +849,334 @@ func TestMetrics_ISA_FullCycle(t *testing.T) {
 	}
 	// ISA unchanged numerator, but denominator changes: 8 / 23 * 100 = 34.78%
 	require.InDelta(t, 34.78, m.getISA(), 0.01)
+}
+
+// SCR (Session Completion Ratio) tests per RFC 6076 §4.9
+// Formula: SCR = (Successfully Completed Sessions) / (Total INVITE) × 100
+// 3xx NOT excluded from denominator (same as ISA)
+
+// getSCR returns current SCR value for tests
+func (m *metrics) getSCR() float64 {
+	total := atomic.LoadInt64(&m.inviteTotal)
+	if total == 0 {
+		return 0
+	}
+
+	completed := atomic.LoadInt64(&m.sessionCompletedTotal)
+	return float64(completed) / float64(total) * 100 //nolint:mnd // percentage formula
+}
+
+// getRRD returns current RRD value for tests (in milliseconds)
+func (m *metrics) getRRD() float64 {
+	count := atomic.LoadInt64(&m.rrdCount)
+	if count == 0 {
+		return 0
+	}
+	total := atomic.LoadUint64(&m.rrdTotal)
+	return float64(total) / float64(count) / 1e3 //nolint:mnd // convert microseconds to milliseconds
+}
+
+// TestMetrics_SCR_NoInvites — MC/DC: total == 0
+func TestMetrics_SCR_NoInvites(t *testing.T) {
+	m := &metrics{}
+	require.Equal(t, 0.0, m.getSCR())
+}
+
+// TestMetrics_SCR_AllCompleted — all sessions completed
+func TestMetrics_SCR_AllCompleted(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.sessionCompletedTotal, 100)
+
+	// SCR = 100 / 100 * 100 = 100%
+	require.Equal(t, 100.0, m.getSCR())
+}
+
+// TestMetrics_SCR_HalfCompleted — half sessions completed
+func TestMetrics_SCR_HalfCompleted(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.sessionCompletedTotal, 50)
+
+	// SCR = 50 / 100 * 100 = 50%
+	require.Equal(t, 50.0, m.getSCR())
+}
+
+// TestMetrics_SCR_3xxNotExcluded — 3xx NOT excluded from denominator (unlike SER)
+func TestMetrics_SCR_3xxNotExcluded(t *testing.T) {
+	m := &metrics{}
+
+	// 100 INVITE total (including 10 that got 3xx), 40 completed
+	// SCR = 40 / 100 * 100 = 40% (3xx stay in denominator)
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.sessionCompletedTotal, 40)
+
+	require.Equal(t, 40.0, m.getSCR())
+}
+
+// TestMetrics_SCR_Values — table-driven MC/DC tests
+func TestMetrics_SCR_Values(t *testing.T) {
+	tests := []struct {
+		name      string
+		invites   int64
+		completed int64
+		wantSCR   float64
+	}{
+		{
+			name:      "zero_invites",
+			invites:   0,
+			completed: 0,
+			wantSCR:   0,
+		},
+		{
+			name:      "all_completed",
+			invites:   100,
+			completed: 100,
+			wantSCR:   100,
+		},
+		{
+			name:      "half_completed",
+			invites:   100,
+			completed: 50,
+			wantSCR:   50,
+		},
+		{
+			name:      "one_of_ten",
+			invites:   10,
+			completed: 1,
+			wantSCR:   10,
+		},
+		{
+			name:      "75_percent",
+			invites:   8,
+			completed: 6,
+			wantSCR:   75,
+		},
+		{
+			name:      "25_percent",
+			invites:   200,
+			completed: 50,
+			wantSCR:   25,
+		},
+		{
+			name:      "zero_completed",
+			invites:   50,
+			completed: 0,
+			wantSCR:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			atomic.StoreInt64(&m.inviteTotal, tt.invites)
+			atomic.StoreInt64(&m.sessionCompletedTotal, tt.completed)
+
+			got := m.getSCR()
+			require.Equal(t, tt.wantSCR, got)
+		})
+	}
+}
+
+// TestMetrics_SCR_FullCycle — full lifecycle test
+func TestMetrics_SCR_FullCycle(t *testing.T) {
+	m := &metrics{}
+
+	// Initial state: SCR = 0
+	require.Equal(t, 0.0, m.getSCR())
+
+	// 20 INVITE requests
+	for i := 0; i < 20; i++ {
+		atomic.AddInt64(&m.inviteTotal, 1)
+	}
+	// SCR = 0 / 20 * 100 = 0%
+	require.Equal(t, 0.0, m.getSCR())
+
+	// 10 sessions completed (BYE→200 OK)
+	for i := 0; i < 10; i++ {
+		atomic.AddInt64(&m.sessionCompletedTotal, 1)
+	}
+	// SCR = 10 / 20 * 100 = 50%
+	require.Equal(t, 50.0, m.getSCR())
+
+	// 5 more sessions completed
+	for i := 0; i < 5; i++ {
+		atomic.AddInt64(&m.sessionCompletedTotal, 1)
+	}
+	// SCR = 15 / 20 * 100 = 75%
+	require.Equal(t, 75.0, m.getSCR())
+
+	// 3xx redirects do NOT change SCR denominator (unlike SER)
+	// SCR remains 75%
+	require.Equal(t, 75.0, m.getSCR())
+}
+
+// TestMetrics_SessionCompleted increments counter
+func TestMetrics_SessionCompleted(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.sessionCompletedTotal, 0)
+
+	m.SessionCompleted()
+	require.Equal(t, int64(1), atomic.LoadInt64(&m.sessionCompletedTotal))
+
+	m.SessionCompleted()
+	require.Equal(t, int64(2), atomic.LoadInt64(&m.sessionCompletedTotal))
+}
+
+// TestMetrics_SCR_ComparedToSER verifies SCR <= SER always
+// (completed sessions ⊆ established sessions)
+func TestMetrics_SCR_ComparedToSER(t *testing.T) {
+	tests := []struct {
+		name        string
+		invites     int64
+		invite200OK int64
+		completed   int64
+		invite3xx   int64
+	}{
+		{"equal_when_all_completed", 100, 50, 50, 0},
+		{"scr_lower_when_some_terminated", 100, 80, 60, 10},
+		{"scr_zero_when_none_completed", 100, 50, 0, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			atomic.StoreInt64(&m.inviteTotal, tt.invites)
+			atomic.StoreInt64(&m.invite200OKTotal, tt.invite200OK)
+			atomic.StoreInt64(&m.sessionCompletedTotal, tt.completed)
+			atomic.StoreInt64(&m.invite3xxTotal, tt.invite3xx)
+
+			scr := m.getSCR()
+			ser := m.getSER()
+
+			require.LessOrEqual(t, scr, ser, "SCR must be <= SER")
+		})
+	}
+}
+
+// ResponseWithMetrics tests
+
+func TestMetricser_ResponseWithMetrics_200OK_Invite(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	invite200OKBefore := atomic.LoadInt64(&m.invite200OKTotal)
+	invite3xxBefore := atomic.LoadInt64(&m.invite3xxTotal)
+	inviteEffectiveBefore := atomic.LoadInt64(&m.inviteEffectiveTotal)
+	inviteIneffectiveBefore := atomic.LoadInt64(&m.inviteIneffectiveTotal)
+
+	m.ResponseWithMetrics([]byte("200"), true, true)
+
+	require.Equal(t, invite200OKBefore+1, atomic.LoadInt64(&m.invite200OKTotal))
+	require.Equal(t, inviteEffectiveBefore+1, atomic.LoadInt64(&m.inviteEffectiveTotal))
+	require.Equal(t, invite3xxBefore, atomic.LoadInt64(&m.invite3xxTotal))
+	require.Equal(t, inviteIneffectiveBefore, atomic.LoadInt64(&m.inviteIneffectiveTotal))
+}
+
+func TestMetricser_ResponseWithMetrics_200OK_Register(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	invite200OKBefore := atomic.LoadInt64(&m.invite200OKTotal)
+
+	m.ResponseWithMetrics([]byte("200"), false, true)
+
+	require.Equal(t, invite200OKBefore, atomic.LoadInt64(&m.invite200OKTotal), "invite200OKTotal should not increment for non-INVITE")
+}
+
+func TestMetricser_ResponseWithMetrics_401(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	invite200OKBefore := atomic.LoadInt64(&m.invite200OKTotal)
+	inviteEffectiveBefore := atomic.LoadInt64(&m.inviteEffectiveTotal)
+	inviteIneffectiveBefore := atomic.LoadInt64(&m.inviteIneffectiveTotal)
+
+	m.ResponseWithMetrics([]byte("401"), true, false)
+
+	require.Equal(t, invite200OKBefore, atomic.LoadInt64(&m.invite200OKTotal))
+	require.Equal(t, inviteEffectiveBefore, atomic.LoadInt64(&m.inviteEffectiveTotal))
+	require.Equal(t, inviteIneffectiveBefore, atomic.LoadInt64(&m.inviteIneffectiveTotal))
+}
+
+func TestMetricser_ResponseWithMetrics_3xx(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	invite3xxBefore := atomic.LoadInt64(&m.invite3xxTotal)
+	invite200OKBefore := atomic.LoadInt64(&m.invite200OKTotal)
+
+	m.ResponseWithMetrics([]byte("302"), true, false)
+
+	require.Equal(t, invite3xxBefore+1, atomic.LoadInt64(&m.invite3xxTotal))
+	require.Equal(t, invite200OKBefore, atomic.LoadInt64(&m.invite200OKTotal))
+}
+
+func TestMetricser_ResponseWithMetrics_SEER_EffectiveCodes(t *testing.T) {
+	effectiveCodes := []string{"200", "480", "486", "600", "603"}
+
+	for _, code := range effectiveCodes {
+		t.Run(code, func(t *testing.T) {
+			m := NewTestMetricser().(*metrics)
+			inviteEffectiveBefore := atomic.LoadInt64(&m.inviteEffectiveTotal)
+
+			is200OK := code == "200"
+			m.ResponseWithMetrics([]byte(code), true, is200OK)
+
+			require.Equal(t, inviteEffectiveBefore+1, atomic.LoadInt64(&m.inviteEffectiveTotal), "code %s should be effective", code)
+		})
+	}
+}
+
+func TestMetricser_ResponseWithMetrics_ISA_IneffectiveCodes(t *testing.T) {
+	ineffectiveCodes := []string{"408", "500", "503", "504"}
+
+	for _, code := range ineffectiveCodes {
+		t.Run(code, func(t *testing.T) {
+			m := NewTestMetricser().(*metrics)
+			inviteIneffectiveBefore := atomic.LoadInt64(&m.inviteIneffectiveTotal)
+
+			m.ResponseWithMetrics([]byte(code), true, false)
+
+			require.Equal(t, inviteIneffectiveBefore+1, atomic.LoadInt64(&m.inviteIneffectiveTotal), "code %s should be ineffective", code)
+		})
+	}
+}
+
+func TestMetricser_ResponseWithMetrics_NonInvite(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	invite200OKBefore := atomic.LoadInt64(&m.invite200OKTotal)
+	invite3xxBefore := atomic.LoadInt64(&m.invite3xxTotal)
+	inviteEffectiveBefore := atomic.LoadInt64(&m.inviteEffectiveTotal)
+	inviteIneffectiveBefore := atomic.LoadInt64(&m.inviteIneffectiveTotal)
+
+	m.ResponseWithMetrics([]byte("200"), false, true)
+
+	require.Equal(t, invite200OKBefore, atomic.LoadInt64(&m.invite200OKTotal))
+	require.Equal(t, invite3xxBefore, atomic.LoadInt64(&m.invite3xxTotal))
+	require.Equal(t, inviteEffectiveBefore, atomic.LoadInt64(&m.inviteEffectiveTotal))
+	require.Equal(t, inviteIneffectiveBefore, atomic.LoadInt64(&m.inviteIneffectiveTotal))
+}
+
+func TestMetricser_ResponseWithMetrics_AllInOne(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	invite200OKBefore := atomic.LoadInt64(&m.invite200OKTotal)
+	inviteEffectiveBefore := atomic.LoadInt64(&m.inviteEffectiveTotal)
+	inviteIneffectiveBefore := atomic.LoadInt64(&m.inviteIneffectiveTotal)
+	invite3xxBefore := atomic.LoadInt64(&m.invite3xxTotal)
+
+	m.ResponseWithMetrics([]byte("200"), true, true)
+	require.Equal(t, invite200OKBefore+1, atomic.LoadInt64(&m.invite200OKTotal))
+	require.Equal(t, inviteEffectiveBefore+1, atomic.LoadInt64(&m.inviteEffectiveTotal))
+
+	m.ResponseWithMetrics([]byte("480"), true, false)
+	require.Equal(t, invite200OKBefore+1, atomic.LoadInt64(&m.invite200OKTotal))
+	require.Equal(t, inviteEffectiveBefore+2, atomic.LoadInt64(&m.inviteEffectiveTotal))
+
+	m.ResponseWithMetrics([]byte("500"), true, false)
+	require.Equal(t, inviteIneffectiveBefore+1, atomic.LoadInt64(&m.inviteIneffectiveTotal))
+
+	m.ResponseWithMetrics([]byte("302"), true, false)
+	require.Equal(t, invite3xxBefore+1, atomic.LoadInt64(&m.invite3xxTotal))
 }
