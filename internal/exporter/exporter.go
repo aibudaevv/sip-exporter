@@ -21,17 +21,22 @@ var (
 )
 
 const (
-	ethPAll     = 0x0003
-	readBufSize = 65536
+	ethPAll            = 0x0003
+	readBufSize        = 65536
+	defaultRegisterTTL = 60 * time.Second
 )
 
 type (
+	registerEntry struct {
+		timestamp time.Time
+	}
+
 	exporter struct {
 		collection      *ebpf.Collection
 		sock            int
 		messages        chan []byte
 		services        services
-		registerTracker map[string]time.Time
+		registerTracker map[string]registerEntry
 		registerMutex   sync.RWMutex
 	}
 	services struct {
@@ -51,7 +56,7 @@ func NewExporter(m service.Metricser, d service.Dialoger) Exporter {
 			dialoger:  d,
 		},
 		messages:        make(chan []byte, 10_000),
-		registerTracker: make(map[string]time.Time),
+		registerTracker: make(map[string]registerEntry),
 	}
 }
 
@@ -132,12 +137,32 @@ func (e *exporter) sipDialogMetricsUpdate() {
 	ticker := time.NewTicker(1 * time.Second)
 	for {
 		<-ticker.C
-		e.services.dialoger.Cleanup()
+		expired := e.services.dialoger.Cleanup()
+		e.cleanupRegisterTracker()
 		s := e.services.dialoger.Size()
 
-		zap.L().Debug("update metrics", zap.Int("size dialogs", s))
+		for i := 0; i < expired; i++ {
+			e.services.metricser.SessionCompleted()
+		}
+
+		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", expired))
 
 		e.services.metricser.UpdateSession(s)
+	}
+}
+
+func (e *exporter) cleanupRegisterTracker() {
+	e.registerMutex.Lock()
+	defer e.registerMutex.Unlock()
+
+	now := time.Now()
+	for callID, entry := range e.registerTracker {
+		if now.Sub(entry.timestamp) > defaultRegisterTTL {
+			delete(e.registerTracker, callID)
+			zap.L().Debug("register tracker expired",
+				zap.String("call_id", callID),
+				zap.Duration("age", now.Sub(entry.timestamp)))
+		}
 	}
 }
 
@@ -333,66 +358,7 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 	zap.L().Debug("parsed packet", zap.Any("packet", packet))
 
 	if packet.IsResponse {
-		isInviteResponse := bytes.Equal(packet.CSeq.Method, []byte("INVITE"))
-		isRegisterResponse := bytes.Equal(packet.CSeq.Method, []byte("REGISTER"))
-		is200OK := bytes.Equal(packet.ResponseStatus, []byte("200"))
-
-		go func() {
-			e.services.metricser.Response(packet.ResponseStatus, isInviteResponse)
-			if is200OK && isInviteResponse {
-				e.services.metricser.Invite200OK()
-			}
-		}()
-
-		if is200OK {
-			zap.L().Debug("handle message", zap.ByteString("200 OK cseq method", packet.CSeq.Method))
-
-			if bytes.Equal(packet.CSeq.Method, []byte("INVITE")) {
-				var dialogID string
-				dialogID, err = normalizeDialogID(
-					packet.CallID, packet.From.Tag, packet.To.Tag,
-				)
-				if err != nil {
-					return fmt.Errorf("normalize dialog ID: %w", err)
-				}
-
-				expires := packet.SessionExpires
-				if expires == 0 {
-					expires = 1800 // default 30 min
-				}
-				expiresAt := time.Now().Add(time.Duration(expires) * time.Second)
-
-				zap.L().Debug("create sip dialog",
-					zap.String("session", dialogID),
-					zap.Int("expires_sec", expires))
-				e.services.dialoger.Create(dialogID, expiresAt)
-			}
-
-			if bytes.Equal(packet.CSeq.Method, []byte("BYE")) {
-				var dialogID string
-				dialogID, err = normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag)
-				if err != nil {
-					return fmt.Errorf("normalize dialog ID: %w", err)
-				}
-
-				zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
-
-				e.services.dialoger.Delete(dialogID)
-				e.services.metricser.SessionCompleted()
-			}
-
-			if isRegisterResponse {
-				if startTime, ok := e.getRegisterTime(string(packet.CallID)); ok {
-					//nolint:mnd // nanoseconds to milliseconds
-					delayMs := float64(time.Since(startTime).Nanoseconds()) / 1e6
-					e.services.metricser.UpdateRRD(delayMs)
-					e.removeRegisterTime(string(packet.CallID))
-					zap.L().Debug("RRD measured",
-						zap.String("call_id", string(packet.CallID)),
-						zap.Float64("delay_ms", delayMs))
-				}
-			}
-		}
+		e.handleResponse(packet)
 	} else {
 		go e.services.metricser.Request(packet.Method)
 
@@ -402,6 +368,92 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 	}
 
 	return nil
+}
+
+func (e *exporter) handleResponse(packet dto.Packet) {
+	isInviteResponse := bytes.Equal(packet.CSeq.Method, []byte("INVITE"))
+	isRegisterResponse := bytes.Equal(packet.CSeq.Method, []byte("REGISTER"))
+	is200OK := bytes.Equal(packet.ResponseStatus, []byte("200"))
+
+	go e.services.metricser.ResponseWithMetrics(
+		packet.ResponseStatus,
+		isInviteResponse,
+		is200OK,
+	)
+
+	if is200OK {
+		e.handle200OKResponse(packet, isRegisterResponse)
+	} else if isRegisterResponse {
+		e.removeRegisterTime(string(packet.CallID))
+		zap.L().Debug("register tracker removed (non-200 response)",
+			zap.String("call_id", string(packet.CallID)),
+			zap.ByteString("status", packet.ResponseStatus))
+	}
+}
+
+func (e *exporter) handle200OKResponse(packet dto.Packet, isRegisterResponse bool) {
+	zap.L().Debug("handle message", zap.ByteString("200 OK cseq method", packet.CSeq.Method))
+
+	if bytes.Equal(packet.CSeq.Method, []byte("INVITE")) {
+		if err := e.handleInvite200OK(packet); err != nil {
+			zap.L().Error("handle INVITE 200 OK", zap.Error(err))
+		}
+	}
+
+	if bytes.Equal(packet.CSeq.Method, []byte("BYE")) {
+		if err := e.handleBye200OK(packet); err != nil {
+			zap.L().Error("handle BYE 200 OK", zap.Error(err))
+		}
+	}
+
+	if isRegisterResponse {
+		e.handleRegister200OK(packet)
+	}
+}
+
+func (e *exporter) handleInvite200OK(packet dto.Packet) error {
+	dialogID, err := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag)
+	if err != nil {
+		return fmt.Errorf("normalize dialog ID: %w", err)
+	}
+
+	expires := packet.SessionExpires
+	if expires == 0 {
+		expires = 1800
+	}
+	expiresAt := time.Now().Add(time.Duration(expires) * time.Second)
+
+	zap.L().Debug("create sip dialog",
+		zap.String("session", dialogID),
+		zap.Int("expires_sec", expires))
+	e.services.dialoger.Create(dialogID, expiresAt)
+	return nil
+}
+
+func (e *exporter) handleBye200OK(packet dto.Packet) error {
+	dialogID, err := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag)
+	if err != nil {
+		return fmt.Errorf("normalize dialog ID: %w", err)
+	}
+
+	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
+	e.services.dialoger.Delete(dialogID)
+	e.services.metricser.SessionCompleted()
+	return nil
+}
+
+func (e *exporter) handleRegister200OK(packet dto.Packet) {
+	startTime, ok := e.getRegisterTime(string(packet.CallID))
+	if !ok {
+		return
+	}
+
+	delayMs := float64(time.Since(startTime).Nanoseconds()) / 1e6
+	e.services.metricser.UpdateRRD(delayMs)
+	e.removeRegisterTime(string(packet.CallID))
+	zap.L().Debug("RRD measured",
+		zap.String("call_id", string(packet.CallID)),
+		zap.Float64("delay_ms", delayMs))
 }
 
 func splitHeader(line []byte) ([]byte, []byte) {
@@ -480,17 +532,16 @@ func extractSessionExpires(value []byte) int {
 func (e *exporter) storeRegisterTime(callID string) {
 	e.registerMutex.Lock()
 	defer e.registerMutex.Unlock()
-	if e.registerTracker == nil {
-		e.registerTracker = make(map[string]time.Time)
+	e.registerTracker[callID] = registerEntry{
+		timestamp: time.Now(),
 	}
-	e.registerTracker[callID] = time.Now()
 }
 
 func (e *exporter) getRegisterTime(callID string) (time.Time, bool) {
 	e.registerMutex.RLock()
 	defer e.registerMutex.RUnlock()
-	t, ok := e.registerTracker[callID]
-	return t, ok
+	entry, ok := e.registerTracker[callID]
+	return entry.timestamp, ok
 }
 
 func (e *exporter) removeRegisterTime(callID string) {

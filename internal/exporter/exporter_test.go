@@ -11,16 +11,17 @@ import (
 
 // Mock services for testing
 type mockMetricser struct {
-	requestCalled        []byte
-	responseCalled       []byte
-	responseIsInvite     bool
-	sessionUpdated       int
-	systemErrorCalled    bool
-	packetsIncremented   int
-	invite200OKCalled    bool
-	sessionCompletedFlag bool
-	rrdUpdated           bool
-	rrdDelay             float64
+	requestCalled             []byte
+	responseCalled            []byte
+	responseIsInvite          bool
+	sessionUpdated            int
+	systemErrorCalled         bool
+	packetsIncremented        int
+	invite200OKCalled         bool
+	sessionCompletedFlag      bool
+	rrdUpdated                bool
+	rrdDelay                  float64
+	responseWithMetricsCalled bool
 }
 
 func (m *mockMetricser) Request(in []byte) {
@@ -32,6 +33,16 @@ func (m *mockMetricser) Response(in []byte, isInviteResponse bool) {
 	m.responseCalled = in
 	m.responseIsInvite = isInviteResponse
 	m.packetsIncremented++
+}
+
+func (m *mockMetricser) ResponseWithMetrics(status []byte, isInviteResponse, is200OK bool) {
+	m.responseWithMetricsCalled = true
+	m.responseCalled = status
+	m.responseIsInvite = isInviteResponse
+	m.packetsIncremented++
+	if is200OK && isInviteResponse {
+		m.invite200OKCalled = true
+	}
 }
 
 func (m *mockMetricser) Invite200OK() {
@@ -56,8 +67,9 @@ func (m *mockMetricser) SystemError() {
 }
 
 type mockDialoger struct {
-	created map[string]time.Time
-	deleted []string
+	created      map[string]time.Time
+	deleted      []string
+	cleanupCount int
 }
 
 func (m *mockDialoger) Create(dialogID string, expiresAt time.Time) {
@@ -75,7 +87,9 @@ func (m *mockDialoger) Size() int {
 	return len(m.created)
 }
 
-func (m *mockDialoger) Cleanup() {}
+func (m *mockDialoger) Cleanup() int {
+	return m.cleanupCount
+}
 
 // ==================== normalizeDialogID tests ====================
 
@@ -640,6 +654,7 @@ func TestHandleMessage_RRD_FullCycle(t *testing.T) {
 			metricser: mm,
 			dialoger:  md,
 		},
+		registerTracker: make(map[string]registerEntry),
 	}
 
 	registerReq := []byte("REGISTER sip:test SIP/2.0\r\n" +
@@ -822,9 +837,10 @@ func TestHandleMessage_Response200_InvalidDialogID(t *testing.T) {
 		"Call-ID: test\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
+	// Should not panic and should not create dialog
 	err := e.handleMessage(input)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "normalize dialog ID")
+	require.NoError(t, err)
+	require.Len(t, md.created, 0, "dialog should not be created with invalid tags")
 }
 
 // ==================== Tests for all SIP methods ====================
@@ -843,7 +859,7 @@ func TestParseRawPacket_AllSIPMethods(t *testing.T) {
 					metricser: &mockMetricser{},
 					dialoger:  &mockDialoger{},
 				},
-				registerTracker: make(map[string]time.Time),
+				registerTracker: make(map[string]registerEntry),
 			}
 
 			packet := make([]byte, 200)
@@ -1091,4 +1107,389 @@ func TestParseRegisterPacket(t *testing.T) {
 	require.Equal(t, []byte("583ce713cb324f27bd614e594db53cc2"), p.CallID)
 	require.Equal(t, []byte("6596"), p.CSeq.ID)
 	require.Equal(t, []byte("REGISTER"), p.CSeq.Method)
+}
+
+// ==================== Register Tracker tests ====================
+
+func TestExporter_RegisterTracker_StoreAndRemove(t *testing.T) {
+	e := &exporter{
+		services: services{
+			metricser: &mockMetricser{},
+			dialoger:  &mockDialoger{},
+		},
+		registerTracker: make(map[string]registerEntry),
+	}
+
+	callID := "test-call-id-123"
+
+	// Store
+	e.storeRegisterTime(callID)
+
+	// Verify stored
+	_, exists := e.getRegisterTime(callID)
+	require.True(t, exists, "entry should exist after store")
+
+	// Remove
+	e.removeRegisterTime(callID)
+
+	// Verify removed
+	_, exists = e.getRegisterTime(callID)
+	require.False(t, exists, "entry should not exist after remove")
+}
+
+func TestExporter_RegisterTracker_401Removes(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+	}
+
+	// REGISTER request
+	registerReq := []byte("REGISTER sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: reg-401-test\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	err := e.handleMessage(registerReq)
+	require.NoError(t, err)
+
+	// Verify stored
+	_, exists := e.getRegisterTime("reg-401-test")
+	require.True(t, exists, "register should be tracked")
+
+	// 401 Unauthorized response
+	registerResp := []byte("SIP/2.0 401 Unauthorized\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: reg-401-test\r\n" +
+		"CSeq: 1 REGISTER\r\n" +
+		"WWW-Authenticate: Digest realm=\"test\"\r\n")
+
+	err = e.handleMessage(registerResp)
+	require.NoError(t, err)
+
+	// Verify removed
+	_, exists = e.getRegisterTime("reg-401-test")
+	require.False(t, exists, "register should be removed after 401")
+	require.False(t, mm.rrdUpdated, "RRD should NOT be updated for 401")
+}
+
+func TestExporter_RegisterTracker_403Removes(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+	}
+
+	// REGISTER request
+	registerReq := []byte("REGISTER sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: reg-403-test\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	e.handleMessage(registerReq)
+
+	// 403 Forbidden response
+	registerResp := []byte("SIP/2.0 403 Forbidden\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: reg-403-test\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	err := e.handleMessage(registerResp)
+	require.NoError(t, err)
+
+	_, exists := e.getRegisterTime("reg-403-test")
+	require.False(t, exists, "register should be removed after 403")
+	require.False(t, mm.rrdUpdated, "RRD should NOT be updated for 403")
+}
+
+func TestExporter_RegisterTracker_500Removes(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+	}
+
+	// REGISTER request
+	registerReq := []byte("REGISTER sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: reg-500-test\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	e.handleMessage(registerReq)
+
+	// 500 Server Error response
+	registerResp := []byte("SIP/2.0 500 Server Internal Error\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: reg-500-test\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	err := e.handleMessage(registerResp)
+	require.NoError(t, err)
+
+	_, exists := e.getRegisterTime("reg-500-test")
+	require.False(t, exists, "register should be removed after 500")
+	require.False(t, mm.rrdUpdated, "RRD should NOT be updated for 500")
+}
+
+func TestExporter_RegisterTracker_TTLExpired(t *testing.T) {
+	e := &exporter{
+		services: services{
+			metricser: &mockMetricser{},
+			dialoger:  &mockDialoger{},
+		},
+		registerTracker: make(map[string]registerEntry),
+	}
+
+	// Add entry older than TTL (61 seconds)
+	oldTime := time.Now().Add(-61 * time.Second)
+	e.registerTracker["expired-call-id"] = registerEntry{timestamp: oldTime}
+
+	// Add entry at TTL border (59 seconds)
+	borderTime := time.Now().Add(-59 * time.Second)
+	e.registerTracker["border-call-id"] = registerEntry{timestamp: borderTime}
+
+	// Add fresh entry
+	e.registerTracker["fresh-call-id"] = registerEntry{timestamp: time.Now()}
+
+	// Run cleanup
+	e.cleanupRegisterTracker()
+
+	// Verify
+	_, expiredExists := e.getRegisterTime("expired-call-id")
+	_, borderExists := e.getRegisterTime("border-call-id")
+	_, freshExists := e.getRegisterTime("fresh-call-id")
+
+	require.False(t, expiredExists, "expired entry (61s) should be removed")
+	require.True(t, borderExists, "entry at 59s should remain (TTL=60s)")
+	require.True(t, freshExists, "fresh entry should remain")
+}
+
+func TestExporter_RegisterTracker_TTLNotExpired(t *testing.T) {
+	e := &exporter{
+		services: services{
+			metricser: &mockMetricser{},
+			dialoger:  &mockDialoger{},
+		},
+		registerTracker: make(map[string]registerEntry),
+	}
+
+	// Add entry just before TTL (30 seconds ago)
+	recentTime := time.Now().Add(-30 * time.Second)
+	e.registerTracker["recent-call-id"] = registerEntry{timestamp: recentTime}
+
+	// Run cleanup
+	e.cleanupRegisterTracker()
+
+	// Verify still exists
+	_, exists := e.getRegisterTime("recent-call-id")
+	require.True(t, exists, "entry at 30s should remain (TTL=60s)")
+}
+
+func TestExporter_RegisterTracker_Retransmit200OK(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+	}
+
+	// First REGISTER
+	registerReq := []byte("REGISTER sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: same-call-id\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	e.handleMessage(registerReq)
+
+	// Wait a bit
+	time.Sleep(20 * time.Millisecond)
+
+	// Retransmit REGISTER (same Call-ID)
+	e.handleMessage(registerReq)
+
+	// Wait a bit more
+	time.Sleep(10 * time.Millisecond)
+
+	// 200 OK arrives
+	registerResp := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: same-call-id\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	e.handleMessage(registerResp)
+
+	// RRD should be measured
+	require.Eventually(t, func() bool {
+		return mm.rrdUpdated
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	// RRD should be from LAST REGISTER (~10-30ms), not first (~30-50ms)
+	require.Less(t, mm.rrdDelay, 35.0, "RRD should be from last REGISTER, not first")
+	require.Greater(t, mm.rrdDelay, 0.0, "RRD should be positive")
+
+	// Entry should be removed
+	_, exists := e.getRegisterTime("same-call-id")
+	require.False(t, exists, "entry should be removed after 200 OK")
+}
+
+func TestExporter_RegisterTracker_Retransmit401(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+	}
+
+	// First REGISTER
+	registerReq := []byte("REGISTER sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: same-call-id-401\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	e.handleMessage(registerReq)
+	time.Sleep(20 * time.Millisecond)
+
+	// Retransmit REGISTER (same Call-ID)
+	e.handleMessage(registerReq)
+
+	// 401 arrives
+	registerResp := []byte("SIP/2.0 401 Unauthorized\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: same-call-id-401\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	e.handleMessage(registerResp)
+
+	// RRD should NOT be updated
+	require.False(t, mm.rrdUpdated, "RRD should not be updated for 401")
+
+	// Entry should be removed
+	_, exists := e.getRegisterTime("same-call-id-401")
+	require.False(t, exists, "entry should be removed after 401")
+}
+
+func TestExporter_RegisterTracker_DifferentCallID(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+	}
+
+	// REGISTER with Call-ID 1
+	registerReq1 := []byte("REGISTER sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: call-id-1\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	e.handleMessage(registerReq1)
+
+	// REGISTER with Call-ID 2
+	registerReq2 := []byte("REGISTER sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=def\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: call-id-2\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	e.handleMessage(registerReq2)
+
+	// Both should be tracked
+	_, exists1 := e.getRegisterTime("call-id-1")
+	_, exists2 := e.getRegisterTime("call-id-2")
+	require.True(t, exists1, "call-id-1 should be tracked")
+	require.True(t, exists2, "call-id-2 should be tracked")
+
+	// 200 OK for Call-ID 1
+	registerResp1 := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: call-id-1\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	e.handleMessage(registerResp1)
+
+	// Only call-id-1 should be removed
+	_, exists1 = e.getRegisterTime("call-id-1")
+	_, exists2 = e.getRegisterTime("call-id-2")
+	require.False(t, exists1, "call-id-1 should be removed")
+	require.True(t, exists2, "call-id-2 should still be tracked")
+
+	// 200 OK for Call-ID 2
+	registerResp2 := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=def\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: call-id-2\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	e.handleMessage(registerResp2)
+
+	// Both removed
+	_, exists1 = e.getRegisterTime("call-id-1")
+	_, exists2 = e.getRegisterTime("call-id-2")
+	require.False(t, exists1, "call-id-1 should be removed")
+	require.False(t, exists2, "call-id-2 should be removed")
+}
+
+func TestSipDialogMetricsUpdate_ExpiredIncrementsSessionCompleted(t *testing.T) {
+	start := time.Now()
+	mm := &mockMetricser{}
+	md := &mockDialoger{
+		cleanupCount: 5,
+	}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+	}
+
+	// Simulate one tick of sipDialogMetricsUpdate
+	// We can't call it directly (it's an infinite loop), so test the logic
+	expired := e.services.dialoger.Cleanup()
+	for i := 0; i < expired; i++ {
+		e.services.metricser.SessionCompleted()
+	}
+
+	require.True(t, mm.sessionCompletedFlag, "SessionCompleted should be called")
+	t.Logf("duration: %v", time.Since(start))
 }

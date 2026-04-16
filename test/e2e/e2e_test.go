@@ -152,7 +152,6 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	// ADDED: configurable SIPp verbosity
 	var stdout, stderr io.Writer = &testWriter{t}, &testWriter{t}
 	if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") != "true" {
 		stdout, stderr = io.Discard, io.Discard
@@ -198,6 +197,40 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 	time.Sleep(3 * time.Second)
 
 	return sippResult{totalCalls: callCount}
+}
+
+// runSippUACOnly starts SIPp client only (no server) for timeout tests.
+func runSippUACOnly(ctx context.Context, t *testing.T, uacScenario string, callCount int) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	var stdout, stderr io.Writer = &testWriter{t}, &testWriter{t}
+	if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") != "true" {
+		stdout, stderr = io.Discard, io.Discard
+	}
+
+	uacPath := absScenarioPath(t, uacScenario)
+	sippVol := filepath.Dir(uacPath)
+	uacScenarioFile := filepath.Base(uacScenario)
+
+	uacCmd := exec.Command("docker", "run", "--rm",
+		"--network", "host",
+		"-v", sippVol+":/scenarios:ro",
+		sippImage,
+		"-sf", "/scenarios/"+uacScenarioFile,
+		"-i", "127.0.0.1",
+		"-p", sippClientPort,
+		"-m", strconv.Itoa(callCount),
+		"-timeout", "5s",
+		"127.0.0.1:"+sippPort,
+	)
+	uacCmd.Stdout = stdout
+	uacCmd.Stderr = stderr
+	_ = uacCmd.Run()
+
+	time.Sleep(3 * time.Second)
 }
 
 // getSER reads sip_exporter_ser metric from exporter endpoint.

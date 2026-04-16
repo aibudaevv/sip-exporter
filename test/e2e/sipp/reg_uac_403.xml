@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<scenario name="UAC_REGISTER_403">
+  <send retrans="500">
+    <![CDATA[
+      REGISTER sip:[remote_ip] SIP/2.0
+      Via: SIP/2.0/UDP [local_ip]:[local_port];branch=z9hG4bK-[call_number]
+      From: <sip:user@[local_ip]>;tag=[call_number]
+      To: <sip:user@[local_ip]>
+      Call-ID: [call_id]
+      CSeq: 1 REGISTER
+      Contact: <sip:user@[local_ip]:[local_port]>
+      Max-Forwards: 70
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <recv response="403" rtd="true">
+  </recv>
+</scenario>

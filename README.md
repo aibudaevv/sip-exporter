@@ -346,6 +346,15 @@ SIP_EXPORTER_E2E_SIPP_VERBOSE=true SIP_EXPORTER_E2E_EXPORTER_VERBOSE=true make t
 
 ## Integration
 
+### Alerting
+
+Pre-configured alerting examples are available in [ALERTING.md](./ALERTING.md):
+
+- **Prometheus alert rules** — Critical, warning, and info alerts for SER, ISA, RRD, and more
+- **Grafana dashboard** — Ready-to-import JSON with 8 panels
+- **Alertmanager examples** — Slack, PagerDuty, and Email integrations
+- **Best practices** — Scrape intervals, retention, threshold tuning
+
 ### Grafana Dashboard
 Import the pre-built dashboard into your Grafana instance:
 

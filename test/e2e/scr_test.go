@@ -5,6 +5,7 @@ package e2e
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -130,4 +131,29 @@ func TestSCR_Complex(t *testing.T) {
 
 	sessions := getSessions(t, endpoint)
 	require.Equal(t, 0.0, sessions, "sessions should be 0 after all calls terminated")
+}
+
+// TestSCR_SessionExpires tests that expired dialogs (Session-Expires timeout)
+// increment sessionCompletedTotal, increasing SCR.
+func TestSCR_SessionExpires(t *testing.T) {
+	start := time.Now()
+	ctx := context.Background()
+
+	endpoint := startExporter(ctx, t)
+
+	scrBefore := getSCR(t, endpoint)
+	sessionsBefore := getSessions(t, endpoint)
+	t.Logf("Before: SCR = %.2f, sessions = %.0f", scrBefore, sessionsBefore)
+
+	runSippScenario(ctx, t, "uas_short_expires.xml", "uac_short_expires.xml", 10)
+
+	time.Sleep(5 * time.Second)
+
+	scrAfter := getSCR(t, endpoint)
+	sessionsAfter := getSessions(t, endpoint)
+	t.Logf("After: SCR = %.2f, sessions = %.0f", scrAfter, sessionsAfter)
+
+	require.Equal(t, 0.0, sessionsAfter, "sessions should be 0 after Session-Expires timeout")
+	require.Greater(t, scrAfter, scrBefore, "SCR should increase after Session-Expires timeout")
+	t.Logf("duration: %v", time.Since(start))
 }
