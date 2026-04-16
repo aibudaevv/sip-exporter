@@ -348,7 +348,7 @@ SIP_EXPORTER_E2E_SIPP_VERBOSE=true SIP_EXPORTER_E2E_EXPORTER_VERBOSE=true make t
 
 ### Alerting
 
-Pre-configured alerting examples are available in [ALERTING.md](./ALERTING.md):
+Pre-configured alerting examples are available in [ALERTING.md](./docs/ALERTING.md):
 
 - **Prometheus alert rules** — Critical, warning, and info alerts for SER, ISA, RRD, and more
 - **Grafana dashboard** — Ready-to-import JSON with 8 panels
