@@ -11,10 +11,11 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.uber.org/zap"
+
 	"gitlab.com/sip-exporter/internal/config"
 	"gitlab.com/sip-exporter/internal/exporter"
 	"gitlab.com/sip-exporter/internal/service"
-	"go.uber.org/zap"
 )
 
 const (
@@ -41,6 +42,14 @@ func (s *server) Run(cfg *config.App) error {
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		if s.exporter.IsAlive() {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("OK"))
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	})
 
 	h := http.Server{
 		Addr:              ":" + cfg.Port,

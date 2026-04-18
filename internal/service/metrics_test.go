@@ -890,6 +890,18 @@ func (m *metrics) getRRDFromHistogram() (sum float64, count uint64) {
 	return h.GetSampleSum(), h.GetSampleCount()
 }
 
+func (m *metrics) getTTRFromHistogram() (sum float64, count uint64) {
+	if m.ttr == nil {
+		return 0, 0
+	}
+	var dtoMetric dto.Metric
+	if err := m.ttr.Write(&dtoMetric); err != nil {
+		return 0, 0
+	}
+	h := dtoMetric.GetHistogram()
+	return h.GetSampleSum(), h.GetSampleCount()
+}
+
 // TestMetrics_SCR_NoInvites — MC/DC: total == 0
 func TestMetrics_SCR_NoInvites(t *testing.T) {
 	m := &metrics{}
@@ -1398,4 +1410,58 @@ func TestMetrics_RRD_DeprecatedAverageMatches(t *testing.T) {
 	require.Equal(t, uint64(2), count)
 
 	require.InDelta(t, 100.0, m.getRRD(), 0.01)
+}
+
+// ==================== TTR Histogram tests ====================
+
+func TestMetrics_TTR_Histogram(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	sum, count := m.getTTRFromHistogram()
+	require.Equal(t, 0.0, sum)
+	require.Equal(t, uint64(0), count)
+
+	m.UpdateTTR(50.0)
+
+	sum, count = m.getTTRFromHistogram()
+	require.InDelta(t, 50.0, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+
+	m.UpdateTTR(150.0)
+
+	sum, count = m.getTTRFromHistogram()
+	require.InDelta(t, 200.0, sum, 0.01)
+	require.Equal(t, uint64(2), count)
+}
+
+func TestMetrics_TTR_Histogram_MultipleObservations(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	for i := range 100 {
+		m.UpdateTTR(float64(i) * 10.0)
+	}
+
+	sum, count := m.getTTRFromHistogram()
+	require.Equal(t, uint64(100), count)
+	require.InDelta(t, 49500.0, sum, 1.0)
+}
+
+func TestMetrics_TTR_Histogram_ZeroValue(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateTTR(0.0)
+
+	sum, count := m.getTTRFromHistogram()
+	require.InDelta(t, 0.0, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestMetrics_TTR_Histogram_LargeValue(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateTTR(5000.0)
+
+	sum, count := m.getTTRFromHistogram()
+	require.InDelta(t, 5000.0, sum, 0.01)
+	require.Equal(t, uint64(1), count)
 }

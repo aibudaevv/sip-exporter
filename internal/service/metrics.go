@@ -79,6 +79,9 @@ type (
 		spdCount   int64                // deprecated: количество завершённых сессий
 		spd        prometheus.Histogram // Метрика SPD histogram (sec)
 		spdAvg     prometheus.GaugeFunc // deprecated: среднее SPD (sec)
+
+		// TTR metrics (Time to First Response)
+		ttr prometheus.Histogram // Метрика TTR histogram (ms)
 	}
 
 	Metricser interface {
@@ -89,6 +92,7 @@ type (
 		SessionCompleted()
 		UpdateRRD(delayMs float64)
 		UpdateSPD(duration time.Duration)
+		UpdateTTR(delayMs float64)
 		UpdateSession(size int)
 		SystemError()
 	}
@@ -112,6 +116,7 @@ func newMetricserWithRegistry(reg *prometheus.Registry) Metricser {
 	m.scr = newSCRWithRegistry(m, reg)
 	m.rrd, m.rrdAvg = newRRDWithRegistry(m, reg)
 	m.spd, m.spdAvg = newSPDWithRegistry(m, reg)
+	m.ttr = newTTRWithRegistry(reg)
 
 	return m
 }
@@ -381,6 +386,14 @@ func newSPDWithRegistry(m *metrics, reg *prometheus.Registry) (prometheus.Histog
 	return hist, avg
 }
 
+func newTTRWithRegistry(reg *prometheus.Registry) prometheus.Histogram {
+	return newHistogramWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_ttr",
+		Help:    "Time to First Response in milliseconds (time from INVITE to first provisional 1xx response)",
+		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
+	}, reg)
+}
+
 func (m *metrics) UpdateSPD(duration time.Duration) {
 	if duration < 0 {
 		return
@@ -399,6 +412,12 @@ func (m *metrics) UpdateRRD(delayMs float64) {
 	atomic.AddInt64(&m.rrdCount, 1)
 	//nolint:mnd // convert milliseconds to microseconds for precision
 	atomic.AddUint64(&m.rrdTotal, uint64(delayMs*1e3))
+}
+
+func (m *metrics) UpdateTTR(delayMs float64) {
+	if m.ttr != nil {
+		m.ttr.Observe(delayMs)
+	}
 }
 
 func (m *metrics) UpdateSession(size int) {

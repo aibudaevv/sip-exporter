@@ -88,6 +88,7 @@ Dialogs are tracked with Session-Expires (RFC 4028). If no BYE is received befor
 | SCR | §4.9 | Session Completion Ratio |
 | RRD | §4.1 | Registration Request Delay |
 | SPD | §4.5 | Session Process Duration |
+| TTR | — | Time to First Response |
 
 ---
 
@@ -277,3 +278,35 @@ rate(sip_exporter_spd_sum[5m]) / rate(sip_exporter_spd_count[5m])
 - `> 3600 s` — long-duration sessions (conferences, held calls)
 
 **Deprecated metric:** `sip_exporter_spd_average` — cumulative average (will be removed in next major version)
+
+---
+
+### Time to First Response (TTR)
+
+`sip_exporter_ttr`: histogram of delays in milliseconds between an INVITE request and the first provisional (1xx) response.
+
+**Formula:**
+```
+TTR = Time of first 1xx response - Time of INVITE request
+```
+
+- Not defined in RFC 6076, but is a useful operational metric for detecting slow SIP servers
+- Measures the time from INVITE to the **first** provisional response (100 Trying, 180 Ringing, 183 Session Progress)
+- Only the first 1xx response is measured — subsequent provisional responses are ignored
+- If no provisional response is received (e.g., INVITE → 200 OK directly), TTR is not measured
+- Exposed as a Prometheus Histogram with buckets: `[1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000]` ms
+- Use `histogram_quantile()` for percentile-based alerting
+
+**PromQL examples:**
+```promql
+# 95th percentile time to first response
+histogram_quantile(0.95, sum(rate(sip_exporter_ttr_bucket[5m])) by (le))
+
+# Average time to first response
+rate(sip_exporter_ttr_sum[5m]) / rate(sip_exporter_ttr_count[5m])
+```
+
+**Example values:**
+- `< 50 ms` — excellent server responsiveness
+- `100-500 ms` — acceptable (typical for loaded servers)
+- `> 1000 ms` — potential issues (server overload, network latency)
