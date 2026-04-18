@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"sync/atomic"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -325,63 +326,60 @@ func (m *metrics) UpdateSession(size int) {
 func (m *metrics) Response(in []byte, isInviteResponse bool) {
 	defer m.sipPacketsTotal.Inc()
 
-	switch string(in) {
-	case "100":
+	switch {
+	case bytes.Equal(in, []byte("100")):
 		m.statusTryingTotal.Inc()
-	case "180":
+	case bytes.Equal(in, []byte("180")):
 		m.statusRingingTotal.Inc()
-	case "183":
+	case bytes.Equal(in, []byte("183")):
 		m.statusSessionProgressTotal.Inc()
-	case "200":
+	case bytes.Equal(in, []byte("200")):
 		m.statusOKTotal.Inc()
-	case "202":
+	case bytes.Equal(in, []byte("202")):
 		m.statusAcceptedTotal.Inc()
-	case "300":
+	case bytes.Equal(in, []byte("300")):
 		m.statusMultipleChoiceTotal.Inc()
-	case "302":
+	case bytes.Equal(in, []byte("302")):
 		m.statusMovedTemporarilyTotal.Inc()
-	case "400":
+	case bytes.Equal(in, []byte("400")):
 		m.statusBadRequestTotal.Inc()
-	case "401":
+	case bytes.Equal(in, []byte("401")):
 		m.statusUnauthorizedTotal.Inc()
-	case "403":
+	case bytes.Equal(in, []byte("403")):
 		m.statusForbiddenTotal.Inc()
-	case "404":
+	case bytes.Equal(in, []byte("404")):
 		m.statusNotFoundTotal.Inc()
-	case "407":
+	case bytes.Equal(in, []byte("407")):
 		m.proxyAuthenticationRequired.Inc()
-	case "408":
+	case bytes.Equal(in, []byte("408")):
 		m.statusRequestTimeoutTotal.Inc()
-	case "480":
+	case bytes.Equal(in, []byte("480")):
 		m.statusTemporarilyUnavailableTotal.Inc()
-	case "486":
+	case bytes.Equal(in, []byte("486")):
 		m.statusBusyHereTotal.Inc()
-	case "500":
+	case bytes.Equal(in, []byte("500")):
 		m.statusServerInternalTotal.Inc()
-	case "503":
+	case bytes.Equal(in, []byte("503")):
 		m.statusServiceUnavailableTotal.Inc()
-	case "504":
+	case bytes.Equal(in, []byte("504")):
 		m.statusServerTimeoutTotal.Inc()
-	case "600":
+	case bytes.Equal(in, []byte("600")):
 		m.statusBusyEverywhereTotal.Inc()
-	case "603":
+	case bytes.Equal(in, []byte("603")):
 		m.statusDeclineTotal.Inc()
 	default:
 		zap.L().Warn("unknown response", zap.ByteString("in", in))
 	}
 
-	// Count 3xx for SER (RFC 6076)
 	if isInviteResponse && len(in) == 3 && in[0] == '3' {
 		atomic.AddInt64(&m.invite3xxTotal, 1)
 	}
 
-	// ADDED: SEER numerator
-	if isInviteResponse && isEffectiveResponse(string(in)) {
+	if isInviteResponse && isEffectiveResponse(in) {
 		atomic.AddInt64(&m.inviteEffectiveTotal, 1)
 	}
 
-	// ADDED: ISA numerator
-	if isInviteResponse && isIneffectiveResponse(string(in)) {
+	if isInviteResponse && isIneffectiveResponse(in) {
 		atomic.AddInt64(&m.inviteIneffectiveTotal, 1)
 	}
 }
@@ -394,58 +392,53 @@ func (m *metrics) ResponseWithMetrics(status []byte, isInviteResponse, is200OK b
 	}
 }
 
-// isEffectiveResponse returns true if the response code is part of SEER numerator (RFC 6076).
-func isEffectiveResponse(code string) bool {
-	switch code {
-	case "200", "480", "486", "600", "603":
-		return true
-	default:
-		return false
-	}
+func isEffectiveResponse(code []byte) bool {
+	return bytes.Equal(code, []byte("200")) ||
+		bytes.Equal(code, []byte("480")) ||
+		bytes.Equal(code, []byte("486")) ||
+		bytes.Equal(code, []byte("600")) ||
+		bytes.Equal(code, []byte("603"))
 }
 
-// isIneffectiveResponse returns true if the response code is part of ISA numerator (RFC 6076).
-func isIneffectiveResponse(code string) bool {
-	switch code {
-	case "408", "500", "503", "504":
-		return true
-	default:
-		return false
-	}
+func isIneffectiveResponse(code []byte) bool {
+	return bytes.Equal(code, []byte("408")) ||
+		bytes.Equal(code, []byte("500")) ||
+		bytes.Equal(code, []byte("503")) ||
+		bytes.Equal(code, []byte("504"))
 }
 
 func (m *metrics) Request(in []byte) {
 	defer m.sipPacketsTotal.Inc()
 
-	switch string(in) {
-	case "PUBLISH":
+	switch {
+	case bytes.Equal(in, []byte("PUBLISH")):
 		m.requestPublishTotal.Inc()
-	case "PRACK":
+	case bytes.Equal(in, []byte("PRACK")):
 		m.requestPrackTotal.Inc()
-	case "NOTIFY":
+	case bytes.Equal(in, []byte("NOTIFY")):
 		m.requestNotifyTotal.Inc()
-	case "SUBSCRIBE":
+	case bytes.Equal(in, []byte("SUBSCRIBE")):
 		m.requestSubscribeTotal.Inc()
-	case "REFER":
+	case bytes.Equal(in, []byte("REFER")):
 		m.requestReferTotal.Inc()
-	case "INFO":
+	case bytes.Equal(in, []byte("INFO")):
 		m.requestInfoTotal.Inc()
-	case "UPDATE":
+	case bytes.Equal(in, []byte("UPDATE")):
 		m.requestUpdateTotal.Inc()
-	case "REGISTER":
+	case bytes.Equal(in, []byte("REGISTER")):
 		m.requestRegisterTotal.Inc()
-	case "OPTIONS":
+	case bytes.Equal(in, []byte("OPTIONS")):
 		m.requestOptionsTotal.Inc()
-	case "CANCEL":
+	case bytes.Equal(in, []byte("CANCEL")):
 		m.requestCancelTotal.Inc()
-	case "BYE":
+	case bytes.Equal(in, []byte("BYE")):
 		m.requestByeTotal.Inc()
-	case "ACK":
+	case bytes.Equal(in, []byte("ACK")):
 		m.requestACKTotal.Inc()
-	case "INVITE":
+	case bytes.Equal(in, []byte("INVITE")):
 		m.requestInviteTotal.Inc()
 		atomic.AddInt64(&m.inviteTotal, 1)
-	case "MESSAGE":
+	case bytes.Equal(in, []byte("MESSAGE")):
 		m.requestMessageTotal.Inc()
 	default:
 		zap.L().Warn("unknown request", zap.ByteString("in", in))

@@ -7,6 +7,22 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](https://github.com/aibudaevv/sip-exporter/blob/main/LICENSE)
 [![Issues](https://img.shields.io/github/issues/aibudaevv/sip-exporter)](https://github.com/aibudaevv/sip-exporter/issues)
 
+## Table of Contents
+
+- [Key Features](#key-features)
+- [Quick Start](#quick-start)
+- [Core Technology](#core-technology)
+- [Architecture](#architecture)
+- [Performance](#performance)
+- [Install](#install)
+- [Metrics](#metrics)
+- [Development](#development)
+- [E2E Testing](#e2e-testing)
+- [Benchmark](#benchmark)
+- [Integration](#integration)
+- [License](#license)
+- [Changelog](#changelog)
+
 ## Key Features
 
 - ⚡ **Low overhead** — eBPF packet filtering in kernel space
@@ -28,7 +44,7 @@ services:
 ```
 
 ```bash
-docker-compose up -d
+docker compose up -d
 curl http://localhost:2112/metrics
 ```
 
@@ -36,13 +52,13 @@ Access metrics at `http://localhost:2112/metrics`.
 
 ## Core Technology
 
-This service uses eBPF (extended Berkeley Packet Filter) attached to network sockets to
+This service uses eBPF (extended Berkeley Packet Filter) attached to `AF_PACKET` sockets to
 intercept SIP packets (UDP/5060-5061) at L4 without overhead of iptables/nftables or userspace daemons like tcpdump.
-Packets are transferred to userspace via Linux ringbuf for efficient processing.
+Filtered packets are delivered to userspace via the socket for efficient Go processing.
 
 ## Architecture
 ```
-SIP Traffic → NIC → eBPF socket filter → ringbuf → Go poller → SIP parser → Prometheus
+SIP Traffic → NIC → eBPF socket filter → AF_PACKET socket → Go poller → SIP parser → Prometheus
 ```
 
 ### Dialog Lifecycle
@@ -59,7 +75,7 @@ Dialogs are tracked with Session-Expires (RFC 4028). If no BYE is received befor
 
 ## Performance
 
-Go benchmark results (Intel i7-8665U):
+Go benchmark results:
 
 | Operation | Latency | Throughput | Memory |
 |-----------|---------|------------|--------|
@@ -67,7 +83,7 @@ Go benchmark results (Intel i7-8665U):
 | SIP header parsing | ~1.2 μs | 800k pkt/sec | 350 B/op |
 | Full processing (with metrics) | ~3 μs | 300k pkt/sec | 1000 B/op |
 
-*Note: Benchmarks measure userspace processing only. Actual latency depends on kernel eBPF overhead and system load.*
+*Note: Benchmarks measure userspace processing only. Actual latency depends on kernel eBPF overhead and system load. Load test results available in [BENCHMARK.md](./docs/BENCHMARK.md).*
 
 ## Install
 
@@ -129,11 +145,13 @@ Start docker container in privileged mode is true and host mode.
 `sip_exporter_401_total`: total number of SIP 401 Unauthorized responses.  
 `sip_exporter_403_total`: total number of SIP 403 Forbidden responses.  
 `sip_exporter_404_total`: total number of SIP 404 Not Found responses.  
+`sip_exporter_proxy_authentication_required_total`: total number of SIP 407 Proxy Authentication Required responses.  
 `sip_exporter_408_total`: total number of SIP 408 Request Timeout responses.  
 `sip_exporter_480_total`: total number of SIP 480 Temporarily Unavailable responses.  
 `sip_exporter_486_total`: total number of SIP 486 Busy Here responses.  
 `sip_exporter_500_total`: total number of SIP 500 Server Internal Error responses.  
 `sip_exporter_503_total`: total number of SIP 503 Service Unavailable responses.  
+`sip_exporter_504_total`: total number of SIP 504 Server Time-out responses.  
 `sip_exporter_600_total`: total number of SIP 600 Busy Everywhere responses.  
 `sip_exporter_603_total`: total number of SIP 603 Decline responses.  
 ### System metrics
@@ -271,7 +289,7 @@ RRD = Average(Time of 200 OK - Time of REGISTER request)
 ## Development
 
 ### Requirements
-- Go 1.24+
+- Go 1.25+
 - Clang/LLVM (for eBPF compilation)
 - Linux kernel with eBPF support
 - Root privileges (required for eBPF and packet socket)
@@ -312,7 +330,7 @@ go test -cover ./...
 make docker_build
 
 # Run with Docker Compose
-docker-compose up -d
+docker compose up -d
 ```
 
 ## E2E Testing
@@ -360,6 +378,12 @@ SIP_EXPORTER_E2E_SIPP_VERBOSE=true SIP_EXPORTER_E2E_EXPORTER_VERBOSE=true make t
 5. SIPp generates SIP traffic through loopback (127.0.0.1:5060)
 6. Exporter captures packets via eBPF and updates Prometheus metrics
 7. Tests verify ISA/SCR/SEER/SER metrics and sessions cleanup
+
+## Benchmark
+
+Load testing results: **0% packet loss at 2,000 CPS (28,000 PPS)**.
+
+See [BENCHMARK.md](./docs/BENCHMARK.md) for detailed results, methodology, and optimization notes.
 
 ## Integration
 

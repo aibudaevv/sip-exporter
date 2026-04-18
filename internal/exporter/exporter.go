@@ -99,6 +99,20 @@ func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPo
 	}
 	e.sock = sock
 
+	socketRecvBufSize := 4 * 1024 * 1024
+	if setErr := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUF, socketRecvBufSize); setErr != nil {
+		return fmt.Errorf("failed to set SO_RCVBUF: %w", setErr)
+	}
+
+	var actualBufSize int
+	actualBufSize, err = unix.GetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUF)
+	if err != nil {
+		return fmt.Errorf("failed to get SO_RCVBUF: %w", err)
+	}
+	zap.L().Info("socket receive buffer configured",
+		zap.Int("requested_bytes", socketRecvBufSize),
+		zap.Int("actual_bytes", actualBufSize))
+
 	ifaceName := interfaceName
 	iface, err := net.InterfaceByName(ifaceName)
 	if err != nil {
@@ -202,7 +216,6 @@ func (e *exporter) readSocket() {
 			continue
 		}
 
-		// Copy data to avoid races
 		packet := make([]byte, n)
 		copy(packet, buf[:n])
 
@@ -360,7 +373,7 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 	if packet.IsResponse {
 		e.handleResponse(packet)
 	} else {
-		go e.services.metricser.Request(packet.Method)
+		e.services.metricser.Request(packet.Method)
 
 		if bytes.Equal(packet.Method, []byte("REGISTER")) {
 			e.storeRegisterTime(string(packet.CallID))
@@ -375,7 +388,7 @@ func (e *exporter) handleResponse(packet dto.Packet) {
 	isRegisterResponse := bytes.Equal(packet.CSeq.Method, []byte("REGISTER"))
 	is200OK := bytes.Equal(packet.ResponseStatus, []byte("200"))
 
-	go e.services.metricser.ResponseWithMetrics(
+	e.services.metricser.ResponseWithMetrics(
 		packet.ResponseStatus,
 		isInviteResponse,
 		is200OK,

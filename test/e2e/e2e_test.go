@@ -16,22 +16,57 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 const (
-	sippImage      = "pbertera/sipp:latest"
-	exporterPort   = "2119"
-	sippPort       = "15060"
-	sipsPort       = "15061"
-	sippClientPort = "15061"
-	testInterface  = "lo"
+	sippImage     = "pbertera/sipp:latest"
+	testInterface = "lo"
 )
+
+// testEnv holds per-test network configuration.
+// Each parallel test gets its own set of free ports to avoid conflicts.
+type testEnv struct {
+	endpoint       string // http://localhost:PORT — exporter /metrics endpoint
+	sippPort       string // UAS listens here; UAC connects here; exporter SIP_PORT
+	sippClientPort string // UAC listens here; exporter SIPS_PORT
+}
+
+var (
+	portMu       sync.Mutex
+	nextBasePort = 20000
+)
+
+// allocatePorts returns 3 guaranteed-unique port numbers within this process.
+// Uses a monotonic counter under a mutex so parallel tests never collide.
+// Ports start at 20000 to stay clear of the OS ephemeral range (32768–60999).
+func allocatePorts() (exporter, sipp, sippClient string) {
+	portMu.Lock()
+	defer portMu.Unlock()
+	base := nextBasePort
+	nextBasePort += 3
+	return strconv.Itoa(base), strconv.Itoa(base + 1), strconv.Itoa(base + 2)
+}
+
+// newTestEnv allocates free ports and starts an exporter container for the test.
+func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
+	t.Helper()
+	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
+
+	env := &testEnv{
+		sippPort:       sippPort,
+		sippClientPort: sippClientPort,
+	}
+	env.endpoint = startExporter(ctx, t, exporterHTTPPort, sippPort, sippClientPort)
+	return env
+}
 
 var projectRoot string
 var interfaceIP string
@@ -76,13 +111,13 @@ type sippResult struct {
 // startExporter starts exporter container and returns HTTP endpoint.
 // Image is pre-built via Makefile (docker_build target) and passed through
 // SIP_EXPORTER_E2E_IMAGE environment variable.
-func startExporter(ctx context.Context, t *testing.T) string {
+// Called only from newTestEnv; ports are allocated by freePort.
+func startExporter(ctx context.Context, t *testing.T, exporterPort, sippPort, sippClientPort string) string {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	// ADDED: configurable exporter log level
 	exporterLogLevel := "error"
 	if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
 		exporterLogLevel = "debug"
@@ -96,11 +131,11 @@ func startExporter(ctx context.Context, t *testing.T) string {
 			"SIP_EXPORTER_INTERFACE":    testInterface,
 			"SIP_EXPORTER_HTTP_PORT":    exporterPort,
 			"SIP_EXPORTER_SIP_PORT":     sippPort,
-			"SIP_EXPORTER_SIPS_PORT":    sipsPort,
+			"SIP_EXPORTER_SIPS_PORT":    sippClientPort,
 			"SIP_EXPORTER_LOGGER_LEVEL": exporterLogLevel,
 		},
 		WaitingFor: wait.ForHTTP("/metrics").
-			WithPort(exporterPort).
+			WithPort(nat.Port(exporterPort)).
 			WithStartupTimeout(60 * time.Second),
 	}
 
@@ -144,9 +179,62 @@ func startExporter(ctx context.Context, t *testing.T) string {
 	return fmt.Sprintf("http://localhost:%s", exporterPort)
 }
 
+// waitForSessionsZero polls sip_exporter_sessions until it reaches 0.
+// Needed because the sessions gauge is updated by a 1-second ticker in the exporter,
+// not immediately when dialogs are deleted.
+func waitForSessionsZero(t *testing.T, endpoint string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		return getMetric(t, endpoint, "sip_exporter_sessions") == 0
+	}, 5*time.Second, 300*time.Millisecond, "sessions should reach 0 after all calls terminated")
+}
+
+// waitForMetricStable polls sip_exporter_packets_total until the value stops
+// changing for 2 consecutive intervals (2 × 300 ms), indicating all in-flight
+// packets have been processed by the exporter.
+func waitForMetricStable(t *testing.T, endpoint string) {
+	t.Helper()
+	prev := -1.0
+	stableCount := 0
+	require.Eventually(t, func() bool {
+		cur := getMetric(t, endpoint, "sip_exporter_packets_total")
+		if cur == prev {
+			stableCount++
+			return stableCount >= 2
+		}
+		prev = cur
+		stableCount = 0
+		return false
+	}, 10*time.Second, 300*time.Millisecond, "metrics did not stabilize after SIPp scenario")
+}
+
+// getMetric reads a single numeric metric value from the exporter /metrics endpoint.
+func getMetric(t *testing.T, endpoint string, metricName string) float64 {
+	t.Helper()
+
+	resp, err := http.Get(endpoint + "/metrics") //nolint:noctx // test helper
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	re := regexp.MustCompile(`^` + metricName + `\s+([0-9.]+)`)
+	for _, line := range strings.Split(string(body), "\n") {
+		matches := re.FindStringSubmatch(strings.TrimSpace(line))
+		if len(matches) == 2 {
+			val, err := strconv.ParseFloat(matches[1], 64)
+			require.NoError(t, err)
+			return val
+		}
+	}
+
+	return 0
+}
+
 // runSippScenario starts SIPp server and client via docker CLI (host network mode),
 // waits for calls to complete and returns statistics.
-func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario string, callCount int) sippResult {
+func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario string, callCount int, env *testEnv) sippResult {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -168,7 +256,7 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 		sippImage,
 		"-sf", "/scenarios/"+uasScenarioFile,
 		"-i", "127.0.0.1",
-		"-p", sippPort,
+		"-p", env.sippPort,
 		"-m", strconv.Itoa(callCount),
 		"-nostdin",
 	)
@@ -184,9 +272,9 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 		sippImage,
 		"-sf", "/scenarios/"+uacScenarioFile,
 		"-i", "127.0.0.1",
-		"-p", sippClientPort,
+		"-p", env.sippClientPort,
 		"-m", strconv.Itoa(callCount),
-		"127.0.0.1:"+sippPort,
+		"127.0.0.1:"+env.sippPort,
 	)
 	uacCmd.Stdout = stdout
 	uacCmd.Stderr = stderr
@@ -194,13 +282,13 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 
 	_ = uasCmd.Wait()
 
-	time.Sleep(3 * time.Second)
+	waitForMetricStable(t, env.endpoint)
 
 	return sippResult{totalCalls: callCount}
 }
 
 // runSippUACOnly starts SIPp client only (no server) for timeout tests.
-func runSippUACOnly(ctx context.Context, t *testing.T, uacScenario string, callCount int) {
+func runSippUACOnly(ctx context.Context, t *testing.T, uacScenario string, callCount int, env *testEnv) {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -221,16 +309,16 @@ func runSippUACOnly(ctx context.Context, t *testing.T, uacScenario string, callC
 		sippImage,
 		"-sf", "/scenarios/"+uacScenarioFile,
 		"-i", "127.0.0.1",
-		"-p", sippClientPort,
+		"-p", env.sippClientPort,
 		"-m", strconv.Itoa(callCount),
 		"-timeout", "5s",
-		"127.0.0.1:"+sippPort,
+		"127.0.0.1:"+env.sippPort,
 	)
 	uacCmd.Stdout = stdout
 	uacCmd.Stderr = stderr
 	_ = uacCmd.Run()
 
-	time.Sleep(3 * time.Second)
+	waitForMetricStable(t, env.endpoint)
 }
 
 // getSER reads sip_exporter_ser metric from exporter endpoint.

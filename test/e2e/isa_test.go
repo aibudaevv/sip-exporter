@@ -12,6 +12,7 @@ import (
 // TestISA_AllScenarios tests ISA metric with various ineffective response scenarios.
 // ISA = (INVITE → 408, 500, 503, 504) / Total INVITE × 100
 func TestISA_AllScenarios(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		uasScenario string
@@ -44,76 +45,70 @@ func TestISA_AllScenarios(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
+			env := newTestEnv(ctx, t)
 
-			endpoint := startExporter(ctx, t)
-			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
 
-			isa := getISA(t, endpoint)
+			isa := getISA(t, env.endpoint)
 			t.Logf("ISA = %.2f (want %.2f)", isa, tt.wantISA)
 			require.Equal(t, tt.wantISA, isa)
 
-			sessions := getSessions(t, endpoint)
-			require.Equal(t, 0.0, sessions, "sessions should be 0 after all calls terminated")
+			waitForSessionsZero(t, env.endpoint)
 		})
-		if t.Failed() {
-			break
-		}
 	}
 }
 
 // TestISA_Mixed tests 50% 200 OK + 50% 503 → ISA = 50%.
 // 503 is ineffective, 200 is effective.
 func TestISA_Mixed(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
+	env := newTestEnv(ctx, t)
 
-	endpoint := startExporter(ctx, t)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25, env)
+	runSippScenario(ctx, t, "uas_unavailable.xml", "uac_unavailable.xml", 25, env)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25)
-	runSippScenario(ctx, t, "uas_unavailable.xml", "uac_unavailable.xml", 25)
-
-	isa := getISA(t, endpoint)
+	isa := getISA(t, env.endpoint)
 	t.Logf("ISA = %.2f (want %.2f)", isa, 50.0)
 	require.Equal(t, 50.0, isa)
 
-	sessions := getSessions(t, endpoint)
-	require.Equal(t, 0.0, sessions, "sessions should be 0 after all calls terminated")
+	waitForSessionsZero(t, env.endpoint)
 }
 
 // TestISA_MixedWith3xx tests 50% 302 Redirect + 50% 500 Server Error → ISA = 50%.
 // Unlike SER/SEER, 3xx are NOT excluded from ISA denominator.
 // ISA = 25 / 50 × 100 = 50%
 func TestISA_MixedWith3xx(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
+	env := newTestEnv(ctx, t)
 
-	endpoint := startExporter(ctx, t)
+	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 25, env)
+	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 25, env)
 
-	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 25)
-	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 25)
-
-	isa := getISA(t, endpoint)
+	isa := getISA(t, env.endpoint)
 	t.Logf("ISA = %.2f (want %.2f)", isa, 50.0)
 	require.Equal(t, 50.0, isa)
 
-	sessions := getSessions(t, endpoint)
-	require.Equal(t, 0.0, sessions, "sessions should be 0 after all calls terminated")
+	waitForSessionsZero(t, env.endpoint)
 }
 
 // TestISA_Complex tests mixed effective and ineffective codes.
 // 20×200 OK + 15×500 Server Error + 15×503 Service Unavailable → ISA = (15+15)/50 × 100 = 60%.
 func TestISA_Complex(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
+	env := newTestEnv(ctx, t)
 
-	endpoint := startExporter(ctx, t)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 20, env)
+	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 15, env)
+	runSippScenario(ctx, t, "uas_unavailable.xml", "uac_unavailable.xml", 15, env)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 20)
-	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 15)
-	runSippScenario(ctx, t, "uas_unavailable.xml", "uac_unavailable.xml", 15)
-
-	isa := getISA(t, endpoint)
+	isa := getISA(t, env.endpoint)
 	t.Logf("ISA = %.2f (want %.2f)", isa, 60.0)
 	require.Equal(t, 60.0, isa)
 
-	sessions := getSessions(t, endpoint)
-	require.Equal(t, 0.0, sessions, "sessions should be 0 after all calls terminated")
+	waitForSessionsZero(t, env.endpoint)
 }
