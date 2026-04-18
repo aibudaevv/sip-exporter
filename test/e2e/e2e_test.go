@@ -351,6 +351,29 @@ func getSCR(t *testing.T, endpoint string) float64 {
 	return 0
 }
 
+func getSPD(t *testing.T, endpoint string) float64 {
+	t.Helper()
+
+	resp, err := http.Get(endpoint + "/metrics")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	re := regexp.MustCompile(`^sip_exporter_spd\s+([0-9.]+)`)
+	for _, line := range strings.Split(string(body), "\n") {
+		matches := re.FindStringSubmatch(strings.TrimSpace(line))
+		if len(matches) == 2 {
+			val, err := strconv.ParseFloat(matches[1], 64)
+			require.NoError(t, err)
+			return val
+		}
+	}
+
+	return 0
+}
+
 // absScenarioPath returns absolute path to SIPp scenario.
 func absScenarioPath(t *testing.T, filename string) string {
 	t.Helper()
