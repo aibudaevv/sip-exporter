@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 )
 
@@ -877,6 +878,18 @@ func (m *metrics) getRRD() float64 {
 	return float64(total) / float64(count) / 1e3 //nolint:mnd // convert microseconds to milliseconds
 }
 
+func (m *metrics) getRRDFromHistogram() (sum float64, count uint64) {
+	if m.rrd == nil {
+		return 0, 0
+	}
+	var dtoMetric dto.Metric
+	if err := m.rrd.Write(&dtoMetric); err != nil {
+		return 0, 0
+	}
+	h := dtoMetric.GetHistogram()
+	return h.GetSampleSum(), h.GetSampleCount()
+}
+
 // TestMetrics_SCR_NoInvites — MC/DC: total == 0
 func TestMetrics_SCR_NoInvites(t *testing.T) {
 	m := &metrics{}
@@ -1193,6 +1206,18 @@ func (m *metrics) getSPD() float64 {
 	return float64(totalNs) / float64(count) / 1e9
 }
 
+func (m *metrics) getSPDFromHistogram() (sum float64, count uint64) {
+	if m.spd == nil {
+		return 0, 0
+	}
+	var dtoMetric dto.Metric
+	if err := m.spd.Write(&dtoMetric); err != nil {
+		return 0, 0
+	}
+	h := dtoMetric.GetHistogram()
+	return h.GetSampleSum(), h.GetSampleCount()
+}
+
 func TestMetrics_SPD_NoCompleted(t *testing.T) {
 	m := &metrics{}
 	require.Equal(t, 0.0, m.getSPD())
@@ -1273,4 +1298,104 @@ func TestMetrics_SPD_FullCycle(t *testing.T) {
 
 	m.UpdateSPD(0)
 	require.InDelta(t, 10.0, m.getSPD(), 0.01)
+}
+
+func TestMetrics_SPD_Histogram(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	sum, count := m.getSPDFromHistogram()
+	require.Equal(t, 0.0, sum)
+	require.Equal(t, uint64(0), count)
+
+	m.UpdateSPD(5 * time.Second)
+
+	sum, count = m.getSPDFromHistogram()
+	require.Equal(t, 5.0, sum)
+	require.Equal(t, uint64(1), count)
+
+	m.UpdateSPD(15 * time.Second)
+
+	sum, count = m.getSPDFromHistogram()
+	require.Equal(t, 20.0, sum)
+	require.Equal(t, uint64(2), count)
+}
+
+func TestMetrics_SPD_Histogram_NegativeIgnored(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateSPD(-1 * time.Second)
+
+	sum, count := m.getSPDFromHistogram()
+	require.Equal(t, 0.0, sum)
+	require.Equal(t, uint64(0), count)
+}
+
+func TestMetrics_SPD_Histogram_ZeroDuration(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateSPD(0)
+
+	sum, count := m.getSPDFromHistogram()
+	require.Equal(t, 0.0, sum)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestMetrics_SPD_DeprecatedAverageMatches(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateSPD(3 * time.Second)
+	m.UpdateSPD(7 * time.Second)
+
+	sum, count := m.getSPDFromHistogram()
+	require.Equal(t, 10.0, sum)
+	require.Equal(t, uint64(2), count)
+
+	require.Equal(t, 5.0, m.getSPD())
+}
+
+func TestMetrics_RRD_Histogram(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	sum, count := m.getRRDFromHistogram()
+	require.Equal(t, 0.0, sum)
+	require.Equal(t, uint64(0), count)
+
+	m.UpdateRRD(100.5)
+
+	sum, count = m.getRRDFromHistogram()
+	require.InDelta(t, 100.5, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+
+	m.UpdateRRD(200.5)
+
+	sum, count = m.getRRDFromHistogram()
+	require.InDelta(t, 301.0, sum, 0.01)
+	require.Equal(t, uint64(2), count)
+}
+
+func TestMetrics_RRD_Histogram_MultipleObservations(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	for i := range 100 {
+		m.UpdateRRD(float64(i) * 10.0)
+	}
+
+	sum, count := m.getRRDFromHistogram()
+	require.Equal(t, uint64(100), count)
+	require.InDelta(t, 49500.0, sum, 1.0)
+
+	require.InDelta(t, 495.0, m.getRRD(), 0.01)
+}
+
+func TestMetrics_RRD_DeprecatedAverageMatches(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateRRD(50.0)
+	m.UpdateRRD(150.0)
+
+	sum, count := m.getRRDFromHistogram()
+	require.InDelta(t, 200.0, sum, 0.01)
+	require.Equal(t, uint64(2), count)
+
+	require.InDelta(t, 100.0, m.getRRD(), 0.01)
 }

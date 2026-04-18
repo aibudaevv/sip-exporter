@@ -69,14 +69,16 @@ type (
 		sessionCompletedTotal int64
 
 		// RRD metrics (RFC 6076 for REGISTER)
-		rrdTotal uint64               // Суммарная задержка для расчета среднего
-		rrdCount int64                // Количество измерений для среднего
-		rrd      prometheus.GaugeFunc // Метрика RRD для REGISTER
+		rrdTotal uint64               // deprecated: суммарная задержка для расчёта среднего (микросекунды)
+		rrdCount int64                // deprecated: количество измерений для среднего
+		rrd      prometheus.Histogram // Метрика RRD histogram (ms)
+		rrdAvg   prometheus.GaugeFunc // deprecated: среднее RRD (ms)
 
 		// SPD metrics (RFC 6076 §4.5)
-		spdTotalNs uint64               // Суммарная длительность сессий (наносекунды)
-		spdCount   int64                // Количество завершённых сессий
-		spd        prometheus.GaugeFunc // Метрика SPD
+		spdTotalNs uint64               // deprecated: суммарная длительность сессий (наносекунды)
+		spdCount   int64                // deprecated: количество завершённых сессий
+		spd        prometheus.Histogram // Метрика SPD histogram (sec)
+		spdAvg     prometheus.GaugeFunc // deprecated: среднее SPD (sec)
 	}
 
 	Metricser interface {
@@ -108,8 +110,8 @@ func newMetricserWithRegistry(reg *prometheus.Registry) Metricser {
 	m.seer = newSEERWithRegistry(m, reg)
 	m.isa = newISAWithRegistry(m, reg)
 	m.scr = newSCRWithRegistry(m, reg)
-	m.rrd = newRRDWithRegistry(m, reg)
-	m.spd = newSPDWithRegistry(m, reg)
+	m.rrd, m.rrdAvg = newRRDWithRegistry(m, reg)
+	m.spd, m.spdAvg = newSPDWithRegistry(m, reg)
 
 	return m
 }
@@ -206,6 +208,15 @@ func newCounterWithRegistry(name, help string, reg *prometheus.Registry) prometh
 	})
 }
 
+func newHistogramWithRegistry(opts prometheus.HistogramOpts, reg *prometheus.Registry) prometheus.Histogram {
+	if reg != nil {
+		h := prometheus.NewHistogram(opts)
+		reg.MustRegister(h)
+		return h
+	}
+	return promauto.NewHistogram(opts)
+}
+
 func newSERWithRegistry(m *metrics, reg *prometheus.Registry) prometheus.GaugeFunc {
 	fn := func() float64 {
 		total := atomic.LoadInt64(&m.inviteTotal)
@@ -300,7 +311,13 @@ func newSCRWithRegistry(m *metrics, reg *prometheus.Registry) prometheus.GaugeFu
 	}, fn)
 }
 
-func newRRDWithRegistry(m *metrics, reg *prometheus.Registry) prometheus.GaugeFunc {
+func newRRDWithRegistry(m *metrics, reg *prometheus.Registry) (prometheus.Histogram, prometheus.GaugeFunc) {
+	hist := newHistogramWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_rrd",
+		Help:    "Registration Request Delay in milliseconds (RFC 6076)",
+		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
+	}, reg)
+
 	fn := func() float64 {
 		count := atomic.LoadInt64(&m.rrdCount)
 		if count == 0 {
@@ -309,19 +326,33 @@ func newRRDWithRegistry(m *metrics, reg *prometheus.Registry) prometheus.GaugeFu
 		total := atomic.LoadUint64(&m.rrdTotal)
 		return float64(total) / float64(count) / 1e3 //nolint:mnd // convert microseconds to milliseconds
 	}
+
+	help := "Registration Request Delay average in milliseconds (DEPRECATED: use sip_exporter_rrd histogram)"
+
+	var avg prometheus.GaugeFunc
 	if reg != nil {
-		return prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-			Name: "sip_exporter_rrd",
-			Help: "Registration Request Delay in milliseconds (RFC 6076)",
+		avg = prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "sip_exporter_rrd_average",
+			Help: help,
+		}, fn)
+		reg.MustRegister(avg)
+	} else {
+		avg = promauto.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "sip_exporter_rrd_average",
+			Help: help,
 		}, fn)
 	}
-	return promauto.NewGaugeFunc(prometheus.GaugeOpts{
-		Name: "sip_exporter_rrd",
-		Help: "Registration Request Delay in milliseconds (RFC 6076)",
-	}, fn)
+
+	return hist, avg
 }
 
-func newSPDWithRegistry(m *metrics, reg *prometheus.Registry) prometheus.GaugeFunc {
+func newSPDWithRegistry(m *metrics, reg *prometheus.Registry) (prometheus.Histogram, prometheus.GaugeFunc) {
+	hist := newHistogramWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_spd",
+		Help:    "Session Process Duration in seconds (RFC 6076)",
+		Buckets: []float64{1, 5, 10, 30, 60, 300, 600, 1800, 3600},
+	}, reg)
+
 	fn := func() float64 {
 		count := atomic.LoadInt64(&m.spdCount)
 		if count == 0 {
@@ -330,27 +361,41 @@ func newSPDWithRegistry(m *metrics, reg *prometheus.Registry) prometheus.GaugeFu
 		totalNs := atomic.LoadUint64(&m.spdTotalNs)
 		return float64(totalNs) / float64(count) / 1e9 //nolint:mnd // convert nanoseconds to seconds
 	}
+
+	help := "Session Process Duration average in seconds (DEPRECATED: use sip_exporter_spd histogram)"
+
+	var avg prometheus.GaugeFunc
 	if reg != nil {
-		return prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-			Name: "sip_exporter_spd",
-			Help: "Session Process Duration in seconds (RFC 6076)",
+		avg = prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "sip_exporter_spd_average",
+			Help: help,
+		}, fn)
+		reg.MustRegister(avg)
+	} else {
+		avg = promauto.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "sip_exporter_spd_average",
+			Help: help,
 		}, fn)
 	}
-	return promauto.NewGaugeFunc(prometheus.GaugeOpts{
-		Name: "sip_exporter_spd",
-		Help: "Session Process Duration in seconds (RFC 6076)",
-	}, fn)
+
+	return hist, avg
 }
 
 func (m *metrics) UpdateSPD(duration time.Duration) {
 	if duration < 0 {
 		return
 	}
+	if m.spd != nil {
+		m.spd.Observe(duration.Seconds())
+	}
 	atomic.AddInt64(&m.spdCount, 1)
 	atomic.AddUint64(&m.spdTotalNs, uint64(duration.Nanoseconds()))
 }
 
 func (m *metrics) UpdateRRD(delayMs float64) {
+	if m.rrd != nil {
+		m.rrd.Observe(delayMs)
+	}
 	atomic.AddInt64(&m.rrdCount, 1)
 	//nolint:mnd // convert milliseconds to microseconds for precision
 	atomic.AddUint64(&m.rrdTotal, uint64(delayMs*1e3))

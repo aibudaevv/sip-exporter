@@ -9,9 +9,9 @@ The SIP Exporter exposes metrics based on RFC 6076 (SIP Performance Metrics). Ke
 | Metric | Description | Alert When |
 |--------|-------------|------------|
 | `sip_exporter_ser` | Session Establishment Ratio | < 50% (warning), < 20% (critical) |
-| `sip_exporter_spd` | Session Process Duration (seconds) | Unusually short (< 5s) or long (> 3600s) |
+| `sip_exporter_spd` | Session Process Duration (seconds) | p95 < 5s or p95 > 3600s |
 | `sip_exporter_isa` | Ineffective Sessions Attempts | High rate indicates DDoS or server issues |
-| `sip_exporter_rrd` | Registration Request Delay | > 500ms indicates network/registrar issues |
+| `sip_exporter_rrd` | Registration Request Delay | p95 > 500ms indicates network/registrar issues |
 | `sip_exporter_401_total` | Authentication failures | High rate indicates brute-force attacks |
 | `sip_exporter_403_total` | Forbidden responses | High rate indicates authorization issues |
 
@@ -74,13 +74,13 @@ groups:
           description: "401 Unauthorized rate is {{ $value | printf \"%.2f\" }}/s. Possible brute-force attack or misconfigured clients."
 
       - alert: SIPRegistrationSlow
-        expr: sip_exporter_rrd > 500
+        expr: histogram_quantile(0.95, rate(sip_exporter_rrd_bucket[5m])) > 500
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "Slow SIP registration times"
-          description: "Registration Request Delay is {{ $value | printf \"%.0f\" }}ms. Network or registrar performance issues."
+          description: "95th percentile registration delay is {{ $value | printf \"%.0f\" }}ms. Network or registrar performance issues."
 
       - alert: SIPSessionEstablishmentLow
         expr: sip_exporter_ser < 50 and sip_exporter_ser >= 20
@@ -142,13 +142,13 @@ groups:
           description: "{{ $value | printf \"%.1f\" }}% of INVITEs have active dialogs. Possible Session-Expires timeout issues or missing BYE messages. Check downstream servers."
 
       - alert: SIPSessionDurationTooShort
-        expr: sip_exporter_spd > 0 and sip_exporter_spd < 5
+        expr: histogram_quantile(0.95, rate(sip_exporter_spd_bucket[5m])) > 0 and histogram_quantile(0.95, rate(sip_exporter_spd_bucket[5m])) < 5
         for: 10m
         labels:
           severity: info
         annotations:
           summary: "Very short call duration"
-          description: "Average session duration is {{ $value | printf \"%.1f\" }}s. Calls are terminating very quickly, possible media issues or misconfigured dial plans."
+          description: "95th percentile session duration is {{ $value | printf \"%.1f\" }}s. Calls are terminating very quickly, possible media issues or misconfigured dial plans."
 ```
 
 ## Grafana Dashboard

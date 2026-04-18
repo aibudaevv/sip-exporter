@@ -31,7 +31,14 @@ func TestRRD_RegistrationSuccess(t *testing.T) {
 
 func getRRD(t *testing.T, endpoint string) float64 {
 	t.Helper()
-	return getMetric(t, endpoint, "sip_exporter_rrd")
+
+	sum := getMetric(t, endpoint, "sip_exporter_rrd_sum")
+	count := getMetric(t, endpoint, "sip_exporter_rrd_count")
+	if count == 0 {
+		return 0
+	}
+
+	return sum / count
 }
 
 func TestRRD_Register401(t *testing.T) {

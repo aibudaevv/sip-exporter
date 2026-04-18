@@ -211,7 +211,7 @@ SCR = (Completed Sessions) / Total INVITE × 100
 
 ### Registration Request Delay (RRD)
 
-`sip_exporter_rrd`: average delay in milliseconds between sending a REGISTER request and receiving a 200 OK response.
+`sip_exporter_rrd`: histogram of delays in milliseconds between sending a REGISTER request and receiving a 200 OK response.
 
 **Formula (RFC 6076 §4.1):**
 ```
@@ -220,8 +220,17 @@ RRD = Average(Time of 200 OK - Time of REGISTER request)
 
 - Measures the round-trip time for SIP registration transactions
 - Only successful registrations (200 OK responses) are measured
-- Returns 0 when no successful registrations have occurred
-- The metric is cumulative — it shows the average delay over the entire runtime
+- Exposed as a Prometheus Histogram with buckets: `[1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000]` ms
+- Use `histogram_quantile()` for percentile-based alerting
+
+**PromQL examples:**
+```promql
+# 95th percentile registration delay
+histogram_quantile(0.95, rate(sip_exporter_rrd_bucket[5m]))
+
+# Average registration delay
+rate(sip_exporter_rrd_sum[5m]) / rate(sip_exporter_rrd_count[5m])
+```
 
 **Important:** RRD measures registration latency, not call setup latency. Use SER/SEER for call establishment metrics.
 
@@ -230,25 +239,35 @@ RRD = Average(Time of 200 OK - Time of REGISTER request)
 - `100-500 ms` — acceptable performance (typical WAN)
 - `> 1000 ms` — potential issues (network congestion, server overload)
 
+**Deprecated metric:** `sip_exporter_rrd_average` — cumulative average (will be removed in next major version)
+
 ---
 
 ### Session Process Duration (SPD)
 
-`sip_exporter_spd`: average duration of completed SIP sessions in seconds.
+`sip_exporter_spd`: histogram of completed SIP session durations in seconds.
 
 **Formula (RFC 6076 §4.5):**
 ```
 SPD = (Cumulative Session Duration) / (Completed Session Count)
 ```
 
-- Measures the average time from session establishment (`200 OK` to `INVITE`) to session termination (`200 OK` to `BYE` or Session-Expires timeout)
+- Measures the time from session establishment (`200 OK` to `INVITE`) to session termination (`200 OK` to `BYE` or Session-Expires timeout)
 - A session begins when the dialog is created upon receiving `200 OK` for `INVITE`
 - A session ends when:
   1. `200 OK` received for `BYE` (normal termination), **OR**
   2. Dialog expires via Session-Expires timeout (RFC 4028)
-- Returns `0` when no sessions have been completed
-- Exposed as a `Gauge` (average can go up or down as new sessions complete)
-- The metric is cumulative — it shows the running average over the entire runtime
+- Exposed as a Prometheus Histogram with buckets: `[1, 5, 10, 30, 60, 300, 600, 1800, 3600]` seconds
+- Use `histogram_quantile()` for percentile-based alerting
+
+**PromQL examples:**
+```promql
+# 99th percentile session duration
+histogram_quantile(0.99, rate(sip_exporter_spd_bucket[5m]))
+
+# Average session duration
+rate(sip_exporter_spd_sum[5m]) / rate(sip_exporter_spd_count[5m])
+```
 
 **Important:** SPD measures actual session duration, not setup latency. Use SER/SEER for establishment metrics.
 
@@ -256,3 +275,5 @@ SPD = (Cumulative Session Duration) / (Completed Session Count)
 - `< 30 s` — short calls (IVR, voicemail)
 - `180 s` — typical voice call (~3 minutes)
 - `> 3600 s` — long-duration sessions (conferences, held calls)
+
+**Deprecated metric:** `sip_exporter_spd_average` — cumulative average (will be removed in next major version)
