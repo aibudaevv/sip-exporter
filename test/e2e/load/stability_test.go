@@ -118,8 +118,15 @@ func TestBenchmark_MemoryStability(t *testing.T) {
 	t.Logf("Memory samples: %d", len(memSamples))
 
 	require.Greater(t, packetsTotal, float64(0), "should have processed packets")
+	require.Less(t, growthRate, 1.0,
+		"memory growth rate SLO: < 1 MB/min (got %.2f MB/min)", growthRate)
 
-	if growthRate > 1.0 {
-		t.Logf("WARNING: memory growth rate %.2f MB/min exceeds 1 MB/min threshold", growthRate)
-	}
+	recordResult(t.Name(), map[string]MetricEntry{
+		"packets_total": {Value: packetsTotal, Unit: "count", Direction: dirHigherIsBetter},
+		"cpu_avg":       {Value: cpuAvg, Unit: "%", Direction: dirLowerIsBetter},
+		"cpu_peak":      {Value: cpuPeak, Unit: "%", Direction: dirLowerIsBetter},
+		"mem_min":       {Value: memMin, Unit: "MB", Direction: dirLowerIsBetter},
+		"mem_max":       {Value: memMax, Unit: "MB", Direction: dirLowerIsBetter},
+		"mem_growth":    {Value: growthRate, Unit: "MB/min", Direction: dirLowerIsBetter},
+	})
 }

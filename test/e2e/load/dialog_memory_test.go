@@ -95,6 +95,11 @@ func TestBenchmark_MemoryPerDialog(t *testing.T) {
 					memMB:   memMB,
 				})
 
+				recordResult(t.Name(), map[string]MetricEntry{
+					"sessions": {Value: sessions, Unit: "count", Direction: dirHigherIsBetter},
+					"mem_mb":   {Value: memMB, Unit: "MB", Direction: dirLowerIsBetter},
+				})
+
 				waitForContainerExit(ctx, t, uasContainer)
 			} else {
 				memMB := getSingleMemSample(t, env.exporterContainer.GetContainerID())
@@ -102,6 +107,10 @@ func TestBenchmark_MemoryPerDialog(t *testing.T) {
 				measurements = append(measurements, dialogMeasurement{
 					dialogs: 0,
 					memMB:   memMB,
+				})
+
+				recordResult(t.Name(), map[string]MetricEntry{
+					"mem_mb": {Value: memMB, Unit: "MB", Direction: dirLowerIsBetter},
 				})
 			}
 		})

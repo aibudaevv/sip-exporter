@@ -37,7 +37,11 @@ func (c *dialogs) Delete(dialogID string) time.Duration {
 		return 0
 	}
 	delete(c.storage, dialogID)
-	return time.Since(entry.createdAt)
+	d := time.Since(entry.createdAt)
+	if d < 0 {
+		return 0
+	}
+	return d
 }
 
 func (c *dialogs) Create(dialogID string, expiresAt time.Time, createdAt time.Time) {
@@ -64,7 +68,10 @@ func (c *dialogs) Cleanup() []time.Duration {
 	var durations []time.Duration
 	for id, entry := range c.storage {
 		if now.After(entry.expiresAt) {
-			durations = append(durations, now.Sub(entry.createdAt))
+			d := now.Sub(entry.createdAt)
+			if d > 0 {
+				durations = append(durations, d)
+			}
 			delete(c.storage, id)
 		}
 	}

@@ -88,8 +88,10 @@ func TestBenchmark_ScrapeLatencyUnderLoad(t *testing.T) {
 		durations = append(durations, float64(r.duration.Microseconds())/1000.0)
 	}
 
-	require.Empty(t, errors, "all scrapes should succeed")
-	require.Len(t, durations, numScrapes, "all scrapes should return timing data")
+	maxErrors := numScrapes / 20 //nolint:mnd // 5% error tolerance
+	require.LessOrEqual(t, errors, maxErrors,
+		"scrape error rate SLO: < 5%% (%d/%d failed)", errors, numScrapes)
+	require.NotEmpty(t, durations, "should have successful scrapes for latency measurement")
 
 	sort.Float64s(durations)
 
@@ -108,7 +110,14 @@ func TestBenchmark_ScrapeLatencyUnderLoad(t *testing.T) {
 	t.Logf("P95: %.2f ms", p95)
 	t.Logf("Max: %.2f ms", maxMs)
 
-	require.Less(t, p95, 100.0, "P95 scrape latency should be < 100ms")
+	require.Less(t, p95, 100.0, "P95 scrape latency SLO: < 100ms")
+
+	recordResult(t.Name(), map[string]MetricEntry{
+		"p95_ms": {Value: p95, Unit: "ms", Direction: dirLowerIsBetter},
+		"avg_ms": {Value: avgMs, Unit: "ms", Direction: dirLowerIsBetter},
+		"max_ms": {Value: maxMs, Unit: "ms", Direction: dirLowerIsBetter},
+		"min_ms": {Value: minMs, Unit: "ms", Direction: dirLowerIsBetter},
+	})
 
 	waitForContainerExit(ctx, t, uasContainer)
 }

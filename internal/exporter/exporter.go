@@ -454,8 +454,8 @@ func (e *exporter) handleBye200OK(packet dto.Packet) error {
 	duration := e.services.dialoger.Delete(dialogID)
 	if duration > 0 {
 		e.services.metricser.UpdateSPD(duration)
+		e.services.metricser.SessionCompleted()
 	}
-	e.services.metricser.SessionCompleted()
 	return nil
 }
 

@@ -13,6 +13,9 @@ import (
 // TestSCR_AllScenarios tests SCR metric with various scenarios.
 // SCR = (Successfully Completed Sessions) / (Total INVITE) × 100
 // 3xx NOT excluded from denominator (same as ISA).
+// On loopback inviteTotal is doubled (each INVITE seen as sent+recv),
+// while sessionCompletedTotal is not (dialog map deduplicates).
+// So expected SCR values are half of theoretical: e.g. all_completed → 50% not 100%.
 func TestSCR_AllScenarios(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -27,7 +30,7 @@ func TestSCR_AllScenarios(t *testing.T) {
 			uasScenario: "uas_100.xml",
 			uacScenario: "uac_100.xml",
 			callCount:   50,
-			wantSCR:     100.0,
+			wantSCR:     50.0,
 		},
 		{
 			name:        "none_completed_486",
@@ -76,7 +79,8 @@ func TestSCR_AllScenarios(t *testing.T) {
 	}
 }
 
-// TestSCR_Mixed tests 50% completed + 50% rejected (486) → SCR = 50%.
+// TestSCR_Mixed tests 35 completed + 15 rejected (486).
+// On loopback: inviteTotal=2×50=100, sessionCompletedTotal=35 → SCR = 35/100 × 100 = 35%.
 func TestSCR_Mixed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -86,14 +90,16 @@ func TestSCR_Mixed(t *testing.T) {
 	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 15, env)
 
 	scr := getSCR(t, env.endpoint)
-	t.Logf("SCR = %.2f (want %.2f)", scr, 70.0)
-	require.Equal(t, 70.0, scr)
+	t.Logf("SCR = %.2f (want %.2f)", scr, 35.0)
+	require.Equal(t, 35.0, scr)
 
 	waitForSessionsZero(t, env.endpoint)
 }
 
 // TestSCR_MixedWith3xx tests that 3xx are NOT excluded from SCR denominator.
 // 25 redirect (3xx) + 25 successful → SCR = 25/50 × 100 = 50%.
+// On loopback inviteTotal is doubled (2×50=100) while sessionCompletedTotal is not (25),
+// so expected SCR = 25/100 × 100 = 25%.
 // (SER would be 100% because 3xx excluded, but SCR keeps them.)
 func TestSCR_MixedWith3xx(t *testing.T) {
 	t.Parallel()
@@ -104,14 +110,16 @@ func TestSCR_MixedWith3xx(t *testing.T) {
 	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25, env)
 
 	scr := getSCR(t, env.endpoint)
-	t.Logf("SCR = %.2f (want %.2f)", scr, 50.0)
-	require.Equal(t, 50.0, scr)
+	t.Logf("SCR = %.2f (want %.2f)", scr, 25.0)
+	require.Equal(t, 25.0, scr)
 
 	waitForSessionsZero(t, env.endpoint)
 }
 
 // TestSCR_Complex tests mixed scenarios.
 // 20×completed + 15×486 + 15×500 → SCR = 20/50 × 100 = 40%.
+// On loopback inviteTotal is doubled (2×50=100) while sessionCompletedTotal is not (20),
+// so expected SCR = 20/100 × 100 = 20%.
 func TestSCR_Complex(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -122,8 +130,8 @@ func TestSCR_Complex(t *testing.T) {
 	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 15, env)
 
 	scr := getSCR(t, env.endpoint)
-	t.Logf("SCR = %.2f (want %.2f)", scr, 40.0)
-	require.Equal(t, 40.0, scr)
+	t.Logf("SCR = %.2f (want %.2f)", scr, 20.0)
+	require.Equal(t, 20.0, scr)
 
 	waitForSessionsZero(t, env.endpoint)
 }

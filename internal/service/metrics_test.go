@@ -1182,7 +1182,7 @@ func TestMetricser_ResponseWithMetrics_AllInOne(t *testing.T) {
 	require.Equal(t, invite3xxBefore+1, atomic.LoadInt64(&m.invite3xxTotal))
 }
 
-// SPD (Session Process Duration) tests per RFC 6076 §4.7
+// SPD (Session Process Duration) tests per RFC 6076 §4.5
 
 func (m *metrics) getSPD() float64 {
 	count := atomic.LoadInt64(&m.spdCount)
@@ -1236,10 +1236,10 @@ func TestMetrics_SPD_UpdateSPD(t *testing.T) {
 
 func TestMetrics_SPD_Values(t *testing.T) {
 	tests := []struct {
-		name      string
-		totalNs   uint64
-		count     int64
-		wantSPD   float64
+		name    string
+		totalNs uint64
+		count   int64
+		wantSPD float64
 	}{
 		{"zero_count", 0, 0, 0},
 		{"single_1s", uint64(1 * time.Second), 1, 1.0},

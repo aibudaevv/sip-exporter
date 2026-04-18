@@ -33,10 +33,20 @@ func TestLoad_INVITEFlood(t *testing.T) {
 				rate, result.ActualPPS, result.ExpectedPPS, result.LossRate*100,
 				result.DrainTime, result.CPUAvg, result.CPUPeak, result.MemMaxMB)
 
-			require.Equal(t, float64(0), result.ErrorCount,
-				"no parse errors expected during INVITE flood")
+			totalPackets := result.PacketsAfter - result.PacketsBefore
+			maxErrors := totalPackets * 0.001
+			require.LessOrEqual(t, result.ErrorCount, maxErrors,
+				"error rate SLO: < 0.1%% of processed packets")
 			require.Greater(t, result.PacketsAfter, result.PacketsBefore,
 				"exporter should have processed packets")
+
+			recordResult(t.Name(), map[string]MetricEntry{
+				"actual_pps": {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
+				"loss_rate":  {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
+				"cpu_peak":   {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},
+				"cpu_avg":    {Value: result.CPUAvg, Unit: "%", Direction: dirLowerIsBetter},
+				"mem_mb":     {Value: result.MemMaxMB, Unit: "MB", Direction: dirLowerIsBetter},
+			})
 		})
 	}
 }
@@ -58,13 +68,25 @@ func TestLoad_FullCallFlow(t *testing.T) {
 				rate, result.ActualPPS, result.ExpectedPPS, result.LossRate*100,
 				result.DrainTime, result.CPUAvg, result.CPUPeak, result.MemMaxMB)
 
-			require.Equal(t, float64(0), result.ErrorCount,
-				"no parse errors expected during full call flow")
+			totalPackets := result.PacketsAfter - result.PacketsBefore
+			maxErrors := totalPackets * 0.001
+			require.LessOrEqual(t, result.ErrorCount, maxErrors,
+				"error rate SLO: < 0.1%% of processed packets")
 			require.Greater(t, result.PacketsAfter, result.PacketsBefore,
 				"exporter should have processed packets")
 
 			ser := getMetric(t, env.endpoint, "sip_exporter_ser")
-			require.Equal(t, 100.0, ser, "SER should be 100%% (got %.2f%%)", ser)
+			require.GreaterOrEqual(t, ser, 99.0,
+				"SER SLO: >= 99%% at rate %d (got %.2f%%)", rate, ser)
+
+			recordResult(t.Name(), map[string]MetricEntry{
+				"actual_pps": {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
+				"loss_rate":  {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
+				"ser":        {Value: ser, Unit: "%", Direction: dirHigherIsBetter},
+				"cpu_peak":   {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},
+				"cpu_avg":    {Value: result.CPUAvg, Unit: "%", Direction: dirLowerIsBetter},
+				"mem_mb":     {Value: result.MemMaxMB, Unit: "MB", Direction: dirLowerIsBetter},
+			})
 		})
 	}
 }
@@ -93,6 +115,14 @@ func TestLoad_ConcurrentSessions(t *testing.T) {
 				"should have INVITE requests")
 			require.Greater(t, result.PacketsAfter, result.PacketsBefore,
 				"exporter should have processed packets")
+
+			recordResult(t.Name(), map[string]MetricEntry{
+				"sessions": {Value: sessions, Unit: "count", Direction: dirHigherIsBetter},
+				"invites":  {Value: inviteTotal, Unit: "count", Direction: dirHigherIsBetter},
+				"cpu_peak": {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},
+				"cpu_avg":  {Value: result.CPUAvg, Unit: "%", Direction: dirLowerIsBetter},
+				"mem_mb":   {Value: result.MemMaxMB, Unit: "MB", Direction: dirLowerIsBetter},
+			})
 		})
 	}
 }

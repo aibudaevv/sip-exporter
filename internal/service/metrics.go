@@ -73,7 +73,7 @@ type (
 		rrdCount int64                // Количество измерений для среднего
 		rrd      prometheus.GaugeFunc // Метрика RRD для REGISTER
 
-		// SPD metrics (RFC 6076 §4.7)
+		// SPD metrics (RFC 6076 §4.5)
 		spdTotalNs uint64               // Суммарная длительность сессий (наносекунды)
 		spdCount   int64                // Количество завершённых сессий
 		spd        prometheus.GaugeFunc // Метрика SPD
@@ -343,6 +343,9 @@ func newSPDWithRegistry(m *metrics, reg *prometheus.Registry) prometheus.GaugeFu
 }
 
 func (m *metrics) UpdateSPD(duration time.Duration) {
+	if duration < 0 {
+		return
+	}
 	atomic.AddInt64(&m.spdCount, 1)
 	atomic.AddUint64(&m.spdTotalNs, uint64(duration.Nanoseconds()))
 }

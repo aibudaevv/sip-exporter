@@ -2,16 +2,31 @@
 
 ## 0.9.0
 ### Added
-- SPD (Session Process Duration) metric per RFC 6076 §4.7 (`sip_exporter_spd`)
+- SPD (Session Process Duration) metric per RFC 6076 §4.5 (`sip_exporter_spd`)
 - SPD measures average session duration from INVITE 200 OK to BYE 200 OK (in seconds)
 - SPD also tracks sessions that expire via Session-Expires timeout
 - E2E tests for SPD: SuccessfulCalls, NoCompletedCalls, Mixed
 - MC/DC unit tests for SPD metric calculation
+- Load tests: baseline comparison system with `load_result.json` and `baseline.json` (k6 Thresholds model)
+- Load tests: `make test-load`, `make test-load-run`, `make test-load-update-baseline`
+- Load test metrics recording: each test writes structured metrics to `load_result.json`
+- Load test summary: baseline comparison table with OK / REGRESSION / IMPROVEMENT status
+- Metrics documentation: [docs/METRICS.md](docs/METRICS.md) — full reference for all metrics
 
 ### Changed
 - `Dialoger.Create` now accepts `createdAt` parameter for session duration tracking
 - `Dialoger.Delete` now returns `time.Duration` (session duration)
 - `Dialoger.Cleanup` now returns `[]time.Duration` instead of `int`
+- SCR e2e tests: expected values account for loopback duplication (SCR = theoretical/2)
+- E2e and load tests run separately (`./test/e2e/` and `./test/e2e/load/...`)
+- E2e tests use `-parallel 4` to avoid AF_PACKET socket contention on `lo`
+- Load tests use SLO-based thresholds instead of exact value assertions:
+  - `require.Equal(t, 100.0, ser)` → `require.GreaterOrEqual(t, ser, 99.0)`
+  - `require.Equal(t, 0, errors)` → `require.LessOrEqual(t, errors, maxErrors)`
+  - Warning logs replaced with `require.Less` SLO assertions
+- RFC 6076 section numbering corrected across all files (code, docs, changelog)
+- Metrics descriptions moved from README to [docs/METRICS.md](docs/METRICS.md)
+- `.gitignore` updated: `load_result.json` excluded, `baseline.json` tracked
 
 ## 0.8.0
 ### Added

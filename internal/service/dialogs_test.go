@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -148,7 +149,7 @@ func TestDialoger_Concurrent_Create(t *testing.T) {
 
 	for i := 0; i < 100; i++ {
 		go func(id int) {
-			d.Create("dialog-"+string(rune(id)), time.Now().Add(1*time.Hour), time.Now())
+			d.Create("dialog-"+strconv.Itoa(id), time.Now().Add(1*time.Hour), time.Now())
 			done <- true
 		}(i)
 	}
@@ -164,14 +165,14 @@ func TestDialoger_Concurrent_Delete(t *testing.T) {
 	d := NewDialoger()
 
 	for i := 0; i < 50; i++ {
-		d.Create("dialog-"+string(rune(i)), time.Now().Add(1*time.Hour), time.Now())
+		d.Create("dialog-"+strconv.Itoa(i), time.Now().Add(1*time.Hour), time.Now())
 	}
 
 	done := make(chan bool, 50)
 
 	for i := 0; i < 50; i++ {
 		go func(id int) {
-			d.Delete("dialog-" + string(rune(id)))
+			d.Delete("dialog-" + strconv.Itoa(id))
 			done <- true
 		}(i)
 	}
@@ -188,9 +189,9 @@ func TestDialoger_Concurrent_Cleanup(t *testing.T) {
 
 	for i := 0; i < 50; i++ {
 		if i%2 == 0 {
-			d.Create("expired-"+string(rune(i)), time.Now().Add(-1*time.Hour), time.Now())
+			d.Create("expired-"+strconv.Itoa(i), time.Now().Add(-1*time.Hour), time.Now())
 		} else {
-			d.Create("valid-"+string(rune(i)), time.Now().Add(1*time.Hour), time.Now())
+			d.Create("valid-"+strconv.Itoa(i), time.Now().Add(1*time.Hour), time.Now())
 		}
 	}
 

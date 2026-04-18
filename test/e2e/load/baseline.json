@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "updated": "2026-04-18T13:58:57+03:00",
+  "commit": "1c88e93",
+  "results": {
+    "TestLoad_FullCallFlow/rate_1800": {
+      "metrics": {
+        "actual_pps": {
+          "value": 21037.67535246147,
+          "unit": "pps",
+          "direction": "higher_is_better"
+        },
+        "cpu_avg": {
+          "value": 9.038244845360826,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "cpu_peak": {
+          "value": 13.947130872483221,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "loss_rate": {
+          "value": 0,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "mem_mb": {
+          "value": 13.48828125,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        },
+        "ser": {
+          "value": 100,
+          "unit": "%",
+          "direction": "higher_is_better"
+        }
+      }
+    },
+    "TestLoad_INVITEFlood/rate_100": {
+      "metrics": {
+        "actual_pps": {
+          "value": 191.72981753151876,
+          "unit": "pps",
+          "direction": "higher_is_better"
+        },
+        "cpu_avg": {
+          "value": 0.45895270270270266,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "cpu_peak": {
+          "value": 0.5919663648124192,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "loss_rate": {
+          "value": 0,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "mem_mb": {
+          "value": 12.74609375,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        }
+      }
+    }
+  }
+}
