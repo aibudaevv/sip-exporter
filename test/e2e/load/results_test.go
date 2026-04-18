@@ -40,9 +40,9 @@ type (
 	}
 
 	BaselineData struct {
-		Version          int                       `json:"version"`
-		Updated          string                    `json:"updated"`
-		Results          map[string]ScenarioResult `json:"results"`
+		Version          int                        `json:"version"`
+		Updated          string                     `json:"updated"`
+		Results          map[string]ScenarioResult  `json:"results"`
 		RegressionLimits map[string]RegressionLimit `json:"regression_limits"`
 	}
 

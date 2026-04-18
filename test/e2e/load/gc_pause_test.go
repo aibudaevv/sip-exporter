@@ -111,9 +111,9 @@ func TestBenchmark_GCPauseDuration(t *testing.T) {
 	require.Less(t, maxPause, 50.0, "max STW pause SLO: < 50ms")
 
 	recordResult(t.Name(), map[string]MetricEntry{
-		"avg_ms":  {Value: avgPause, Unit: "ms", Direction: dirLowerIsBetter},
-		"p95_ms":  {Value: p95, Unit: "ms", Direction: dirLowerIsBetter},
-		"max_ms":  {Value: maxPause, Unit: "ms", Direction: dirLowerIsBetter},
-		"min_ms":  {Value: minPause, Unit: "ms", Direction: dirLowerIsBetter},
+		"avg_ms": {Value: avgPause, Unit: "ms", Direction: dirLowerIsBetter},
+		"p95_ms": {Value: p95, Unit: "ms", Direction: dirLowerIsBetter},
+		"max_ms": {Value: maxPause, Unit: "ms", Direction: dirLowerIsBetter},
+		"min_ms": {Value: minPause, Unit: "ms", Direction: dirLowerIsBetter},
 	})
 }
