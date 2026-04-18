@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 0.9.0
+### Added
+- SPD (Session Process Duration) metric per RFC 6076 §4.7 (`sip_exporter_spd`)
+- SPD measures average session duration from INVITE 200 OK to BYE 200 OK (in seconds)
+- SPD also tracks sessions that expire via Session-Expires timeout
+- E2E tests for SPD: SuccessfulCalls, NoCompletedCalls, Mixed
+- MC/DC unit tests for SPD metric calculation
+
+### Changed
+- `Dialoger.Create` now accepts `createdAt` parameter for session duration tracking
+- `Dialoger.Delete` now returns `time.Duration` (session duration)
+- `Dialoger.Cleanup` now returns `[]time.Duration` instead of `int`
+
 ## 0.8.0
 ### Added
 - SCR (Session Completion Ratio) metric per RFC 6076 §4.9 (`sip_exporter_scr`)

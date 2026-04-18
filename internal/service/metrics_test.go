@@ -3,6 +3,7 @@ package service
 import (
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
@@ -1179,4 +1180,97 @@ func TestMetricser_ResponseWithMetrics_AllInOne(t *testing.T) {
 
 	m.ResponseWithMetrics([]byte("302"), true, false)
 	require.Equal(t, invite3xxBefore+1, atomic.LoadInt64(&m.invite3xxTotal))
+}
+
+// SPD (Session Process Duration) tests per RFC 6076 §4.7
+
+func (m *metrics) getSPD() float64 {
+	count := atomic.LoadInt64(&m.spdCount)
+	if count == 0 {
+		return 0
+	}
+	totalNs := atomic.LoadUint64(&m.spdTotalNs)
+	return float64(totalNs) / float64(count) / 1e9
+}
+
+func TestMetrics_SPD_NoCompleted(t *testing.T) {
+	m := &metrics{}
+	require.Equal(t, 0.0, m.getSPD())
+}
+
+func TestMetrics_SPD_SingleSession(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreUint64(&m.spdTotalNs, uint64(5*time.Second))
+	atomic.StoreInt64(&m.spdCount, 1)
+
+	require.Equal(t, 5.0, m.getSPD())
+}
+
+func TestMetrics_SPD_MultipleSessions(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreUint64(&m.spdTotalNs, uint64(10*time.Second))
+	atomic.StoreInt64(&m.spdCount, 2)
+
+	require.Equal(t, 5.0, m.getSPD())
+}
+
+func TestMetrics_SPD_ZeroDuration(t *testing.T) {
+	m := &metrics{}
+
+	m.UpdateSPD(0)
+
+	require.Equal(t, 0.0, m.getSPD())
+}
+
+func TestMetrics_SPD_UpdateSPD(t *testing.T) {
+	m := &metrics{}
+
+	m.UpdateSPD(3 * time.Second)
+	require.Equal(t, 3.0, m.getSPD())
+
+	m.UpdateSPD(7 * time.Second)
+	require.Equal(t, 5.0, m.getSPD())
+}
+
+func TestMetrics_SPD_Values(t *testing.T) {
+	tests := []struct {
+		name      string
+		totalNs   uint64
+		count     int64
+		wantSPD   float64
+	}{
+		{"zero_count", 0, 0, 0},
+		{"single_1s", uint64(1 * time.Second), 1, 1.0},
+		{"single_10s", uint64(10 * time.Second), 1, 10.0},
+		{"two_5s_avg", uint64(10 * time.Second), 2, 5.0},
+		{"three_mixed", uint64(30 * time.Second), 3, 10.0},
+		{"zero_duration_with_count", 0, 5, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			atomic.StoreUint64(&m.spdTotalNs, tt.totalNs)
+			atomic.StoreInt64(&m.spdCount, tt.count)
+
+			require.Equal(t, tt.wantSPD, m.getSPD())
+		})
+	}
+}
+
+func TestMetrics_SPD_FullCycle(t *testing.T) {
+	m := &metrics{}
+
+	require.Equal(t, 0.0, m.getSPD())
+
+	m.UpdateSPD(10 * time.Second)
+	require.Equal(t, 10.0, m.getSPD())
+
+	m.UpdateSPD(20 * time.Second)
+	require.Equal(t, 15.0, m.getSPD())
+
+	m.UpdateSPD(0)
+	require.InDelta(t, 10.0, m.getSPD(), 0.01)
 }

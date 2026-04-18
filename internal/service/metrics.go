@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"sync/atomic"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -71,6 +72,11 @@ type (
 		rrdTotal uint64               // Суммарная задержка для расчета среднего
 		rrdCount int64                // Количество измерений для среднего
 		rrd      prometheus.GaugeFunc // Метрика RRD для REGISTER
+
+		// SPD metrics (RFC 6076 §4.7)
+		spdTotalNs uint64               // Суммарная длительность сессий (наносекунды)
+		spdCount   int64                // Количество завершённых сессий
+		spd        prometheus.GaugeFunc // Метрика SPD
 	}
 
 	Metricser interface {
@@ -80,6 +86,7 @@ type (
 		Invite200OK()
 		SessionCompleted()
 		UpdateRRD(delayMs float64)
+		UpdateSPD(duration time.Duration)
 		UpdateSession(size int)
 		SystemError()
 	}
@@ -102,6 +109,7 @@ func newMetricserWithRegistry(reg *prometheus.Registry) Metricser {
 	m.isa = newISAWithRegistry(m, reg)
 	m.scr = newSCRWithRegistry(m, reg)
 	m.rrd = newRRDWithRegistry(m, reg)
+	m.spd = newSPDWithRegistry(m, reg)
 
 	return m
 }
@@ -311,6 +319,32 @@ func newRRDWithRegistry(m *metrics, reg *prometheus.Registry) prometheus.GaugeFu
 		Name: "sip_exporter_rrd",
 		Help: "Registration Request Delay in milliseconds (RFC 6076)",
 	}, fn)
+}
+
+func newSPDWithRegistry(m *metrics, reg *prometheus.Registry) prometheus.GaugeFunc {
+	fn := func() float64 {
+		count := atomic.LoadInt64(&m.spdCount)
+		if count == 0 {
+			return 0
+		}
+		totalNs := atomic.LoadUint64(&m.spdTotalNs)
+		return float64(totalNs) / float64(count) / 1e9 //nolint:mnd // convert nanoseconds to seconds
+	}
+	if reg != nil {
+		return prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "sip_exporter_spd",
+			Help: "Session Process Duration in seconds (RFC 6076)",
+		}, fn)
+	}
+	return promauto.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "sip_exporter_spd",
+		Help: "Session Process Duration in seconds (RFC 6076)",
+	}, fn)
+}
+
+func (m *metrics) UpdateSPD(duration time.Duration) {
+	atomic.AddInt64(&m.spdCount, 1)
+	atomic.AddUint64(&m.spdTotalNs, uint64(duration.Nanoseconds()))
 }
 
 func (m *metrics) UpdateRRD(delayMs float64) {

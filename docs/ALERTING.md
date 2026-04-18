@@ -9,6 +9,7 @@ The SIP Exporter exposes metrics based on RFC 6076 (SIP Performance Metrics). Ke
 | Metric | Description | Alert When |
 |--------|-------------|------------|
 | `sip_exporter_ser` | Session Establishment Ratio | < 50% (warning), < 20% (critical) |
+| `sip_exporter_spd` | Session Process Duration (seconds) | Unusually short (< 5s) or long (> 3600s) |
 | `sip_exporter_isa` | Ineffective Sessions Attempts | High rate indicates DDoS or server issues |
 | `sip_exporter_rrd` | Registration Request Delay | > 500ms indicates network/registrar issues |
 | `sip_exporter_401_total` | Authentication failures | High rate indicates brute-force attacks |
@@ -139,6 +140,15 @@ groups:
         annotations:
           summary: "High ratio of active SIP dialogs"
           description: "{{ $value | printf \"%.1f\" }}% of INVITEs have active dialogs. Possible Session-Expires timeout issues or missing BYE messages. Check downstream servers."
+
+      - alert: SIPSessionDurationTooShort
+        expr: sip_exporter_spd > 0 and sip_exporter_spd < 5
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Very short call duration"
+          description: "Average session duration is {{ $value | printf \"%.1f\" }}s. Calls are terminating very quickly, possible media issues or misconfigured dial plans."
 ```
 
 ## Grafana Dashboard

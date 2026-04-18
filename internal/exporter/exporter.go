@@ -151,15 +151,16 @@ func (e *exporter) sipDialogMetricsUpdate() {
 	ticker := time.NewTicker(1 * time.Second)
 	for {
 		<-ticker.C
-		expired := e.services.dialoger.Cleanup()
+		durations := e.services.dialoger.Cleanup()
 		e.cleanupRegisterTracker()
 		s := e.services.dialoger.Size()
 
-		for i := 0; i < expired; i++ {
+		for _, d := range durations {
 			e.services.metricser.SessionCompleted()
+			e.services.metricser.UpdateSPD(d)
 		}
 
-		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", expired))
+		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", len(durations)))
 
 		e.services.metricser.UpdateSession(s)
 	}
@@ -439,7 +440,7 @@ func (e *exporter) handleInvite200OK(packet dto.Packet) error {
 	zap.L().Debug("create sip dialog",
 		zap.String("session", dialogID),
 		zap.Int("expires_sec", expires))
-	e.services.dialoger.Create(dialogID, expiresAt)
+	e.services.dialoger.Create(dialogID, expiresAt, time.Now())
 	return nil
 }
 
@@ -450,7 +451,10 @@ func (e *exporter) handleBye200OK(packet dto.Packet) error {
 	}
 
 	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
-	e.services.dialoger.Delete(dialogID)
+	duration := e.services.dialoger.Delete(dialogID)
+	if duration > 0 {
+		e.services.metricser.UpdateSPD(duration)
+	}
 	e.services.metricser.SessionCompleted()
 	return nil
 }

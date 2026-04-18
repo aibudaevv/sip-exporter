@@ -22,6 +22,8 @@ type mockMetricser struct {
 	rrdUpdated                bool
 	rrdDelay                  float64
 	responseWithMetricsCalled bool
+	spdUpdated                bool
+	spdDuration               time.Duration
 }
 
 func (m *mockMetricser) Request(in []byte) {
@@ -58,6 +60,11 @@ func (m *mockMetricser) UpdateRRD(delayMs float64) {
 	m.rrdDelay = delayMs
 }
 
+func (m *mockMetricser) UpdateSPD(duration time.Duration) {
+	m.spdUpdated = true
+	m.spdDuration = duration
+}
+
 func (m *mockMetricser) UpdateSession(size int) {
 	m.sessionUpdated = size
 }
@@ -66,29 +73,35 @@ func (m *mockMetricser) SystemError() {
 	m.systemErrorCalled = true
 }
 
+type dialogCreateArgs struct {
+	expiresAt time.Time
+	createdAt time.Time
+}
+
 type mockDialoger struct {
-	created      map[string]time.Time
-	deleted      []string
-	cleanupCount int
+	created        map[string]dialogCreateArgs
+	deleted        []string
+	cleanupResults []time.Duration
 }
 
-func (m *mockDialoger) Create(dialogID string, expiresAt time.Time) {
+func (m *mockDialoger) Create(dialogID string, expiresAt time.Time, createdAt time.Time) {
 	if m.created == nil {
-		m.created = make(map[string]time.Time)
+		m.created = make(map[string]dialogCreateArgs)
 	}
-	m.created[dialogID] = expiresAt
+	m.created[dialogID] = dialogCreateArgs{expiresAt: expiresAt, createdAt: createdAt}
 }
 
-func (m *mockDialoger) Delete(dialogID string) {
+func (m *mockDialoger) Delete(dialogID string) time.Duration {
 	m.deleted = append(m.deleted, dialogID)
+	return 100 * time.Millisecond
 }
 
 func (m *mockDialoger) Size() int {
 	return len(m.created)
 }
 
-func (m *mockDialoger) Cleanup() int {
-	return m.cleanupCount
+func (m *mockDialoger) Cleanup() []time.Duration {
+	return m.cleanupResults
 }
 
 // ==================== normalizeDialogID tests ====================
@@ -1472,7 +1485,13 @@ func TestSipDialogMetricsUpdate_ExpiredIncrementsSessionCompleted(t *testing.T) 
 	start := time.Now()
 	mm := &mockMetricser{}
 	md := &mockDialoger{
-		cleanupCount: 5,
+		cleanupResults: []time.Duration{
+			1 * time.Second,
+			2 * time.Second,
+			3 * time.Second,
+			4 * time.Second,
+			5 * time.Second,
+		},
 	}
 
 	e := &exporter{
@@ -1483,13 +1502,13 @@ func TestSipDialogMetricsUpdate_ExpiredIncrementsSessionCompleted(t *testing.T) 
 		registerTracker: make(map[string]registerEntry),
 	}
 
-	// Simulate one tick of sipDialogMetricsUpdate
-	// We can't call it directly (it's an infinite loop), so test the logic
-	expired := e.services.dialoger.Cleanup()
-	for i := 0; i < expired; i++ {
+	durations := e.services.dialoger.Cleanup()
+	for _, d := range durations {
 		e.services.metricser.SessionCompleted()
+		e.services.metricser.UpdateSPD(d)
 	}
 
 	require.True(t, mm.sessionCompletedFlag, "SessionCompleted should be called")
+	require.True(t, mm.spdUpdated, "UpdateSPD should be called")
 	t.Logf("duration: %v", time.Since(start))
 }
