@@ -89,6 +89,8 @@ Dialogs are tracked with Session-Expires (RFC 4028). If no BYE is received befor
 | RRD | §4.1 | Registration Request Delay |
 | SPD | §4.5 | Session Process Duration |
 | TTR | — | Time to First Response |
+| ASR | — | Answer Seizure Ratio (ITU-T E.411) |
+| SDC | — | Session Duration Counter |
 
 ---
 
@@ -310,3 +312,54 @@ rate(sip_exporter_ttr_sum[5m]) / rate(sip_exporter_ttr_count[5m])
 - `< 50 ms` — excellent server responsiveness
 - `100-500 ms` — acceptable (typical for loaded servers)
 - `> 1000 ms` — potential issues (server overload, network latency)
+
+---
+
+### Answer Seizure Ratio (ASR)
+
+`sip_exporter_asr`: percentage of INVITE requests that received a 200 OK response.
+
+**Formula (ITU-T E.411):**
+```
+ASR = (INVITE → 200 OK) / Total INVITE × 100
+```
+
+- Classic telephony metric defined in ITU-T E.411, referenced by RFC 6076 §4.6
+- Unlike SER, 3xx responses are **NOT excluded from the denominator**
+- Undefined when no INVITE requests have been received
+
+**Relationship with SER:** ASR is always <= SER. When 3xx responses are present, SER excludes them from the denominator, making SER higher. ASR keeps all INVITEs in the denominator.
+
+**PromQL examples:**
+```promql
+# Current ASR
+sip_exporter_asr
+
+# Compare with SER to detect redirect volume
+sip_exporter_ser - sip_exporter_asr
+```
+
+**Example values:**
+- `100` — all INVITEs received 200 OK
+- `50` — half of INVITEs received 200 OK
+- `0` — no INVITEs received 200 OK
+
+---
+
+### Session Duration Counter (SDC)
+
+`sip_exporter_sdc_total`: total number of completed SIP sessions (Prometheus Counter).
+
+- Counts sessions that ended via:
+  1. `200 OK` received for `BYE` (normal termination), **OR**
+  2. Dialog expired via Session-Expires timeout (RFC 4028)
+- Same events counted by SCR numerator, but exposed as a Counter for rate queries
+
+**PromQL examples:**
+```promql
+# Session completion rate (sessions per second)
+rate(sip_exporter_sdc_total[5m])
+
+# Session completion rate per minute
+rate(sip_exporter_sdc_total[1m]) * 60
+```

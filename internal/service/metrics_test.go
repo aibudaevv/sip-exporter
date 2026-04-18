@@ -467,6 +467,17 @@ func (m *metrics) getISA() float64 {
 	return float64(ineffective) / float64(total) * 100
 }
 
+// getASR returns current ASR value for tests
+// ASR = invite200OKTotal / inviteTotal × 100 (3xx NOT excluded, unlike SER)
+func (m *metrics) getASR() float64 {
+	total := atomic.LoadInt64(&m.inviteTotal)
+	if total == 0 {
+		return 0
+	}
+	ok := atomic.LoadInt64(&m.invite200OKTotal)
+	return float64(ok) / float64(total) * 100 //nolint:mnd // percentage formula
+}
+
 // TestMetrics_SEER_NoInvites — MC/DC: total == 0
 func TestMetrics_SEER_NoInvites(t *testing.T) {
 	m := &metrics{}
@@ -703,9 +714,156 @@ func TestMetrics_SEER_NonEffectiveCodes(t *testing.T) {
 			atomic.StoreInt64(&m.inviteEffectiveTotal, 0)
 			atomic.StoreInt64(&m.invite3xxTotal, 0)
 
-			// Non-effective codes should NOT increment inviteEffectiveTotal
-			// Verify SEER remains 0
 			require.Equal(t, 0.0, m.getSEER())
+		})
+	}
+}
+
+// ASR (Answer Seizure Ratio) tests per ITU-T E.411
+// Formula: ASR = (INVITE → 200 OK) / Total INVITE × 100
+// 3xx NOT excluded from denominator (difference from SER)
+
+// TestMetrics_ASR_NoInvites — MC/DC: total == 0
+func TestMetrics_ASR_NoInvites(t *testing.T) {
+	m := &metrics{}
+	require.Equal(t, 0.0, m.getASR())
+}
+
+// TestMetrics_ASR_AllSuccessful — all INVITE → 200 OK
+func TestMetrics_ASR_AllSuccessful(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.invite200OKTotal, 100)
+
+	require.Equal(t, 100.0, m.getASR())
+}
+
+// TestMetrics_ASR_HalfSuccessful — MC/DC: partial success
+func TestMetrics_ASR_HalfSuccessful(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.invite200OKTotal, 50)
+
+	require.Equal(t, 50.0, m.getASR())
+}
+
+// TestMetrics_ASR_3xxNotExcluded — 3xx NOT excluded (key difference from SER)
+func TestMetrics_ASR_3xxNotExcluded(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.invite200OKTotal, 45)
+	atomic.StoreInt64(&m.invite3xxTotal, 10)
+
+	require.Equal(t, 45.0, m.getASR())
+}
+
+// TestMetrics_ASR_Values — table-driven MC/DC tests
+func TestMetrics_ASR_Values(t *testing.T) {
+	tests := []struct {
+		name        string
+		invites     int64
+		invite200OK int64
+		wantASR     float64
+	}{
+		{
+			name:        "zero_invites",
+			invites:     0,
+			invite200OK: 0,
+			wantASR:     0,
+		},
+		{
+			name:        "all_successful",
+			invites:     100,
+			invite200OK: 100,
+			wantASR:     100,
+		},
+		{
+			name:        "half_successful",
+			invites:     100,
+			invite200OK: 50,
+			wantASR:     50,
+		},
+		{
+			name:        "one_of_ten",
+			invites:     10,
+			invite200OK: 1,
+			wantASR:     10,
+		},
+		{
+			name:        "75_percent",
+			invites:     8,
+			invite200OK: 6,
+			wantASR:     75,
+		},
+		{
+			name:        "zero_200ok",
+			invites:     50,
+			invite200OK: 0,
+			wantASR:     0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			atomic.StoreInt64(&m.inviteTotal, tt.invites)
+			atomic.StoreInt64(&m.invite200OKTotal, tt.invite200OK)
+
+			got := m.getASR()
+			require.Equal(t, tt.wantASR, got)
+		})
+	}
+}
+
+// TestMetrics_ASR_FullCycle — full lifecycle test
+func TestMetrics_ASR_FullCycle(t *testing.T) {
+	m := &metrics{}
+
+	require.Equal(t, 0.0, m.getASR())
+
+	for i := 0; i < 20; i++ {
+		atomic.AddInt64(&m.inviteTotal, 1)
+	}
+	require.Equal(t, 0.0, m.getASR())
+
+	for i := 0; i < 10; i++ {
+		atomic.AddInt64(&m.invite200OKTotal, 1)
+	}
+	require.Equal(t, 50.0, m.getASR())
+
+	for i := 0; i < 5; i++ {
+		atomic.AddInt64(&m.invite3xxTotal, 1)
+	}
+	require.Equal(t, 50.0, m.getASR())
+}
+
+// TestMetrics_ASR_ComparedToSER verifies ASR <= SER always
+func TestMetrics_ASR_ComparedToSER(t *testing.T) {
+	tests := []struct {
+		name        string
+		invites     int64
+		invite200OK int64
+		invite3xx   int64
+	}{
+		{"equal_when_no_3xx", 100, 50, 0},
+		{"asr_lower_with_3xx", 100, 50, 20},
+		{"all_3xx_asr_zero", 100, 0, 100},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			atomic.StoreInt64(&m.inviteTotal, tt.invites)
+			atomic.StoreInt64(&m.invite200OKTotal, tt.invite200OK)
+			atomic.StoreInt64(&m.invite3xxTotal, tt.invite3xx)
+
+			asr := m.getASR()
+			ser := m.getSER()
+
+			require.LessOrEqual(t, asr, ser, "ASR must be <= SER")
 		})
 	}
 }
@@ -902,6 +1060,17 @@ func (m *metrics) getTTRFromHistogram() (sum float64, count uint64) {
 	return h.GetSampleSum(), h.GetSampleCount()
 }
 
+func (m *metrics) getSDCFromCounter() float64 {
+	if m.sdc == nil {
+		return 0
+	}
+	var dtoMetric dto.Metric
+	if err := m.sdc.Write(&dtoMetric); err != nil {
+		return 0
+	}
+	return dtoMetric.GetCounter().GetValue()
+}
+
 // TestMetrics_SCR_NoInvites — MC/DC: total == 0
 func TestMetrics_SCR_NoInvites(t *testing.T) {
 	m := &metrics{}
@@ -1050,6 +1219,37 @@ func TestMetrics_SessionCompleted(t *testing.T) {
 
 	m.SessionCompleted()
 	require.Equal(t, int64(2), atomic.LoadInt64(&m.sessionCompletedTotal))
+}
+
+// SDC (Session Duration Counter) tests
+// Prometheus Counter incremented on each completed session (BYE→200 OK + expired dialogs)
+
+// TestMetrics_SDC_IncrementOnSessionCompleted verifies Counter increments with atomic
+func TestMetrics_SDC_IncrementOnSessionCompleted(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	require.Equal(t, 0.0, m.getSDCFromCounter())
+	require.Equal(t, int64(0), atomic.LoadInt64(&m.sessionCompletedTotal))
+
+	m.SessionCompleted()
+	require.Equal(t, 1.0, m.getSDCFromCounter())
+	require.Equal(t, int64(1), atomic.LoadInt64(&m.sessionCompletedTotal))
+
+	m.SessionCompleted()
+	require.Equal(t, 2.0, m.getSDCFromCounter())
+	require.Equal(t, int64(2), atomic.LoadInt64(&m.sessionCompletedTotal))
+}
+
+// TestMetrics_SDC_NilSafe verifies SessionCompleted works without init (sdc == nil)
+func TestMetrics_SDC_NilSafe(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.sessionCompletedTotal, 0)
+	require.Equal(t, 0.0, m.getSDCFromCounter())
+
+	m.SessionCompleted()
+	require.Equal(t, int64(1), atomic.LoadInt64(&m.sessionCompletedTotal))
+	require.Equal(t, 0.0, m.getSDCFromCounter(), "SDC Counter should be 0 when nil")
 }
 
 // TestMetrics_SCR_ComparedToSER verifies SCR <= SER always

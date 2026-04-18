@@ -68,6 +68,12 @@ type (
 		scr                   prometheus.GaugeFunc
 		sessionCompletedTotal int64
 
+		// ASR metric (ITU-T E.411)
+		asr prometheus.GaugeFunc
+
+		// SDC metric — completed sessions counter
+		sdc prometheus.Counter
+
 		// RRD metrics (RFC 6076 for REGISTER)
 		rrdTotal uint64               // deprecated: суммарная задержка для расчёта среднего (микросекунды)
 		rrdCount int64                // deprecated: количество измерений для среднего
@@ -114,6 +120,8 @@ func newMetricserWithRegistry(reg *prometheus.Registry) Metricser {
 	m.seer = newSEERWithRegistry(m, reg)
 	m.isa = newISAWithRegistry(m, reg)
 	m.scr = newSCRWithRegistry(m, reg)
+	m.asr = newASRWithRegistry(m, reg)
+	m.sdc = newCounterWithRegistry("sip_exporter_sdc_total", "Total number of completed SIP sessions", reg)
 	m.rrd, m.rrdAvg = newRRDWithRegistry(m, reg)
 	m.spd, m.spdAvg = newSPDWithRegistry(m, reg)
 	m.ttr = newTTRWithRegistry(reg)
@@ -313,6 +321,27 @@ func newSCRWithRegistry(m *metrics, reg *prometheus.Registry) prometheus.GaugeFu
 	return promauto.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "sip_exporter_scr",
 		Help: "Session Completion Ratio percentage (RFC 6076)",
+	}, fn)
+}
+
+func newASRWithRegistry(m *metrics, reg *prometheus.Registry) prometheus.GaugeFunc {
+	fn := func() float64 {
+		total := atomic.LoadInt64(&m.inviteTotal)
+		if total == 0 {
+			return 0
+		}
+		ok := atomic.LoadInt64(&m.invite200OKTotal)
+		return float64(ok) / float64(total) * 100 //nolint:mnd // percentage formula
+	}
+	if reg != nil {
+		return prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "sip_exporter_asr",
+			Help: "Answer Seizure Ratio (ITU-T E.411): ratio of INVITE 200 OK to total INVITE requests",
+		}, fn)
+	}
+	return promauto.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "sip_exporter_asr",
+		Help: "Answer Seizure Ratio (ITU-T E.411): ratio of INVITE 200 OK to total INVITE requests",
 	}, fn)
 }
 
@@ -556,4 +585,7 @@ func (m *metrics) SystemError() {
 
 func (m *metrics) SessionCompleted() {
 	atomic.AddInt64(&m.sessionCompletedTotal, 1)
+	if m.sdc != nil {
+		m.sdc.Inc()
+	}
 }

@@ -2,6 +2,10 @@
 
 ## 0.9.0
 ### Added
+- ASR (Answer Seizure Ratio) metric per ITU-T E.411 (`sip_exporter_asr`)
+- ASR tracks INVITE→200 OK ratio without excluding 3xx (difference from SER)
+- SDC (Session Duration Counter) metric (`sip_exporter_sdc_total`)
+- SDC exposes completed session count as Prometheus Counter for rate queries (`rate(sip_exporter_sdc_total[5m])`)
 - SPD (Session Process Duration) metric per RFC 6076 §4.5 (`sip_exporter_spd`)
 - SPD measures average session duration from INVITE 200 OK to BYE 200 OK (in seconds)
 - SPD also tracks sessions that expire via Session-Expires timeout
@@ -12,6 +16,10 @@
 - Load test metrics recording: each test writes structured metrics to `load_result.json`
 - Load test summary: baseline comparison table with OK / REGRESSION / IMPROVEMENT status
 - Metrics documentation: [docs/METRICS.md](docs/METRICS.md) — full reference for all metrics
+- E2E tests for ASR: AllScenarios, Mixed, MixedWith3xx, Complex
+- E2E tests for SDC: AllScenarios, Mixed, MixedWith3xx, Complex, SessionExpires
+- MC/DC unit tests for ASR formula calculation and ASR ≤ SER invariant
+- Unit tests for SDC Counter increment and nil-safety
 
 ### Changed
 - `Dialoger.Create` now accepts `createdAt` parameter for session duration tracking
@@ -26,6 +34,7 @@
   - Warning logs replaced with `require.Less` SLO assertions
 - RFC 6076 section numbering corrected across all files (code, docs, changelog)
 - Metrics descriptions moved from README to [docs/METRICS.md](docs/METRICS.md)
+- Grafana dashboard updated: added ASR, SDC, SPD panels; fixed RRD to use `histogram_quantile()` instead of broken bare metric expression
 - `.gitignore` updated: `load_result.json` excluded, `baseline.json` tracked
 
 ## 0.8.0
