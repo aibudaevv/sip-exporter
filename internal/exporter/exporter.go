@@ -6,14 +6,16 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/cilium/ebpf"
-	"gitlab.com/sip-exporter/internal/dto"
-	"gitlab.com/sip-exporter/internal/service"
 	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
+
+	"gitlab.com/sip-exporter/internal/dto"
+	"gitlab.com/sip-exporter/internal/service"
 )
 
 var (
@@ -24,10 +26,15 @@ const (
 	ethPAll            = 0x0003
 	readBufSize        = 65536
 	defaultRegisterTTL = 60 * time.Second
+	defaultInviteTTL   = 60 * time.Second
 )
 
 type (
 	registerEntry struct {
+		timestamp time.Time
+	}
+
+	inviteEntry struct {
 		timestamp time.Time
 	}
 
@@ -38,6 +45,9 @@ type (
 		services        services
 		registerTracker map[string]registerEntry
 		registerMutex   sync.RWMutex
+		inviteTracker   map[string]inviteEntry
+		inviteMutex     sync.RWMutex
+		initialized     atomic.Bool
 	}
 	services struct {
 		metricser service.Metricser
@@ -45,6 +55,7 @@ type (
 	}
 	Exporter interface {
 		Initialize(interfaceName string, path string, sipPort, sipsPort int) error
+		IsAlive() bool
 		Close()
 	}
 )
@@ -57,6 +68,7 @@ func NewExporter(m service.Metricser, d service.Dialoger) Exporter {
 		},
 		messages:        make(chan []byte, 10_000),
 		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
 	}
 }
 
@@ -99,6 +111,20 @@ func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPo
 	}
 	e.sock = sock
 
+	socketRecvBufSize := 4 * 1024 * 1024
+	if setErr := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUF, socketRecvBufSize); setErr != nil {
+		return fmt.Errorf("failed to set SO_RCVBUF: %w", setErr)
+	}
+
+	var actualBufSize int
+	actualBufSize, err = unix.GetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUF)
+	if err != nil {
+		return fmt.Errorf("failed to get SO_RCVBUF: %w", err)
+	}
+	zap.L().Info("socket receive buffer configured",
+		zap.Int("requested_bytes", socketRecvBufSize),
+		zap.Int("actual_bytes", actualBufSize))
+
 	ifaceName := interfaceName
 	iface, err := net.InterfaceByName(ifaceName)
 	if err != nil {
@@ -130,6 +156,8 @@ func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPo
 	go e.readSocket()
 	go e.sipDialogMetricsUpdate()
 
+	e.initialized.Store(true)
+
 	return nil
 }
 
@@ -137,15 +165,17 @@ func (e *exporter) sipDialogMetricsUpdate() {
 	ticker := time.NewTicker(1 * time.Second)
 	for {
 		<-ticker.C
-		expired := e.services.dialoger.Cleanup()
+		durations := e.services.dialoger.Cleanup()
 		e.cleanupRegisterTracker()
+		e.cleanupInviteTracker()
 		s := e.services.dialoger.Size()
 
-		for i := 0; i < expired; i++ {
+		for _, d := range durations {
 			e.services.metricser.SessionCompleted()
+			e.services.metricser.UpdateSPD(d)
 		}
 
-		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", expired))
+		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", len(durations)))
 
 		e.services.metricser.UpdateSession(s)
 	}
@@ -166,13 +196,33 @@ func (e *exporter) cleanupRegisterTracker() {
 	}
 }
 
+func (e *exporter) cleanupInviteTracker() {
+	e.inviteMutex.Lock()
+	defer e.inviteMutex.Unlock()
+
+	now := time.Now()
+	for callID, entry := range e.inviteTracker {
+		if now.Sub(entry.timestamp) > defaultInviteTTL {
+			delete(e.inviteTracker, callID)
+			zap.L().Debug("invite tracker expired",
+				zap.String("call_id", callID),
+				zap.Duration("age", now.Sub(entry.timestamp)))
+		}
+	}
+}
+
 func (e *exporter) Close() {
+	e.initialized.Store(false)
 	if e.collection != nil {
 		e.collection.Close()
 	}
 	if e.sock != 0 {
 		_ = unix.Close(e.sock) // nolint:gosec // cleanup code, error can be ignored
 	}
+}
+
+func (e *exporter) IsAlive() bool {
+	return e.initialized.Load()
 }
 
 func (e *exporter) readPackets() {
@@ -202,7 +252,6 @@ func (e *exporter) readSocket() {
 			continue
 		}
 
-		// Copy data to avoid races
 		packet := make([]byte, n)
 		copy(packet, buf[:n])
 
@@ -360,10 +409,14 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 	if packet.IsResponse {
 		e.handleResponse(packet)
 	} else {
-		go e.services.metricser.Request(packet.Method)
+		e.services.metricser.Request(packet.Method)
 
 		if bytes.Equal(packet.Method, []byte("REGISTER")) {
 			e.storeRegisterTime(string(packet.CallID))
+		}
+
+		if bytes.Equal(packet.Method, []byte("INVITE")) {
+			e.storeInviteTime(string(packet.CallID))
 		}
 	}
 
@@ -375,7 +428,17 @@ func (e *exporter) handleResponse(packet dto.Packet) {
 	isRegisterResponse := bytes.Equal(packet.CSeq.Method, []byte("REGISTER"))
 	is200OK := bytes.Equal(packet.ResponseStatus, []byte("200"))
 
-	go e.services.metricser.ResponseWithMetrics(
+	if isInviteResponse && len(packet.ResponseStatus) > 0 {
+		if packet.ResponseStatus[0] == '1' {
+			if delayMs, ok := e.measureInviteTTR(string(packet.CallID)); ok {
+				e.services.metricser.UpdateTTR(delayMs)
+			}
+		} else {
+			e.removeInviteTime(string(packet.CallID))
+		}
+	}
+
+	e.services.metricser.ResponseWithMetrics(
 		packet.ResponseStatus,
 		isInviteResponse,
 		is200OK,
@@ -426,7 +489,7 @@ func (e *exporter) handleInvite200OK(packet dto.Packet) error {
 	zap.L().Debug("create sip dialog",
 		zap.String("session", dialogID),
 		zap.Int("expires_sec", expires))
-	e.services.dialoger.Create(dialogID, expiresAt)
+	e.services.dialoger.Create(dialogID, expiresAt, time.Now())
 	return nil
 }
 
@@ -437,8 +500,11 @@ func (e *exporter) handleBye200OK(packet dto.Packet) error {
 	}
 
 	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
-	e.services.dialoger.Delete(dialogID)
-	e.services.metricser.SessionCompleted()
+	duration := e.services.dialoger.Delete(dialogID)
+	if duration > 0 {
+		e.services.metricser.UpdateSPD(duration)
+		e.services.metricser.SessionCompleted()
+	}
 	return nil
 }
 
@@ -548,4 +614,37 @@ func (e *exporter) removeRegisterTime(callID string) {
 	e.registerMutex.Lock()
 	defer e.registerMutex.Unlock()
 	delete(e.registerTracker, callID)
+}
+
+func (e *exporter) storeInviteTime(callID string) {
+	e.inviteMutex.Lock()
+	defer e.inviteMutex.Unlock()
+	e.inviteTracker[callID] = inviteEntry{
+		timestamp: time.Now(),
+	}
+}
+
+func (e *exporter) measureInviteTTR(callID string) (float64, bool) {
+	e.inviteMutex.Lock()
+	defer e.inviteMutex.Unlock()
+
+	entry, ok := e.inviteTracker[callID]
+	if !ok {
+		return 0, false
+	}
+
+	delete(e.inviteTracker, callID)
+	delayMs := float64(time.Since(entry.timestamp).Nanoseconds()) / 1e6
+
+	zap.L().Debug("TTR measured",
+		zap.String("call_id", callID),
+		zap.Float64("delay_ms", delayMs))
+
+	return delayMs, true
+}
+
+func (e *exporter) removeInviteTime(callID string) {
+	e.inviteMutex.Lock()
+	defer e.inviteMutex.Unlock()
+	delete(e.inviteTracker, callID)
 }

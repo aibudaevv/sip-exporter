@@ -1,7 +1,9 @@
 package service
 
 import (
+	"bytes"
 	"sync/atomic"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -66,10 +68,26 @@ type (
 		scr                   prometheus.GaugeFunc
 		sessionCompletedTotal int64
 
+		// ASR metric (ITU-T E.411)
+		asr prometheus.GaugeFunc
+
+		// SDC metric — completed sessions counter
+		sdc prometheus.Counter
+
 		// RRD metrics (RFC 6076 for REGISTER)
-		rrdTotal uint64               // Суммарная задержка для расчета среднего
-		rrdCount int64                // Количество измерений для среднего
-		rrd      prometheus.GaugeFunc // Метрика RRD для REGISTER
+		rrdTotal uint64               // deprecated: суммарная задержка для расчёта среднего (микросекунды)
+		rrdCount int64                // deprecated: количество измерений для среднего
+		rrd      prometheus.Histogram // Метрика RRD histogram (ms)
+		rrdAvg   prometheus.GaugeFunc // deprecated: среднее RRD (ms)
+
+		// SPD metrics (RFC 6076 §4.5)
+		spdTotalNs uint64               // deprecated: суммарная длительность сессий (наносекунды)
+		spdCount   int64                // deprecated: количество завершённых сессий
+		spd        prometheus.Histogram // Метрика SPD histogram (sec)
+		spdAvg     prometheus.GaugeFunc // deprecated: среднее SPD (sec)
+
+		// TTR metrics (Time to First Response)
+		ttr prometheus.Histogram // Метрика TTR histogram (ms)
 	}
 
 	Metricser interface {
@@ -79,6 +97,8 @@ type (
 		Invite200OK()
 		SessionCompleted()
 		UpdateRRD(delayMs float64)
+		UpdateSPD(duration time.Duration)
+		UpdateTTR(delayMs float64)
 		UpdateSession(size int)
 		SystemError()
 	}
@@ -100,7 +120,11 @@ func newMetricserWithRegistry(reg *prometheus.Registry) Metricser {
 	m.seer = newSEERWithRegistry(m, reg)
 	m.isa = newISAWithRegistry(m, reg)
 	m.scr = newSCRWithRegistry(m, reg)
-	m.rrd = newRRDWithRegistry(m, reg)
+	m.asr = newASRWithRegistry(m, reg)
+	m.sdc = newCounterWithRegistry("sip_exporter_sdc_total", "Total number of completed SIP sessions", reg)
+	m.rrd, m.rrdAvg = newRRDWithRegistry(m, reg)
+	m.spd, m.spdAvg = newSPDWithRegistry(m, reg)
+	m.ttr = newTTRWithRegistry(reg)
 
 	return m
 }
@@ -197,6 +221,15 @@ func newCounterWithRegistry(name, help string, reg *prometheus.Registry) prometh
 	})
 }
 
+func newHistogramWithRegistry(opts prometheus.HistogramOpts, reg *prometheus.Registry) prometheus.Histogram {
+	if reg != nil {
+		h := prometheus.NewHistogram(opts)
+		reg.MustRegister(h)
+		return h
+	}
+	return promauto.NewHistogram(opts)
+}
+
 func newSERWithRegistry(m *metrics, reg *prometheus.Registry) prometheus.GaugeFunc {
 	fn := func() float64 {
 		total := atomic.LoadInt64(&m.inviteTotal)
@@ -291,7 +324,34 @@ func newSCRWithRegistry(m *metrics, reg *prometheus.Registry) prometheus.GaugeFu
 	}, fn)
 }
 
-func newRRDWithRegistry(m *metrics, reg *prometheus.Registry) prometheus.GaugeFunc {
+func newASRWithRegistry(m *metrics, reg *prometheus.Registry) prometheus.GaugeFunc {
+	fn := func() float64 {
+		total := atomic.LoadInt64(&m.inviteTotal)
+		if total == 0 {
+			return 0
+		}
+		ok := atomic.LoadInt64(&m.invite200OKTotal)
+		return float64(ok) / float64(total) * 100 //nolint:mnd // percentage formula
+	}
+	if reg != nil {
+		return prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "sip_exporter_asr",
+			Help: "Answer Seizure Ratio (ITU-T E.411): ratio of INVITE 200 OK to total INVITE requests",
+		}, fn)
+	}
+	return promauto.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "sip_exporter_asr",
+		Help: "Answer Seizure Ratio (ITU-T E.411): ratio of INVITE 200 OK to total INVITE requests",
+	}, fn)
+}
+
+func newRRDWithRegistry(m *metrics, reg *prometheus.Registry) (prometheus.Histogram, prometheus.GaugeFunc) {
+	hist := newHistogramWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_rrd",
+		Help:    "Registration Request Delay in milliseconds (RFC 6076)",
+		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
+	}, reg)
+
 	fn := func() float64 {
 		count := atomic.LoadInt64(&m.rrdCount)
 		if count == 0 {
@@ -300,22 +360,93 @@ func newRRDWithRegistry(m *metrics, reg *prometheus.Registry) prometheus.GaugeFu
 		total := atomic.LoadUint64(&m.rrdTotal)
 		return float64(total) / float64(count) / 1e3 //nolint:mnd // convert microseconds to milliseconds
 	}
+
+	help := "Registration Request Delay average in milliseconds (DEPRECATED: use sip_exporter_rrd histogram)"
+
+	var avg prometheus.GaugeFunc
 	if reg != nil {
-		return prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-			Name: "sip_exporter_rrd",
-			Help: "Registration Request Delay in milliseconds (RFC 6076)",
+		avg = prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "sip_exporter_rrd_average",
+			Help: help,
+		}, fn)
+		reg.MustRegister(avg)
+	} else {
+		avg = promauto.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "sip_exporter_rrd_average",
+			Help: help,
 		}, fn)
 	}
-	return promauto.NewGaugeFunc(prometheus.GaugeOpts{
-		Name: "sip_exporter_rrd",
-		Help: "Registration Request Delay in milliseconds (RFC 6076)",
-	}, fn)
+
+	return hist, avg
+}
+
+func newSPDWithRegistry(m *metrics, reg *prometheus.Registry) (prometheus.Histogram, prometheus.GaugeFunc) {
+	hist := newHistogramWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_spd",
+		Help:    "Session Process Duration in seconds (RFC 6076)",
+		Buckets: []float64{1, 5, 10, 30, 60, 300, 600, 1800, 3600},
+	}, reg)
+
+	fn := func() float64 {
+		count := atomic.LoadInt64(&m.spdCount)
+		if count == 0 {
+			return 0
+		}
+		totalNs := atomic.LoadUint64(&m.spdTotalNs)
+		return float64(totalNs) / float64(count) / 1e9 //nolint:mnd // convert nanoseconds to seconds
+	}
+
+	help := "Session Process Duration average in seconds (DEPRECATED: use sip_exporter_spd histogram)"
+
+	var avg prometheus.GaugeFunc
+	if reg != nil {
+		avg = prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "sip_exporter_spd_average",
+			Help: help,
+		}, fn)
+		reg.MustRegister(avg)
+	} else {
+		avg = promauto.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "sip_exporter_spd_average",
+			Help: help,
+		}, fn)
+	}
+
+	return hist, avg
+}
+
+func newTTRWithRegistry(reg *prometheus.Registry) prometheus.Histogram {
+	return newHistogramWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_ttr",
+		Help:    "Time to First Response in milliseconds (time from INVITE to first provisional 1xx response)",
+		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
+	}, reg)
+}
+
+func (m *metrics) UpdateSPD(duration time.Duration) {
+	if duration < 0 {
+		return
+	}
+	if m.spd != nil {
+		m.spd.Observe(duration.Seconds())
+	}
+	atomic.AddInt64(&m.spdCount, 1)
+	atomic.AddUint64(&m.spdTotalNs, uint64(duration.Nanoseconds()))
 }
 
 func (m *metrics) UpdateRRD(delayMs float64) {
+	if m.rrd != nil {
+		m.rrd.Observe(delayMs)
+	}
 	atomic.AddInt64(&m.rrdCount, 1)
 	//nolint:mnd // convert milliseconds to microseconds for precision
 	atomic.AddUint64(&m.rrdTotal, uint64(delayMs*1e3))
+}
+
+func (m *metrics) UpdateTTR(delayMs float64) {
+	if m.ttr != nil {
+		m.ttr.Observe(delayMs)
+	}
 }
 
 func (m *metrics) UpdateSession(size int) {
@@ -325,63 +456,60 @@ func (m *metrics) UpdateSession(size int) {
 func (m *metrics) Response(in []byte, isInviteResponse bool) {
 	defer m.sipPacketsTotal.Inc()
 
-	switch string(in) {
-	case "100":
+	switch {
+	case bytes.Equal(in, []byte("100")):
 		m.statusTryingTotal.Inc()
-	case "180":
+	case bytes.Equal(in, []byte("180")):
 		m.statusRingingTotal.Inc()
-	case "183":
+	case bytes.Equal(in, []byte("183")):
 		m.statusSessionProgressTotal.Inc()
-	case "200":
+	case bytes.Equal(in, []byte("200")):
 		m.statusOKTotal.Inc()
-	case "202":
+	case bytes.Equal(in, []byte("202")):
 		m.statusAcceptedTotal.Inc()
-	case "300":
+	case bytes.Equal(in, []byte("300")):
 		m.statusMultipleChoiceTotal.Inc()
-	case "302":
+	case bytes.Equal(in, []byte("302")):
 		m.statusMovedTemporarilyTotal.Inc()
-	case "400":
+	case bytes.Equal(in, []byte("400")):
 		m.statusBadRequestTotal.Inc()
-	case "401":
+	case bytes.Equal(in, []byte("401")):
 		m.statusUnauthorizedTotal.Inc()
-	case "403":
+	case bytes.Equal(in, []byte("403")):
 		m.statusForbiddenTotal.Inc()
-	case "404":
+	case bytes.Equal(in, []byte("404")):
 		m.statusNotFoundTotal.Inc()
-	case "407":
+	case bytes.Equal(in, []byte("407")):
 		m.proxyAuthenticationRequired.Inc()
-	case "408":
+	case bytes.Equal(in, []byte("408")):
 		m.statusRequestTimeoutTotal.Inc()
-	case "480":
+	case bytes.Equal(in, []byte("480")):
 		m.statusTemporarilyUnavailableTotal.Inc()
-	case "486":
+	case bytes.Equal(in, []byte("486")):
 		m.statusBusyHereTotal.Inc()
-	case "500":
+	case bytes.Equal(in, []byte("500")):
 		m.statusServerInternalTotal.Inc()
-	case "503":
+	case bytes.Equal(in, []byte("503")):
 		m.statusServiceUnavailableTotal.Inc()
-	case "504":
+	case bytes.Equal(in, []byte("504")):
 		m.statusServerTimeoutTotal.Inc()
-	case "600":
+	case bytes.Equal(in, []byte("600")):
 		m.statusBusyEverywhereTotal.Inc()
-	case "603":
+	case bytes.Equal(in, []byte("603")):
 		m.statusDeclineTotal.Inc()
 	default:
 		zap.L().Warn("unknown response", zap.ByteString("in", in))
 	}
 
-	// Count 3xx for SER (RFC 6076)
 	if isInviteResponse && len(in) == 3 && in[0] == '3' {
 		atomic.AddInt64(&m.invite3xxTotal, 1)
 	}
 
-	// ADDED: SEER numerator
-	if isInviteResponse && isEffectiveResponse(string(in)) {
+	if isInviteResponse && isEffectiveResponse(in) {
 		atomic.AddInt64(&m.inviteEffectiveTotal, 1)
 	}
 
-	// ADDED: ISA numerator
-	if isInviteResponse && isIneffectiveResponse(string(in)) {
+	if isInviteResponse && isIneffectiveResponse(in) {
 		atomic.AddInt64(&m.inviteIneffectiveTotal, 1)
 	}
 }
@@ -394,58 +522,53 @@ func (m *metrics) ResponseWithMetrics(status []byte, isInviteResponse, is200OK b
 	}
 }
 
-// isEffectiveResponse returns true if the response code is part of SEER numerator (RFC 6076).
-func isEffectiveResponse(code string) bool {
-	switch code {
-	case "200", "480", "486", "600", "603":
-		return true
-	default:
-		return false
-	}
+func isEffectiveResponse(code []byte) bool {
+	return bytes.Equal(code, []byte("200")) ||
+		bytes.Equal(code, []byte("480")) ||
+		bytes.Equal(code, []byte("486")) ||
+		bytes.Equal(code, []byte("600")) ||
+		bytes.Equal(code, []byte("603"))
 }
 
-// isIneffectiveResponse returns true if the response code is part of ISA numerator (RFC 6076).
-func isIneffectiveResponse(code string) bool {
-	switch code {
-	case "408", "500", "503", "504":
-		return true
-	default:
-		return false
-	}
+func isIneffectiveResponse(code []byte) bool {
+	return bytes.Equal(code, []byte("408")) ||
+		bytes.Equal(code, []byte("500")) ||
+		bytes.Equal(code, []byte("503")) ||
+		bytes.Equal(code, []byte("504"))
 }
 
 func (m *metrics) Request(in []byte) {
 	defer m.sipPacketsTotal.Inc()
 
-	switch string(in) {
-	case "PUBLISH":
+	switch {
+	case bytes.Equal(in, []byte("PUBLISH")):
 		m.requestPublishTotal.Inc()
-	case "PRACK":
+	case bytes.Equal(in, []byte("PRACK")):
 		m.requestPrackTotal.Inc()
-	case "NOTIFY":
+	case bytes.Equal(in, []byte("NOTIFY")):
 		m.requestNotifyTotal.Inc()
-	case "SUBSCRIBE":
+	case bytes.Equal(in, []byte("SUBSCRIBE")):
 		m.requestSubscribeTotal.Inc()
-	case "REFER":
+	case bytes.Equal(in, []byte("REFER")):
 		m.requestReferTotal.Inc()
-	case "INFO":
+	case bytes.Equal(in, []byte("INFO")):
 		m.requestInfoTotal.Inc()
-	case "UPDATE":
+	case bytes.Equal(in, []byte("UPDATE")):
 		m.requestUpdateTotal.Inc()
-	case "REGISTER":
+	case bytes.Equal(in, []byte("REGISTER")):
 		m.requestRegisterTotal.Inc()
-	case "OPTIONS":
+	case bytes.Equal(in, []byte("OPTIONS")):
 		m.requestOptionsTotal.Inc()
-	case "CANCEL":
+	case bytes.Equal(in, []byte("CANCEL")):
 		m.requestCancelTotal.Inc()
-	case "BYE":
+	case bytes.Equal(in, []byte("BYE")):
 		m.requestByeTotal.Inc()
-	case "ACK":
+	case bytes.Equal(in, []byte("ACK")):
 		m.requestACKTotal.Inc()
-	case "INVITE":
+	case bytes.Equal(in, []byte("INVITE")):
 		m.requestInviteTotal.Inc()
 		atomic.AddInt64(&m.inviteTotal, 1)
-	case "MESSAGE":
+	case bytes.Equal(in, []byte("MESSAGE")):
 		m.requestMessageTotal.Inc()
 	default:
 		zap.L().Warn("unknown request", zap.ByteString("in", in))
@@ -462,4 +585,7 @@ func (m *metrics) SystemError() {
 
 func (m *metrics) SessionCompleted() {
 	atomic.AddInt64(&m.sessionCompletedTotal, 1)
+	if m.sdc != nil {
+		m.sdc.Inc()
+	}
 }

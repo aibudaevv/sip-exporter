@@ -3,8 +3,10 @@ package service
 import (
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 )
 
@@ -465,6 +467,17 @@ func (m *metrics) getISA() float64 {
 	return float64(ineffective) / float64(total) * 100
 }
 
+// getASR returns current ASR value for tests
+// ASR = invite200OKTotal / inviteTotal × 100 (3xx NOT excluded, unlike SER)
+func (m *metrics) getASR() float64 {
+	total := atomic.LoadInt64(&m.inviteTotal)
+	if total == 0 {
+		return 0
+	}
+	ok := atomic.LoadInt64(&m.invite200OKTotal)
+	return float64(ok) / float64(total) * 100 //nolint:mnd // percentage formula
+}
+
 // TestMetrics_SEER_NoInvites — MC/DC: total == 0
 func TestMetrics_SEER_NoInvites(t *testing.T) {
 	m := &metrics{}
@@ -701,9 +714,156 @@ func TestMetrics_SEER_NonEffectiveCodes(t *testing.T) {
 			atomic.StoreInt64(&m.inviteEffectiveTotal, 0)
 			atomic.StoreInt64(&m.invite3xxTotal, 0)
 
-			// Non-effective codes should NOT increment inviteEffectiveTotal
-			// Verify SEER remains 0
 			require.Equal(t, 0.0, m.getSEER())
+		})
+	}
+}
+
+// ASR (Answer Seizure Ratio) tests per ITU-T E.411
+// Formula: ASR = (INVITE → 200 OK) / Total INVITE × 100
+// 3xx NOT excluded from denominator (difference from SER)
+
+// TestMetrics_ASR_NoInvites — MC/DC: total == 0
+func TestMetrics_ASR_NoInvites(t *testing.T) {
+	m := &metrics{}
+	require.Equal(t, 0.0, m.getASR())
+}
+
+// TestMetrics_ASR_AllSuccessful — all INVITE → 200 OK
+func TestMetrics_ASR_AllSuccessful(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.invite200OKTotal, 100)
+
+	require.Equal(t, 100.0, m.getASR())
+}
+
+// TestMetrics_ASR_HalfSuccessful — MC/DC: partial success
+func TestMetrics_ASR_HalfSuccessful(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.invite200OKTotal, 50)
+
+	require.Equal(t, 50.0, m.getASR())
+}
+
+// TestMetrics_ASR_3xxNotExcluded — 3xx NOT excluded (key difference from SER)
+func TestMetrics_ASR_3xxNotExcluded(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.invite200OKTotal, 45)
+	atomic.StoreInt64(&m.invite3xxTotal, 10)
+
+	require.Equal(t, 45.0, m.getASR())
+}
+
+// TestMetrics_ASR_Values — table-driven MC/DC tests
+func TestMetrics_ASR_Values(t *testing.T) {
+	tests := []struct {
+		name        string
+		invites     int64
+		invite200OK int64
+		wantASR     float64
+	}{
+		{
+			name:        "zero_invites",
+			invites:     0,
+			invite200OK: 0,
+			wantASR:     0,
+		},
+		{
+			name:        "all_successful",
+			invites:     100,
+			invite200OK: 100,
+			wantASR:     100,
+		},
+		{
+			name:        "half_successful",
+			invites:     100,
+			invite200OK: 50,
+			wantASR:     50,
+		},
+		{
+			name:        "one_of_ten",
+			invites:     10,
+			invite200OK: 1,
+			wantASR:     10,
+		},
+		{
+			name:        "75_percent",
+			invites:     8,
+			invite200OK: 6,
+			wantASR:     75,
+		},
+		{
+			name:        "zero_200ok",
+			invites:     50,
+			invite200OK: 0,
+			wantASR:     0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			atomic.StoreInt64(&m.inviteTotal, tt.invites)
+			atomic.StoreInt64(&m.invite200OKTotal, tt.invite200OK)
+
+			got := m.getASR()
+			require.Equal(t, tt.wantASR, got)
+		})
+	}
+}
+
+// TestMetrics_ASR_FullCycle — full lifecycle test
+func TestMetrics_ASR_FullCycle(t *testing.T) {
+	m := &metrics{}
+
+	require.Equal(t, 0.0, m.getASR())
+
+	for i := 0; i < 20; i++ {
+		atomic.AddInt64(&m.inviteTotal, 1)
+	}
+	require.Equal(t, 0.0, m.getASR())
+
+	for i := 0; i < 10; i++ {
+		atomic.AddInt64(&m.invite200OKTotal, 1)
+	}
+	require.Equal(t, 50.0, m.getASR())
+
+	for i := 0; i < 5; i++ {
+		atomic.AddInt64(&m.invite3xxTotal, 1)
+	}
+	require.Equal(t, 50.0, m.getASR())
+}
+
+// TestMetrics_ASR_ComparedToSER verifies ASR <= SER always
+func TestMetrics_ASR_ComparedToSER(t *testing.T) {
+	tests := []struct {
+		name        string
+		invites     int64
+		invite200OK int64
+		invite3xx   int64
+	}{
+		{"equal_when_no_3xx", 100, 50, 0},
+		{"asr_lower_with_3xx", 100, 50, 20},
+		{"all_3xx_asr_zero", 100, 0, 100},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			atomic.StoreInt64(&m.inviteTotal, tt.invites)
+			atomic.StoreInt64(&m.invite200OKTotal, tt.invite200OK)
+			atomic.StoreInt64(&m.invite3xxTotal, tt.invite3xx)
+
+			asr := m.getASR()
+			ser := m.getSER()
+
+			require.LessOrEqual(t, asr, ser, "ASR must be <= SER")
 		})
 	}
 }
@@ -876,6 +1036,41 @@ func (m *metrics) getRRD() float64 {
 	return float64(total) / float64(count) / 1e3 //nolint:mnd // convert microseconds to milliseconds
 }
 
+func (m *metrics) getRRDFromHistogram() (sum float64, count uint64) {
+	if m.rrd == nil {
+		return 0, 0
+	}
+	var dtoMetric dto.Metric
+	if err := m.rrd.Write(&dtoMetric); err != nil {
+		return 0, 0
+	}
+	h := dtoMetric.GetHistogram()
+	return h.GetSampleSum(), h.GetSampleCount()
+}
+
+func (m *metrics) getTTRFromHistogram() (sum float64, count uint64) {
+	if m.ttr == nil {
+		return 0, 0
+	}
+	var dtoMetric dto.Metric
+	if err := m.ttr.Write(&dtoMetric); err != nil {
+		return 0, 0
+	}
+	h := dtoMetric.GetHistogram()
+	return h.GetSampleSum(), h.GetSampleCount()
+}
+
+func (m *metrics) getSDCFromCounter() float64 {
+	if m.sdc == nil {
+		return 0
+	}
+	var dtoMetric dto.Metric
+	if err := m.sdc.Write(&dtoMetric); err != nil {
+		return 0
+	}
+	return dtoMetric.GetCounter().GetValue()
+}
+
 // TestMetrics_SCR_NoInvites — MC/DC: total == 0
 func TestMetrics_SCR_NoInvites(t *testing.T) {
 	m := &metrics{}
@@ -1024,6 +1219,37 @@ func TestMetrics_SessionCompleted(t *testing.T) {
 
 	m.SessionCompleted()
 	require.Equal(t, int64(2), atomic.LoadInt64(&m.sessionCompletedTotal))
+}
+
+// SDC (Session Duration Counter) tests
+// Prometheus Counter incremented on each completed session (BYE→200 OK + expired dialogs)
+
+// TestMetrics_SDC_IncrementOnSessionCompleted verifies Counter increments with atomic
+func TestMetrics_SDC_IncrementOnSessionCompleted(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	require.Equal(t, 0.0, m.getSDCFromCounter())
+	require.Equal(t, int64(0), atomic.LoadInt64(&m.sessionCompletedTotal))
+
+	m.SessionCompleted()
+	require.Equal(t, 1.0, m.getSDCFromCounter())
+	require.Equal(t, int64(1), atomic.LoadInt64(&m.sessionCompletedTotal))
+
+	m.SessionCompleted()
+	require.Equal(t, 2.0, m.getSDCFromCounter())
+	require.Equal(t, int64(2), atomic.LoadInt64(&m.sessionCompletedTotal))
+}
+
+// TestMetrics_SDC_NilSafe verifies SessionCompleted works without init (sdc == nil)
+func TestMetrics_SDC_NilSafe(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreInt64(&m.sessionCompletedTotal, 0)
+	require.Equal(t, 0.0, m.getSDCFromCounter())
+
+	m.SessionCompleted()
+	require.Equal(t, int64(1), atomic.LoadInt64(&m.sessionCompletedTotal))
+	require.Equal(t, 0.0, m.getSDCFromCounter(), "SDC Counter should be 0 when nil")
 }
 
 // TestMetrics_SCR_ComparedToSER verifies SCR <= SER always
@@ -1179,4 +1405,263 @@ func TestMetricser_ResponseWithMetrics_AllInOne(t *testing.T) {
 
 	m.ResponseWithMetrics([]byte("302"), true, false)
 	require.Equal(t, invite3xxBefore+1, atomic.LoadInt64(&m.invite3xxTotal))
+}
+
+// SPD (Session Process Duration) tests per RFC 6076 §4.5
+
+func (m *metrics) getSPD() float64 {
+	count := atomic.LoadInt64(&m.spdCount)
+	if count == 0 {
+		return 0
+	}
+	totalNs := atomic.LoadUint64(&m.spdTotalNs)
+	return float64(totalNs) / float64(count) / 1e9
+}
+
+func (m *metrics) getSPDFromHistogram() (sum float64, count uint64) {
+	if m.spd == nil {
+		return 0, 0
+	}
+	var dtoMetric dto.Metric
+	if err := m.spd.Write(&dtoMetric); err != nil {
+		return 0, 0
+	}
+	h := dtoMetric.GetHistogram()
+	return h.GetSampleSum(), h.GetSampleCount()
+}
+
+func TestMetrics_SPD_NoCompleted(t *testing.T) {
+	m := &metrics{}
+	require.Equal(t, 0.0, m.getSPD())
+}
+
+func TestMetrics_SPD_SingleSession(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreUint64(&m.spdTotalNs, uint64(5*time.Second))
+	atomic.StoreInt64(&m.spdCount, 1)
+
+	require.Equal(t, 5.0, m.getSPD())
+}
+
+func TestMetrics_SPD_MultipleSessions(t *testing.T) {
+	m := &metrics{}
+
+	atomic.StoreUint64(&m.spdTotalNs, uint64(10*time.Second))
+	atomic.StoreInt64(&m.spdCount, 2)
+
+	require.Equal(t, 5.0, m.getSPD())
+}
+
+func TestMetrics_SPD_ZeroDuration(t *testing.T) {
+	m := &metrics{}
+
+	m.UpdateSPD(0)
+
+	require.Equal(t, 0.0, m.getSPD())
+}
+
+func TestMetrics_SPD_UpdateSPD(t *testing.T) {
+	m := &metrics{}
+
+	m.UpdateSPD(3 * time.Second)
+	require.Equal(t, 3.0, m.getSPD())
+
+	m.UpdateSPD(7 * time.Second)
+	require.Equal(t, 5.0, m.getSPD())
+}
+
+func TestMetrics_SPD_Values(t *testing.T) {
+	tests := []struct {
+		name    string
+		totalNs uint64
+		count   int64
+		wantSPD float64
+	}{
+		{"zero_count", 0, 0, 0},
+		{"single_1s", uint64(1 * time.Second), 1, 1.0},
+		{"single_10s", uint64(10 * time.Second), 1, 10.0},
+		{"two_5s_avg", uint64(10 * time.Second), 2, 5.0},
+		{"three_mixed", uint64(30 * time.Second), 3, 10.0},
+		{"zero_duration_with_count", 0, 5, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			atomic.StoreUint64(&m.spdTotalNs, tt.totalNs)
+			atomic.StoreInt64(&m.spdCount, tt.count)
+
+			require.Equal(t, tt.wantSPD, m.getSPD())
+		})
+	}
+}
+
+func TestMetrics_SPD_FullCycle(t *testing.T) {
+	m := &metrics{}
+
+	require.Equal(t, 0.0, m.getSPD())
+
+	m.UpdateSPD(10 * time.Second)
+	require.Equal(t, 10.0, m.getSPD())
+
+	m.UpdateSPD(20 * time.Second)
+	require.Equal(t, 15.0, m.getSPD())
+
+	m.UpdateSPD(0)
+	require.InDelta(t, 10.0, m.getSPD(), 0.01)
+}
+
+func TestMetrics_SPD_Histogram(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	sum, count := m.getSPDFromHistogram()
+	require.Equal(t, 0.0, sum)
+	require.Equal(t, uint64(0), count)
+
+	m.UpdateSPD(5 * time.Second)
+
+	sum, count = m.getSPDFromHistogram()
+	require.Equal(t, 5.0, sum)
+	require.Equal(t, uint64(1), count)
+
+	m.UpdateSPD(15 * time.Second)
+
+	sum, count = m.getSPDFromHistogram()
+	require.Equal(t, 20.0, sum)
+	require.Equal(t, uint64(2), count)
+}
+
+func TestMetrics_SPD_Histogram_NegativeIgnored(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateSPD(-1 * time.Second)
+
+	sum, count := m.getSPDFromHistogram()
+	require.Equal(t, 0.0, sum)
+	require.Equal(t, uint64(0), count)
+}
+
+func TestMetrics_SPD_Histogram_ZeroDuration(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateSPD(0)
+
+	sum, count := m.getSPDFromHistogram()
+	require.Equal(t, 0.0, sum)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestMetrics_SPD_DeprecatedAverageMatches(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateSPD(3 * time.Second)
+	m.UpdateSPD(7 * time.Second)
+
+	sum, count := m.getSPDFromHistogram()
+	require.Equal(t, 10.0, sum)
+	require.Equal(t, uint64(2), count)
+
+	require.Equal(t, 5.0, m.getSPD())
+}
+
+func TestMetrics_RRD_Histogram(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	sum, count := m.getRRDFromHistogram()
+	require.Equal(t, 0.0, sum)
+	require.Equal(t, uint64(0), count)
+
+	m.UpdateRRD(100.5)
+
+	sum, count = m.getRRDFromHistogram()
+	require.InDelta(t, 100.5, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+
+	m.UpdateRRD(200.5)
+
+	sum, count = m.getRRDFromHistogram()
+	require.InDelta(t, 301.0, sum, 0.01)
+	require.Equal(t, uint64(2), count)
+}
+
+func TestMetrics_RRD_Histogram_MultipleObservations(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	for i := range 100 {
+		m.UpdateRRD(float64(i) * 10.0)
+	}
+
+	sum, count := m.getRRDFromHistogram()
+	require.Equal(t, uint64(100), count)
+	require.InDelta(t, 49500.0, sum, 1.0)
+
+	require.InDelta(t, 495.0, m.getRRD(), 0.01)
+}
+
+func TestMetrics_RRD_DeprecatedAverageMatches(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateRRD(50.0)
+	m.UpdateRRD(150.0)
+
+	sum, count := m.getRRDFromHistogram()
+	require.InDelta(t, 200.0, sum, 0.01)
+	require.Equal(t, uint64(2), count)
+
+	require.InDelta(t, 100.0, m.getRRD(), 0.01)
+}
+
+// ==================== TTR Histogram tests ====================
+
+func TestMetrics_TTR_Histogram(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	sum, count := m.getTTRFromHistogram()
+	require.Equal(t, 0.0, sum)
+	require.Equal(t, uint64(0), count)
+
+	m.UpdateTTR(50.0)
+
+	sum, count = m.getTTRFromHistogram()
+	require.InDelta(t, 50.0, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+
+	m.UpdateTTR(150.0)
+
+	sum, count = m.getTTRFromHistogram()
+	require.InDelta(t, 200.0, sum, 0.01)
+	require.Equal(t, uint64(2), count)
+}
+
+func TestMetrics_TTR_Histogram_MultipleObservations(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	for i := range 100 {
+		m.UpdateTTR(float64(i) * 10.0)
+	}
+
+	sum, count := m.getTTRFromHistogram()
+	require.Equal(t, uint64(100), count)
+	require.InDelta(t, 49500.0, sum, 1.0)
+}
+
+func TestMetrics_TTR_Histogram_ZeroValue(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateTTR(0.0)
+
+	sum, count := m.getTTRFromHistogram()
+	require.InDelta(t, 0.0, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestMetrics_TTR_Histogram_LargeValue(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateTTR(5000.0)
+
+	sum, count := m.getTTRFromHistogram()
+	require.InDelta(t, 5000.0, sum, 0.01)
+	require.Equal(t, uint64(1), count)
 }

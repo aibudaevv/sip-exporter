@@ -22,6 +22,10 @@ type mockMetricser struct {
 	rrdUpdated                bool
 	rrdDelay                  float64
 	responseWithMetricsCalled bool
+	spdUpdated                bool
+	spdDuration               time.Duration
+	ttrUpdated                bool
+	ttrDelay                  float64
 }
 
 func (m *mockMetricser) Request(in []byte) {
@@ -58,37 +62,53 @@ func (m *mockMetricser) UpdateRRD(delayMs float64) {
 	m.rrdDelay = delayMs
 }
 
+func (m *mockMetricser) UpdateSPD(duration time.Duration) {
+	m.spdUpdated = true
+	m.spdDuration = duration
+}
+
 func (m *mockMetricser) UpdateSession(size int) {
 	m.sessionUpdated = size
+}
+
+func (m *mockMetricser) UpdateTTR(delayMs float64) {
+	m.ttrUpdated = true
+	m.ttrDelay = delayMs
 }
 
 func (m *mockMetricser) SystemError() {
 	m.systemErrorCalled = true
 }
 
+type dialogCreateArgs struct {
+	expiresAt time.Time
+	createdAt time.Time
+}
+
 type mockDialoger struct {
-	created      map[string]time.Time
-	deleted      []string
-	cleanupCount int
+	created        map[string]dialogCreateArgs
+	deleted        []string
+	cleanupResults []time.Duration
 }
 
-func (m *mockDialoger) Create(dialogID string, expiresAt time.Time) {
+func (m *mockDialoger) Create(dialogID string, expiresAt time.Time, createdAt time.Time) {
 	if m.created == nil {
-		m.created = make(map[string]time.Time)
+		m.created = make(map[string]dialogCreateArgs)
 	}
-	m.created[dialogID] = expiresAt
+	m.created[dialogID] = dialogCreateArgs{expiresAt: expiresAt, createdAt: createdAt}
 }
 
-func (m *mockDialoger) Delete(dialogID string) {
+func (m *mockDialoger) Delete(dialogID string) time.Duration {
 	m.deleted = append(m.deleted, dialogID)
+	return 100 * time.Millisecond
 }
 
 func (m *mockDialoger) Size() int {
 	return len(m.created)
 }
 
-func (m *mockDialoger) Cleanup() int {
-	return m.cleanupCount
+func (m *mockDialoger) Cleanup() []time.Duration {
+	return m.cleanupResults
 }
 
 // ==================== normalizeDialogID tests ====================
@@ -302,6 +322,7 @@ func TestParseRawPacket_TooShort(t *testing.T) {
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
+		inviteTracker: make(map[string]inviteEntry),
 	}
 
 	err := e.parseRawPacket([]byte("short"))
@@ -315,6 +336,7 @@ func TestParseRawPacket_NotIPv4(t *testing.T) {
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
+		inviteTracker: make(map[string]inviteEntry),
 	}
 
 	packet := make([]byte, 42)
@@ -332,6 +354,7 @@ func TestParseRawPacket_NotUDP(t *testing.T) {
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
+		inviteTracker: make(map[string]inviteEntry),
 	}
 
 	packet := make([]byte, 54)
@@ -351,6 +374,7 @@ func TestParseRawPacket_NoSIPPayload(t *testing.T) {
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
+		inviteTracker: make(map[string]inviteEntry),
 	}
 
 	packet := make([]byte, 42)
@@ -370,6 +394,7 @@ func TestParseRawPacket_NotSIPMethod(t *testing.T) {
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
+		inviteTracker: make(map[string]inviteEntry),
 	}
 
 	packet := make([]byte, 100)
@@ -390,6 +415,7 @@ func TestParseRawPacket_VLAN_Tagged(t *testing.T) {
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
+		inviteTracker: make(map[string]inviteEntry),
 	}
 
 	packet := make([]byte, 100)
@@ -411,6 +437,7 @@ func TestParseRawPacket_IPHeaderTooShort(t *testing.T) {
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
+		inviteTracker: make(map[string]inviteEntry),
 	}
 
 	packet := make([]byte, 30)
@@ -429,6 +456,7 @@ func TestParseRawPacket_UDPHeaderTooShort(t *testing.T) {
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
+		inviteTracker: make(map[string]inviteEntry),
 	}
 
 	packet := make([]byte, 40)
@@ -449,6 +477,7 @@ func TestParseRawPacket_SIPPayloadTooSmall(t *testing.T) {
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
+		inviteTracker: make(map[string]inviteEntry),
 	}
 
 	packet := make([]byte, 91)
@@ -544,6 +573,7 @@ func TestHandleMessage_Request(t *testing.T) {
 			metricser: mm,
 			dialoger:  md,
 		},
+		inviteTracker: make(map[string]inviteEntry),
 	}
 
 	input := []byte("INVITE sip:test SIP/2.0\r\n" +
@@ -570,6 +600,7 @@ func TestHandleMessage_Response200_INVITE(t *testing.T) {
 			metricser: mm,
 			dialoger:  md,
 		},
+		inviteTracker: make(map[string]inviteEntry),
 	}
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
@@ -599,6 +630,7 @@ func TestHandleMessage_Response200_BYE(t *testing.T) {
 			metricser: mm,
 			dialoger:  md,
 		},
+		inviteTracker: make(map[string]inviteEntry),
 	}
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
@@ -627,6 +659,7 @@ func TestHandleMessage_Response200_REGISTER(t *testing.T) {
 			metricser: mm,
 			dialoger:  md,
 		},
+		inviteTracker: make(map[string]inviteEntry),
 	}
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
@@ -655,6 +688,7 @@ func TestHandleMessage_RRD_FullCycle(t *testing.T) {
 			dialoger:  md,
 		},
 		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
 	}
 
 	registerReq := []byte("REGISTER sip:test SIP/2.0\r\n" +
@@ -695,6 +729,7 @@ func TestHandleMessage_Response401(t *testing.T) {
 			metricser: mm,
 			dialoger:  md,
 		},
+		inviteTracker: make(map[string]inviteEntry),
 	}
 
 	input := []byte("SIP/2.0 401 Unauthorized\r\n" +
@@ -722,6 +757,7 @@ func TestHandleMessage_Response302_INVITE(t *testing.T) {
 			metricser: mm,
 			dialoger:  md,
 		},
+		inviteTracker: make(map[string]inviteEntry),
 	}
 
 	input := []byte("SIP/2.0 302 Moved Temporarily\r\n" +
@@ -750,6 +786,7 @@ func TestHandleMessage_SER_Integration(t *testing.T) {
 			metricser: m,
 			dialoger:  d,
 		},
+		inviteTracker: make(map[string]inviteEntry),
 	}
 
 	// 10 INVITE requests
@@ -809,6 +846,7 @@ func TestHandleMessage_ParseError(t *testing.T) {
 			metricser: mm,
 			dialoger:  md,
 		},
+		inviteTracker: make(map[string]inviteEntry),
 	}
 
 	// Invalid SIP packet - "invalid" is too short and won't be recognized
@@ -829,6 +867,7 @@ func TestHandleMessage_Response200_InvalidDialogID(t *testing.T) {
 			metricser: mm,
 			dialoger:  md,
 		},
+		inviteTracker: make(map[string]inviteEntry),
 	}
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
@@ -860,6 +899,7 @@ func TestParseRawPacket_AllSIPMethods(t *testing.T) {
 					dialoger:  &mockDialoger{},
 				},
 				registerTracker: make(map[string]registerEntry),
+				inviteTracker:   make(map[string]inviteEntry),
 			}
 
 			packet := make([]byte, 200)
@@ -1118,6 +1158,7 @@ func TestExporter_RegisterTracker_StoreAndRemove(t *testing.T) {
 			dialoger:  &mockDialoger{},
 		},
 		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
 	}
 
 	callID := "test-call-id-123"
@@ -1147,6 +1188,7 @@ func TestExporter_RegisterTracker_401Removes(t *testing.T) {
 			dialoger:  md,
 		},
 		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
 	}
 
 	// REGISTER request
@@ -1190,6 +1232,7 @@ func TestExporter_RegisterTracker_403Removes(t *testing.T) {
 			dialoger:  md,
 		},
 		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
 	}
 
 	// REGISTER request
@@ -1226,6 +1269,7 @@ func TestExporter_RegisterTracker_500Removes(t *testing.T) {
 			dialoger:  md,
 		},
 		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
 	}
 
 	// REGISTER request
@@ -1259,6 +1303,7 @@ func TestExporter_RegisterTracker_TTLExpired(t *testing.T) {
 			dialoger:  &mockDialoger{},
 		},
 		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
 	}
 
 	// Add entry older than TTL (61 seconds)
@@ -1292,6 +1337,7 @@ func TestExporter_RegisterTracker_TTLNotExpired(t *testing.T) {
 			dialoger:  &mockDialoger{},
 		},
 		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
 	}
 
 	// Add entry just before TTL (30 seconds ago)
@@ -1316,6 +1362,7 @@ func TestExporter_RegisterTracker_Retransmit200OK(t *testing.T) {
 			dialoger:  md,
 		},
 		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
 	}
 
 	// First REGISTER
@@ -1369,6 +1416,7 @@ func TestExporter_RegisterTracker_Retransmit401(t *testing.T) {
 			dialoger:  md,
 		},
 		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
 	}
 
 	// First REGISTER
@@ -1411,6 +1459,7 @@ func TestExporter_RegisterTracker_DifferentCallID(t *testing.T) {
 			dialoger:  md,
 		},
 		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
 	}
 
 	// REGISTER with Call-ID 1
@@ -1472,7 +1521,13 @@ func TestSipDialogMetricsUpdate_ExpiredIncrementsSessionCompleted(t *testing.T) 
 	start := time.Now()
 	mm := &mockMetricser{}
 	md := &mockDialoger{
-		cleanupCount: 5,
+		cleanupResults: []time.Duration{
+			1 * time.Second,
+			2 * time.Second,
+			3 * time.Second,
+			4 * time.Second,
+			5 * time.Second,
+		},
 	}
 
 	e := &exporter{
@@ -1481,15 +1536,564 @@ func TestSipDialogMetricsUpdate_ExpiredIncrementsSessionCompleted(t *testing.T) 
 			dialoger:  md,
 		},
 		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
 	}
 
-	// Simulate one tick of sipDialogMetricsUpdate
-	// We can't call it directly (it's an infinite loop), so test the logic
-	expired := e.services.dialoger.Cleanup()
-	for i := 0; i < expired; i++ {
+	durations := e.services.dialoger.Cleanup()
+	for _, d := range durations {
 		e.services.metricser.SessionCompleted()
+		e.services.metricser.UpdateSPD(d)
 	}
 
 	require.True(t, mm.sessionCompletedFlag, "SessionCompleted should be called")
+	require.True(t, mm.spdUpdated, "UpdateSPD should be called")
 	t.Logf("duration: %v", time.Since(start))
+}
+
+// ==================== Invite Tracker tests ====================
+
+func TestExporter_InviteTracker_StoreAndMeasure(t *testing.T) {
+	e := &exporter{
+		services: services{
+			metricser: &mockMetricser{},
+			dialoger:  &mockDialoger{},
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	callID := "test-call-id-123"
+
+	e.storeInviteTime(callID)
+
+	time.Sleep(10 * time.Millisecond)
+
+	delayMs, ok := e.measureInviteTTR(callID)
+	require.True(t, ok, "measureInviteTTR should return true for existing entry")
+	require.Greater(t, delayMs, 0.0, "delay should be positive")
+
+	_, ok = e.measureInviteTTR(callID)
+	require.False(t, ok, "second measure should return false (entry already removed)")
+}
+
+func TestExporter_InviteTracker_StoreAndRemove(t *testing.T) {
+	e := &exporter{
+		services: services{
+			metricser: &mockMetricser{},
+			dialoger:  &mockDialoger{},
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	callID := "test-call-id-remove"
+
+	e.storeInviteTime(callID)
+	e.removeInviteTime(callID)
+
+	_, ok := e.measureInviteTTR(callID)
+	require.False(t, ok, "entry should not exist after remove")
+}
+
+func TestExporter_InviteTracker_MeasureNonExistent(t *testing.T) {
+	e := &exporter{
+		services: services{
+			metricser: &mockMetricser{},
+			dialoger:  &mockDialoger{},
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	delayMs, ok := e.measureInviteTTR("nonexistent")
+	require.False(t, ok, "measureInviteTTR should return false for nonexistent entry")
+	require.Equal(t, 0.0, delayMs)
+}
+
+func TestExporter_InviteTracker_RemoveNonExistent(t *testing.T) {
+	e := &exporter{
+		services: services{
+			metricser: &mockMetricser{},
+			dialoger:  &mockDialoger{},
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	e.removeInviteTime("nonexistent")
+}
+
+func TestExporter_InviteTracker_TTLExpired(t *testing.T) {
+	e := &exporter{
+		services: services{
+			metricser: &mockMetricser{},
+			dialoger:  &mockDialoger{},
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	oldTime := time.Now().Add(-61 * time.Second)
+	e.inviteTracker["expired-call-id"] = inviteEntry{timestamp: oldTime}
+
+	borderTime := time.Now().Add(-59 * time.Second)
+	e.inviteTracker["border-call-id"] = inviteEntry{timestamp: borderTime}
+
+	e.inviteTracker["fresh-call-id"] = inviteEntry{timestamp: time.Now()}
+
+	e.cleanupInviteTracker()
+
+	_, expiredExists := e.measureInviteTTR("expired-call-id")
+	_, borderExists := e.measureInviteTTR("border-call-id")
+	_, freshExists := e.measureInviteTTR("fresh-call-id")
+
+	require.False(t, expiredExists, "expired entry (61s) should be removed")
+	require.True(t, borderExists, "entry at 59s should remain (TTL=60s)")
+	require.True(t, freshExists, "fresh entry should remain")
+}
+
+func TestExporter_InviteTracker_TTLNotExpired(t *testing.T) {
+	e := &exporter{
+		services: services{
+			metricser: &mockMetricser{},
+			dialoger:  &mockDialoger{},
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	recentTime := time.Now().Add(-30 * time.Second)
+	e.inviteTracker["recent-call-id"] = inviteEntry{timestamp: recentTime}
+
+	e.cleanupInviteTracker()
+
+	_, exists := e.measureInviteTTR("recent-call-id")
+	require.True(t, exists, "entry at 30s should remain (TTL=60s)")
+}
+
+func TestExporter_InviteTracker_DifferentCallIDs(t *testing.T) {
+	e := &exporter{
+		services: services{
+			metricser: &mockMetricser{},
+			dialoger:  &mockDialoger{},
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	e.storeInviteTime("call-id-1")
+	e.storeInviteTime("call-id-2")
+
+	_, ok1 := e.measureInviteTTR("call-id-1")
+	_, ok2 := e.measureInviteTTR("call-id-2")
+	require.True(t, ok1)
+	require.True(t, ok2)
+
+	_, ok1 = e.measureInviteTTR("call-id-1")
+	require.False(t, ok1, "call-id-1 should already be removed")
+}
+
+// ==================== TTR integration tests ====================
+
+func TestHandleMessage_TTR_100Trying(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	inviteReq := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: ttr-test-100\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	err := e.handleMessage(inviteReq)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	time.Sleep(10 * time.Millisecond)
+
+	tryingResp := []byte("SIP/2.0 100 Trying\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: ttr-test-100\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	err = e.handleMessage(tryingResp)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		return mm.ttrUpdated
+	}, 100*time.Millisecond, 10*time.Millisecond)
+	require.True(t, mm.ttrUpdated)
+	require.Greater(t, mm.ttrDelay, 0.0)
+}
+
+func TestHandleMessage_TTR_180Ringing(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	inviteReq := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: ttr-test-180\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage(inviteReq)
+	require.Eventually(t, func() bool {
+		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	time.Sleep(10 * time.Millisecond)
+
+	ringingResp := []byte("SIP/2.0 180 Ringing\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: ttr-test-180\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage(ringingResp)
+	require.Eventually(t, func() bool {
+		return mm.ttrUpdated
+	}, 100*time.Millisecond, 10*time.Millisecond)
+	require.Greater(t, mm.ttrDelay, 0.0)
+}
+
+func TestHandleMessage_TTR_183SessionProgress(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	inviteReq := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: ttr-test-183\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage(inviteReq)
+	require.Eventually(t, func() bool {
+		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	time.Sleep(10 * time.Millisecond)
+
+	progressResp := []byte("SIP/2.0 183 Session Progress\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: ttr-test-183\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage(progressResp)
+	require.Eventually(t, func() bool {
+		return mm.ttrUpdated
+	}, 100*time.Millisecond, 10*time.Millisecond)
+	require.Greater(t, mm.ttrDelay, 0.0)
+}
+
+func TestHandleMessage_TTR_NoProvisionalResponse(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	inviteReq := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: ttr-no-prov\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage(inviteReq)
+	require.Eventually(t, func() bool {
+		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	okResp := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: ttr-no-prov\r\n" +
+		"CSeq: 1 INVITE\r\n" +
+		"Session-Expires: 3600\r\n")
+
+	e.handleMessage(okResp)
+	time.Sleep(20 * time.Millisecond)
+
+	require.False(t, mm.ttrUpdated, "TTR should NOT be measured when no 1xx received")
+}
+
+func TestHandleMessage_TTR_OnlyFirstProvisionalMeasured(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	inviteReq := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: ttr-first-only\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage(inviteReq)
+	require.Eventually(t, func() bool {
+		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	time.Sleep(10 * time.Millisecond)
+
+	tryingResp := []byte("SIP/2.0 100 Trying\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: ttr-first-only\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage(tryingResp)
+	require.Eventually(t, func() bool {
+		return mm.ttrUpdated
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	firstTTR := mm.ttrDelay
+	require.Greater(t, firstTTR, 0.0)
+
+	time.Sleep(10 * time.Millisecond)
+
+	ringingResp := []byte("SIP/2.0 180 Ringing\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: ttr-first-only\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage(ringingResp)
+	time.Sleep(10 * time.Millisecond)
+
+	require.Equal(t, firstTTR, mm.ttrDelay, "TTR should not change on second 1xx (tracker already removed)")
+}
+
+func TestHandleMessage_TTR_RetransmitOverwrites(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	inviteReq := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: ttr-retransmit\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage(inviteReq)
+	require.Eventually(t, func() bool {
+		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	time.Sleep(20 * time.Millisecond)
+
+	e.handleMessage(inviteReq)
+
+	time.Sleep(10 * time.Millisecond)
+
+	tryingResp := []byte("SIP/2.0 100 Trying\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: ttr-retransmit\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage(tryingResp)
+	require.Eventually(t, func() bool {
+		return mm.ttrUpdated
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	require.Less(t, mm.ttrDelay, 35.0, "TTR should be from last INVITE, not first")
+	require.Greater(t, mm.ttrDelay, 0.0)
+}
+
+func TestHandleMessage_TTR_FinalResponseRemovesTracker(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	inviteReq := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: ttr-final-remove\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage(inviteReq)
+	require.Eventually(t, func() bool {
+		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	busyResp := []byte("SIP/2.0 486 Busy Here\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: ttr-final-remove\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage(busyResp)
+	time.Sleep(10 * time.Millisecond)
+
+	require.False(t, mm.ttrUpdated, "TTR should NOT be measured for non-1xx response")
+
+	_, ok := e.measureInviteTTR("ttr-final-remove")
+	require.False(t, ok, "tracker entry should be removed after final response")
+}
+
+func TestHandleMessage_TTR_NonInviteResponse_Ignored(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	registerReq := []byte("REGISTER sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: ttr-non-invite\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	e.handleMessage(registerReq)
+	require.Eventually(t, func() bool {
+		return bytes.Equal(mm.requestCalled, []byte("REGISTER"))
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	tryingResp := []byte("SIP/2.0 100 Trying\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: ttr-non-invite\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	e.handleMessage(tryingResp)
+	time.Sleep(10 * time.Millisecond)
+
+	require.False(t, mm.ttrUpdated, "TTR should NOT be measured for REGISTER 100 Trying")
+}
+
+func TestHandleMessage_TTR_FullCallFlow(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	inviteReq := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: ttr-full-flow\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage(inviteReq)
+	require.Eventually(t, func() bool {
+		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	time.Sleep(10 * time.Millisecond)
+
+	tryingResp := []byte("SIP/2.0 100 Trying\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: ttr-full-flow\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage(tryingResp)
+	require.Eventually(t, func() bool {
+		return mm.ttrUpdated
+	}, 100*time.Millisecond, 10*time.Millisecond)
+	require.Greater(t, mm.ttrDelay, 0.0)
+
+	okResp := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: ttr-full-flow\r\n" +
+		"CSeq: 1 INVITE\r\n" +
+		"Session-Expires: 3600\r\n")
+
+	e.handleMessage(okResp)
+	require.Eventually(t, func() bool {
+		return mm.invite200OKCalled
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	byeReq := []byte("BYE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: ttr-full-flow\r\n" +
+		"CSeq: 2 BYE\r\n")
+
+	e.handleMessage(byeReq)
+	time.Sleep(10 * time.Millisecond)
+
+	byeOkResp := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: ttr-full-flow\r\n" +
+		"CSeq: 2 BYE\r\n")
+
+	e.handleMessage(byeOkResp)
+	time.Sleep(10 * time.Millisecond)
+
+	require.True(t, mm.ttrUpdated, "TTR should be measured during full call flow")
+	require.True(t, mm.sessionCompletedFlag, "session should be completed")
 }

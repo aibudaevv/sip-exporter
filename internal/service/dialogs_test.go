@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -17,7 +18,7 @@ func TestDialoger_Create(t *testing.T) {
 	require.NotNil(t, d)
 
 	expiresAt := time.Now().Add(1 * time.Hour)
-	d.Create("dialog-1", expiresAt)
+	d.Create("dialog-1", expiresAt, time.Now())
 
 	require.Equal(t, 1, d.Size())
 }
@@ -25,41 +26,41 @@ func TestDialoger_Create(t *testing.T) {
 func TestDialoger_Create_ExistingDialog(t *testing.T) {
 	d := NewDialoger()
 
-	// Attempt to create existing dialog (should not overwrite)
 	firstExpires := time.Now().Add(1 * time.Hour)
-	d.Create("dialog-1", firstExpires)
+	d.Create("dialog-1", firstExpires, time.Now())
 
 	secondExpires := time.Now().Add(2 * time.Hour)
-	d.Create("dialog-1", secondExpires)
+	d.Create("dialog-1", secondExpires, time.Now())
 
-	// Size should not change
 	require.Equal(t, 1, d.Size())
 }
 
 func TestDialoger_Delete(t *testing.T) {
 	d := NewDialoger()
 
-	d.Create("dialog-1", time.Now().Add(1*time.Hour))
+	createdAt := time.Now()
+	d.Create("dialog-1", time.Now().Add(1*time.Hour), createdAt)
 	require.Equal(t, 1, d.Size())
 
-	d.Delete("dialog-1")
+	duration := d.Delete("dialog-1")
 	require.Equal(t, 0, d.Size())
+	require.GreaterOrEqual(t, duration, time.Duration(0))
 }
 
 func TestDialoger_Delete_NonExisting(t *testing.T) {
 	d := NewDialoger()
 
-	// Deleting non-existing dialog should not panic
-	d.Delete("non-existing")
+	duration := d.Delete("non-existing")
 	require.Equal(t, 0, d.Size())
+	require.Equal(t, time.Duration(0), duration)
 }
 
 func TestDialoger_Size_Multiple(t *testing.T) {
 	d := NewDialoger()
 
-	d.Create("dialog-1", time.Now().Add(1*time.Hour))
-	d.Create("dialog-2", time.Now().Add(1*time.Hour))
-	d.Create("dialog-3", time.Now().Add(1*time.Hour))
+	d.Create("dialog-1", time.Now().Add(1*time.Hour), time.Now())
+	d.Create("dialog-2", time.Now().Add(1*time.Hour), time.Now())
+	d.Create("dialog-3", time.Now().Add(1*time.Hour), time.Now())
 
 	require.Equal(t, 3, d.Size())
 
@@ -72,18 +73,18 @@ func TestDialoger_Cleanup_Expired(t *testing.T) {
 	d := NewDialoger()
 
 	expiredExpires := time.Now().Add(-1 * time.Hour)
-	d.Create("expired-dialog", expiredExpires)
+	d.Create("expired-dialog", expiredExpires, start.Add(-2*time.Hour))
 
 	validExpires := time.Now().Add(1 * time.Hour)
-	d.Create("valid-dialog", validExpires)
+	d.Create("valid-dialog", validExpires, time.Now())
 
 	require.Equal(t, 2, d.Size())
 
-	// Cleanup should remove only expired dialogs and return count
-	count := d.Cleanup()
+	durations := d.Cleanup()
 
 	require.Equal(t, 1, d.Size())
-	require.Equal(t, 1, count, "Cleanup should return count of removed dialogs")
+	require.Len(t, durations, 1)
+	require.Greater(t, durations[0], time.Hour)
 	t.Logf("duration: %v", time.Since(start))
 }
 
@@ -91,17 +92,16 @@ func TestDialoger_Cleanup_AllExpired(t *testing.T) {
 	start := time.Now()
 	d := NewDialoger()
 
-	d.Create("expired-1", time.Now().Add(-1*time.Hour))
-	d.Create("expired-2", time.Now().Add(-2*time.Hour))
-	d.Create("expired-3", time.Now().Add(-3*time.Hour))
+	d.Create("expired-1", time.Now().Add(-1*time.Hour), start.Add(-3*time.Hour))
+	d.Create("expired-2", time.Now().Add(-2*time.Hour), start.Add(-4*time.Hour))
+	d.Create("expired-3", time.Now().Add(-3*time.Hour), start.Add(-5*time.Hour))
 
 	require.Equal(t, 3, d.Size())
 
-	// Cleanup should remove all dialogs
-	count := d.Cleanup()
+	durations := d.Cleanup()
 
 	require.Equal(t, 0, d.Size())
-	require.Equal(t, 3, count, "Cleanup should return count of all removed dialogs")
+	require.Len(t, durations, 3)
 	t.Logf("duration: %v", time.Since(start))
 }
 
@@ -109,17 +109,16 @@ func TestDialoger_Cleanup_NoneExpired(t *testing.T) {
 	start := time.Now()
 	d := NewDialoger()
 
-	d.Create("valid-1", time.Now().Add(1*time.Hour))
-	d.Create("valid-2", time.Now().Add(2*time.Hour))
-	d.Create("valid-3", time.Now().Add(3*time.Hour))
+	d.Create("valid-1", time.Now().Add(1*time.Hour), time.Now())
+	d.Create("valid-2", time.Now().Add(2*time.Hour), time.Now())
+	d.Create("valid-3", time.Now().Add(3*time.Hour), time.Now())
 
 	require.Equal(t, 3, d.Size())
 
-	// Cleanup should not remove valid dialogs
-	count := d.Cleanup()
+	durations := d.Cleanup()
 
 	require.Equal(t, 3, d.Size())
-	require.Equal(t, 0, count, "Cleanup should return 0 when nothing removed")
+	require.Empty(t, durations)
 	t.Logf("duration: %v", time.Since(start))
 }
 
@@ -127,22 +126,30 @@ func TestDialoger_Cleanup_Empty(t *testing.T) {
 	start := time.Now()
 	d := NewDialoger()
 
-	// Cleanup on empty storage
-	count := d.Cleanup()
+	durations := d.Cleanup()
 
 	require.Equal(t, 0, d.Size())
-	require.Equal(t, 0, count, "Cleanup should return 0 on empty storage")
+	require.Empty(t, durations)
 	t.Logf("duration: %v", time.Since(start))
+}
+
+func TestDialoger_Delete_ReturnsDuration(t *testing.T) {
+	d := NewDialoger()
+
+	createdAt := time.Now().Add(-5 * time.Second)
+	d.Create("dialog-1", time.Now().Add(1*time.Hour), createdAt)
+
+	duration := d.Delete("dialog-1")
+	require.GreaterOrEqual(t, duration, 5*time.Second)
 }
 
 func TestDialoger_Concurrent_Create(t *testing.T) {
 	d := NewDialoger()
 	done := make(chan bool, 100)
 
-	// Test thread safety for Create
 	for i := 0; i < 100; i++ {
 		go func(id int) {
-			d.Create("dialog-"+string(rune(id)), time.Now().Add(1*time.Hour))
+			d.Create("dialog-"+strconv.Itoa(id), time.Now().Add(1*time.Hour), time.Now())
 			done <- true
 		}(i)
 	}
@@ -151,24 +158,21 @@ func TestDialoger_Concurrent_Create(t *testing.T) {
 		<-done
 	}
 
-	// All dialogs should be created
 	require.Equal(t, 100, d.Size())
 }
 
 func TestDialoger_Concurrent_Delete(t *testing.T) {
 	d := NewDialoger()
 
-	// Create dialogs
 	for i := 0; i < 50; i++ {
-		d.Create("dialog-"+string(rune(i)), time.Now().Add(1*time.Hour))
+		d.Create("dialog-"+strconv.Itoa(i), time.Now().Add(1*time.Hour), time.Now())
 	}
 
 	done := make(chan bool, 50)
 
-	// Test thread safety for Delete
 	for i := 0; i < 50; i++ {
 		go func(id int) {
-			d.Delete("dialog-" + string(rune(id)))
+			d.Delete("dialog-" + strconv.Itoa(id))
 			done <- true
 		}(i)
 	}
@@ -183,18 +187,16 @@ func TestDialoger_Concurrent_Delete(t *testing.T) {
 func TestDialoger_Concurrent_Cleanup(t *testing.T) {
 	d := NewDialoger()
 
-	// Create dialogs with different expiration times
 	for i := 0; i < 50; i++ {
 		if i%2 == 0 {
-			d.Create("expired-"+string(rune(i)), time.Now().Add(-1*time.Hour))
+			d.Create("expired-"+strconv.Itoa(i), time.Now().Add(-1*time.Hour), time.Now())
 		} else {
-			d.Create("valid-"+string(rune(i)), time.Now().Add(1*time.Hour))
+			d.Create("valid-"+strconv.Itoa(i), time.Now().Add(1*time.Hour), time.Now())
 		}
 	}
 
 	done := make(chan bool, 10)
 
-	// Test thread safety for Cleanup
 	for i := 0; i < 10; i++ {
 		go func() {
 			d.Cleanup()
@@ -206,6 +208,5 @@ func TestDialoger_Concurrent_Cleanup(t *testing.T) {
 		<-done
 	}
 
-	// Only valid dialogs should remain (25 total)
 	require.Equal(t, 25, d.Size())
 }

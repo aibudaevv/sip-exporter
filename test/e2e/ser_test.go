@@ -10,6 +10,7 @@ import (
 )
 
 func TestSER_AllScenarios(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		uasScenario string
@@ -49,55 +50,50 @@ func TestSER_AllScenarios(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
+			env := newTestEnv(ctx, t)
 
-			endpoint := startExporter(ctx, t)
-			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
 
-			ser := getSER(t, endpoint)
+			ser := getSER(t, env.endpoint)
 			t.Logf("SER = %.2f (want %.2f)", ser, tt.wantSER)
 			require.Equal(t, tt.wantSER, ser)
 
-			sessions := getSessions(t, endpoint)
-			require.Equal(t, 0.0, sessions, "sessions should be 0 after all calls terminated")
+			waitForSessionsZero(t, env.endpoint)
 		})
-		if t.Failed() {
-			break
-		}
 	}
 }
 
 // TestSER_Mixed tests mixed scenario: some calls successful, some rejected.
 func TestSER_Mixed(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
+	env := newTestEnv(ctx, t)
 
-	endpoint := startExporter(ctx, t)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 35, env)
+	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 15, env)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 35)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 15)
-
-	ser := getSER(t, endpoint)
+	ser := getSER(t, env.endpoint)
 	t.Logf("SER = %.2f (want %.2f)", ser, 70.0)
 	require.Equal(t, 70.0, ser)
 
-	sessions := getSessions(t, endpoint)
-	require.Equal(t, 0.0, sessions, "sessions should be 0 after all calls terminated")
+	waitForSessionsZero(t, env.endpoint)
 }
 
 // TestSER_Mixed3xx tests that 3xx responses are correctly excluded from denominator.
 // 50 redirect (3xx) + 50 successful (200 OK) → SER = 100% (all non-3xx successful).
 func TestSER_Mixed3xx(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
+	env := newTestEnv(ctx, t)
 
-	endpoint := startExporter(ctx, t)
+	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 25, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25, env)
 
-	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 25)
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25)
-
-	ser := getSER(t, endpoint)
+	ser := getSER(t, env.endpoint)
 	t.Logf("SER = %.2f (want %.2f)", ser, 100.0)
 	require.Equal(t, 100.0, ser)
 
-	sessions := getSessions(t, endpoint)
-	require.Equal(t, 0.0, sessions, "sessions should be 0 after all calls terminated")
+	waitForSessionsZero(t, env.endpoint)
 }

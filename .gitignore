@@ -11,7 +11,13 @@ AGENTS.md
 e2e.test
 exporter.test
 
+# Load test results (per-run artifact, baseline.json is committed)
+test/e2e/load/load_result.json
+
 # Session notes
 SESSION_NOTES.md
 TODO.md
-session-ses_26b6.md
+.CLAUDE.md
+ISSUES.md
+WHATS_NEXT.md
+.claudedocs/superpowers/

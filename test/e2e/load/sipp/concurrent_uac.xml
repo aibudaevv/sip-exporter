@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<scenario name="Concurrent Sessions UAC">
+    <send retrans="500">
+        <![CDATA[
+        INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/UDP [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]>;tag=[call_number]
+        To: sut <sip:[service]@[remote_ip]:[remote_port]>
+        Call-ID: [call_id]
+        CSeq: 1 INVITE
+        Contact: sip:sipp@[local_ip]:[local_port]
+        Max-Forwards: 70
+        Content-Type: application/sdp
+        Content-Length: [len]
+
+        v=0
+        o=- 1 1 IN IP[local_ip_type] [local_ip]
+        s=-
+        c=IN IP[local_ip_type] [local_ip]
+        t=0 0
+        m=audio 10000 RTP/AVP 0
+        a=rtpmap:0 PCMU/8000
+
+        ]]>
+    </send>
+    <recv response="100" optional="true" crlf="true"/>
+    <recv response="180" optional="true" crlf="true"/>
+    <recv response="200" crlf="true"/>
+    <send>
+        <![CDATA[
+        ACK sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/UDP [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]>;tag=[call_number]
+        To: sut <sip:[service]@[remote_ip]:[remote_port]>[last_To_tag]
+        Call-ID: [call_id]
+        CSeq: 2 ACK
+        Content-Length: 0
+
+        ]]>
+    </send>
+    <pause milliseconds="30000"/>
+    <send retrans="500">
+        <![CDATA[
+        BYE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/UDP [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]>;tag=[call_number]
+        To: sut <sip:[service]@[remote_ip]:[remote_port]>[last_To_tag]
+        Call-ID: [call_id]
+        CSeq: 3 BYE
+        Content-Length: 0
+
+        ]]>
+    </send>
+    <recv response="200" crlf="true"/>
+</scenario>

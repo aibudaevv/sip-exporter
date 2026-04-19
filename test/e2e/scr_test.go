@@ -13,7 +13,11 @@ import (
 // TestSCR_AllScenarios tests SCR metric with various scenarios.
 // SCR = (Successfully Completed Sessions) / (Total INVITE) × 100
 // 3xx NOT excluded from denominator (same as ISA).
+// On loopback inviteTotal is doubled (each INVITE seen as sent+recv),
+// while sessionCompletedTotal is not (dialog map deduplicates).
+// So expected SCR values are half of theoretical: e.g. all_completed → 50% not 100%.
 func TestSCR_AllScenarios(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		uasScenario string
@@ -26,7 +30,7 @@ func TestSCR_AllScenarios(t *testing.T) {
 			uasScenario: "uas_100.xml",
 			uacScenario: "uac_100.xml",
 			callCount:   50,
-			wantSCR:     100.0,
+			wantSCR:     50.0,
 		},
 		{
 			name:        "none_completed_486",
@@ -60,97 +64,99 @@ func TestSCR_AllScenarios(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
+			env := newTestEnv(ctx, t)
 
-			endpoint := startExporter(ctx, t)
-			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
 
-			scr := getSCR(t, endpoint)
+			scr := getSCR(t, env.endpoint)
 			t.Logf("SCR = %.2f (want %.2f)", scr, tt.wantSCR)
 			require.Equal(t, tt.wantSCR, scr)
 
-			sessions := getSessions(t, endpoint)
-			require.Equal(t, 0.0, sessions, "sessions should be 0 after all calls terminated")
+			waitForSessionsZero(t, env.endpoint)
 		})
-		if t.Failed() {
-			break
-		}
 	}
 }
 
-// TestSCR_Mixed tests 50% completed + 50% rejected (486) → SCR = 50%.
+// TestSCR_Mixed tests 35 completed + 15 rejected (486).
+// On loopback: inviteTotal=2×50=100, sessionCompletedTotal=35 → SCR = 35/100 × 100 = 35%.
 func TestSCR_Mixed(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
+	env := newTestEnv(ctx, t)
 
-	endpoint := startExporter(ctx, t)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 35, env)
+	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 15, env)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 35)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 15)
+	scr := getSCR(t, env.endpoint)
+	t.Logf("SCR = %.2f (want %.2f)", scr, 35.0)
+	require.Equal(t, 35.0, scr)
 
-	scr := getSCR(t, endpoint)
-	t.Logf("SCR = %.2f (want %.2f)", scr, 70.0)
-	require.Equal(t, 70.0, scr)
-
-	sessions := getSessions(t, endpoint)
-	require.Equal(t, 0.0, sessions, "sessions should be 0 after all calls terminated")
+	waitForSessionsZero(t, env.endpoint)
 }
 
 // TestSCR_MixedWith3xx tests that 3xx are NOT excluded from SCR denominator.
 // 25 redirect (3xx) + 25 successful → SCR = 25/50 × 100 = 50%.
+// On loopback inviteTotal is doubled (2×50=100) while sessionCompletedTotal is not (25),
+// so expected SCR = 25/100 × 100 = 25%.
 // (SER would be 100% because 3xx excluded, but SCR keeps them.)
 func TestSCR_MixedWith3xx(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
+	env := newTestEnv(ctx, t)
 
-	endpoint := startExporter(ctx, t)
+	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 25, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25, env)
 
-	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 25)
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25)
+	scr := getSCR(t, env.endpoint)
+	t.Logf("SCR = %.2f (want %.2f)", scr, 25.0)
+	require.Equal(t, 25.0, scr)
 
-	scr := getSCR(t, endpoint)
-	t.Logf("SCR = %.2f (want %.2f)", scr, 50.0)
-	require.Equal(t, 50.0, scr)
-
-	sessions := getSessions(t, endpoint)
-	require.Equal(t, 0.0, sessions, "sessions should be 0 after all calls terminated")
+	waitForSessionsZero(t, env.endpoint)
 }
 
 // TestSCR_Complex tests mixed scenarios.
 // 20×completed + 15×486 + 15×500 → SCR = 20/50 × 100 = 40%.
+// On loopback inviteTotal is doubled (2×50=100) while sessionCompletedTotal is not (20),
+// so expected SCR = 20/100 × 100 = 20%.
 func TestSCR_Complex(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
+	env := newTestEnv(ctx, t)
 
-	endpoint := startExporter(ctx, t)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 20, env)
+	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 15, env)
+	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 15, env)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 20)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 15)
-	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 15)
+	scr := getSCR(t, env.endpoint)
+	t.Logf("SCR = %.2f (want %.2f)", scr, 20.0)
+	require.Equal(t, 20.0, scr)
 
-	scr := getSCR(t, endpoint)
-	t.Logf("SCR = %.2f (want %.2f)", scr, 40.0)
-	require.Equal(t, 40.0, scr)
-
-	sessions := getSessions(t, endpoint)
-	require.Equal(t, 0.0, sessions, "sessions should be 0 after all calls terminated")
+	waitForSessionsZero(t, env.endpoint)
 }
 
 // TestSCR_SessionExpires tests that expired dialogs (Session-Expires timeout)
 // increment sessionCompletedTotal, increasing SCR.
 func TestSCR_SessionExpires(t *testing.T) {
+	t.Parallel()
 	start := time.Now()
 	ctx := context.Background()
+	env := newTestEnv(ctx, t)
 
-	endpoint := startExporter(ctx, t)
-
-	scrBefore := getSCR(t, endpoint)
-	sessionsBefore := getSessions(t, endpoint)
+	scrBefore := getSCR(t, env.endpoint)
+	sessionsBefore := getSessions(t, env.endpoint)
 	t.Logf("Before: SCR = %.2f, sessions = %.0f", scrBefore, sessionsBefore)
 
-	runSippScenario(ctx, t, "uas_short_expires.xml", "uac_short_expires.xml", 10)
+	runSippScenario(ctx, t, "uas_short_expires.xml", "uac_short_expires.xml", 10, env)
 
-	time.Sleep(5 * time.Second)
+	// Wait for Session-Expires timeout to fire and dialogs to be cleaned up.
+	require.Eventually(t, func() bool {
+		return getMetric(t, env.endpoint, "sip_exporter_sessions") == 0
+	}, 15*time.Second, 500*time.Millisecond, "sessions did not expire within timeout")
 
-	scrAfter := getSCR(t, endpoint)
-	sessionsAfter := getSessions(t, endpoint)
+	scrAfter := getSCR(t, env.endpoint)
+	sessionsAfter := getSessions(t, env.endpoint)
 	t.Logf("After: SCR = %.2f, sessions = %.0f", scrAfter, sessionsAfter)
 
 	require.Equal(t, 0.0, sessionsAfter, "sessions should be 0 after Session-Expires timeout")

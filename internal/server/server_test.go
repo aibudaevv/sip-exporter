@@ -19,15 +19,22 @@ type mockExporter struct {
 	initializeCalled bool
 	initializeErr    error
 	closeCalled      bool
+	isAlive          bool
 }
 
 func (m *mockExporter) Initialize(interfaceName string, path string, sipPort, sipsPort int) error {
 	m.initializeCalled = true
+	m.isAlive = true
 	return m.initializeErr
 }
 
 func (m *mockExporter) Close() {
 	m.closeCalled = true
+	m.isAlive = false
+}
+
+func (m *mockExporter) IsAlive() bool {
+	return m.isAlive
 }
 
 func TestNewServer(t *testing.T) {

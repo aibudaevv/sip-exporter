@@ -1,7 +1,7 @@
 version := $(shell cat VERSION)
 .DEFAULT_GOAL := docker_build
 
-.PHONY: test test-e2e test-e2e-run
+.PHONY: build docker_build ebpf_compile go_build clean ebpf_log lint vet imports test test-e2e test-e2e-run test-load test-load-run test-load-update-baseline
 
 build: ebpf_compile go_build
 docker_build:
@@ -19,12 +19,23 @@ test:
 
 test-e2e: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
-		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -failfast -timeout 10m ./test/e2e/...
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 4 -failfast -timeout 5m ./test/e2e/
 
 #example: make test-e2e-run TEST=TestSER_AllScenarios/100_percent
 test-e2e-run: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
-		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -failfast -timeout 10m -run "$(TEST)" ./test/e2e/...
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 4 -failfast -timeout 5m -run "$(TEST)" ./test/e2e/
+
+test-load: docker_build
+	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -timeout 30m ./test/e2e/load/...
+
+test-load-run: docker_build
+	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -timeout 30m -run "$(TEST)" ./test/e2e/load/...
+
+test-load-update-baseline:
+	cp test/e2e/load/load_result.json test/e2e/load/baseline.json
 
 lint: vet imports
 	golangci-lint run
