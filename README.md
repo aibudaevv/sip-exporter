@@ -96,7 +96,8 @@ All metrics are exposed at `/metrics` in Prometheus exposition format. The expor
 
 - **Traffic counters** — SIP request types (INVITE, BYE, REGISTER, etc.) and response status codes (100–603)
 - **Active sessions** — real-time count of active SIP dialogs
-- **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, RRD, SPD
+- **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, NER, RRD, SPD, TTR
+- **Extended metrics** — ISS (ineffective session severity), ORD (OPTIONS response delay), LRD (location registration delay), ASR, SDC
 
 Full reference with formulas, examples, and RFC section mapping: [docs/METRICS.md](docs/METRICS.md)
 
@@ -120,7 +121,7 @@ Full reference with formulas, examples, and RFC section mapping: [docs/METRICS.m
 
 Test suite:
 - **Unit tests** — MC/DC standard, all business logic covered
-- **27 E2E tests** — real SIP traffic via SIPp + testcontainers-go, validates all RFC 6076 metrics
+- **55 E2E tests** — real SIP traffic via SIPp + testcontainers-go, validates all RFC 6076 metrics
 - **8 load tests** — PPS throughput, concurrent sessions, memory stability, GC pauses, scrape latency
 
 ## Benchmark
@@ -136,7 +137,7 @@ See [BENCHMARK.md](./docs/BENCHMARK.md) for detailed results, methodology, and o
 Pre-configured alerting examples are available in [ALERTING.md](./docs/ALERTING.md):
 
 - **Prometheus alert rules** — Critical, warning, and info alerts for SER, ISA, RRD, and more
-- **Grafana dashboard** — Ready-to-import JSON with 8 panels
+- **Grafana dashboard** — Ready-to-import JSON with 21 panels
 - **Alertmanager examples** — Slack, PagerDuty, and Email integrations
 - **Best practices** — Scrape intervals, retention, threshold tuning
 
@@ -147,7 +148,7 @@ Import the pre-built dashboard into your Grafana instance:
 2. Upload `examples/grafana-dashboard.json` or copy the JSON content
 3. Select your Prometheus or VictoriaMetrics datasource
 
-The dashboard includes all available metrics: traffic counters, SIP request/response breakdowns, active sessions, RFC 6076 performance metrics, and system errors.
+The dashboard includes all available metrics: traffic counters, SIP request/response breakdowns, active sessions, RFC 6076 performance metrics (SER, SEER, ISA, SCR, NER), delay histograms (RRD, TTR, SPD, ORD, LRD), session quality metrics (ISS, ASR, SDC), and system errors.
 
 Dashboard file: [`examples/grafana-dashboard.json`](examples/grafana-dashboard.json)
 

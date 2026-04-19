@@ -1,0 +1,89 @@
+//go:build e2e
+
+package e2e
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+// TestISS_AllScenarios tests ISS counter with various scenarios.
+// ISS counts INVITE responses with 408, 500, 503, 504 status codes.
+// On loopback each response is seen twice → ISS doubles.
+
+func TestISS_AllScenarios(t *testing.T) {
+	tests := []struct {
+		name    string
+		uas     string
+		uac     string
+		count   int
+		wantISS float64
+	}{
+		{
+			name:    "server_error_500",
+			uas:     "uas_server_error.xml",
+			uac:     "uac_server_error.xml",
+			count:   50,
+			wantISS: 100.0,
+		},
+		{
+			name:    "unavailable_503",
+			uas:     "uas_unavailable.xml",
+			uac:     "uac_unavailable.xml",
+			count:   50,
+			wantISS: 100.0,
+		},
+		{
+			name:    "all_200_ok",
+			uas:     "uas_100.xml",
+			uac:     "uac_100.xml",
+			count:   50,
+			wantISS: 0.0,
+		},
+		{
+			name:    "rejected_486",
+			uas:     "uas_0.xml",
+			uac:     "uac_0.xml",
+			count:   50,
+			wantISS: 0.0,
+		},
+		{
+			name:    "no_invite",
+			uas:     "uas_no_invite.xml",
+			uac:     "uac_no_invite.xml",
+			count:   50,
+			wantISS: 0.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			env := newTestEnv(ctx, t)
+
+			runSippScenario(ctx, t, tt.uas, tt.uac, tt.count, env)
+			iss := getISS(t, env.endpoint)
+			t.Logf("ISS = %.0f (want %.0f)", iss, tt.wantISS)
+			require.Equal(t, tt.wantISS, iss)
+		})
+	}
+}
+
+// TestISS_Mixed tests 20×200 OK + 15×busy (480) + 15×server error (500).
+// ISS = 15×2 = 30 (loopback doubles 500 responses).
+
+func TestISS_Mixed(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(ctx, t)
+
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 20, env)
+	runSippScenario(ctx, t, "uas_busy.xml", "uac_busy.xml", 15, env)
+	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 15, env)
+
+	iss := getISS(t, env.endpoint)
+	t.Logf("ISS = %.0f (want %.0f)", iss, 30.0)
+	require.Equal(t, 30.0, iss)
+}

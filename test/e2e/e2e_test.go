@@ -479,6 +479,26 @@ func getSPD(t *testing.T, endpoint string) float64 {
 	return sum / count
 }
 
+func getNER(t *testing.T, endpoint string) float64 {
+	t.Helper()
+	return getMetric(t, endpoint, "sip_exporter_ner")
+}
+
+func getISS(t *testing.T, endpoint string) float64 {
+	t.Helper()
+	return getMetric(t, endpoint, "sip_exporter_iss_total")
+}
+
+func getORD(t *testing.T, endpoint string) float64 {
+	t.Helper()
+	return getMetric(t, endpoint, "sip_exporter_ord_count")
+}
+
+func getLRD(t *testing.T, endpoint string) float64 {
+	t.Helper()
+	return getMetric(t, endpoint, "sip_exporter_lrd_count")
+}
+
 // absScenarioPath returns absolute path to SIPp scenario.
 func absScenarioPath(t *testing.T, filename string) string {
 	t.Helper()

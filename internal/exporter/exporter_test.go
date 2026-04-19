@@ -26,6 +26,10 @@ type mockMetricser struct {
 	spdDuration               time.Duration
 	ttrUpdated                bool
 	ttrDelay                  float64
+	ordUpdated                bool
+	ordDelay                  float64
+	lrdUpdated                bool
+	lrdDelay                  float64
 }
 
 func (m *mockMetricser) Request(in []byte) {
@@ -74,6 +78,16 @@ func (m *mockMetricser) UpdateSession(size int) {
 func (m *mockMetricser) UpdateTTR(delayMs float64) {
 	m.ttrUpdated = true
 	m.ttrDelay = delayMs
+}
+
+func (m *mockMetricser) UpdateORD(delayMs float64) {
+	m.ordUpdated = true
+	m.ordDelay = delayMs
+}
+
+func (m *mockMetricser) UpdateLRD(delayMs float64) {
+	m.lrdUpdated = true
+	m.lrdDelay = delayMs
 }
 
 func (m *mockMetricser) SystemError() {
@@ -322,7 +336,8 @@ func TestParseRawPacket_TooShort(t *testing.T) {
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
-		inviteTracker: make(map[string]inviteEntry),
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
 	}
 
 	err := e.parseRawPacket([]byte("short"))
@@ -336,7 +351,8 @@ func TestParseRawPacket_NotIPv4(t *testing.T) {
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
-		inviteTracker: make(map[string]inviteEntry),
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
 	}
 
 	packet := make([]byte, 42)
@@ -354,7 +370,8 @@ func TestParseRawPacket_NotUDP(t *testing.T) {
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
-		inviteTracker: make(map[string]inviteEntry),
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
 	}
 
 	packet := make([]byte, 54)
@@ -374,7 +391,8 @@ func TestParseRawPacket_NoSIPPayload(t *testing.T) {
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
-		inviteTracker: make(map[string]inviteEntry),
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
 	}
 
 	packet := make([]byte, 42)
@@ -394,7 +412,8 @@ func TestParseRawPacket_NotSIPMethod(t *testing.T) {
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
-		inviteTracker: make(map[string]inviteEntry),
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
 	}
 
 	packet := make([]byte, 100)
@@ -415,7 +434,8 @@ func TestParseRawPacket_VLAN_Tagged(t *testing.T) {
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
-		inviteTracker: make(map[string]inviteEntry),
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
 	}
 
 	packet := make([]byte, 100)
@@ -437,7 +457,8 @@ func TestParseRawPacket_IPHeaderTooShort(t *testing.T) {
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
-		inviteTracker: make(map[string]inviteEntry),
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
 	}
 
 	packet := make([]byte, 30)
@@ -456,7 +477,8 @@ func TestParseRawPacket_UDPHeaderTooShort(t *testing.T) {
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
-		inviteTracker: make(map[string]inviteEntry),
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
 	}
 
 	packet := make([]byte, 40)
@@ -477,7 +499,8 @@ func TestParseRawPacket_SIPPayloadTooSmall(t *testing.T) {
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
-		inviteTracker: make(map[string]inviteEntry),
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
 	}
 
 	packet := make([]byte, 91)
@@ -573,7 +596,8 @@ func TestHandleMessage_Request(t *testing.T) {
 			metricser: mm,
 			dialoger:  md,
 		},
-		inviteTracker: make(map[string]inviteEntry),
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
 	}
 
 	input := []byte("INVITE sip:test SIP/2.0\r\n" +
@@ -600,7 +624,8 @@ func TestHandleMessage_Response200_INVITE(t *testing.T) {
 			metricser: mm,
 			dialoger:  md,
 		},
-		inviteTracker: make(map[string]inviteEntry),
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
 	}
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
@@ -630,7 +655,8 @@ func TestHandleMessage_Response200_BYE(t *testing.T) {
 			metricser: mm,
 			dialoger:  md,
 		},
-		inviteTracker: make(map[string]inviteEntry),
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
 	}
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
@@ -659,7 +685,8 @@ func TestHandleMessage_Response200_REGISTER(t *testing.T) {
 			metricser: mm,
 			dialoger:  md,
 		},
-		inviteTracker: make(map[string]inviteEntry),
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
 	}
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
@@ -729,7 +756,8 @@ func TestHandleMessage_Response401(t *testing.T) {
 			metricser: mm,
 			dialoger:  md,
 		},
-		inviteTracker: make(map[string]inviteEntry),
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
 	}
 
 	input := []byte("SIP/2.0 401 Unauthorized\r\n" +
@@ -757,7 +785,8 @@ func TestHandleMessage_Response302_INVITE(t *testing.T) {
 			metricser: mm,
 			dialoger:  md,
 		},
-		inviteTracker: make(map[string]inviteEntry),
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
 	}
 
 	input := []byte("SIP/2.0 302 Moved Temporarily\r\n" +
@@ -786,7 +815,8 @@ func TestHandleMessage_SER_Integration(t *testing.T) {
 			metricser: m,
 			dialoger:  d,
 		},
-		inviteTracker: make(map[string]inviteEntry),
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
 	}
 
 	// 10 INVITE requests
@@ -846,7 +876,8 @@ func TestHandleMessage_ParseError(t *testing.T) {
 			metricser: mm,
 			dialoger:  md,
 		},
-		inviteTracker: make(map[string]inviteEntry),
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
 	}
 
 	// Invalid SIP packet - "invalid" is too short and won't be recognized
@@ -867,7 +898,8 @@ func TestHandleMessage_Response200_InvalidDialogID(t *testing.T) {
 			metricser: mm,
 			dialoger:  md,
 		},
-		inviteTracker: make(map[string]inviteEntry),
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
 	}
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
@@ -900,6 +932,7 @@ func TestParseRawPacket_AllSIPMethods(t *testing.T) {
 				},
 				registerTracker: make(map[string]registerEntry),
 				inviteTracker:   make(map[string]inviteEntry),
+				optionsTracker:  make(map[string]optionsEntry),
 			}
 
 			packet := make([]byte, 200)

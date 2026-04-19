@@ -91,6 +91,10 @@ Dialogs are tracked with Session-Expires (RFC 4028). If no BYE is received befor
 | TTR | — | Time to First Response |
 | ASR | — | Answer Seizure Ratio (ITU-T E.411) |
 | SDC | — | Session Duration Counter |
+| NER | — | Network Effectiveness Ratio (GSMA IR.42) |
+| ISS | — | Ineffective Session Severity |
+| ORD | — | OPTIONS Response Delay |
+| LRD | — | Location Registration Delay |
 
 ---
 
@@ -363,3 +367,123 @@ rate(sip_exporter_sdc_total[5m])
 # Session completion rate per minute
 rate(sip_exporter_sdc_total[1m]) * 60
 ```
+
+---
+
+### Network Effectiveness Ratio (NER)
+
+`sip_exporter_ner`: percentage of INVITE requests that did **not** result in ineffective (infrastructure failure) responses.
+
+**Formula (GSMA IR.42):**
+```
+NER = (Total INVITE - INVITE → 408, 500, 503, 504) / Total INVITE × 100
+NER = 100 - ISA
+```
+
+- Defined in GSMA IR.42 (not RFC 6076), widely used in mobile operator networks
+- 3xx responses are **NOT excluded from the denominator**
+- Measures network quality including call termination — higher NER means fewer infrastructure failures
+- Undefined when no INVITE requests have been received
+
+**Relationship with ISA:** NER = 100 − ISA. Always use together: ISA for failure percentage, NER for success percentage.
+
+**PromQL examples:**
+```promql
+# Current NER
+sip_exporter_ner
+
+# Verify NER = 100 - ISA
+sip_exporter_ner + sip_exporter_isa
+```
+
+**Example values:**
+- `100` — no infrastructure failures (all INVITEs resolved without 408/500/503/504)
+- `95` — 5% of INVITEs hit server errors or timeouts
+- `0` — all INVITEs resulted in infrastructure failures
+
+---
+
+### Ineffective Session Severity (ISS)
+
+`sip_exporter_iss_total`: total number of INVITE requests that resulted in ineffective responses (Prometheus Counter).
+
+- Counts INVITE responses with status codes: `408`, `500`, `503`, `504`
+- Same codes used by ISA numerator, but exposed as an absolute Counter
+- Useful for alerting on absolute volume of infrastructure failures (unlike ISA which is a percentage)
+
+**PromQL examples:**
+```promql
+# Ineffective sessions per second
+rate(sip_exporter_iss_total[5m])
+
+# Total ineffective sessions since start
+sip_exporter_iss_total
+
+# Alert: more than 20 ineffective sessions per second
+rate(sip_exporter_iss_total[5m]) > 20
+```
+
+**Example values:**
+- `0` — no infrastructure failures detected
+- `rate > 5/sec` — elevated error rate, investigate
+- `rate > 20/sec` — critical, immediate attention required
+
+---
+
+### OPTIONS Response Delay (ORD)
+
+`sip_exporter_ord`: histogram of delays in milliseconds between sending an OPTIONS request and receiving any response.
+
+**Formula:**
+```
+ORD = Time of OPTIONS response - Time of OPTIONS request
+```
+
+- Measures round-trip time for SIP OPTIONS-pong transactions
+- Any response is measured (not only 200 OK) — OPTIONS is used for keepalive/health-check
+- OPTIONS requests are tracked by Call-ID with TTL-based cleanup (60s)
+- Exposed as a Prometheus Histogram with buckets: `[1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000]` ms
+
+**PromQL examples:**
+```promql
+# 95th percentile OPTIONS response delay
+histogram_quantile(0.95, sum(rate(sip_exporter_ord_bucket[5m])) by (le))
+
+# Average OPTIONS response delay
+rate(sip_exporter_ord_sum[5m]) / rate(sip_exporter_ord_count[5m])
+```
+
+**Example values:**
+- `< 50 ms` — excellent SIP server responsiveness
+- `100-500 ms` — acceptable (typical for WAN or loaded servers)
+- `> 1000 ms` — potential issues (server overload, network latency)
+
+---
+
+### Location Registration Delay (LRD)
+
+`sip_exporter_lrd`: histogram of delays in milliseconds between sending a REGISTER request and receiving a 3xx redirect response.
+
+**Formula:**
+```
+LRD = Time of REGISTER 3xx response - Time of REGISTER request
+```
+
+- Measures delay for registration redirect scenarios (e.g., SIP load balancer redirecting to another registrar)
+- Only 3xx responses to REGISTER are measured (200 OK is measured by RRD)
+- Reuses the same `registerTracker` as RRD — REGISTER→3xx triggers LRD, REGISTER→200 OK triggers RRD
+- Exposed as a Prometheus Histogram with buckets: `[1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000]` ms
+
+**PromQL examples:**
+```promql
+# 95th percentile location registration delay
+histogram_quantile(0.95, sum(rate(sip_exporter_lrd_bucket[5m])) by (le))
+
+# Average location registration delay
+rate(sip_exporter_lrd_sum[5m]) / rate(sip_exporter_lrd_count[5m])
+```
+
+**Example values:**
+- `< 50 ms` — fast redirect processing
+- `100-500 ms` — acceptable (redirect involves DNS or database lookup)
+- `> 1000 ms` — potential issues (slow redirect server, DNS resolution delays)

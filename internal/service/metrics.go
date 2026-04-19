@@ -71,8 +71,14 @@ type (
 		// ASR metric (ITU-T E.411)
 		asr prometheus.GaugeFunc
 
+		// NER metric (GSMA IR.42)
+		ner prometheus.GaugeFunc
+
 		// SDC metric — completed sessions counter
 		sdc prometheus.Counter
+
+		// ISS metric — ineffective session severity counter
+		iss prometheus.Counter
 
 		// RRD metrics (RFC 6076 for REGISTER)
 		rrdTotal uint64               // deprecated: суммарная задержка для расчёта среднего (микросекунды)
@@ -88,6 +94,12 @@ type (
 
 		// TTR metrics (Time to First Response)
 		ttr prometheus.Histogram // Метрика TTR histogram (ms)
+
+		// ORD metrics (OPTIONS Response Delay)
+		ord prometheus.Histogram
+
+		// LRD metrics (Location Registration Delay)
+		lrd prometheus.Histogram
 	}
 
 	Metricser interface {
@@ -99,6 +111,8 @@ type (
 		UpdateRRD(delayMs float64)
 		UpdateSPD(duration time.Duration)
 		UpdateTTR(delayMs float64)
+		UpdateORD(delayMs float64)
+		UpdateLRD(delayMs float64)
 		UpdateSession(size int)
 		SystemError()
 	}
@@ -121,10 +135,22 @@ func newMetricserWithRegistry(reg *prometheus.Registry) Metricser {
 	m.isa = newISAWithRegistry(m, reg)
 	m.scr = newSCRWithRegistry(m, reg)
 	m.asr = newASRWithRegistry(m, reg)
+	m.ner = newNERWithRegistry(m, reg)
 	m.sdc = newCounterWithRegistry("sip_exporter_sdc_total", "Total number of completed SIP sessions", reg)
+	m.iss = newCounterWithRegistry("sip_exporter_iss_total", "Total number of ineffective INVITE responses (408, 500, 503, 504) per RFC 6076 §4.8", reg)
 	m.rrd, m.rrdAvg = newRRDWithRegistry(m, reg)
 	m.spd, m.spdAvg = newSPDWithRegistry(m, reg)
 	m.ttr = newTTRWithRegistry(reg)
+	m.ord = newHistogramWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_ord",
+		Help:    "OPTIONS Response Delay in milliseconds (RFC 3261 §11.1)",
+		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
+	}, reg)
+	m.lrd = newHistogramWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_lrd",
+		Help:    "Location Registration Delay in milliseconds: delay between REGISTER and 3xx redirect response",
+		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
+	}, reg)
 
 	return m
 }
@@ -345,6 +371,27 @@ func newASRWithRegistry(m *metrics, reg *prometheus.Registry) prometheus.GaugeFu
 	}, fn)
 }
 
+func newNERWithRegistry(m *metrics, reg *prometheus.Registry) prometheus.GaugeFunc {
+	fn := func() float64 {
+		total := atomic.LoadInt64(&m.inviteTotal)
+		if total == 0 {
+			return 0
+		}
+		ineffective := atomic.LoadInt64(&m.inviteIneffectiveTotal)
+		return float64(total-ineffective) / float64(total) * 100 //nolint:mnd // percentage formula
+	}
+	if reg != nil {
+		return prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "sip_exporter_ner",
+			Help: "Network Effectiveness Ratio (GSMA IR.42): percentage of INVITEs without server errors",
+		}, fn)
+	}
+	return promauto.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "sip_exporter_ner",
+		Help: "Network Effectiveness Ratio (GSMA IR.42): percentage of INVITEs without server errors",
+	}, fn)
+}
+
 func newRRDWithRegistry(m *metrics, reg *prometheus.Registry) (prometheus.Histogram, prometheus.GaugeFunc) {
 	hist := newHistogramWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_rrd",
@@ -449,6 +496,18 @@ func (m *metrics) UpdateTTR(delayMs float64) {
 	}
 }
 
+func (m *metrics) UpdateORD(delayMs float64) {
+	if m.ord != nil {
+		m.ord.Observe(delayMs)
+	}
+}
+
+func (m *metrics) UpdateLRD(delayMs float64) {
+	if m.lrd != nil {
+		m.lrd.Observe(delayMs)
+	}
+}
+
 func (m *metrics) UpdateSession(size int) {
 	m.sessions.Set(float64(size))
 }
@@ -511,6 +570,9 @@ func (m *metrics) Response(in []byte, isInviteResponse bool) {
 
 	if isInviteResponse && isIneffectiveResponse(in) {
 		atomic.AddInt64(&m.inviteIneffectiveTotal, 1)
+		if m.iss != nil {
+			m.iss.Inc()
+		}
 	}
 }
 

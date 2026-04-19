@@ -27,6 +27,7 @@ const (
 	readBufSize        = 65536
 	defaultRegisterTTL = 60 * time.Second
 	defaultInviteTTL   = 60 * time.Second
+	defaultOptionsTTL  = 60 * time.Second
 )
 
 type (
@@ -35,6 +36,10 @@ type (
 	}
 
 	inviteEntry struct {
+		timestamp time.Time
+	}
+
+	optionsEntry struct {
 		timestamp time.Time
 	}
 
@@ -47,6 +52,8 @@ type (
 		registerMutex   sync.RWMutex
 		inviteTracker   map[string]inviteEntry
 		inviteMutex     sync.RWMutex
+		optionsTracker  map[string]optionsEntry
+		optionsMutex    sync.RWMutex
 		initialized     atomic.Bool
 	}
 	services struct {
@@ -69,6 +76,7 @@ func NewExporter(m service.Metricser, d service.Dialoger) Exporter {
 		messages:        make(chan []byte, 10_000),
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
+		optionsTracker:  make(map[string]optionsEntry),
 	}
 }
 
@@ -168,6 +176,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		durations := e.services.dialoger.Cleanup()
 		e.cleanupRegisterTracker()
 		e.cleanupInviteTracker()
+		e.cleanupOptionsTracker()
 		s := e.services.dialoger.Size()
 
 		for _, d := range durations {
@@ -418,6 +427,10 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 		if bytes.Equal(packet.Method, []byte("INVITE")) {
 			e.storeInviteTime(string(packet.CallID))
 		}
+
+		if bytes.Equal(packet.Method, []byte("OPTIONS")) {
+			e.storeOptionsTime(string(packet.CallID))
+		}
 	}
 
 	return nil
@@ -438,6 +451,13 @@ func (e *exporter) handleResponse(packet dto.Packet) {
 		}
 	}
 
+	isOptionsResponse := bytes.Equal(packet.CSeq.Method, []byte("OPTIONS"))
+	if isOptionsResponse {
+		if delayMs, ok := e.measureOptionsTime(string(packet.CallID)); ok {
+			e.services.metricser.UpdateORD(delayMs)
+		}
+	}
+
 	e.services.metricser.ResponseWithMetrics(
 		packet.ResponseStatus,
 		isInviteResponse,
@@ -447,11 +467,26 @@ func (e *exporter) handleResponse(packet dto.Packet) {
 	if is200OK {
 		e.handle200OKResponse(packet, isRegisterResponse)
 	} else if isRegisterResponse {
-		e.removeRegisterTime(string(packet.CallID))
-		zap.L().Debug("register tracker removed (non-200 response)",
-			zap.String("call_id", string(packet.CallID)),
-			zap.ByteString("status", packet.ResponseStatus))
+		e.handleRegisterNon200Response(packet)
 	}
+}
+
+func (e *exporter) handleRegisterNon200Response(packet dto.Packet) {
+	if len(packet.ResponseStatus) > 0 && packet.ResponseStatus[0] == '3' {
+		if startTime, ok := e.getRegisterTime(string(packet.CallID)); ok {
+			delayMs := float64(time.Since(startTime).Nanoseconds()) / 1e6
+			e.services.metricser.UpdateLRD(delayMs)
+			e.removeRegisterTime(string(packet.CallID))
+			zap.L().Debug("LRD measured",
+				zap.String("call_id", string(packet.CallID)),
+				zap.Float64("delay_ms", delayMs))
+		}
+		return
+	}
+	e.removeRegisterTime(string(packet.CallID))
+	zap.L().Debug("register tracker removed (non-200 non-3xx response)",
+		zap.String("call_id", string(packet.CallID)),
+		zap.ByteString("status", packet.ResponseStatus))
 }
 
 func (e *exporter) handle200OKResponse(packet dto.Packet, isRegisterResponse bool) {
@@ -647,4 +682,43 @@ func (e *exporter) removeInviteTime(callID string) {
 	e.inviteMutex.Lock()
 	defer e.inviteMutex.Unlock()
 	delete(e.inviteTracker, callID)
+}
+
+func (e *exporter) storeOptionsTime(callID string) {
+	e.optionsMutex.Lock()
+	defer e.optionsMutex.Unlock()
+	e.optionsTracker[callID] = optionsEntry{
+		timestamp: time.Now(),
+	}
+}
+
+func (e *exporter) measureOptionsTime(callID string) (float64, bool) {
+	e.optionsMutex.Lock()
+	defer e.optionsMutex.Unlock()
+
+	entry, ok := e.optionsTracker[callID]
+	if !ok {
+		return 0, false
+	}
+
+	delete(e.optionsTracker, callID)
+	delayMs := float64(time.Since(entry.timestamp).Nanoseconds()) / 1e6
+
+	zap.L().Debug("ORD measured",
+		zap.String("call_id", callID),
+		zap.Float64("delay_ms", delayMs))
+
+	return delayMs, true
+}
+
+func (e *exporter) cleanupOptionsTracker() {
+	e.optionsMutex.Lock()
+	defer e.optionsMutex.Unlock()
+
+	now := time.Now()
+	for callID, entry := range e.optionsTracker {
+		if now.Sub(entry.timestamp) > defaultOptionsTTL {
+			delete(e.optionsTracker, callID)
+		}
+	}
 }

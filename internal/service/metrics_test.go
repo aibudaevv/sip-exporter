@@ -478,6 +478,17 @@ func (m *metrics) getASR() float64 {
 	return float64(ok) / float64(total) * 100 //nolint:mnd // percentage formula
 }
 
+// getNER returns current NER value for tests
+// NER = (inviteTotal - inviteIneffectiveTotal) / inviteTotal × 100
+func (m *metrics) getNER() float64 {
+	total := atomic.LoadInt64(&m.inviteTotal)
+	if total == 0 {
+		return 0
+	}
+	ineffective := atomic.LoadInt64(&m.inviteIneffectiveTotal)
+	return float64(total-ineffective) / float64(total) * 100 //nolint:mnd // percentage formula
+}
+
 // TestMetrics_SEER_NoInvites — MC/DC: total == 0
 func TestMetrics_SEER_NoInvites(t *testing.T) {
 	m := &metrics{}
@@ -868,6 +879,112 @@ func TestMetrics_ASR_ComparedToSER(t *testing.T) {
 	}
 }
 
+// NER (Network Effectiveness Ratio) tests per GSMA IR.42
+// Formula: NER = (Total INVITE - ineffective) / Total INVITE × 100
+// NER = 100 - ISA mathematically
+
+func TestMetrics_NER_NoInvites(t *testing.T) {
+	m := &metrics{}
+	require.Equal(t, 0.0, m.getNER())
+}
+
+func TestMetrics_NER_AllEffective(t *testing.T) {
+	m := &metrics{}
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.inviteIneffectiveTotal, 0)
+	require.Equal(t, 100.0, m.getNER())
+}
+
+func TestMetrics_NER_AllIneffective(t *testing.T) {
+	m := &metrics{}
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.inviteIneffectiveTotal, 100)
+	require.Equal(t, 0.0, m.getNER())
+}
+
+func TestMetrics_NER_HalfIneffective(t *testing.T) {
+	m := &metrics{}
+	atomic.StoreInt64(&m.inviteTotal, 100)
+	atomic.StoreInt64(&m.inviteIneffectiveTotal, 30)
+	require.Equal(t, 70.0, m.getNER())
+}
+
+func TestMetrics_NER_Equals100MinusISA(t *testing.T) {
+	tests := []struct {
+		name        string
+		invites     int64
+		ineffective int64
+	}{
+		{"all_effective", 100, 0},
+		{"half_ineffective", 100, 50},
+		{"all_ineffective", 100, 100},
+		{"partial", 200, 15},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			atomic.StoreInt64(&m.inviteTotal, tt.invites)
+			atomic.StoreInt64(&m.inviteIneffectiveTotal, tt.ineffective)
+
+			ner := m.getNER()
+			isa := m.getISA()
+			require.InDelta(t, 100.0-isa, ner, 0.01, "NER must equal 100 - ISA")
+		})
+	}
+}
+
+func TestMetrics_NER_Values(t *testing.T) {
+	tests := []struct {
+		name        string
+		invites     int64
+		ineffective int64
+		wantNER     float64
+	}{
+		{"zero_invites", 0, 0, 0},
+		{"all_effective", 100, 0, 100},
+		{"30_percent_ineffective", 100, 30, 70},
+		{"one_of_ten_ineffective", 10, 1, 90},
+		{"zero_ineffective", 50, 0, 100},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			atomic.StoreInt64(&m.inviteTotal, tt.invites)
+			atomic.StoreInt64(&m.inviteIneffectiveTotal, tt.ineffective)
+			require.Equal(t, tt.wantNER, m.getNER())
+		})
+	}
+}
+
+func TestMetrics_NER_GreaterOrEqualSEER(t *testing.T) {
+	tests := []struct {
+		name        string
+		invites     int64
+		ineffective int64
+		effective   int64
+		invite3xx   int64
+	}{
+		{"equal_no_3xx", 100, 10, 90, 0},
+		{"ner_higher_with_3xx", 100, 10, 60, 20},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			atomic.StoreInt64(&m.inviteTotal, tt.invites)
+			atomic.StoreInt64(&m.inviteIneffectiveTotal, tt.ineffective)
+			atomic.StoreInt64(&m.inviteEffectiveTotal, tt.effective)
+			atomic.StoreInt64(&m.invite3xxTotal, tt.invite3xx)
+
+			ner := m.getNER()
+			seer := m.getSEER()
+			require.GreaterOrEqual(t, ner, seer, "NER must be >= SEER")
+		})
+	}
+}
+
 // TestMetrics_ISA_NoInvites — MC/DC: total == 0
 func TestMetrics_ISA_NoInvites(t *testing.T) {
 	m := &metrics{}
@@ -1060,12 +1177,47 @@ func (m *metrics) getTTRFromHistogram() (sum float64, count uint64) {
 	return h.GetSampleSum(), h.GetSampleCount()
 }
 
+func (m *metrics) getORDFromHistogram() (sum float64, count uint64) {
+	if m.ord == nil {
+		return 0, 0
+	}
+	var dtoMetric dto.Metric
+	if err := m.ord.Write(&dtoMetric); err != nil {
+		return 0, 0
+	}
+	h := dtoMetric.GetHistogram()
+	return h.GetSampleSum(), h.GetSampleCount()
+}
+
+func (m *metrics) getLRDFromHistogram() (sum float64, count uint64) {
+	if m.lrd == nil {
+		return 0, 0
+	}
+	var dtoMetric dto.Metric
+	if err := m.lrd.Write(&dtoMetric); err != nil {
+		return 0, 0
+	}
+	h := dtoMetric.GetHistogram()
+	return h.GetSampleSum(), h.GetSampleCount()
+}
+
 func (m *metrics) getSDCFromCounter() float64 {
 	if m.sdc == nil {
 		return 0
 	}
 	var dtoMetric dto.Metric
 	if err := m.sdc.Write(&dtoMetric); err != nil {
+		return 0
+	}
+	return dtoMetric.GetCounter().GetValue()
+}
+
+func (m *metrics) getISSFromCounter() float64 {
+	if m.iss == nil {
+		return 0
+	}
+	var dtoMetric dto.Metric
+	if err := m.iss.Write(&dtoMetric); err != nil {
 		return 0
 	}
 	return dtoMetric.GetCounter().GetValue()
@@ -1250,6 +1402,51 @@ func TestMetrics_SDC_NilSafe(t *testing.T) {
 	m.SessionCompleted()
 	require.Equal(t, int64(1), atomic.LoadInt64(&m.sessionCompletedTotal))
 	require.Equal(t, 0.0, m.getSDCFromCounter(), "SDC Counter should be 0 when nil")
+}
+
+// ISS (Ineffective Session Severity) tests
+// Counter incremented on 408, 500, 503, 504 INVITE responses
+
+func TestMetrics_ISS_IncrementOnIneffective(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	ineffectiveCodes := []string{"408", "500", "503", "504"}
+	for _, code := range ineffectiveCodes {
+		before := m.getISSFromCounter()
+		m.ResponseWithMetrics([]byte(code), true, false)
+		require.Equal(t, before+1, m.getISSFromCounter(), "ISS should increment on %s", code)
+	}
+	require.Equal(t, 4.0, m.getISSFromCounter())
+}
+
+func TestMetrics_ISS_NotIncrementOnEffective(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	effectiveCodes := []string{"200", "480", "486", "600", "603"}
+	for _, code := range effectiveCodes {
+		is200OK := code == "200"
+		m.ResponseWithMetrics([]byte(code), true, is200OK)
+	}
+	require.Equal(t, 0.0, m.getISSFromCounter())
+}
+
+func TestMetrics_ISS_NotIncrementOnNonInvite(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.ResponseWithMetrics([]byte("500"), false, false)
+	require.Equal(t, 0.0, m.getISSFromCounter())
+}
+
+func TestMetrics_ISS_NilSafe(t *testing.T) {
+	m := &metrics{}
+	atomic.StoreInt64(&m.inviteIneffectiveTotal, 0)
+
+	atomic.AddInt64(&m.inviteIneffectiveTotal, 1)
+	if m.iss != nil {
+		m.iss.Inc()
+	}
+	require.Equal(t, int64(1), atomic.LoadInt64(&m.inviteIneffectiveTotal))
+	require.Equal(t, 0.0, m.getISSFromCounter(), "ISS Counter should be 0 when nil")
 }
 
 // TestMetrics_SCR_ComparedToSER verifies SCR <= SER always
@@ -1664,4 +1861,44 @@ func TestMetrics_TTR_Histogram_LargeValue(t *testing.T) {
 	sum, count := m.getTTRFromHistogram()
 	require.InDelta(t, 5000.0, sum, 0.01)
 	require.Equal(t, uint64(1), count)
+}
+
+// ORD (OPTIONS Response Delay) tests
+
+func TestMetrics_ORD_Observe(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateORD(10.5)
+	m.UpdateORD(25.0)
+
+	_, count := m.getORDFromHistogram()
+	require.Equal(t, uint64(2), count)
+}
+
+func TestMetrics_ORD_NilSafe(t *testing.T) {
+	m := &metrics{}
+	m.UpdateORD(10.0)
+
+	_, count := m.getORDFromHistogram()
+	require.Equal(t, uint64(0), count)
+}
+
+// LRD (Location Registration Delay) tests
+
+func TestMetrics_LRD_Observe(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateLRD(5.5)
+	m.UpdateLRD(15.0)
+
+	_, count := m.getLRDFromHistogram()
+	require.Equal(t, uint64(2), count)
+}
+
+func TestMetrics_LRD_NilSafe(t *testing.T) {
+	m := &metrics{}
+	m.UpdateLRD(10.0)
+
+	_, count := m.getLRDFromHistogram()
+	require.Equal(t, uint64(0), count)
 }

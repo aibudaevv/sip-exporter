@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## 0.10.0
+### Added
+- NER (Network Effectiveness Ratio) metric per GSMA IR.42 (`sip_exporter_ner`)
+- NER = 100 − ISA, reflects network quality including call termination
+- ISS (Ineffective Session Severity) counter (`sip_exporter_iss_total`)
+- ISS counts absolute number of INVITE→408/500/503/504 responses
+- ORD (OPTIONS Response Delay) histogram (`sip_exporter_ord`)
+- ORD measures delay from OPTIONS request to any response (p95, ms)
+- LRD (Location Registration Delay) histogram (`sip_exporter_lrd`)
+- LRD measures delay from REGISTER to 3xx redirect response (p95, ms)
+- E2E tests for NER: AllScenarios, Mixed, Equals100MinusISA
+- E2E tests for ISS: AllScenarios, Mixed
+- E2E tests for ORD: OptionsPing, NoOptions, MixedWithOptions
+- E2E tests for LRD: RegisterRedirect, Register200OK, RegisterError, Mixed
+- SIPp scenarios for LRD: reg_uas_redirect, reg_uac_redirect (REGISTER→302)
+- MC/DC unit tests for NER, ISS, ORD, LRD metric calculation
+- Grafana dashboard: NER, ISS, ORD, LRD panels with thresholds
+
+### Changed
+- README updated: 55 E2E tests, 21 dashboard panels, new metrics listed
+- Grafana dashboard layout: new row with delay/ratio metrics, timeseries shifted
+
 ## 0.9.0
 ### Added
 - ASR (Answer Seizure Ratio) metric per ITU-T E.411 (`sip_exporter_asr`)
