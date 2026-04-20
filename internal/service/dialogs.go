@@ -9,6 +9,7 @@ type (
 	dialogEntry struct {
 		expiresAt time.Time
 		createdAt time.Time
+		carrier   string
 	}
 
 	dialogs struct {
@@ -16,9 +17,10 @@ type (
 		storage map[string]dialogEntry
 	}
 	Dialoger interface {
-		Create(dialogID string, expiresAt time.Time, createdAt time.Time)
+		Create(dialogID string, expiresAt time.Time, createdAt time.Time, carrier string)
 		Delete(dialogID string) time.Duration
 		Size() int
+		SizeByCarrier() map[string]int
 		Cleanup() []time.Duration
 	}
 )
@@ -44,13 +46,14 @@ func (c *dialogs) Delete(dialogID string) time.Duration {
 	return d
 }
 
-func (c *dialogs) Create(dialogID string, expiresAt time.Time, createdAt time.Time) {
+func (c *dialogs) Create(dialogID string, expiresAt time.Time, createdAt time.Time, carrier string) {
 	c.m.Lock()
 	defer c.m.Unlock()
 	if _, exists := c.storage[dialogID]; !exists {
 		c.storage[dialogID] = dialogEntry{
 			expiresAt: expiresAt,
 			createdAt: createdAt,
+			carrier:   carrier,
 		}
 	}
 }
@@ -59,6 +62,16 @@ func (c *dialogs) Size() int {
 	c.m.Lock()
 	defer c.m.Unlock()
 	return len(c.storage)
+}
+
+func (c *dialogs) SizeByCarrier() map[string]int {
+	c.m.Lock()
+	defer c.m.Unlock()
+	result := make(map[string]int)
+	for _, entry := range c.storage {
+		result[entry.carrier]++
+	}
+	return result
 }
 
 func (c *dialogs) Cleanup() []time.Duration {

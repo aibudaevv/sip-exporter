@@ -2,13 +2,64 @@
 
 All metrics are exposed at `/metrics` endpoint in Prometheus exposition format.
 
+## Carrier Label
+
+All SIP metrics include a `carrier` label that identifies the originating carrier for each packet. The carrier is resolved from the source IP address of the packet using a CIDR-to-carrier mapping defined in a YAML config file.
+
+| Label | Value | Description |
+|-------|-------|-------------|
+| `carrier` | Carrier name from config | Resolved via longest-prefix match on source IP against configured CIDRs |
+
+**Example:**
+```
+sip_exporter_invite_total{carrier="carrier-a"} 1523
+sip_exporter_200_total{carrier="carrier-b"} 847
+sip_exporter_ser{carrier="carrier-a"} 95.2
+```
+
+### Metrics WITHOUT `carrier` label
+
+The following metrics are system-level and do not include the `carrier` label:
+
+- `sip_exporter_system_error_total` — internal exporter errors (not SIP traffic)
+- `sip_exporter_packets_total` — counts all parsed SIP packets regardless of source
+
+### Default behavior
+
+If no carriers config is provided (`SIP_EXPORTER_CARRIERS_CONFIG` not set), all SIP metrics use `carrier="other"`.
+
+### Configuration
+
+| Variable | Default | Required | Description |
+|----------|---------|----------|-------------|
+| `SIP_EXPORTER_CARRIERS_CONFIG` | — | no | Path to YAML file with CIDR-to-carrier mapping |
+
+**Config file format:**
+```yaml
+carriers:
+  - name: "carrier-name"
+    cidrs:
+      - "10.0.1.0/24"
+      - "10.0.2.0/24"
+```
+
+See [`examples/carriers.yaml`](../examples/carriers.yaml) for a complete example.
+
+### Resolution algorithm
+
+1. Source IP is extracted from the IPv4 header of each raw packet
+2. IP is matched against configured CIDRs in order (first match wins)
+3. If no match found, `carrier="other"` is used
+
+---
+
 ## SIP traffic
 
-`sip_exporter_packets_total`: total number of parsed SIP packets (requests + responses).
+`sip_exporter_packets_total`: total number of parsed SIP packets (requests + responses). **No `carrier` label.**
 
 ## Active sessions
 
-`sip_exporter_sessions`: number of active SIP dialogs (RFC 3261).
+`sip_exporter_sessions{carrier="..."}`: number of active SIP dialogs (RFC 3261).
 
 **How dialogs are counted:**
 - A dialog is created when a `200 OK` response is received for an `INVITE` request
@@ -23,48 +74,59 @@ All metrics are exposed at `/metrics` endpoint in Prometheus exposition format.
 
 ## SIP request metrics
 
-`sip_exporter_invite_total`: total number of received SIP INVITE requests.  
-`sip_exporter_register_total`: total number of received SIP REGISTER requests.  
-`sip_exporter_options_total`: total number of received SIP OPTIONS requests.  
-`sip_exporter_cancel_total`: total number of received SIP CANCEL requests.  
-`sip_exporter_bye_total`: total number of received SIP BYE requests.  
-`sip_exporter_ack_total`: total number of received SIP ACK requests.  
-`sip_exporter_publish_total`: total number of received SIP PUBLISH requests.  
-`sip_exporter_prack_total`: total number of received SIP PRACK requests.  
-`sip_exporter_notify_total`: total number of received SIP NOTIFY requests.  
-`sip_exporter_subscribe_total`: total number of received SIP SUBSCRIBE requests.  
-`sip_exporter_refer_total`: total number of received SIP REFER requests.  
-`sip_exporter_info_total`: total number of received SIP INFO requests.  
-`sip_exporter_update_total`: total number of received SIP UPDATE requests.
+`sip_exporter_invite_total{carrier="..."}`: total number of received SIP INVITE requests.  
+`sip_exporter_register_total{carrier="..."}`: total number of received SIP REGISTER requests.  
+`sip_exporter_options_total{carrier="..."}`: total number of received SIP OPTIONS requests.  
+`sip_exporter_cancel_total{carrier="..."}`: total number of received SIP CANCEL requests.  
+`sip_exporter_bye_total{carrier="..."}`: total number of received SIP BYE requests.  
+`sip_exporter_ack_total{carrier="..."}`: total number of received SIP ACK requests.  
+`sip_exporter_publish_total{carrier="..."}`: total number of received SIP PUBLISH requests.  
+`sip_exporter_prack_total{carrier="..."}`: total number of received SIP PRACK requests.  
+`sip_exporter_notify_total{carrier="..."}`: total number of received SIP NOTIFY requests.  
+`sip_exporter_subscribe_total{carrier="..."}`: total number of received SIP SUBSCRIBE requests.  
+`sip_exporter_refer_total{carrier="..."}`: total number of received SIP REFER requests.  
+`sip_exporter_info_total{carrier="..."}`: total number of received SIP INFO requests.  
+`sip_exporter_update_total{carrier="..."}`: total number of received SIP UPDATE requests.
 
 ## SIP response metrics (by status code)
 
-`sip_exporter_100_total`: total number of SIP 100 Trying responses.  
-`sip_exporter_180_total`: total number of SIP 180 Ringing responses.  
-`sip_exporter_183_total`: total number of SIP 183 Session Progress responses.  
-`sip_exporter_200_total`: total number of SIP 200 OK responses.  
-`sip_exporter_202_total`: total number of SIP 202 Accepted responses.  
-`sip_exporter_300_total`: total number of SIP 300 Multiple Choices responses.  
-`sip_exporter_302_total`: total number of SIP 302 Moved Temporarily responses.  
-`sip_exporter_400_total`: total number of SIP 400 Bad Request responses.  
-`sip_exporter_401_total`: total number of SIP 401 Unauthorized responses.  
-`sip_exporter_403_total`: total number of SIP 403 Forbidden responses.  
-`sip_exporter_404_total`: total number of SIP 404 Not Found responses.  
-`sip_exporter_proxy_authentication_required_total`: total number of SIP 407 Proxy Authentication Required responses.  
-`sip_exporter_408_total`: total number of SIP 408 Request Timeout responses.  
-`sip_exporter_480_total`: total number of SIP 480 Temporarily Unavailable responses.  
-`sip_exporter_486_total`: total number of SIP 486 Busy Here responses.  
-`sip_exporter_500_total`: total number of SIP 500 Server Internal Error responses.  
-`sip_exporter_503_total`: total number of SIP 503 Service Unavailable responses.  
-`sip_exporter_504_total`: total number of SIP 504 Server Time-out responses.  
-`sip_exporter_600_total`: total number of SIP 600 Busy Everywhere responses.  
-`sip_exporter_603_total`: total number of SIP 603 Decline responses.
+`sip_exporter_100_total{carrier="..."}`: total number of SIP 100 Trying responses.  
+`sip_exporter_180_total{carrier="..."}`: total number of SIP 180 Ringing responses.  
+`sip_exporter_183_total{carrier="..."}`: total number of SIP 183 Session Progress responses.  
+`sip_exporter_200_total{carrier="..."}`: total number of SIP 200 OK responses.  
+`sip_exporter_202_total{carrier="..."}`: total number of SIP 202 Accepted responses.  
+`sip_exporter_300_total{carrier="..."}`: total number of SIP 300 Multiple Choices responses.  
+`sip_exporter_302_total{carrier="..."}`: total number of SIP 302 Moved Temporarily responses.  
+`sip_exporter_400_total{carrier="..."}`: total number of SIP 400 Bad Request responses.  
+`sip_exporter_401_total{carrier="..."}`: total number of SIP 401 Unauthorized responses.  
+`sip_exporter_403_total{carrier="..."}`: total number of SIP 403 Forbidden responses.  
+`sip_exporter_404_total{carrier="..."}`: total number of SIP 404 Not Found responses.  
+`sip_exporter_proxy_authentication_required_total{carrier="..."}`: total number of SIP 407 Proxy Authentication Required responses.  
+`sip_exporter_408_total{carrier="..."}`: total number of SIP 408 Request Timeout responses.  
+`sip_exporter_480_total{carrier="..."}`: total number of SIP 480 Temporarily Unavailable responses.  
+`sip_exporter_486_total{carrier="..."}`: total number of SIP 486 Busy Here responses.  
+`sip_exporter_500_total{carrier="..."}`: total number of SIP 500 Server Internal Error responses.  
+`sip_exporter_503_total{carrier="..."}`: total number of SIP 503 Service Unavailable responses.  
+`sip_exporter_504_total{carrier="..."}`: total number of SIP 504 Server Time-out responses.  
+`sip_exporter_600_total{carrier="..."}`: total number of SIP 600 Busy Everywhere responses.  
+`sip_exporter_603_total{carrier="..."}`: total number of SIP 603 Decline responses.
 
 ## System metrics
 
-`sip_exporter_system_error_total`: total number internal SIP exporter errors.
+`sip_exporter_system_error_total`: total number internal SIP exporter errors. **No `carrier` label.**
 
 ## RFC 6076 Performance Metrics
+
+All RFC 6076 metrics are **scoped per carrier** — each ratio/histogram is computed independently for each `carrier` label value. This allows comparing SER, SEER, ISA, SCR, ASR, NER across carriers in a single Prometheus query.
+
+**Example:**
+```promql
+# SER per carrier
+sip_exporter_ser
+
+# Compare SER across carriers
+sip_exporter_ser{carrier="carrier-a"} - sip_exporter_ser{carrier="carrier-b"}
+```
 
 Metrics defined in [RFC 6076](https://datatracker.ietf.org/doc/html/rfc6076):
 
@@ -100,7 +162,7 @@ Dialogs are tracked with Session-Expires (RFC 4028). If no BYE is received befor
 
 ### Session Establishment Ratio (SER)
 
-`sip_exporter_ser`: percentage of successfully established sessions relative to total INVITE attempts.
+`sip_exporter_ser{carrier="..."}`: percentage of successfully established sessions relative to total INVITE attempts.
 
 **Formula (RFC 6076 §4.6):**
 ```
@@ -118,7 +180,7 @@ SER = (INVITE → 200 OK) / (Total INVITE - INVITE → 3xx) × 100
 
 ### Session Establishment Effectiveness Ratio (SEER)
 
-`sip_exporter_seer`: percentage of "effective" INVITE responses relative to total non-redirected INVITE attempts.
+`sip_exporter_seer{carrier="..."}`: percentage of "effective" INVITE responses relative to total non-redirected INVITE attempts.
 
 **Formula (RFC 6076 §4.7):**
 ```
@@ -149,7 +211,7 @@ SEER = (INVITE → 200, 480, 486, 600, 603) / (Total INVITE - INVITE → 3xx) ×
 
 ### Ineffective Session Attempts (ISA)
 
-`sip_exporter_isa`: percentage of INVITE requests that resulted in server error or timeout responses.
+`sip_exporter_isa{carrier="..."}`: percentage of INVITE requests that resulted in server error or timeout responses.
 
 **Formula (RFC 6076 §4.8):**
 ```
@@ -190,7 +252,7 @@ ISA measures infrastructure health, not user experience. Unlike SER/SEER which m
 
 ### Session Completion Ratio (SCR)
 
-`sip_exporter_scr`: percentage of INVITE sessions that were fully completed (established and terminated) relative to total INVITE attempts.
+`sip_exporter_scr{carrier="..."}`: percentage of INVITE sessions that were fully completed (established and terminated) relative to total INVITE attempts.
 
 **Formula (RFC 6076 §4.9):**
 ```
@@ -218,7 +280,7 @@ SCR = (Completed Sessions) / Total INVITE × 100
 
 ### Registration Request Delay (RRD)
 
-`sip_exporter_rrd`: histogram of delays in milliseconds between sending a REGISTER request and receiving a 200 OK response.
+`sip_exporter_rrd{carrier="..."}`: histogram of delays in milliseconds between sending a REGISTER request and receiving a 200 OK response.
 
 **Formula (RFC 6076 §4.1):**
 ```
@@ -232,8 +294,11 @@ RRD = Average(Time of 200 OK - Time of REGISTER request)
 
 **PromQL examples:**
 ```promql
-# 95th percentile registration delay
-histogram_quantile(0.95, rate(sip_exporter_rrd_bucket[5m]))
+# 95th percentile registration delay (all carriers)
+histogram_quantile(0.95, sum(rate(sip_exporter_rrd_bucket[5m])) by (le))
+
+# 95th percentile registration delay (specific carrier)
+histogram_quantile(0.95, sum(rate(sip_exporter_rrd_bucket{carrier="carrier-a"}[5m])) by (le))
 
 # Average registration delay
 rate(sip_exporter_rrd_sum[5m]) / rate(sip_exporter_rrd_count[5m])
@@ -246,13 +311,13 @@ rate(sip_exporter_rrd_sum[5m]) / rate(sip_exporter_rrd_count[5m])
 - `100-500 ms` — acceptable performance (typical WAN)
 - `> 1000 ms` — potential issues (network congestion, server overload)
 
-**Deprecated metric:** `sip_exporter_rrd_average` — cumulative average (will be removed in next major version)
+**Deprecated metric:** `sip_exporter_rrd_average` — cumulative average (will be removed in next major version). Has `carrier` label.
 
 ---
 
 ### Session Process Duration (SPD)
 
-`sip_exporter_spd`: histogram of completed SIP session durations in seconds.
+`sip_exporter_spd{carrier="..."}`: histogram of completed SIP session durations in seconds.
 
 **Formula (RFC 6076 §4.5):**
 ```
@@ -269,8 +334,11 @@ SPD = (Cumulative Session Duration) / (Completed Session Count)
 
 **PromQL examples:**
 ```promql
-# 99th percentile session duration
-histogram_quantile(0.99, rate(sip_exporter_spd_bucket[5m]))
+# 99th percentile session duration (all carriers)
+histogram_quantile(0.99, sum(rate(sip_exporter_spd_bucket[5m])) by (le))
+
+# 99th percentile session duration (specific carrier)
+histogram_quantile(0.99, sum(rate(sip_exporter_spd_bucket{carrier="carrier-a"}[5m])) by (le))
 
 # Average session duration
 rate(sip_exporter_spd_sum[5m]) / rate(sip_exporter_spd_count[5m])
@@ -283,13 +351,13 @@ rate(sip_exporter_spd_sum[5m]) / rate(sip_exporter_spd_count[5m])
 - `180 s` — typical voice call (~3 minutes)
 - `> 3600 s` — long-duration sessions (conferences, held calls)
 
-**Deprecated metric:** `sip_exporter_spd_average` — cumulative average (will be removed in next major version)
+**Deprecated metric:** `sip_exporter_spd_average` — cumulative average (will be removed in next major version). Has `carrier` label.
 
 ---
 
 ### Time to First Response (TTR)
 
-`sip_exporter_ttr`: histogram of delays in milliseconds between an INVITE request and the first provisional (1xx) response.
+`sip_exporter_ttr{carrier="..."}`: histogram of delays in milliseconds between an INVITE request and the first provisional (1xx) response.
 
 **Formula:**
 ```
@@ -305,8 +373,11 @@ TTR = Time of first 1xx response - Time of INVITE request
 
 **PromQL examples:**
 ```promql
-# 95th percentile time to first response
+# 95th percentile time to first response (all carriers)
 histogram_quantile(0.95, sum(rate(sip_exporter_ttr_bucket[5m])) by (le))
+
+# 95th percentile time to first response (specific carrier)
+histogram_quantile(0.95, sum(rate(sip_exporter_ttr_bucket{carrier="carrier-a"}[5m])) by (le))
 
 # Average time to first response
 rate(sip_exporter_ttr_sum[5m]) / rate(sip_exporter_ttr_count[5m])
@@ -321,7 +392,7 @@ rate(sip_exporter_ttr_sum[5m]) / rate(sip_exporter_ttr_count[5m])
 
 ### Answer Seizure Ratio (ASR)
 
-`sip_exporter_asr`: percentage of INVITE requests that received a 200 OK response.
+`sip_exporter_asr{carrier="..."}`: percentage of INVITE requests that received a 200 OK response.
 
 **Formula (ITU-T E.411):**
 ```
@@ -336,12 +407,20 @@ ASR = (INVITE → 200 OK) / Total INVITE × 100
 
 **PromQL examples:**
 ```promql
-# Current ASR
+# Current ASR (per carrier)
 sip_exporter_asr
 
 # Compare with SER to detect redirect volume
 sip_exporter_ser - sip_exporter_asr
 ```
+
+**Carrier-scoped queries:**
+```promql
+# ASR for a specific carrier
+sip_exporter_asr{carrier="carrier-a"}
+
+# Compare ASR across all carriers
+sip_exporter_asr
 
 **Example values:**
 - `100` — all INVITEs received 200 OK
@@ -352,7 +431,7 @@ sip_exporter_ser - sip_exporter_asr
 
 ### Session Duration Counter (SDC)
 
-`sip_exporter_sdc_total`: total number of completed SIP sessions (Prometheus Counter).
+`sip_exporter_sdc_total{carrier="..."}`: total number of completed SIP sessions (Prometheus Counter).
 
 - Counts sessions that ended via:
   1. `200 OK` received for `BYE` (normal termination), **OR**
@@ -361,8 +440,11 @@ sip_exporter_ser - sip_exporter_asr
 
 **PromQL examples:**
 ```promql
-# Session completion rate (sessions per second)
+# Session completion rate (sessions per second, per carrier)
 rate(sip_exporter_sdc_total[5m])
+
+# Session completion rate for specific carrier
+rate(sip_exporter_sdc_total{carrier="carrier-a"}[5m])
 
 # Session completion rate per minute
 rate(sip_exporter_sdc_total[1m]) * 60
@@ -372,7 +454,7 @@ rate(sip_exporter_sdc_total[1m]) * 60
 
 ### Network Effectiveness Ratio (NER)
 
-`sip_exporter_ner`: percentage of INVITE requests that did **not** result in ineffective (infrastructure failure) responses.
+`sip_exporter_ner{carrier="..."}`: percentage of INVITE requests that did **not** result in ineffective (infrastructure failure) responses.
 
 **Formula (GSMA IR.42):**
 ```
@@ -389,11 +471,14 @@ NER = 100 - ISA
 
 **PromQL examples:**
 ```promql
-# Current NER
+# Current NER (per carrier)
 sip_exporter_ner
 
 # Verify NER = 100 - ISA
 sip_exporter_ner + sip_exporter_isa
+
+# NER for a specific carrier
+sip_exporter_ner{carrier="carrier-a"}
 ```
 
 **Example values:**
@@ -405,7 +490,7 @@ sip_exporter_ner + sip_exporter_isa
 
 ### Ineffective Session Severity (ISS)
 
-`sip_exporter_iss_total`: total number of INVITE requests that resulted in ineffective responses (Prometheus Counter).
+`sip_exporter_iss_total{carrier="..."}`: total number of INVITE requests that resulted in ineffective responses (Prometheus Counter).
 
 - Counts INVITE responses with status codes: `408`, `500`, `503`, `504`
 - Same codes used by ISA numerator, but exposed as an absolute Counter
@@ -413,13 +498,13 @@ sip_exporter_ner + sip_exporter_isa
 
 **PromQL examples:**
 ```promql
-# Ineffective sessions per second
+# Ineffective sessions per second (per carrier)
 rate(sip_exporter_iss_total[5m])
 
 # Total ineffective sessions since start
 sip_exporter_iss_total
 
-# Alert: more than 20 ineffective sessions per second
+# Alert: more than 20 ineffective sessions per second for any carrier
 rate(sip_exporter_iss_total[5m]) > 20
 ```
 
@@ -432,7 +517,7 @@ rate(sip_exporter_iss_total[5m]) > 20
 
 ### OPTIONS Response Delay (ORD)
 
-`sip_exporter_ord`: histogram of delays in milliseconds between sending an OPTIONS request and receiving any response.
+`sip_exporter_ord{carrier="..."}`: histogram of delays in milliseconds between sending an OPTIONS request and receiving any response.
 
 **Formula:**
 ```
@@ -446,8 +531,11 @@ ORD = Time of OPTIONS response - Time of OPTIONS request
 
 **PromQL examples:**
 ```promql
-# 95th percentile OPTIONS response delay
+# 95th percentile OPTIONS response delay (all carriers)
 histogram_quantile(0.95, sum(rate(sip_exporter_ord_bucket[5m])) by (le))
+
+# 95th percentile OPTIONS response delay (specific carrier)
+histogram_quantile(0.95, sum(rate(sip_exporter_ord_bucket{carrier="carrier-a"}[5m])) by (le))
 
 # Average OPTIONS response delay
 rate(sip_exporter_ord_sum[5m]) / rate(sip_exporter_ord_count[5m])
@@ -462,7 +550,7 @@ rate(sip_exporter_ord_sum[5m]) / rate(sip_exporter_ord_count[5m])
 
 ### Location Registration Delay (LRD)
 
-`sip_exporter_lrd`: histogram of delays in milliseconds between sending a REGISTER request and receiving a 3xx redirect response.
+`sip_exporter_lrd{carrier="..."}`: histogram of delays in milliseconds between sending a REGISTER request and receiving a 3xx redirect response.
 
 **Formula:**
 ```
@@ -476,8 +564,11 @@ LRD = Time of REGISTER 3xx response - Time of REGISTER request
 
 **PromQL examples:**
 ```promql
-# 95th percentile location registration delay
+# 95th percentile location registration delay (all carriers)
 histogram_quantile(0.95, sum(rate(sip_exporter_lrd_bucket[5m])) by (le))
+
+# 95th percentile location registration delay (specific carrier)
+histogram_quantile(0.95, sum(rate(sip_exporter_lrd_bucket{carrier="carrier-a"}[5m])) by (le))
 
 # Average location registration delay
 rate(sip_exporter_lrd_sum[5m]) / rate(sip_exporter_lrd_count[5m])

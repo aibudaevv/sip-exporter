@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
 
+	"gitlab.com/sip-exporter/internal/carriers"
 	"gitlab.com/sip-exporter/internal/dto"
 	"gitlab.com/sip-exporter/internal/service"
 )
@@ -48,6 +49,7 @@ type (
 		sock            int
 		messages        chan []byte
 		services        services
+		carrierResolver *carriers.Resolver
 		registerTracker map[string]registerEntry
 		registerMutex   sync.RWMutex
 		inviteTracker   map[string]inviteEntry
@@ -67,12 +69,13 @@ type (
 	}
 )
 
-func NewExporter(m service.Metricser, d service.Dialoger) Exporter {
+func NewExporter(m service.Metricser, d service.Dialoger, resolver *carriers.Resolver) Exporter {
 	return &exporter{
 		services: services{
 			metricser: m,
 			dialoger:  d,
 		},
+		carrierResolver: resolver,
 		messages:        make(chan []byte, 10_000),
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
@@ -169,6 +172,24 @@ func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPo
 	return nil
 }
 
+func extractIPs(ipHeader []byte) (net.IP, net.IP) {
+	srcIP := net.IPv4(ipHeader[12], ipHeader[13], ipHeader[14], ipHeader[15])
+	dstIP := net.IPv4(ipHeader[16], ipHeader[17], ipHeader[18], ipHeader[19])
+	return srcIP, dstIP
+}
+
+func (e *exporter) resolveCarrier(ipHeader []byte) string {
+	if e.carrierResolver == nil {
+		return "other"
+	}
+	srcIP, dstIP := extractIPs(ipHeader)
+	carrier := e.carrierResolver.Lookup(srcIP)
+	if carrier == "other" {
+		carrier = e.carrierResolver.Lookup(dstIP)
+	}
+	return carrier
+}
+
 func (e *exporter) sipDialogMetricsUpdate() {
 	ticker := time.NewTicker(1 * time.Second)
 	for {
@@ -180,13 +201,13 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		s := e.services.dialoger.Size()
 
 		for _, d := range durations {
-			e.services.metricser.SessionCompleted()
-			e.services.metricser.UpdateSPD(d)
+			e.services.metricser.SessionCompleted("other")
+			e.services.metricser.UpdateSPD("other", d)
 		}
 
 		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", len(durations)))
 
-		e.services.metricser.UpdateSession(s)
+		e.services.metricser.UpdateSessionsByCarrier(e.services.dialoger.SizeByCarrier())
 	}
 }
 
@@ -302,6 +323,7 @@ func (e *exporter) parseRawPacket(packet []byte) error {
 	ipHeader := packet[ipOffset : ipOffset+20]
 	ihl := ipHeader[0] & 0x0F
 	ipHeaderLen := int(ihl) * 4
+	carrier := e.resolveCarrier(ipHeader)
 
 	if ipHeader[9] != 17 { // UDP
 		return errors.New("not UDP packet")
@@ -347,7 +369,7 @@ func (e *exporter) parseRawPacket(packet []byte) error {
 
 	zap.L().Debug("packet raw", zap.ByteString("sip_data", sipData))
 
-	if err := e.handleMessage(sipData); err != nil {
+	if err := e.handleMessage(carrier, sipData); err != nil {
 		return err
 	}
 
@@ -407,7 +429,7 @@ func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
 	return p, nil
 }
 
-func (e *exporter) handleMessage(rawPacket []byte) error {
+func (e *exporter) handleMessage(carrier string, rawPacket []byte) error {
 	packet, err := e.sipPacketParse(rawPacket)
 	if err != nil {
 		return fmt.Errorf("parse SIP packet: %w", err)
@@ -416,9 +438,9 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 	zap.L().Debug("parsed packet", zap.Any("packet", packet))
 
 	if packet.IsResponse {
-		e.handleResponse(packet)
+		e.handleResponse(carrier, packet)
 	} else {
-		e.services.metricser.Request(packet.Method)
+		e.services.metricser.Request(carrier, packet.Method)
 
 		if bytes.Equal(packet.Method, []byte("REGISTER")) {
 			e.storeRegisterTime(string(packet.CallID))
@@ -436,7 +458,7 @@ func (e *exporter) handleMessage(rawPacket []byte) error {
 	return nil
 }
 
-func (e *exporter) handleResponse(packet dto.Packet) {
+func (e *exporter) handleResponse(carrier string, packet dto.Packet) {
 	isInviteResponse := bytes.Equal(packet.CSeq.Method, []byte("INVITE"))
 	isRegisterResponse := bytes.Equal(packet.CSeq.Method, []byte("REGISTER"))
 	is200OK := bytes.Equal(packet.ResponseStatus, []byte("200"))
@@ -444,7 +466,7 @@ func (e *exporter) handleResponse(packet dto.Packet) {
 	if isInviteResponse && len(packet.ResponseStatus) > 0 {
 		if packet.ResponseStatus[0] == '1' {
 			if delayMs, ok := e.measureInviteTTR(string(packet.CallID)); ok {
-				e.services.metricser.UpdateTTR(delayMs)
+				e.services.metricser.UpdateTTR(carrier, delayMs)
 			}
 		} else {
 			e.removeInviteTime(string(packet.CallID))
@@ -454,28 +476,29 @@ func (e *exporter) handleResponse(packet dto.Packet) {
 	isOptionsResponse := bytes.Equal(packet.CSeq.Method, []byte("OPTIONS"))
 	if isOptionsResponse {
 		if delayMs, ok := e.measureOptionsTime(string(packet.CallID)); ok {
-			e.services.metricser.UpdateORD(delayMs)
+			e.services.metricser.UpdateORD(carrier, delayMs)
 		}
 	}
 
 	e.services.metricser.ResponseWithMetrics(
+		carrier,
 		packet.ResponseStatus,
 		isInviteResponse,
 		is200OK,
 	)
 
 	if is200OK {
-		e.handle200OKResponse(packet, isRegisterResponse)
+		e.handle200OKResponse(carrier, packet, isRegisterResponse)
 	} else if isRegisterResponse {
-		e.handleRegisterNon200Response(packet)
+		e.handleRegisterNon200Response(carrier, packet)
 	}
 }
 
-func (e *exporter) handleRegisterNon200Response(packet dto.Packet) {
+func (e *exporter) handleRegisterNon200Response(carrier string, packet dto.Packet) {
 	if len(packet.ResponseStatus) > 0 && packet.ResponseStatus[0] == '3' {
 		if startTime, ok := e.getRegisterTime(string(packet.CallID)); ok {
 			delayMs := float64(time.Since(startTime).Nanoseconds()) / 1e6
-			e.services.metricser.UpdateLRD(delayMs)
+			e.services.metricser.UpdateLRD(carrier, delayMs)
 			e.removeRegisterTime(string(packet.CallID))
 			zap.L().Debug("LRD measured",
 				zap.String("call_id", string(packet.CallID)),
@@ -489,27 +512,27 @@ func (e *exporter) handleRegisterNon200Response(packet dto.Packet) {
 		zap.ByteString("status", packet.ResponseStatus))
 }
 
-func (e *exporter) handle200OKResponse(packet dto.Packet, isRegisterResponse bool) {
+func (e *exporter) handle200OKResponse(carrier string, packet dto.Packet, isRegisterResponse bool) {
 	zap.L().Debug("handle message", zap.ByteString("200 OK cseq method", packet.CSeq.Method))
 
 	if bytes.Equal(packet.CSeq.Method, []byte("INVITE")) {
-		if err := e.handleInvite200OK(packet); err != nil {
+		if err := e.handleInvite200OK(carrier, packet); err != nil {
 			zap.L().Error("handle INVITE 200 OK", zap.Error(err))
 		}
 	}
 
 	if bytes.Equal(packet.CSeq.Method, []byte("BYE")) {
-		if err := e.handleBye200OK(packet); err != nil {
+		if err := e.handleBye200OK(carrier, packet); err != nil {
 			zap.L().Error("handle BYE 200 OK", zap.Error(err))
 		}
 	}
 
 	if isRegisterResponse {
-		e.handleRegister200OK(packet)
+		e.handleRegister200OK(carrier, packet)
 	}
 }
 
-func (e *exporter) handleInvite200OK(packet dto.Packet) error {
+func (e *exporter) handleInvite200OK(carrier string, packet dto.Packet) error {
 	dialogID, err := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag)
 	if err != nil {
 		return fmt.Errorf("normalize dialog ID: %w", err)
@@ -524,11 +547,11 @@ func (e *exporter) handleInvite200OK(packet dto.Packet) error {
 	zap.L().Debug("create sip dialog",
 		zap.String("session", dialogID),
 		zap.Int("expires_sec", expires))
-	e.services.dialoger.Create(dialogID, expiresAt, time.Now())
+	e.services.dialoger.Create(dialogID, expiresAt, time.Now(), carrier)
 	return nil
 }
 
-func (e *exporter) handleBye200OK(packet dto.Packet) error {
+func (e *exporter) handleBye200OK(carrier string, packet dto.Packet) error {
 	dialogID, err := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag)
 	if err != nil {
 		return fmt.Errorf("normalize dialog ID: %w", err)
@@ -537,20 +560,20 @@ func (e *exporter) handleBye200OK(packet dto.Packet) error {
 	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
 	duration := e.services.dialoger.Delete(dialogID)
 	if duration > 0 {
-		e.services.metricser.UpdateSPD(duration)
-		e.services.metricser.SessionCompleted()
+		e.services.metricser.UpdateSPD(carrier, duration)
+		e.services.metricser.SessionCompleted(carrier)
 	}
 	return nil
 }
 
-func (e *exporter) handleRegister200OK(packet dto.Packet) {
+func (e *exporter) handleRegister200OK(carrier string, packet dto.Packet) {
 	startTime, ok := e.getRegisterTime(string(packet.CallID))
 	if !ok {
 		return
 	}
 
 	delayMs := float64(time.Since(startTime).Nanoseconds()) / 1e6
-	e.services.metricser.UpdateRRD(delayMs)
+	e.services.metricser.UpdateRRD(carrier, delayMs)
 	e.removeRegisterTime(string(packet.CallID))
 	zap.L().Debug("RRD measured",
 		zap.String("call_id", string(packet.CallID)),

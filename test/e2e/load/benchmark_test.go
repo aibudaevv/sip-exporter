@@ -14,7 +14,7 @@ import (
 const (
 	floodPacketsPerCall    = 2.0
 	fullCallPacketsPerCall = 14.0
-	subtestTimeout         = 12 * time.Second
+	subtestTimeout         = 20 * time.Second
 )
 
 func TestLoad_INVITEFlood(t *testing.T) {

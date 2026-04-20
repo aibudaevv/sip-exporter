@@ -197,7 +197,7 @@ func getMetric(t *testing.T, endpoint, metricName string) float64 {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 
-	re := regexp.MustCompile(`^` + metricName + `\s+([0-9.]+)`)
+	re := regexp.MustCompile(`^` + metricName + `(?:\{[^}]*\})?\s+([0-9.]+)`)
 	for _, line := range strings.Split(string(body), "\n") {
 		matches := re.FindStringSubmatch(strings.TrimSpace(line))
 		if len(matches) == 2 {

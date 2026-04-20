@@ -219,7 +219,7 @@ func getMetric(t *testing.T, endpoint string, metricName string) float64 {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 
-	re := regexp.MustCompile(`^` + metricName + `\s+([0-9.]+)`)
+	re := regexp.MustCompile(`^` + metricName + `(?:\{[^}]*\})?\s+([0-9.]+)`)
 	for _, line := range strings.Split(string(body), "\n") {
 		matches := re.FindStringSubmatch(strings.TrimSpace(line))
 		if len(matches) == 2 {
@@ -324,142 +324,33 @@ func runSippUACOnly(ctx context.Context, t *testing.T, uacScenario string, callC
 // getSER reads sip_exporter_ser metric from exporter endpoint.
 func getSER(t *testing.T, endpoint string) float64 {
 	t.Helper()
-
-	resp, err := http.Get(endpoint + "/metrics")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	re := regexp.MustCompile(`^sip_exporter_ser\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 2 {
-			val, err := strconv.ParseFloat(matches[1], 64)
-			require.NoError(t, err)
-			return val
-		}
-	}
-
-	return 0
+	return getMetric(t, endpoint, "sip_exporter_ser")
 }
 
 // ADDED: getSEER reads sip_exporter_seer metric from exporter endpoint.
 func getSEER(t *testing.T, endpoint string) float64 {
 	t.Helper()
-
-	resp, err := http.Get(endpoint + "/metrics")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	re := regexp.MustCompile(`^sip_exporter_seer\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 2 {
-			val, err := strconv.ParseFloat(matches[1], 64)
-			require.NoError(t, err)
-			return val
-		}
-	}
-
-	return 0
+	return getMetric(t, endpoint, "sip_exporter_seer")
 }
 
-// ADDED: getISA reads sip_exporter_isa metric from exporter endpoint.
 func getISA(t *testing.T, endpoint string) float64 {
 	t.Helper()
-
-	resp, err := http.Get(endpoint + "/metrics")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	re := regexp.MustCompile(`^sip_exporter_isa\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 2 {
-			val, err := strconv.ParseFloat(matches[1], 64)
-			require.NoError(t, err)
-			return val
-		}
-	}
-
-	return 0
+	return getMetric(t, endpoint, "sip_exporter_isa")
 }
 
 func getSessions(t *testing.T, endpoint string) float64 {
 	t.Helper()
-
-	resp, err := http.Get(endpoint + "/metrics")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	re := regexp.MustCompile(`^sip_exporter_sessions\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 2 {
-			val, err := strconv.ParseFloat(matches[1], 64)
-			require.NoError(t, err)
-			return val
-		}
-	}
-
-	return 0
+	return getMetric(t, endpoint, "sip_exporter_sessions")
 }
 
 func getSCR(t *testing.T, endpoint string) float64 {
 	t.Helper()
-
-	resp, err := http.Get(endpoint + "/metrics")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	re := regexp.MustCompile(`^sip_exporter_scr\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 2 {
-			val, err := strconv.ParseFloat(matches[1], 64)
-			require.NoError(t, err)
-			return val
-		}
-	}
-
-	return 0
+	return getMetric(t, endpoint, "sip_exporter_scr")
 }
 
 func getASR(t *testing.T, endpoint string) float64 {
 	t.Helper()
-
-	resp, err := http.Get(endpoint + "/metrics")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	re := regexp.MustCompile(`^sip_exporter_asr\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 2 {
-			val, err := strconv.ParseFloat(matches[1], 64)
-			require.NoError(t, err)
-			return val
-		}
-	}
-
-	return 0
+	return getMetric(t, endpoint, "sip_exporter_asr")
 }
 
 func getSDC(t *testing.T, endpoint string) float64 {

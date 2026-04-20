@@ -28,6 +28,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - 🐳 **Single container deployment** — no external dependencies
 - 🔧 **Configurable SIP ports** — monitor custom ports via environment variables
 - 📈 **Prometheus native** — standard `/metrics` endpoint for scraping
+- 🏷️ **Per-carrier metrics** — CIDR-based carrier resolution for all SIP metrics
 
 ## Quick Start
 
@@ -40,6 +41,10 @@ services:
     network_mode: host
     environment:
       - SIP_EXPORTER_INTERFACE=eth0
+      # Optional: carrier labels for per-provider metrics
+      # - SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml
+    # volumes:
+    #   - ./examples/carriers.yaml:/etc/sip-exporter/carriers.yaml:ro
 ```
 
 ```bash
@@ -88,11 +93,12 @@ Environment variables:
 * `SIP_EXPORTER_SIP_PORT` - SIP port (default 5060)
 * `SIP_EXPORTER_SIPS_PORT` - SIPS port (default 5061)
 * `SIP_EXPORTER_OBJECT_FILE_PATH` - path to eBPF object file (default /usr/local/bin/sip.o)
+* `SIP_EXPORTER_CARRIERS_CONFIG` - path to carriers YAML config (optional, see [`examples/carriers.yaml`](examples/carriers.yaml))
 
 Start docker container in privileged mode is true and host mode.
 ## Metrics
 
-All metrics are exposed at `/metrics` in Prometheus exposition format. The exporter provides:
+All metrics are exposed at `/metrics` in Prometheus exposition format. All SIP metrics include a `carrier` label for per-provider breakdown (configurable via CIDR mapping). The exporter provides:
 
 - **Traffic counters** — SIP request types (INVITE, BYE, REGISTER, etc.) and response status codes (100–603)
 - **Active sessions** — real-time count of active SIP dialogs
