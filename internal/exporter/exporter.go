@@ -34,14 +34,17 @@ const (
 type (
 	registerEntry struct {
 		timestamp time.Time
+		carrier   string
 	}
 
 	inviteEntry struct {
 		timestamp time.Time
+		carrier   string
 	}
 
 	optionsEntry struct {
 		timestamp time.Time
+		carrier   string
 	}
 
 	exporter struct {
@@ -194,18 +197,18 @@ func (e *exporter) sipDialogMetricsUpdate() {
 	ticker := time.NewTicker(1 * time.Second)
 	for {
 		<-ticker.C
-		durations := e.services.dialoger.Cleanup()
+		results := e.services.dialoger.Cleanup()
 		e.cleanupRegisterTracker()
 		e.cleanupInviteTracker()
 		e.cleanupOptionsTracker()
 		s := e.services.dialoger.Size()
 
-		for _, d := range durations {
-			e.services.metricser.SessionCompleted("other")
-			e.services.metricser.UpdateSPD("other", d)
+		for _, r := range results {
+			e.services.metricser.SessionCompleted(r.Carrier)
+			e.services.metricser.UpdateSPD(r.Carrier, r.Duration)
 		}
 
-		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", len(durations)))
+		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", len(results)))
 
 		e.services.metricser.UpdateSessionsByCarrier(e.services.dialoger.SizeByCarrier())
 	}
@@ -443,40 +446,42 @@ func (e *exporter) handleMessage(carrier string, rawPacket []byte) error {
 		e.services.metricser.Request(carrier, packet.Method)
 
 		if bytes.Equal(packet.Method, []byte("REGISTER")) {
-			e.storeRegisterTime(string(packet.CallID))
+			e.storeRegisterTime(string(packet.CallID), carrier)
 		}
 
 		if bytes.Equal(packet.Method, []byte("INVITE")) {
-			e.storeInviteTime(string(packet.CallID))
+			e.storeInviteTime(string(packet.CallID), carrier)
 		}
 
 		if bytes.Equal(packet.Method, []byte("OPTIONS")) {
-			e.storeOptionsTime(string(packet.CallID))
+			e.storeOptionsTime(string(packet.CallID), carrier)
 		}
 	}
 
 	return nil
 }
 
-func (e *exporter) handleResponse(carrier string, packet dto.Packet) {
+func (e *exporter) handleResponse(packetCarrier string, packet dto.Packet) {
 	isInviteResponse := bytes.Equal(packet.CSeq.Method, []byte("INVITE"))
 	isRegisterResponse := bytes.Equal(packet.CSeq.Method, []byte("REGISTER"))
 	is200OK := bytes.Equal(packet.ResponseStatus, []byte("200"))
 
-	if isInviteResponse && len(packet.ResponseStatus) > 0 {
-		if packet.ResponseStatus[0] == '1' {
-			if delayMs, ok := e.measureInviteTTR(string(packet.CallID)); ok {
-				e.services.metricser.UpdateTTR(carrier, delayMs)
-			}
-		} else {
-			e.removeInviteTime(string(packet.CallID))
+	carrier := packetCarrier
+
+	if isInviteResponse {
+		carrier = e.handleInviteResponse(carrier, packet)
+	}
+
+	if isRegisterResponse {
+		if regCarrier, ok := e.getRegisterCarrier(string(packet.CallID)); ok {
+			carrier = regCarrier
 		}
 	}
 
 	isOptionsResponse := bytes.Equal(packet.CSeq.Method, []byte("OPTIONS"))
 	if isOptionsResponse {
-		if delayMs, ok := e.measureOptionsTime(string(packet.CallID)); ok {
-			e.services.metricser.UpdateORD(carrier, delayMs)
+		if delayMs, optionsCarrier, ok := e.measureOptionsTime(string(packet.CallID)); ok {
+			e.services.metricser.UpdateORD(optionsCarrier, delayMs)
 		}
 	}
 
@@ -492,6 +497,23 @@ func (e *exporter) handleResponse(carrier string, packet dto.Packet) {
 	} else if isRegisterResponse {
 		e.handleRegisterNon200Response(carrier, packet)
 	}
+}
+
+func (e *exporter) handleInviteResponse(fallbackCarrier string, packet dto.Packet) string {
+	carrier := fallbackCarrier
+	if inviteCarrier, ok := e.getInviteCarrier(string(packet.CallID)); ok {
+		carrier = inviteCarrier
+	}
+	if len(packet.ResponseStatus) > 0 {
+		if packet.ResponseStatus[0] == '1' {
+			if delayMs, inviteCarrier, ok := e.readInviteEntry(string(packet.CallID)); ok {
+				e.services.metricser.UpdateTTR(inviteCarrier, delayMs)
+			}
+		} else {
+			e.removeInviteTime(string(packet.CallID))
+		}
+	}
+	return carrier
 }
 
 func (e *exporter) handleRegisterNon200Response(carrier string, packet dto.Packet) {
@@ -551,17 +573,17 @@ func (e *exporter) handleInvite200OK(carrier string, packet dto.Packet) error {
 	return nil
 }
 
-func (e *exporter) handleBye200OK(carrier string, packet dto.Packet) error {
+func (e *exporter) handleBye200OK(_ string, packet dto.Packet) error {
 	dialogID, err := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag)
 	if err != nil {
 		return fmt.Errorf("normalize dialog ID: %w", err)
 	}
 
 	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
-	duration := e.services.dialoger.Delete(dialogID)
-	if duration > 0 {
-		e.services.metricser.UpdateSPD(carrier, duration)
-		e.services.metricser.SessionCompleted(carrier)
+	result := e.services.dialoger.Delete(dialogID)
+	if result.Duration > 0 {
+		e.services.metricser.UpdateSPD(result.Carrier, result.Duration)
+		e.services.metricser.SessionCompleted(result.Carrier)
 	}
 	return nil
 }
@@ -653,11 +675,12 @@ func extractSessionExpires(value []byte) int {
 	return n
 }
 
-func (e *exporter) storeRegisterTime(callID string) {
+func (e *exporter) storeRegisterTime(callID string, carrier string) {
 	e.registerMutex.Lock()
 	defer e.registerMutex.Unlock()
 	e.registerTracker[callID] = registerEntry{
 		timestamp: time.Now(),
+		carrier:   carrier,
 	}
 }
 
@@ -674,31 +697,31 @@ func (e *exporter) removeRegisterTime(callID string) {
 	delete(e.registerTracker, callID)
 }
 
-func (e *exporter) storeInviteTime(callID string) {
+func (e *exporter) storeInviteTime(callID string, carrier string) {
 	e.inviteMutex.Lock()
 	defer e.inviteMutex.Unlock()
 	e.inviteTracker[callID] = inviteEntry{
 		timestamp: time.Now(),
+		carrier:   carrier,
 	}
 }
 
-func (e *exporter) measureInviteTTR(callID string) (float64, bool) {
-	e.inviteMutex.Lock()
-	defer e.inviteMutex.Unlock()
+func (e *exporter) readInviteEntry(callID string) (float64, string, bool) {
+	e.inviteMutex.RLock()
+	defer e.inviteMutex.RUnlock()
 
 	entry, ok := e.inviteTracker[callID]
 	if !ok {
-		return 0, false
+		return 0, "", false
 	}
 
-	delete(e.inviteTracker, callID)
 	delayMs := float64(time.Since(entry.timestamp).Nanoseconds()) / 1e6
 
-	zap.L().Debug("TTR measured",
+	zap.L().Debug("TTR read",
 		zap.String("call_id", callID),
 		zap.Float64("delay_ms", delayMs))
 
-	return delayMs, true
+	return delayMs, entry.carrier, true
 }
 
 func (e *exporter) removeInviteTime(callID string) {
@@ -707,21 +730,42 @@ func (e *exporter) removeInviteTime(callID string) {
 	delete(e.inviteTracker, callID)
 }
 
-func (e *exporter) storeOptionsTime(callID string) {
+func (e *exporter) getRegisterCarrier(callID string) (string, bool) {
+	e.registerMutex.RLock()
+	defer e.registerMutex.RUnlock()
+	entry, ok := e.registerTracker[callID]
+	if !ok {
+		return "", false
+	}
+	return entry.carrier, true
+}
+
+func (e *exporter) getInviteCarrier(callID string) (string, bool) {
+	e.inviteMutex.RLock()
+	defer e.inviteMutex.RUnlock()
+	entry, ok := e.inviteTracker[callID]
+	if !ok {
+		return "", false
+	}
+	return entry.carrier, true
+}
+
+func (e *exporter) storeOptionsTime(callID string, carrier string) {
 	e.optionsMutex.Lock()
 	defer e.optionsMutex.Unlock()
 	e.optionsTracker[callID] = optionsEntry{
 		timestamp: time.Now(),
+		carrier:   carrier,
 	}
 }
 
-func (e *exporter) measureOptionsTime(callID string) (float64, bool) {
+func (e *exporter) measureOptionsTime(callID string) (float64, string, bool) {
 	e.optionsMutex.Lock()
 	defer e.optionsMutex.Unlock()
 
 	entry, ok := e.optionsTracker[callID]
 	if !ok {
-		return 0, false
+		return 0, "", false
 	}
 
 	delete(e.optionsTracker, callID)
@@ -731,7 +775,7 @@ func (e *exporter) measureOptionsTime(callID string) (float64, bool) {
 		zap.String("call_id", callID),
 		zap.Float64("delay_ms", delayMs))
 
-	return delayMs, true
+	return delayMs, entry.carrier, true
 }
 
 func (e *exporter) cleanupOptionsTracker() {

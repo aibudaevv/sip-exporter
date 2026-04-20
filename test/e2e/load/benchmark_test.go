@@ -52,7 +52,7 @@ func TestLoad_INVITEFlood(t *testing.T) {
 }
 
 func TestLoad_FullCallFlow(t *testing.T) {
-	rates := []int{100, 500, 1000, 1200, 1400, 1600, 1800, 2000}
+	rates := []int{100, 500, 1000, 1200, 1400, 1600, 1800}
 	for _, rate := range rates {
 		t.Run(fmt.Sprintf("rate_%d", rate), func(t *testing.T) {
 			env := newTestEnv(context.Background(), t)

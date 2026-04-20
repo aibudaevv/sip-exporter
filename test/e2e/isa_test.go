@@ -112,3 +112,34 @@ func TestISA_Complex(t *testing.T) {
 
 	waitForSessionsZero(t, env.endpoint)
 }
+
+// TestISA_WithCarrierConfig verifies ISA per-carrier.
+func TestISA_WithCarrierConfig(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnvWithCarriers(ctx, t)
+
+	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 50, env)
+
+	isa := env.getISAByCarrier(t)
+	t.Logf("ISA{carrier=%q} = %.2f (want %.2f)", env.carrier, isa, 100.0)
+	require.Equal(t, 100.0, isa)
+
+	env.waitForSessionsZeroByCarrier(t)
+}
+
+// TestISA_MixedWithCarrierConfig verifies ISA per-carrier for mixed traffic.
+func TestISA_MixedWithCarrierConfig(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnvWithCarriers(ctx, t)
+
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25, env)
+	runSippScenario(ctx, t, "uas_unavailable.xml", "uac_unavailable.xml", 25, env)
+
+	isa := env.getISAByCarrier(t)
+	t.Logf("ISA{carrier=%q} = %.2f (want %.2f)", env.carrier, isa, 50.0)
+	require.Equal(t, 50.0, isa)
+
+	env.waitForSessionsZeroByCarrier(t)
+}

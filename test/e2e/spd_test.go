@@ -51,3 +51,18 @@ func TestSPD_Mixed(t *testing.T) {
 
 	waitForSessionsZero(t, env.endpoint)
 }
+
+// TestSPD_WithCarrierConfig verifies SPD per-carrier.
+func TestSPD_WithCarrierConfig(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnvWithCarriers(ctx, t)
+
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 50, env)
+
+	spd := env.getSPDByCarrier(t)
+	t.Logf("SPD{carrier=%q} = %.4f seconds", env.carrier, spd)
+	require.Greater(t, spd, 0.0, "SPD should be greater than 0 after successful calls")
+
+	env.waitForSessionsZeroByCarrier(t)
+}

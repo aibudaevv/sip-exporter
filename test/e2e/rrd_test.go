@@ -148,3 +148,16 @@ func TestSER_ConcurrentRequests(t *testing.T) {
 	require.Greater(t, ser, 0.0, "SER should be calculated")
 	require.LessOrEqual(t, ser, 100.0, "SER should not exceed 100%")
 }
+
+// TestRRD_WithCarrierConfig verifies RRD per-carrier.
+func TestRRD_WithCarrierConfig(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnvWithCarriers(ctx, t)
+
+	runSippScenario(ctx, t, "reg_uas.xml", "reg_uac.xml", 50, env)
+
+	rrd := env.getRRDByCarrier(t)
+	t.Logf("RRD{carrier=%q} = %.2f ms", env.carrier, rrd)
+	require.Greater(t, rrd, 0.0, "RRD should be greater than 0 after successful registrations")
+}

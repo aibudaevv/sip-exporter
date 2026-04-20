@@ -150,7 +150,6 @@ func TestSCR_SessionExpires(t *testing.T) {
 
 	runSippScenario(ctx, t, "uas_short_expires.xml", "uac_short_expires.xml", 10, env)
 
-	// Wait for Session-Expires timeout to fire and dialogs to be cleaned up.
 	require.Eventually(t, func() bool {
 		return getMetric(t, env.endpoint, "sip_exporter_sessions") == 0
 	}, 15*time.Second, 500*time.Millisecond, "sessions did not expire within timeout")
@@ -162,4 +161,37 @@ func TestSCR_SessionExpires(t *testing.T) {
 	require.Equal(t, 0.0, sessionsAfter, "sessions should be 0 after Session-Expires timeout")
 	require.Greater(t, scrAfter, scrBefore, "SCR should increase after Session-Expires timeout")
 	t.Logf("duration: %v", time.Since(start))
+}
+
+// TestSCR_WithCarrierConfig verifies SCR per-carrier on loopback.
+// On loopback with carrier: inviteTotal doubles, sessionCompletedTotal does not.
+// SCR = sessionCompletedTotal / inviteTotal × 100 = 50/100 × 100 = 50%.
+func TestSCR_WithCarrierConfig(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnvWithCarriers(ctx, t)
+
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 50, env)
+
+	scr := env.getSCRByCarrier(t)
+	t.Logf("SCR{carrier=%q} = %.2f (want %.2f)", env.carrier, scr, 50.0)
+	require.Equal(t, 50.0, scr)
+
+	env.waitForSessionsZeroByCarrier(t)
+}
+
+// TestSCR_MixedWithCarrierConfig verifies SCR per-carrier with mixed results.
+func TestSCR_MixedWithCarrierConfig(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnvWithCarriers(ctx, t)
+
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 35, env)
+	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 15, env)
+
+	scr := env.getSCRByCarrier(t)
+	t.Logf("SCR{carrier=%q} = %.2f (want %.2f)", env.carrier, scr, 35.0)
+	require.Equal(t, 35.0, scr)
+
+	env.waitForSessionsZeroByCarrier(t)
 }

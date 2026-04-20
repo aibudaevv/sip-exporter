@@ -61,3 +61,15 @@ func TestLRD_Mixed(t *testing.T) {
 	t.Logf("LRD count = %.0f (want 25.0)", lrdCount)
 	require.Equal(t, 25.0, lrdCount)
 }
+
+// TestLRD_WithCarrierConfig verifies LRD per-carrier.
+func TestLRD_WithCarrierConfig(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnvWithCarriers(ctx, t)
+
+	runSippScenario(ctx, t, "reg_uas_redirect.xml", "reg_uac_redirect.xml", 50, env)
+
+	lrdCount := env.getLRDByCarrier(t)
+	t.Logf("LRD{carrier=%q} count = %.0f (want 50.0)", env.carrier, lrdCount)
+	require.Equal(t, 50.0, lrdCount)
+}

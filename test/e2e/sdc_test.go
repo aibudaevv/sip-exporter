@@ -148,3 +148,34 @@ func TestSDC_SessionExpires(t *testing.T) {
 
 	require.Equal(t, sdcBefore+10.0, sdcAfter, "SDC should increase by 10 after Session-Expires timeout")
 }
+
+// TestSDC_WithCarrierConfig verifies SDC per-carrier.
+func TestSDC_WithCarrierConfig(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnvWithCarriers(ctx, t)
+
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 50, env)
+
+	sdc := env.getSDCByCarrier(t)
+	t.Logf("SDC{carrier=%q} = %.0f (want 50)", env.carrier, sdc)
+	require.Equal(t, 50.0, sdc)
+
+	env.waitForSessionsZeroByCarrier(t)
+}
+
+// TestSDC_MixedWithCarrierConfig verifies SDC per-carrier with mixed results.
+func TestSDC_MixedWithCarrierConfig(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnvWithCarriers(ctx, t)
+
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 35, env)
+	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 15, env)
+
+	sdc := env.getSDCByCarrier(t)
+	t.Logf("SDC{carrier=%q} = %.0f (want 35)", env.carrier, sdc)
+	require.Equal(t, 35.0, sdc)
+
+	env.waitForSessionsZeroByCarrier(t)
+}

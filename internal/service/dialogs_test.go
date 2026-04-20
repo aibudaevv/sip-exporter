@@ -42,17 +42,17 @@ func TestDialoger_Delete(t *testing.T) {
 	d.Create("dialog-1", time.Now().Add(1*time.Hour), createdAt, "")
 	require.Equal(t, 1, d.Size())
 
-	duration := d.Delete("dialog-1")
+	result := d.Delete("dialog-1")
 	require.Equal(t, 0, d.Size())
-	require.GreaterOrEqual(t, duration, time.Duration(0))
+	require.GreaterOrEqual(t, result.Duration, time.Duration(0))
 }
 
 func TestDialoger_Delete_NonExisting(t *testing.T) {
 	d := NewDialoger()
 
-	duration := d.Delete("non-existing")
+	result := d.Delete("non-existing")
 	require.Equal(t, 0, d.Size())
-	require.Equal(t, time.Duration(0), duration)
+	require.Equal(t, time.Duration(0), result.Duration)
 }
 
 func TestDialoger_Size_Multiple(t *testing.T) {
@@ -80,11 +80,11 @@ func TestDialoger_Cleanup_Expired(t *testing.T) {
 
 	require.Equal(t, 2, d.Size())
 
-	durations := d.Cleanup()
+	results := d.Cleanup()
 
 	require.Equal(t, 1, d.Size())
-	require.Len(t, durations, 1)
-	require.Greater(t, durations[0], time.Hour)
+	require.Len(t, results, 1)
+	require.Greater(t, results[0].Duration, time.Hour)
 	t.Logf("duration: %v", time.Since(start))
 }
 
@@ -98,10 +98,10 @@ func TestDialoger_Cleanup_AllExpired(t *testing.T) {
 
 	require.Equal(t, 3, d.Size())
 
-	durations := d.Cleanup()
+	results := d.Cleanup()
 
 	require.Equal(t, 0, d.Size())
-	require.Len(t, durations, 3)
+	require.Len(t, results, 3)
 	t.Logf("duration: %v", time.Since(start))
 }
 
@@ -115,10 +115,10 @@ func TestDialoger_Cleanup_NoneExpired(t *testing.T) {
 
 	require.Equal(t, 3, d.Size())
 
-	durations := d.Cleanup()
+	results := d.Cleanup()
 
 	require.Equal(t, 3, d.Size())
-	require.Empty(t, durations)
+	require.Empty(t, results)
 	t.Logf("duration: %v", time.Since(start))
 }
 
@@ -126,10 +126,10 @@ func TestDialoger_Cleanup_Empty(t *testing.T) {
 	start := time.Now()
 	d := NewDialoger()
 
-	durations := d.Cleanup()
+	results := d.Cleanup()
 
 	require.Equal(t, 0, d.Size())
-	require.Empty(t, durations)
+	require.Empty(t, results)
 	t.Logf("duration: %v", time.Since(start))
 }
 
@@ -139,8 +139,8 @@ func TestDialoger_Delete_ReturnsDuration(t *testing.T) {
 	createdAt := time.Now().Add(-5 * time.Second)
 	d.Create("dialog-1", time.Now().Add(1*time.Hour), createdAt, "")
 
-	duration := d.Delete("dialog-1")
-	require.GreaterOrEqual(t, duration, 5*time.Second)
+	result := d.Delete("dialog-1")
+	require.GreaterOrEqual(t, result.Duration, 5*time.Second)
 }
 
 func TestDialoger_Concurrent_Create(t *testing.T) {
@@ -225,4 +225,33 @@ func TestDialogs_SizeByCarrier_Empty(t *testing.T) {
 	d := NewDialoger()
 	byCarrier := d.SizeByCarrier()
 	require.Empty(t, byCarrier)
+}
+
+func TestDialoger_Delete_ReturnsCarrier(t *testing.T) {
+	d := NewDialoger()
+	createdAt := time.Now()
+	d.Create("dialog-1", time.Now().Add(1*time.Hour), createdAt, "test-carrier")
+	result := d.Delete("dialog-1")
+	require.Equal(t, "test-carrier", result.Carrier)
+	require.GreaterOrEqual(t, result.Duration, time.Duration(0))
+}
+
+func TestDialoger_Cleanup_ReturnsCarrier(t *testing.T) {
+	d := NewDialoger()
+	d.Create("expired-carrier-a", time.Now().Add(-1*time.Hour), time.Now().Add(-2*time.Hour), "carrier-a")
+	d.Create("expired-carrier-b", time.Now().Add(-1*time.Hour), time.Now().Add(-2*time.Hour), "carrier-b")
+	d.Create("valid-dialog", time.Now().Add(1*time.Hour), time.Now(), "carrier-c")
+	results := d.Cleanup()
+	require.Len(t, results, 2)
+	carriers := map[string]bool{results[0].Carrier: true, results[1].Carrier: true}
+	require.True(t, carriers["carrier-a"])
+	require.True(t, carriers["carrier-b"])
+	require.Equal(t, 1, d.Size())
+}
+
+func TestDialoger_Delete_NonExisting_ReturnsEmptyCarrier(t *testing.T) {
+	d := NewDialoger()
+	result := d.Delete("non-existing")
+	require.Equal(t, time.Duration(0), result.Duration)
+	require.Equal(t, "", result.Carrier)
 }

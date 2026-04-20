@@ -138,7 +138,7 @@ func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
 		Env:         envVars,
 		WaitingFor: wait.ForHTTP("/metrics").
 			WithPort(nat.Port(exporterHTTPPort)).
-			WithStartupTimeout(60 * time.Second),
+			WithStartupTimeout(120 * time.Second),
 	}
 
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{

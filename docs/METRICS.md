@@ -4,16 +4,16 @@ All metrics are exposed at `/metrics` endpoint in Prometheus exposition format.
 
 ## Carrier Label
 
-All SIP metrics include a `carrier` label that identifies the originating carrier for each packet. The carrier is resolved from the source IP address of the packet using a CIDR-to-carrier mapping defined in a YAML config file.
+All SIP metrics include a `carrier` label that identifies the carrier that **initiated** the SIP transaction. The carrier is resolved from the source IP address of the **request** (INVITE, REGISTER, OPTIONS) and then propagated to all related responses and dialog lifecycle events.
 
 | Label | Value | Description |
 |-------|-------|-------------|
-| `carrier` | Carrier name from config | Resolved via longest-prefix match on source IP against configured CIDRs |
+| `carrier` | Carrier name from config | Determined at request time from source IP, inherited by responses via tracker |
 
 **Example:**
 ```
 sip_exporter_invite_total{carrier="carrier-a"} 1523
-sip_exporter_200_total{carrier="carrier-b"} 847
+sip_exporter_200_total{carrier="carrier-a"} 847
 sip_exporter_ser{carrier="carrier-a"} 95.2
 ```
 
@@ -37,19 +37,109 @@ If no carriers config is provided (`SIP_EXPORTER_CARRIERS_CONFIG` not set), all 
 **Config file format:**
 ```yaml
 carriers:
-  - name: "carrier-name"
+  - name: "mobile-operator-a"
     cidrs:
-      - "10.0.1.0/24"
-      - "10.0.2.0/24"
+      - "10.1.0.0/16"
+      - "10.2.0.0/16"
+
+  - name: "sip-trunk-provider"
+    cidrs:
+      - "192.168.10.0/24"
+      - "192.168.11.0/24"
+
+  - name: "enterprise-pbx"
+    cidrs:
+      - "172.16.5.0/24"
 ```
 
 See [`examples/carriers.yaml`](../examples/carriers.yaml) for a complete example.
 
+#### How to fill the configuration
+
+- `name` — arbitrary string used as the `carrier` label value in Prometheus. Avoid spaces and special characters.
+- `cidrs` — list of IPv4 subnets in CIDR notation. Specify subnets of **devices that send SIP requests** (phones, SBCs, PBXs, SIP proxies).
+- **Order matters**: first matching CIDR wins (first match wins).
+- IPs not matching any CIDR → `carrier="other"`.
+- If `SIP_EXPORTER_CARRIERS_CONFIG` is not set → all metrics use `carrier="other"`.
+
+**Recommendations:**
+- Group CIDRs by **logical owner** (operator, client, VLAN).
+- For per-client quality monitoring: each client = own carrier with their subnets.
+- For per-upstream monitoring: each upstream provider = own carrier.
+- Avoid overlapping CIDRs across carriers — order may cause unexpected results.
+
 ### Resolution algorithm
 
-1. Source IP is extracted from the IPv4 header of each raw packet
-2. IP is matched against configured CIDRs in order (first match wins)
-3. If no match found, `carrier="other"` is used
+Carrier is determined at **request time** and inherited by all responses in the same transaction:
+
+```
+1. SIP request arrives (INVITE/REGISTER/OPTIONS):
+   - Source IP extracted from IPv4 header
+   - IP matched against configured CIDRs (first match wins)
+   - If no match — destination IP is checked as fallback
+   - If neither matches → carrier="other"
+   - Carrier saved in tracker by Call-ID
+
+2. SIP response arrives:
+   - Carrier retrieved from tracker (by Call-ID), NOT from response IP
+   - INVITE responses → carrier from inviteTracker
+   - REGISTER responses → carrier from registerTracker
+   - OPTIONS responses → carrier from optionsTracker
+   - If tracker entry expired (TTL 60s) → falls back to response packet IP
+
+3. Dialog lifecycle:
+   - Dialog created with carrier from INVITE tracker
+   - BYE 200 OK → carrier from dialog entry
+   - Session-Expires expiry → carrier from dialog entry
+```
+
+### Carrier semantics per metric
+
+| Metric | Carrier source | Meaning |
+|--------|---------------|---------|
+| `invite_total{carrier}` | INVITE sender IP | How many calls this carrier initiated |
+| `200_total{carrier}` | Request tracker | How many 200 OK for this carrier's transactions |
+| `sessions{carrier}` | INVITE tracker → dialog | Active dialogs initiated by this carrier |
+| SER, SEER, ISA, SCR, ASR, NER | INVITE tracker | Quality of calls initiated by this carrier |
+| RRD | Register tracker | Registration delay for this carrier |
+| TTR | Invite tracker | Time to first response for this carrier's INVITEs |
+| SPD | Dialog (INVITE carrier) | Duration of sessions initiated by this carrier |
+| ORD | Options tracker | OPTIONS response delay for this carrier |
+| LRD | Register tracker | Registration redirect delay for this carrier |
+| `system_error_total` | No carrier | System-level errors |
+| `packets_total` | No carrier | All SIP packets |
+
+### Example scenario
+
+```
+Configuration:
+  carrier-A: 10.0.1.0/24  (mobile operator, sends INVITE)
+  carrier-B: 10.0.2.0/24  (SIP platform, responds 200 OK)
+
+Scenario: carrier-A subscriber calls through carrier-B platform
+
+Packet                  | Source IP  | Carrier resolved  | Source
+INVITE                  | 10.0.1.5   | carrier-A         | IP → tracker
+100 Trying              | 10.0.2.5   | carrier-A         | inviteTracker
+200 OK                  | 10.0.2.5   | carrier-A         | inviteTracker
+ACK                     | 10.0.1.5   | carrier-A         | IP (request)
+BYE                     | 10.0.1.5   | carrier-A         | IP (request)
+200 OK to BYE           | 10.0.2.5   | carrier-A         | dialog entry
+
+Result:
+  invite_total{carrier="carrier-A"} += 1
+  invite200OK_total{carrier="carrier-A"} += 1
+  sessions{carrier="carrier-A"} = N
+  sessionCompleted_total{carrier="carrier-A"} += 1
+  SER{carrier="carrier-A"} is correct
+
+Carrier-B metrics: only response counters for non-tracked packets (if any)
+```
+
+**Analytical meaning:** `carrier` represents the **call initiator**. This aligns with:
+- Billing model (caller pays)
+- RFC 6076 metrics (all tied to INVITE initiator)
+- Capacity planning ("how many sessions is this carrier generating?")
 
 ---
 

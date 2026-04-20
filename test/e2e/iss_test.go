@@ -87,3 +87,16 @@ func TestISS_Mixed(t *testing.T) {
 	t.Logf("ISS = %.0f (want %.0f)", iss, 30.0)
 	require.Equal(t, 30.0, iss)
 }
+
+// TestISS_WithCarrierConfig verifies ISS per-carrier.
+func TestISS_WithCarrierConfig(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnvWithCarriers(ctx, t)
+
+	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 50, env)
+
+	iss := env.getISSByCarrier(t)
+	t.Logf("ISS{carrier=%q} = %.0f (want 100)", env.carrier, iss)
+	require.Equal(t, 100.0, iss)
+}

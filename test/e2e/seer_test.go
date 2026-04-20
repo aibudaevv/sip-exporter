@@ -149,3 +149,19 @@ func TestSEER_Complex(t *testing.T) {
 
 	waitForSessionsZero(t, env.endpoint)
 }
+
+// TestSEER_WithCarrierConfig verifies SEER per-carrier.
+func TestSEER_WithCarrierConfig(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnvWithCarriers(ctx, t)
+
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25, env)
+	runSippScenario(ctx, t, "uas_busy.xml", "uac_busy.xml", 25, env)
+
+	seer := env.getSEERByCarrier(t)
+	t.Logf("SEER{carrier=%q} = %.2f (want %.2f)", env.carrier, seer, 100.0)
+	require.Equal(t, 100.0, seer)
+
+	env.waitForSessionsZeroByCarrier(t)
+}

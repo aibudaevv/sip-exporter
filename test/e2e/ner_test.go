@@ -102,3 +102,17 @@ func TestNER_Equals100MinusISA(t *testing.T) {
 	t.Logf("NER = %.2f, ISA = %.2f", ner, isa)
 	require.InDelta(t, 100.0-isa, ner, 0.01, "NER must equal 100 - ISA")
 }
+
+// TestNER_WithCarrierConfig verifies NER per-carrier.
+func TestNER_WithCarrierConfig(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnvWithCarriers(ctx, t)
+
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 35, env)
+	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 15, env)
+
+	ner := env.getNERByCarrier(t)
+	t.Logf("NER{carrier=%q} = %.2f (want %.2f)", env.carrier, ner, 70.0)
+	require.Equal(t, 70.0, ner)
+}

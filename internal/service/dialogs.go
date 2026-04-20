@@ -12,16 +12,21 @@ type (
 		carrier   string
 	}
 
+	CleanupResult struct {
+		Duration time.Duration
+		Carrier  string
+	}
+
 	dialogs struct {
 		m       sync.Mutex
 		storage map[string]dialogEntry
 	}
 	Dialoger interface {
 		Create(dialogID string, expiresAt time.Time, createdAt time.Time, carrier string)
-		Delete(dialogID string) time.Duration
+		Delete(dialogID string) CleanupResult
 		Size() int
 		SizeByCarrier() map[string]int
-		Cleanup() []time.Duration
+		Cleanup() []CleanupResult
 	}
 )
 
@@ -31,19 +36,19 @@ func NewDialoger() Dialoger {
 	}
 }
 
-func (c *dialogs) Delete(dialogID string) time.Duration {
+func (c *dialogs) Delete(dialogID string) CleanupResult {
 	c.m.Lock()
 	defer c.m.Unlock()
 	entry, ok := c.storage[dialogID]
 	if !ok {
-		return 0
+		return CleanupResult{}
 	}
 	delete(c.storage, dialogID)
 	d := time.Since(entry.createdAt)
 	if d < 0 {
-		return 0
+		return CleanupResult{Carrier: entry.carrier}
 	}
-	return d
+	return CleanupResult{Duration: d, Carrier: entry.carrier}
 }
 
 func (c *dialogs) Create(dialogID string, expiresAt time.Time, createdAt time.Time, carrier string) {
@@ -74,19 +79,19 @@ func (c *dialogs) SizeByCarrier() map[string]int {
 	return result
 }
 
-func (c *dialogs) Cleanup() []time.Duration {
+func (c *dialogs) Cleanup() []CleanupResult {
 	c.m.Lock()
 	defer c.m.Unlock()
 	now := time.Now()
-	var durations []time.Duration
+	var results []CleanupResult
 	for id, entry := range c.storage {
 		if now.After(entry.expiresAt) {
 			d := now.Sub(entry.createdAt)
 			if d > 0 {
-				durations = append(durations, d)
+				results = append(results, CleanupResult{Duration: d, Carrier: entry.carrier})
 			}
 			delete(c.storage, id)
 		}
 	}
-	return durations
+	return results
 }

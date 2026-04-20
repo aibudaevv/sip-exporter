@@ -52,3 +52,15 @@ func TestORD_MixedWithOptions(t *testing.T) {
 	t.Logf("ORD count = %.0f (want 25.0)", ordCount)
 	require.Equal(t, 25.0, ordCount)
 }
+
+// TestORD_WithCarrierConfig verifies ORD per-carrier.
+func TestORD_WithCarrierConfig(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnvWithCarriers(ctx, t)
+
+	runSippScenario(ctx, t, "uas_no_invite.xml", "uac_no_invite.xml", 50, env)
+
+	ordCount := env.getORDByCarrier(t)
+	t.Logf("ORD{carrier=%q} count = %.0f (want 50.0)", env.carrier, ordCount)
+	require.Equal(t, 50.0, ordCount)
+}
