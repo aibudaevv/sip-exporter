@@ -12,8 +12,8 @@ import (
 // TestLRD_RegisterRedirect tests LRD histogram with REGISTER 3xx redirect.
 // LRD measures delay from REGISTER to 3xx response.
 // On loopback: registerTracker keyed by Call-ID → LRD count = unique transactions.
-
 func TestLRD_RegisterRedirect(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
@@ -25,8 +25,8 @@ func TestLRD_RegisterRedirect(t *testing.T) {
 }
 
 // TestLRD_Register200OK verifies LRD = 0 for REGISTER 200 OK (RRD measured, not LRD).
-
 func TestLRD_Register200OK(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
@@ -37,7 +37,9 @@ func TestLRD_Register200OK(t *testing.T) {
 	require.Equal(t, 0.0, lrdCount)
 }
 
+// TestLRD_RegisterError verifies LRD = 0 for REGISTER 500 (not a redirect).
 func TestLRD_RegisterError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
@@ -49,8 +51,8 @@ func TestLRD_RegisterError(t *testing.T) {
 }
 
 // TestLRD_Mixed tests 25×REGISTER 200 OK + 25×REGISTER redirect.
-
 func TestLRD_Mixed(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
@@ -64,6 +66,7 @@ func TestLRD_Mixed(t *testing.T) {
 
 // TestLRD_WithCarrierConfig verifies LRD per-carrier.
 func TestLRD_WithCarrierConfig(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnvWithCarriers(ctx, t)
 

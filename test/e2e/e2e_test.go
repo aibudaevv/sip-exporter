@@ -68,22 +68,66 @@ func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
 // The carrier name is stored in env.carrier for use by env.*ByCarrier() methods.
 func newTestEnvWithCarriers(ctx context.Context, t *testing.T) *testEnv {
 	t.Helper()
-	carriersPath := filepath.Join(projectRoot, "test", "e2e", "carriers.yaml")
-	data, err := os.ReadFile(carriersPath)
-	require.NoError(t, err)
+	carriersYAML := loadCarriersYAML(t, "carriers.yaml")
 
 	var cfg struct {
 		Carriers []struct {
 			Name string `yaml:"name"`
 		} `yaml:"carriers"`
 	}
-	require.NoError(t, yaml.Unmarshal(data, &cfg))
+	require.NoError(t, yaml.Unmarshal([]byte(carriersYAML), &cfg))
 	require.NotEmpty(t, cfg.Carriers, "carriers.yaml must define at least one carrier")
 
-	carrierName := cfg.Carriers[0].Name
-	env := newTestEnvWithConfig(ctx, t, string(data))
+	env := newTestEnvWithConfig(ctx, t, carriersYAML)
+	env.carrier = cfg.Carriers[0].Name
+	return env
+}
+
+// newTestEnvWithCarriersYAML starts an exporter with arbitrary carriers YAML content
+// and sets env.carrier to the given carrierName for use by env.*ByCarrier() methods.
+func newTestEnvWithCarriersYAML(ctx context.Context, t *testing.T, carriersYAML string, carrierName string) *testEnv {
+	t.Helper()
+	env := newTestEnvWithConfig(ctx, t, carriersYAML)
 	env.carrier = carrierName
 	return env
+}
+
+// loadCarriersYAML reads a carriers YAML file from test/e2e/ directory.
+func loadCarriersYAML(t *testing.T, filename string) string {
+	t.Helper()
+	path := filepath.Join(projectRoot, "test", "e2e", filename)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return string(data)
+}
+
+// setupSecondaryIPs adds test IP addresses to loopback interface
+// using a privileged Docker container (avoids requiring root on the host).
+// Addresses are removed via t.Cleanup when the test finishes.
+func setupSecondaryIPs(t *testing.T) {
+	t.Helper()
+	addrs := []string{
+		"10.1.0.1/32",
+		"10.2.0.1/32",
+		"172.16.0.1/32",
+		"172.16.0.2/32",
+		"10.1.1.5/32",
+	}
+	for _, addr := range addrs {
+		err := exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
+			"--entrypoint", "", "alpine",
+			"ip", "addr", "add", addr, "dev", "lo",
+		).Run()
+		require.NoError(t, err, "failed to add %s to lo", addr)
+	}
+	t.Cleanup(func() {
+		for _, addr := range addrs {
+			_ = exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
+				"--entrypoint", "", "alpine",
+				"ip", "addr", "del", addr, "dev", "lo",
+			).Run()
+		}
+	})
 }
 
 // newTestEnvWithConfig starts exporter, optionally with carriers config.
@@ -355,6 +399,105 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 	return sippResult{totalCalls: callCount}
 }
 
+// runSippScenarioWithIPs starts SIPp server and client with custom source IPs
+// using testcontainers. uasIP and uacIP are bound via SIPp -i flag so packets
+// have the specified source address. The target address for UAC is uasIP:env.sippPort.
+func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacScenario string, callCount int, env *testEnv, uasIP, uacIP string) sippResult {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	uasPath := absScenarioPath(t, uasScenario)
+	sippVol := filepath.Dir(uasPath)
+	uasScenarioFile := filepath.Base(uasScenario)
+	uacScenarioFile := filepath.Base(uacScenario)
+
+	uasReq := testcontainers.ContainerRequest{
+		Image:       sippImage,
+		NetworkMode: "host",
+		Cmd: []string{
+			"-sf", "/scenarios/" + uasScenarioFile,
+			"-i", uasIP,
+			"-p", env.sippPort,
+			"-m", strconv.Itoa(callCount),
+			"-nostdin",
+		},
+		Mounts: testcontainers.Mounts(
+			testcontainers.BindMount(sippVol, "/scenarios"),
+		),
+	}
+
+	uasC, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: uasReq,
+		Started:          true,
+		Logger:           log.New(io.Discard, "", 0),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = uasC.Terminate(ctx) })
+
+	if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
+		logs, logErr := uasC.Logs(ctx)
+		if logErr == nil {
+			defer logs.Close()
+			logBytes, _ := io.ReadAll(logs)
+			t.Logf("UAS logs:\n%s", strings.TrimSpace(string(logBytes)))
+		}
+	}
+
+	time.Sleep(1 * time.Second)
+
+	uacReq := testcontainers.ContainerRequest{
+		Image:       sippImage,
+		NetworkMode: "host",
+		Cmd: []string{
+			"-sf", "/scenarios/" + uacScenarioFile,
+			"-i", uacIP,
+			"-p", env.sippClientPort,
+			"-m", strconv.Itoa(callCount),
+			uasIP + ":" + env.sippPort,
+		},
+		Mounts: testcontainers.Mounts(
+			testcontainers.BindMount(sippVol, "/scenarios"),
+		),
+		WaitingFor: wait.ForExit().WithExitTimeout(60 * time.Second),
+	}
+
+	uacC, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: uacReq,
+		Started:          true,
+		Logger:           log.New(io.Discard, "", 0),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = uacC.Terminate(ctx) })
+
+	if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
+		logs, logErr := uacC.Logs(ctx)
+		if logErr == nil {
+			defer logs.Close()
+			logBytes, _ := io.ReadAll(logs)
+			t.Logf("UAC logs:\n%s", strings.TrimSpace(string(logBytes)))
+		}
+	}
+
+	waitForContainerExitLogless(t, uasC)
+	waitForMetricStable(t, env.endpoint)
+
+	return sippResult{totalCalls: callCount}
+}
+
+// waitForContainerExitLogless waits for a container to stop running.
+func waitForContainerExitLogless(t *testing.T, c testcontainers.Container) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		state, err := c.State(context.Background())
+		if err != nil {
+			return false
+		}
+		return !state.Running
+	}, 60*time.Second, 500*time.Millisecond, "container did not exit in time")
+}
+
 // runSippUACOnly starts SIPp client only (no server) for timeout tests.
 func runSippUACOnly(ctx context.Context, t *testing.T, uacScenario string, callCount int, env *testEnv) {
 	t.Helper()
@@ -456,6 +599,26 @@ func getORD(t *testing.T, endpoint string) float64 {
 func getLRD(t *testing.T, endpoint string) float64 {
 	t.Helper()
 	return getMetric(t, endpoint, "sip_exporter_lrd_count")
+}
+
+func getRRD(t *testing.T, endpoint string) float64 {
+	t.Helper()
+	sum := getMetric(t, endpoint, "sip_exporter_rrd_sum")
+	count := getMetric(t, endpoint, "sip_exporter_rrd_count")
+	if count == 0 {
+		return 0
+	}
+	return sum / count
+}
+
+func getTTR(t *testing.T, endpoint string) float64 {
+	t.Helper()
+	sum := getMetric(t, endpoint, "sip_exporter_ttr_sum")
+	count := getMetric(t, endpoint, "sip_exporter_ttr_count")
+	if count == 0 {
+		return 0
+	}
+	return sum / count
 }
 
 func (e *testEnv) getSERByCarrier(t *testing.T) float64 {

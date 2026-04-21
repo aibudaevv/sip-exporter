@@ -20,7 +20,8 @@ import (
 )
 
 const (
-	shutDownTimeout = 10 * time.Second
+	shutDownTimeout   = 10 * time.Second
+	readHeaderTimeout = 3 * time.Second
 )
 
 type (
@@ -54,7 +55,7 @@ func (s *server) Run(cfg *config.App) error {
 
 	h := http.Server{
 		Addr:              ":" + cfg.Port,
-		ReadHeaderTimeout: 3 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
 		Handler:           mux,
 	}
 

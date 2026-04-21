@@ -14,47 +14,48 @@ import (
 // On loopback each response is seen twice → ISS doubles.
 
 func TestISS_AllScenarios(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
-		name    string
-		uas     string
-		uac     string
-		count   int
-		wantISS float64
+		name        string
+		uasScenario string
+		uacScenario string
+		callCount   int
+		wantISS     float64
 	}{
 		{
-			name:    "server_error_500",
-			uas:     "uas_server_error.xml",
-			uac:     "uac_server_error.xml",
-			count:   50,
-			wantISS: 100.0,
+			name:        "server_error_500",
+			uasScenario: "uas_server_error.xml",
+			uacScenario: "uac_server_error.xml",
+			callCount:   50,
+			wantISS:     100.0,
 		},
 		{
-			name:    "unavailable_503",
-			uas:     "uas_unavailable.xml",
-			uac:     "uac_unavailable.xml",
-			count:   50,
-			wantISS: 100.0,
+			name:        "unavailable_503",
+			uasScenario: "uas_unavailable.xml",
+			uacScenario: "uac_unavailable.xml",
+			callCount:   50,
+			wantISS:     100.0,
 		},
 		{
-			name:    "all_200_ok",
-			uas:     "uas_100.xml",
-			uac:     "uac_100.xml",
-			count:   50,
-			wantISS: 0.0,
+			name:        "all_200_ok",
+			uasScenario: "uas_100.xml",
+			uacScenario: "uac_100.xml",
+			callCount:   50,
+			wantISS:     0.0,
 		},
 		{
-			name:    "rejected_486",
-			uas:     "uas_0.xml",
-			uac:     "uac_0.xml",
-			count:   50,
-			wantISS: 0.0,
+			name:        "rejected_486",
+			uasScenario: "uas_0.xml",
+			uacScenario: "uac_0.xml",
+			callCount:   50,
+			wantISS:     0.0,
 		},
 		{
-			name:    "no_invite",
-			uas:     "uas_no_invite.xml",
-			uac:     "uac_no_invite.xml",
-			count:   50,
-			wantISS: 0.0,
+			name:        "no_invite",
+			uasScenario: "uas_no_invite.xml",
+			uacScenario: "uac_no_invite.xml",
+			callCount:   50,
+			wantISS:     0.0,
 		},
 	}
 
@@ -64,10 +65,12 @@ func TestISS_AllScenarios(t *testing.T) {
 			ctx := context.Background()
 			env := newTestEnv(ctx, t)
 
-			runSippScenario(ctx, t, tt.uas, tt.uac, tt.count, env)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
 			iss := getISS(t, env.endpoint)
 			t.Logf("ISS = %.0f (want %.0f)", iss, tt.wantISS)
 			require.Equal(t, tt.wantISS, iss)
+
+			waitForSessionsZero(t, env.endpoint)
 		})
 	}
 }
@@ -76,6 +79,7 @@ func TestISS_AllScenarios(t *testing.T) {
 // ISS = 15×2 = 30 (loopback doubles 500 responses).
 
 func TestISS_Mixed(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
@@ -86,6 +90,8 @@ func TestISS_Mixed(t *testing.T) {
 	iss := getISS(t, env.endpoint)
 	t.Logf("ISS = %.0f (want %.0f)", iss, 30.0)
 	require.Equal(t, 30.0, iss)
+
+	waitForSessionsZero(t, env.endpoint)
 }
 
 // TestISS_WithCarrierConfig verifies ISS per-carrier.

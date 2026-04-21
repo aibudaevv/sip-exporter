@@ -1,0 +1,882 @@
+2026-04-19 13:25:27.806	INFO	exporter/exporter.go:124	eBPF program attached to AF_PACKET socket	{"interface": "eth0", "sip_port": 5060, "sips_port": 5061}
+2026-04-19 13:25:28.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:29.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:30.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:31.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:32.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:33.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:34.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:35.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:36.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:37.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:38.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:39.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:40.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:41.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:42.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:43.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:44.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:45.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:46.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:47.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:48.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:49.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:50.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:51.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:52.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:53.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:54.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:55.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:56.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:57.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:58.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:25:59.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:00.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:01.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:02.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:03.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:04.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:05.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:06.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:07.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:08.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:09.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:10.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:11.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:12.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:13.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:14.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:15.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:16.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:17.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:18.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:19.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:20.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:21.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:22.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:23.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:24.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:25.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:26.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:27.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:28.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:29.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:30.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:31.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:32.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:33.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:34.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:35.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:36.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:37.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:38.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:39.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:40.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:41.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:42.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:43.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:44.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:45.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:46.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:47.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:48.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:49.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:50.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:51.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:52.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:53.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:54.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:55.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:56.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:57.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:58.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:26:59.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:00.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:01.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:02.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:03.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:04.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:05.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:06.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:07.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:08.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:09.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:10.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:11.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:12.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:13.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:14.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:15.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:16.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:17.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:18.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:19.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:20.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:21.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:22.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:23.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:24.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:25.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:26.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:27.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:28.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:29.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:30.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:31.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:32.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:33.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:34.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:35.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:36.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:37.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:38.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:39.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:40.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:41.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:42.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:43.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:44.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:45.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:46.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:47.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:48.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:49.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:50.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:51.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:52.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:53.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:54.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:55.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:56.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:57.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:58.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:27:59.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:00.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:01.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:02.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:03.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:04.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:05.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:06.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:07.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:08.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:09.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:10.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:11.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:12.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:13.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:14.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:15.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:16.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:17.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:18.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:19.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:20.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:21.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:22.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:23.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:24.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:25.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:26.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:27.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:28.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:29.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:30.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:31.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:32.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:33.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:34.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:35.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:36.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:37.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:38.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:39.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:40.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:41.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:42.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:43.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:44.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:45.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:46.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:47.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:48.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:49.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:50.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:51.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:52.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:53.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:54.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:55.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:56.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:57.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:58.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:28:59.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:00.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:01.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:02.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:03.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:04.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:05.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:06.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:07.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:08.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:09.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:10.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:11.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:12.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:13.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:14.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:15.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:16.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:17.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:18.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:19.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:20.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:21.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:22.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:23.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:24.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:25.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:26.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:27.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:28.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:29.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:30.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:31.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:32.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:33.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:34.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:35.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:36.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:37.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:38.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:39.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:40.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:41.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:42.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:43.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:44.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:45.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:46.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:47.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:48.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:49.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:50.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:51.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:52.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:53.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:54.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:55.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:56.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:57.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:58.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:29:59.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:00.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:01.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:02.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:03.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:04.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:05.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:06.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:07.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:08.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:09.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:10.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:11.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:12.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:13.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:14.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:15.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:16.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:17.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:18.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:19.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:20.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:21.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:22.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:23.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:24.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:25.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:26.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:27.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:28.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:29.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:30.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:31.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:32.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:33.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:34.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:35.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:36.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:37.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:38.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:39.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:40.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:41.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:42.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:43.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:44.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:45.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:46.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:47.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:48.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:49.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:50.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:51.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:52.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:53.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:54.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:55.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:56.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:57.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:58.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:30:59.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:00.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:01.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:02.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:03.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:04.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:05.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:06.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:07.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:08.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:09.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:10.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:11.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:12.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:13.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:14.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:15.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:16.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:17.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:18.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:19.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:20.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:21.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:22.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:23.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:24.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:25.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:26.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:27.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:28.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:29.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:30.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:31.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:32.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:33.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:34.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:35.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:36.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:37.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:38.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:39.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:40.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:41.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:42.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:43.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:44.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:45.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:46.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:47.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:48.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:49.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:50.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:51.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:52.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:53.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:54.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:55.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:56.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:57.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:58.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:31:59.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:00.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:01.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:02.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:03.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:04.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:05.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:06.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:07.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:08.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:09.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:10.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:11.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:12.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:13.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:14.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:15.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:16.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:17.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:18.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:19.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:20.274	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 1079}
+2026-04-19 13:32:20.274	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "INVITE sip:366510@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bK4ZNQ8UcUtr8mH\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=UNa00e92ZrFgr\r\nTo: <sip:366510@10.226.97.10:5060>\r\nCall-ID: e2e97614-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 INVITE\r\nContact: <sip:gw+sipp@10.226.97.4:5080;transport=udp;gw=sipp>\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release+git~20260327T100758Z~af5afc62e2~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY\r\nSupported: timer, path, replaces\r\nAllow-Events: talk, hold, conference, refer\r\nContent-Type: application/sdp\r\nContent-Disposition: session\r\nContent-Length: 218\r\nX-FS-Support: update_display,send_info\r\nRemote-Party-ID: <sip:043123456@10.226.97.4>;party=calling;screen=yes;privacy=off\r\n\r\nv=0\r\no=FreeSWITCH 1776575622 1776575623 IN IP4 10.226.97.4\r\ns=FreeSWITCH\r\nc=IN IP4 10.226.97.4\r\nt=0 0\r\nm=audio 19118 RTP/AVP 8 101\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-15\r\na=ptime:20\r\n"}
+2026-04-19 13:32:20.274	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"SU5WSVRF","From":{"Addr":null,"Tag":"VU5hMDBlOTJackZncg=="},"To":{"Addr":null,"Tag":null},"CallID":"ZTJlOTc2MTQtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:20.275	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 357}
+2026-04-19 13:32:20.275	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 100 Trying\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bK4ZNQ8UcUtr8mH\r\nFrom: <sip:043123456@10.226.97.4>;tag=UNa00e92ZrFgr\r\nTo: <sip:366510@10.226.97.10:5060>;tag=1\r\nCall-ID: e2e97614-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:20.275	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MTAw","Method":null,"From":{"Addr":null,"Tag":"VU5hMDBlOTJackZncg=="},"To":{"Addr":null,"Tag":"MQ=="},"CallID":"ZTJlOTc2MTQtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:20.276	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 352}
+2026-04-19 13:32:20.276	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 603 Decline\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bK4ZNQ8UcUtr8mH\r\nFrom: <sip:043123456@10.226.97.4>;tag=UNa00e92ZrFgr\r\nTo: <sip:366510@10.226.97.10:5060>\r\nCall-ID: e2e97614-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:20.276	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"NjAz","Method":null,"From":{"Addr":null,"Tag":"VU5hMDBlOTJackZncg=="},"To":{"Addr":null,"Tag":null},"CallID":"ZTJlOTc2MTQtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:20.276	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 349}
+2026-04-19 13:32:20.276	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "ACK sip:366510@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bK4ZNQ8UcUtr8mH\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=UNa00e92ZrFgr\r\nTo: <sip:366510@10.226.97.10:5060>\r\nCall-ID: e2e97614-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 ACK\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:20.276	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"QUNL","From":{"Addr":null,"Tag":"VU5hMDBlOTJackZncg=="},"To":{"Addr":null,"Tag":null},"CallID":"ZTJlOTc2MTQtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"QUNL"},"SessionExpires":0}}
+2026-04-19 13:32:20.324	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 1079}
+2026-04-19 13:32:20.324	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "INVITE sip:340199@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bK58egaQXyQ1y7c\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=vy3r29S6v152K\r\nTo: <sip:340199@10.226.97.10:5060>\r\nCall-ID: e2f10225-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 INVITE\r\nContact: <sip:gw+sipp@10.226.97.4:5080;transport=udp;gw=sipp>\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release+git~20260327T100758Z~af5afc62e2~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY\r\nSupported: timer, path, replaces\r\nAllow-Events: talk, hold, conference, refer\r\nContent-Type: application/sdp\r\nContent-Disposition: session\r\nContent-Length: 218\r\nX-FS-Support: update_display,send_info\r\nRemote-Party-ID: <sip:043123456@10.226.97.4>;party=calling;screen=yes;privacy=off\r\n\r\nv=0\r\no=FreeSWITCH 1776578256 1776578257 IN IP4 10.226.97.4\r\ns=FreeSWITCH\r\nc=IN IP4 10.226.97.4\r\nt=0 0\r\nm=audio 16484 RTP/AVP 8 101\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-15\r\na=ptime:20\r\n"}
+2026-04-19 13:32:20.324	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"SU5WSVRF","From":{"Addr":null,"Tag":"dnkzcjI5UzZ2MTUySw=="},"To":{"Addr":null,"Tag":null},"CallID":"ZTJmMTAyMjUtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:20.324	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 357}
+2026-04-19 13:32:20.324	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 100 Trying\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bK58egaQXyQ1y7c\r\nFrom: <sip:043123456@10.226.97.4>;tag=vy3r29S6v152K\r\nTo: <sip:340199@10.226.97.10:5060>;tag=2\r\nCall-ID: e2f10225-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:20.324	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MTAw","Method":null,"From":{"Addr":null,"Tag":"dnkzcjI5UzZ2MTUySw=="},"To":{"Addr":null,"Tag":"Mg=="},"CallID":"ZTJmMTAyMjUtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:20.325	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 352}
+2026-04-19 13:32:20.325	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 349}
+2026-04-19 13:32:20.325	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 603 Decline\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bK58egaQXyQ1y7c\r\nFrom: <sip:043123456@10.226.97.4>;tag=vy3r29S6v152K\r\nTo: <sip:340199@10.226.97.10:5060>\r\nCall-ID: e2f10225-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:20.325	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"NjAz","Method":null,"From":{"Addr":null,"Tag":"dnkzcjI5UzZ2MTUySw=="},"To":{"Addr":null,"Tag":null},"CallID":"ZTJmMTAyMjUtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:20.326	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "ACK sip:340199@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bK58egaQXyQ1y7c\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=vy3r29S6v152K\r\nTo: <sip:340199@10.226.97.10:5060>\r\nCall-ID: e2f10225-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 ACK\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:20.326	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"QUNL","From":{"Addr":null,"Tag":"dnkzcjI5UzZ2MTUySw=="},"To":{"Addr":null,"Tag":null},"CallID":"ZTJmMTAyMjUtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"QUNL"},"SessionExpires":0}}
+2026-04-19 13:32:20.375	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 1079}
+2026-04-19 13:32:20.375	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 357}
+2026-04-19 13:32:20.376	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "INVITE sip:635355@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bK6H88Bje2maNtr\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=X7vH44aatavNF\r\nTo: <sip:635355@10.226.97.10:5060>\r\nCall-ID: e2f8d7e1-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 INVITE\r\nContact: <sip:gw+sipp@10.226.97.4:5080;transport=udp;gw=sipp>\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release+git~20260327T100758Z~af5afc62e2~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY\r\nSupported: timer, path, replaces\r\nAllow-Events: talk, hold, conference, refer\r\nContent-Type: application/sdp\r\nContent-Disposition: session\r\nContent-Length: 218\r\nX-FS-Support: update_display,send_info\r\nRemote-Party-ID: <sip:043123456@10.226.97.4>;party=calling;screen=yes;privacy=off\r\n\r\nv=0\r\no=FreeSWITCH 1776567264 1776567265 IN IP4 10.226.97.4\r\ns=FreeSWITCH\r\nc=IN IP4 10.226.97.4\r\nt=0 0\r\nm=audio 27476 RTP/AVP 8 101\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-15\r\na=ptime:20\r\n"}
+2026-04-19 13:32:20.376	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"SU5WSVRF","From":{"Addr":null,"Tag":"WDd2SDQ0YWF0YXZORg=="},"To":{"Addr":null,"Tag":null},"CallID":"ZTJmOGQ3ZTEtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:20.376	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 100 Trying\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bK6H88Bje2maNtr\r\nFrom: <sip:043123456@10.226.97.4>;tag=X7vH44aatavNF\r\nTo: <sip:635355@10.226.97.10:5060>;tag=3\r\nCall-ID: e2f8d7e1-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:20.376	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MTAw","Method":null,"From":{"Addr":null,"Tag":"WDd2SDQ0YWF0YXZORg=="},"To":{"Addr":null,"Tag":"Mw=="},"CallID":"ZTJmOGQ3ZTEtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:20.376	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 352}
+2026-04-19 13:32:20.376	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 603 Decline\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bK6H88Bje2maNtr\r\nFrom: <sip:043123456@10.226.97.4>;tag=X7vH44aatavNF\r\nTo: <sip:635355@10.226.97.10:5060>\r\nCall-ID: e2f8d7e1-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:20.376	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"NjAz","Method":null,"From":{"Addr":null,"Tag":"WDd2SDQ0YWF0YXZORg=="},"To":{"Addr":null,"Tag":null},"CallID":"ZTJmOGQ3ZTEtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:20.377	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 349}
+2026-04-19 13:32:20.377	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "ACK sip:635355@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bK6H88Bje2maNtr\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=X7vH44aatavNF\r\nTo: <sip:635355@10.226.97.10:5060>\r\nCall-ID: e2f8d7e1-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 ACK\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:20.377	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"QUNL","From":{"Addr":null,"Tag":"WDd2SDQ0YWF0YXZORg=="},"To":{"Addr":null,"Tag":null},"CallID":"ZTJmOGQ3ZTEtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"QUNL"},"SessionExpires":0}}
+2026-04-19 13:32:20.425	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 1079}
+2026-04-19 13:32:20.425	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 357}
+2026-04-19 13:32:20.425	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "INVITE sip:305968@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bK7t11DDZ5HKBDm\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=ygpa6ZUDQKj8a\r\nTo: <sip:305968@10.226.97.10:5060>\r\nCall-ID: e3008256-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 INVITE\r\nContact: <sip:gw+sipp@10.226.97.4:5080;transport=udp;gw=sipp>\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release+git~20260327T100758Z~af5afc62e2~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY\r\nSupported: timer, path, replaces\r\nAllow-Events: talk, hold, conference, refer\r\nContent-Type: application/sdp\r\nContent-Disposition: session\r\nContent-Length: 218\r\nX-FS-Support: update_display,send_info\r\nRemote-Party-ID: <sip:043123456@10.226.97.4>;party=calling;screen=yes;privacy=off\r\n\r\nv=0\r\no=FreeSWITCH 1776572606 1776572607 IN IP4 10.226.97.4\r\ns=FreeSWITCH\r\nc=IN IP4 10.226.97.4\r\nt=0 0\r\nm=audio 22134 RTP/AVP 8 101\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-15\r\na=ptime:20\r\n"}
+2026-04-19 13:32:20.425	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"SU5WSVRF","From":{"Addr":null,"Tag":"eWdwYTZaVURRS2o4YQ=="},"To":{"Addr":null,"Tag":null},"CallID":"ZTMwMDgyNTYtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:20.426	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 100 Trying\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bK7t11DDZ5HKBDm\r\nFrom: <sip:043123456@10.226.97.4>;tag=ygpa6ZUDQKj8a\r\nTo: <sip:305968@10.226.97.10:5060>;tag=4\r\nCall-ID: e3008256-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:20.426	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MTAw","Method":null,"From":{"Addr":null,"Tag":"eWdwYTZaVURRS2o4YQ=="},"To":{"Addr":null,"Tag":"NA=="},"CallID":"ZTMwMDgyNTYtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:20.427	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 358}
+2026-04-19 13:32:20.427	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 180 Ringing\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bK7t11DDZ5HKBDm\r\nFrom: <sip:043123456@10.226.97.4>;tag=ygpa6ZUDQKj8a\r\nTo: <sip:305968@10.226.97.10:5060>;tag=4\r\nCall-ID: e3008256-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:20.427	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MTgw","Method":null,"From":{"Addr":null,"Tag":"eWdwYTZaVURRS2o4YQ=="},"To":{"Addr":null,"Tag":"NA=="},"CallID":"ZTMwMDgyNTYtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:20.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:21.434	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 710}
+2026-04-19 13:32:21.434	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 200 OK\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bK7t11DDZ5HKBDm\r\nMax-Forwards: 69\r\nFrom: <sip:043123456@10.226.97.4>;tag=ygpa6ZUDQKj8a\r\nTo: <sip:305968@10.226.97.10:5060>;tag=4\r\nCall-ID: e3008256-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nUser-Agent: SIPp\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO\r\nContent-Type: application/sdp\r\nContent-Length:   229\r\n\r\nv=0\r\no=- 2890844526 2890844527 IN IP4 10.226.97.10\r\ns=session\r\nc=IN IP4 10.226.97.10\r\nt=0 0\r\nm=audio 6000 RTP/AVP 0 8 101\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-15\r\na=ptime:20"}
+2026-04-19 13:32:21.434	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MjAw","Method":null,"From":{"Addr":null,"Tag":"eWdwYTZaVURRS2o4YQ=="},"To":{"Addr":null,"Tag":"NA=="},"CallID":"ZTMwMDgyNTYtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:21.434	DEBUG	exporter/exporter.go:395	handle message	{"200 OK cseq method": "INVITE"}
+2026-04-19 13:32:21.434	DEBUG	exporter/exporter.go:426	create sip dialog	{"session": "e3008256-b67d-123f-ca91-00505699c942:4:ygpa6ZUDQKj8a", "expires_sec": 1800}
+2026-04-19 13:32:21.435	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 416}
+2026-04-19 13:32:21.435	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "ACK sip:1001@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bK83ttF8F9ev1ZF\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=ygpa6ZUDQKj8a\r\nTo: <sip:305968@10.226.97.10:5060>;tag=4\r\nCall-ID: e3008256-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 ACK\r\nContact: <sip:gw+sipp@10.226.97.4:5080;transport=udp;gw=sipp>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:21.435	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"QUNL","From":{"Addr":null,"Tag":"eWdwYTZaVURRS2o4YQ=="},"To":{"Addr":null,"Tag":"NA=="},"CallID":"ZTMwMDgyNTYtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"QUNL"},"SessionExpires":0}}
+2026-04-19 13:32:21.452	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 1123}
+2026-04-19 13:32:21.452	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "INVITE sip:0511@10.226.97.9:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bK9cmKH30cc5QjB\r\nMax-Forwards: 70\r\nFrom: \"Outbound Call\" <sip:305968@10.226.97.4>;tag=ZSF37tcHmv8tp\r\nTo: <sip:0511@10.226.97.9:5060>\r\nCall-ID: e39d224e-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 INVITE\r\nContact: <sip:gw+dev_test_gateway@10.226.97.4:5080;transport=udp;gw=dev_test_gateway>\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release+git~20260327T100758Z~af5afc62e2~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY\r\nSupported: timer, path, replaces\r\nAllow-Events: talk, hold, conference, refer\r\nContent-Type: application/sdp\r\nContent-Disposition: session\r\nContent-Length: 218\r\nX-FS-Support: update_display,send_info\r\nRemote-Party-ID: \"Outbound Call\" <sip:305968@10.226.97.4>;party=calling;screen=yes;privacy=off\r\n\r\nv=0\r\no=FreeSWITCH 1776577121 1776577122 IN IP4 10.226.97.4\r\ns=FreeSWITCH\r\nc=IN IP4 10.226.97.4\r\nt=0 0\r\nm=audio 17620 RTP/AVP 8 101\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-15\r\na=ptime:20\r\n"}
+2026-04-19 13:32:21.452	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"SU5WSVRF","From":{"Addr":null,"Tag":"WlNGMzd0Y0htdjh0cA=="},"To":{"Addr":null,"Tag":null},"CallID":"ZTM5ZDIyNGUtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:21.454	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 383}
+2026-04-19 13:32:21.454	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 100 Trying\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport=5080;branch=z9hG4bK9cmKH30cc5QjB\r\nFrom: \"Outbound Call\" <sip:305968@10.226.97.4>;tag=ZSF37tcHmv8tp\r\nTo: <sip:0511@10.226.97.9:5060>\r\nCall-ID: e39d224e-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 INVITE\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release~64bit\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:21.454	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MTAw","Method":null,"From":{"Addr":null,"Tag":"WlNGMzd0Y0htdjh0cA=="},"To":{"Addr":null,"Tag":null},"CallID":"ZTM5ZDIyNGUtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:21.457	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 1262}
+2026-04-19 13:32:21.457	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 200 OK\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport=5080;branch=z9hG4bK9cmKH30cc5QjB\r\nFrom: \"Outbound Call\" <sip:305968@10.226.97.4>;tag=ZSF37tcHmv8tp\r\nTo: <sip:0511@10.226.97.9:5060>;tag=XBSt4QQj2eX3S\r\nCall-ID: e39d224e-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 INVITE\r\nContact: <sip:0511@10.226.97.9:5060;transport=udp>\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release~64bit\r\nAccept: application/sdp\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY, PUBLISH, SUBSCRIBE\r\nSupported: timer, path, replaces\r\nAllow-Events: talk, hold, conference, presence, as-feature-event, dialog, line-seize, call-info, sla, include-session-description, presence.winfo, message-summary, refer\r\nContent-Type: application/sdp\r\nContent-Disposition: session\r\nContent-Length: 218\r\nX-FS-Display-Name: 0511\r\nX-FS-Display-Number: sip:0511@10.226.97.9\r\nX-FS-Support: update_display,send_info\r\nRemote-Party-ID: \"0511\" <sip:0511@10.226.97.9>;party=calling;privacy=off;screen=no\r\n\r\nv=0\r\no=FreeSWITCH 1776562759 1776562760 IN IP4 10.226.97.9\r\ns=FreeSWITCH\r\nc=IN IP4 10.226.97.9\r\nt=0 0\r\nm=audio 31982 RTP/AVP 8 101\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-15\r\na=ptime:20\r\n"}
+2026-04-19 13:32:21.457	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MjAw","Method":null,"From":{"Addr":null,"Tag":"WlNGMzd0Y0htdjh0cA=="},"To":{"Addr":null,"Tag":"WEJTdDRRUWoyZVgzUw=="},"CallID":"ZTM5ZDIyNGUtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:21.457	DEBUG	exporter/exporter.go:395	handle message	{"200 OK cseq method": "INVITE"}
+2026-04-19 13:32:21.457	DEBUG	exporter/exporter.go:426	create sip dialog	{"session": "e39d224e-b67d-123f-ca91-00505699c942:XBSt4QQj2eX3S:ZSF37tcHmv8tp", "expires_sec": 1800}
+2026-04-19 13:32:21.458	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 475}
+2026-04-19 13:32:21.458	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "ACK sip:0511@10.226.97.9:5060;transport=udp SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKapDcKyHg9De5p\r\nMax-Forwards: 70\r\nFrom: \"Outbound Call\" <sip:305968@10.226.97.4>;tag=ZSF37tcHmv8tp\r\nTo: <sip:0511@10.226.97.9:5060>;tag=XBSt4QQj2eX3S\r\nCall-ID: e39d224e-b67d-123f-ca91-00505699c942\r\nCSeq: 113743578 ACK\r\nContact: <sip:gw+dev_test_gateway@10.226.97.4:5080;transport=udp;gw=dev_test_gateway>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:21.458	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"QUNL","From":{"Addr":null,"Tag":"WlNGMzd0Y0htdjh0cA=="},"To":{"Addr":null,"Tag":"WEJTdDRRUWoyZVgzUw=="},"CallID":"ZTM5ZDIyNGUtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc4","Method":"QUNL"},"SessionExpires":0}}
+2026-04-19 13:32:21.480	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 790}
+2026-04-19 13:32:21.480	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "INFO sip:0511@10.226.97.9:5060;transport=udp SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKBZ64mS2K6p4Qj\r\nMax-Forwards: 70\r\nFrom: \"Outbound Call\" <sip:305968@10.226.97.4>;tag=ZSF37tcHmv8tp\r\nTo: <sip:0511@10.226.97.9:5060>;tag=XBSt4QQj2eX3S\r\nCall-ID: e39d224e-b67d-123f-ca91-00505699c942\r\nCSeq: 113743579 INFO\r\nContact: <sip:gw+dev_test_gateway@10.226.97.4:5080;transport=udp;gw=dev_test_gateway>\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release+git~20260327T100758Z~af5afc62e2~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY\r\nSupported: timer, path, replaces\r\nContent-Type: message/update_display\r\nContent-Length: 0\r\nX-FS-Display-Name: Outbound Call\r\nX-FS-Display-Number: 305968\r\n\r\n"}
+2026-04-19 13:32:21.481	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"SU5GTw==","From":{"Addr":null,"Tag":"WlNGMzd0Y0htdjh0cA=="},"To":{"Addr":null,"Tag":"WEJTdDRRUWoyZVgzUw=="},"CallID":"ZTM5ZDIyNGUtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc5","Method":"SU5GTw=="},"SessionExpires":0}}
+2026-04-19 13:32:21.496	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 539}
+2026-04-19 13:32:21.496	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 200 OK\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport=5080;branch=z9hG4bKBZ64mS2K6p4Qj\r\nFrom: \"Outbound Call\" <sip:305968@10.226.97.4>;tag=ZSF37tcHmv8tp\r\nTo: <sip:0511@10.226.97.9:5060>;tag=XBSt4QQj2eX3S\r\nCall-ID: e39d224e-b67d-123f-ca91-00505699c942\r\nCSeq: 113743579 INFO\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY, PUBLISH, SUBSCRIBE\r\nSupported: timer, path, replaces\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:21.496	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MjAw","Method":null,"From":{"Addr":null,"Tag":"WlNGMzd0Y0htdjh0cA=="},"To":{"Addr":null,"Tag":"WEJTdDRRUWoyZVgzUw=="},"CallID":"ZTM5ZDIyNGUtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc5","Method":"SU5GTw=="},"SessionExpires":0}}
+2026-04-19 13:32:21.496	DEBUG	exporter/exporter.go:395	handle message	{"200 OK cseq method": "INFO"}
+2026-04-19 13:32:21.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:22.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:23.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:24.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:25.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:26.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:27.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:28.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:29.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:30.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:31.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:32.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:33.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:34.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:35.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:36.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:37.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:38.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:39.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:40.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:41.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:42.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:43.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:44.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:45.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:46.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:47.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:48.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:49.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:50.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:50.857	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 665}
+2026-04-19 13:32:50.857	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "BYE sip:gw+dev_test_gateway@10.226.97.4:5080;transport=udp;gw=dev_test_gateway SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.9;rport;branch=z9hG4bKj4e2m3mQBcvBr\r\nMax-Forwards: 70\r\nFrom: <sip:0511@10.226.97.9:5060>;tag=XBSt4QQj2eX3S\r\nTo: \"Outbound Call\" <sip:305968@10.226.97.4>;tag=ZSF37tcHmv8tp\r\nCall-ID: e39d224e-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 BYE\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY, PUBLISH, SUBSCRIBE\r\nSupported: timer, path, replaces\r\nReason: Q.850;cause=16;text=\"NORMAL_CLEARING\"\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:50.857	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"QllF","From":{"Addr":null,"Tag":"WEJTdDRRUWoyZVgzUw=="},"To":{"Addr":null,"Tag":"WlNGMzd0Y0htdjh0cA=="},"CallID":"ZTM5ZDIyNGUtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"QllF"},"SessionExpires":0}}
+2026-04-19 13:32:50.859	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 545}
+2026-04-19 13:32:50.859	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 200 OK\r\nVia: SIP/2.0/UDP 10.226.97.9;rport=5060;branch=z9hG4bKj4e2m3mQBcvBr\r\nFrom: <sip:0511@10.226.97.9:5060>;tag=XBSt4QQj2eX3S\r\nTo: \"Outbound Call\" <sip:305968@10.226.97.4>;tag=ZSF37tcHmv8tp\r\nCall-ID: e39d224e-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 BYE\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release+git~20260327T100758Z~af5afc62e2~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY\r\nSupported: timer, path, replaces\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:50.859	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MjAw","Method":null,"From":{"Addr":null,"Tag":"WEJTdDRRUWoyZVgzUw=="},"To":{"Addr":null,"Tag":"WlNGMzd0Y0htdjh0cA=="},"CallID":"ZTM5ZDIyNGUtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"QllF"},"SessionExpires":0}}
+2026-04-19 13:32:50.860	DEBUG	exporter/exporter.go:395	handle message	{"200 OK cseq method": "BYE"}
+2026-04-19 13:32:50.860	DEBUG	exporter/exporter.go:439	delete sip dialog	{"delete session": "e39d224e-b67d-123f-ca91-00505699c942:XBSt4QQj2eX3S:ZSF37tcHmv8tp"}
+2026-04-19 13:32:50.877	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 612}
+2026-04-19 13:32:50.877	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "BYE sip:1001@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKc8ZXpmKQ3Ztae\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=ygpa6ZUDQKj8a\r\nTo: <sip:305968@10.226.97.10:5060>;tag=4\r\nCall-ID: e3008256-b67d-123f-ca91-00505699c942\r\nCSeq: 113743579 BYE\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release+git~20260327T100758Z~af5afc62e2~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY\r\nSupported: timer, path, replaces\r\nReason: Q.850;cause=16;text=\"NORMAL_CLEARING\"\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:50.877	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"QllF","From":{"Addr":null,"Tag":"eWdwYTZaVURRS2o4YQ=="},"To":{"Addr":null,"Tag":"NA=="},"CallID":"ZTMwMDgyNTYtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc5","Method":"QllF"},"SessionExpires":0}}
+2026-04-19 13:32:50.877	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 374}
+2026-04-19 13:32:50.877	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 200 OK\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKc8ZXpmKQ3Ztae\r\nFrom: <sip:043123456@10.226.97.4>;tag=ygpa6ZUDQKj8a\r\nTo: <sip:305968@10.226.97.10:5060>;tag=4;tag=4\r\nCall-ID: e3008256-b67d-123f-ca91-00505699c942\r\nCSeq: 113743579 BYE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nUser-Agent: SIPp\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:50.877	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MjAw","Method":null,"From":{"Addr":null,"Tag":"eWdwYTZaVURRS2o4YQ=="},"To":{"Addr":null,"Tag":"NA=="},"CallID":"ZTMwMDgyNTYtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTc5","Method":"QllF"},"SessionExpires":0}}
+2026-04-19 13:32:50.877	DEBUG	exporter/exporter.go:395	handle message	{"200 OK cseq method": "BYE"}
+2026-04-19 13:32:50.877	DEBUG	exporter/exporter.go:439	delete sip dialog	{"delete session": "e3008256-b67d-123f-ca91-00505699c942:4:ygpa6ZUDQKj8a"}
+2026-04-19 13:32:50.905	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 1079}
+2026-04-19 13:32:50.905	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "INVITE sip:743830@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKDHSprF4t08gXS\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=028U9NXmH5yDj\r\nTo: <sip:743830@10.226.97.10:5060>\r\nCall-ID: f52b60ba-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 INVITE\r\nContact: <sip:gw+sipp@10.226.97.4:5080;transport=udp;gw=sipp>\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release+git~20260327T100758Z~af5afc62e2~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY\r\nSupported: timer, path, replaces\r\nAllow-Events: talk, hold, conference, refer\r\nContent-Type: application/sdp\r\nContent-Disposition: session\r\nContent-Length: 218\r\nX-FS-Support: update_display,send_info\r\nRemote-Party-ID: <sip:043123456@10.226.97.4>;party=calling;screen=yes;privacy=off\r\n\r\nv=0\r\no=FreeSWITCH 1776567720 1776567721 IN IP4 10.226.97.4\r\ns=FreeSWITCH\r\nc=IN IP4 10.226.97.4\r\nt=0 0\r\nm=audio 27050 RTP/AVP 8 101\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-15\r\na=ptime:20\r\n"}
+2026-04-19 13:32:50.905	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"SU5WSVRF","From":{"Addr":null,"Tag":"MDI4VTlOWG1INXlEag=="},"To":{"Addr":null,"Tag":null},"CallID":"ZjUyYjYwYmEtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:50.905	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 357}
+2026-04-19 13:32:50.906	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 100 Trying\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKDHSprF4t08gXS\r\nFrom: <sip:043123456@10.226.97.4>;tag=028U9NXmH5yDj\r\nTo: <sip:743830@10.226.97.10:5060>;tag=5\r\nCall-ID: f52b60ba-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:50.906	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MTAw","Method":null,"From":{"Addr":null,"Tag":"MDI4VTlOWG1INXlEag=="},"To":{"Addr":null,"Tag":"NQ=="},"CallID":"ZjUyYjYwYmEtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:50.906	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 352}
+2026-04-19 13:32:50.907	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 603 Decline\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKDHSprF4t08gXS\r\nFrom: <sip:043123456@10.226.97.4>;tag=028U9NXmH5yDj\r\nTo: <sip:743830@10.226.97.10:5060>\r\nCall-ID: f52b60ba-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:50.907	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 349}
+2026-04-19 13:32:50.907	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"NjAz","Method":null,"From":{"Addr":null,"Tag":"MDI4VTlOWG1INXlEag=="},"To":{"Addr":null,"Tag":null},"CallID":"ZjUyYjYwYmEtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:50.907	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "ACK sip:743830@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKDHSprF4t08gXS\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=028U9NXmH5yDj\r\nTo: <sip:743830@10.226.97.10:5060>\r\nCall-ID: f52b60ba-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 ACK\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:50.907	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"QUNL","From":{"Addr":null,"Tag":"MDI4VTlOWG1INXlEag=="},"To":{"Addr":null,"Tag":null},"CallID":"ZjUyYjYwYmEtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"QUNL"},"SessionExpires":0}}
+2026-04-19 13:32:50.957	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 1079}
+2026-04-19 13:32:50.957	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "INVITE sip:574963@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKetjFtaNyXH7FN\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=1B2mBHereeN0D\r\nTo: <sip:574963@10.226.97.10:5060>\r\nCall-ID: f5334375-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 INVITE\r\nContact: <sip:gw+sipp@10.226.97.4:5080;transport=udp;gw=sipp>\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release+git~20260327T100758Z~af5afc62e2~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY\r\nSupported: timer, path, replaces\r\nAllow-Events: talk, hold, conference, refer\r\nContent-Type: application/sdp\r\nContent-Disposition: session\r\nContent-Length: 218\r\nX-FS-Support: update_display,send_info\r\nRemote-Party-ID: <sip:043123456@10.226.97.4>;party=calling;screen=yes;privacy=off\r\n\r\nv=0\r\no=FreeSWITCH 1776575542 1776575543 IN IP4 10.226.97.4\r\ns=FreeSWITCH\r\nc=IN IP4 10.226.97.4\r\nt=0 0\r\nm=audio 19228 RTP/AVP 8 101\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-15\r\na=ptime:20\r\n"}
+2026-04-19 13:32:50.957	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"SU5WSVRF","From":{"Addr":null,"Tag":"MUIybUJIZXJlZU4wRA=="},"To":{"Addr":null,"Tag":null},"CallID":"ZjUzMzQzNzUtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:50.957	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 357}
+2026-04-19 13:32:50.957	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 100 Trying\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKetjFtaNyXH7FN\r\nFrom: <sip:043123456@10.226.97.4>;tag=1B2mBHereeN0D\r\nTo: <sip:574963@10.226.97.10:5060>;tag=6\r\nCall-ID: f5334375-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:50.957	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MTAw","Method":null,"From":{"Addr":null,"Tag":"MUIybUJIZXJlZU4wRA=="},"To":{"Addr":null,"Tag":"Ng=="},"CallID":"ZjUzMzQzNzUtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:50.958	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 352}
+2026-04-19 13:32:50.958	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 349}
+2026-04-19 13:32:50.958	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 603 Decline\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKetjFtaNyXH7FN\r\nFrom: <sip:043123456@10.226.97.4>;tag=1B2mBHereeN0D\r\nTo: <sip:574963@10.226.97.10:5060>\r\nCall-ID: f5334375-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:50.958	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"NjAz","Method":null,"From":{"Addr":null,"Tag":"MUIybUJIZXJlZU4wRA=="},"To":{"Addr":null,"Tag":null},"CallID":"ZjUzMzQzNzUtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:50.958	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "ACK sip:574963@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKetjFtaNyXH7FN\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=1B2mBHereeN0D\r\nTo: <sip:574963@10.226.97.10:5060>\r\nCall-ID: f5334375-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 ACK\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:50.958	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"QUNL","From":{"Addr":null,"Tag":"MUIybUJIZXJlZU4wRA=="},"To":{"Addr":null,"Tag":null},"CallID":"ZjUzMzQzNzUtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"QUNL"},"SessionExpires":0}}
+2026-04-19 13:32:51.008	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 1079}
+2026-04-19 13:32:51.008	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "INVITE sip:340199@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKF3B8U551ttX2g\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=2mUDDcZUBQBKS\r\nTo: <sip:340199@10.226.97.10:5060>\r\nCall-ID: f53b0509-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 INVITE\r\nContact: <sip:gw+sipp@10.226.97.4:5080;transport=udp;gw=sipp>\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release+git~20260327T100758Z~af5afc62e2~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY\r\nSupported: timer, path, replaces\r\nAllow-Events: talk, hold, conference, refer\r\nContent-Type: application/sdp\r\nContent-Disposition: session\r\nContent-Length: 218\r\nX-FS-Support: update_display,send_info\r\nRemote-Party-ID: <sip:043123456@10.226.97.4>;party=calling;screen=yes;privacy=off\r\n\r\nv=0\r\no=FreeSWITCH 1776566240 1776566241 IN IP4 10.226.97.4\r\ns=FreeSWITCH\r\nc=IN IP4 10.226.97.4\r\nt=0 0\r\nm=audio 28530 RTP/AVP 8 101\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-15\r\na=ptime:20\r\n"}
+2026-04-19 13:32:51.008	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"SU5WSVRF","From":{"Addr":null,"Tag":"Mm1VRERjWlVCUUJLUw=="},"To":{"Addr":null,"Tag":null},"CallID":"ZjUzYjA1MDktYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:51.008	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 357}
+2026-04-19 13:32:51.008	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 100 Trying\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKF3B8U551ttX2g\r\nFrom: <sip:043123456@10.226.97.4>;tag=2mUDDcZUBQBKS\r\nTo: <sip:340199@10.226.97.10:5060>;tag=7\r\nCall-ID: f53b0509-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:51.008	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MTAw","Method":null,"From":{"Addr":null,"Tag":"Mm1VRERjWlVCUUJLUw=="},"To":{"Addr":null,"Tag":"Nw=="},"CallID":"ZjUzYjA1MDktYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:51.009	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 352}
+2026-04-19 13:32:51.009	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 349}
+2026-04-19 13:32:51.009	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 603 Decline\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKF3B8U551ttX2g\r\nFrom: <sip:043123456@10.226.97.4>;tag=2mUDDcZUBQBKS\r\nTo: <sip:340199@10.226.97.10:5060>\r\nCall-ID: f53b0509-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:51.009	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"NjAz","Method":null,"From":{"Addr":null,"Tag":"Mm1VRERjWlVCUUJLUw=="},"To":{"Addr":null,"Tag":null},"CallID":"ZjUzYjA1MDktYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:51.009	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "ACK sip:340199@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKF3B8U551ttX2g\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=2mUDDcZUBQBKS\r\nTo: <sip:340199@10.226.97.10:5060>\r\nCall-ID: f53b0509-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 ACK\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:51.009	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"QUNL","From":{"Addr":null,"Tag":"Mm1VRERjWlVCUUJLUw=="},"To":{"Addr":null,"Tag":null},"CallID":"ZjUzYjA1MDktYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"QUNL"},"SessionExpires":0}}
+2026-04-19 13:32:51.058	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 1079}
+2026-04-19 13:32:51.058	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "INVITE sip:817148@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKgc50X0p5Q3KNc\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=3Xm6e7FZ8Z15m\r\nTo: <sip:817148@10.226.97.10:5060>\r\nCall-ID: f542ae5f-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 INVITE\r\nContact: <sip:gw+sipp@10.226.97.4:5080;transport=udp;gw=sipp>\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release+git~20260327T100758Z~af5afc62e2~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY\r\nSupported: timer, path, replaces\r\nAllow-Events: talk, hold, conference, refer\r\nContent-Type: application/sdp\r\nContent-Disposition: session\r\nContent-Length: 218\r\nX-FS-Support: update_display,send_info\r\nRemote-Party-ID: <sip:043123456@10.226.97.4>;party=calling;screen=yes;privacy=off\r\n\r\nv=0\r\no=FreeSWITCH 1776563901 1776563902 IN IP4 10.226.97.4\r\ns=FreeSWITCH\r\nc=IN IP4 10.226.97.4\r\nt=0 0\r\nm=audio 30870 RTP/AVP 8 101\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-15\r\na=ptime:20\r\n"}
+2026-04-19 13:32:51.058	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"SU5WSVRF","From":{"Addr":null,"Tag":"M1htNmU3Rlo4WjE1bQ=="},"To":{"Addr":null,"Tag":null},"CallID":"ZjU0MmFlNWYtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:51.058	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 357}
+2026-04-19 13:32:51.058	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 100 Trying\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKgc50X0p5Q3KNc\r\nFrom: <sip:043123456@10.226.97.4>;tag=3Xm6e7FZ8Z15m\r\nTo: <sip:817148@10.226.97.10:5060>;tag=8\r\nCall-ID: f542ae5f-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:51.058	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MTAw","Method":null,"From":{"Addr":null,"Tag":"M1htNmU3Rlo4WjE1bQ=="},"To":{"Addr":null,"Tag":"OA=="},"CallID":"ZjU0MmFlNWYtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:51.059	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 352}
+2026-04-19 13:32:51.059	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 603 Decline\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKgc50X0p5Q3KNc\r\nFrom: <sip:043123456@10.226.97.4>;tag=3Xm6e7FZ8Z15m\r\nTo: <sip:817148@10.226.97.10:5060>\r\nCall-ID: f542ae5f-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:51.059	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"NjAz","Method":null,"From":{"Addr":null,"Tag":"M1htNmU3Rlo4WjE1bQ=="},"To":{"Addr":null,"Tag":null},"CallID":"ZjU0MmFlNWYtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:51.059	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 349}
+2026-04-19 13:32:51.059	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "ACK sip:817148@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKgc50X0p5Q3KNc\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=3Xm6e7FZ8Z15m\r\nTo: <sip:817148@10.226.97.10:5060>\r\nCall-ID: f542ae5f-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 ACK\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:51.059	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"QUNL","From":{"Addr":null,"Tag":"M1htNmU3Rlo4WjE1bQ=="},"To":{"Addr":null,"Tag":null},"CallID":"ZjU0MmFlNWYtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"QUNL"},"SessionExpires":0}}
+2026-04-19 13:32:51.108	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 1079}
+2026-04-19 13:32:51.108	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "INVITE sip:366510@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKHNySZU78mca8Q\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=46DZg20258Qrg\r\nTo: <sip:366510@10.226.97.10:5060>\r\nCall-ID: f54a5c0b-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 INVITE\r\nContact: <sip:gw+sipp@10.226.97.4:5080;transport=udp;gw=sipp>\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release+git~20260327T100758Z~af5afc62e2~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY\r\nSupported: timer, path, replaces\r\nAllow-Events: talk, hold, conference, refer\r\nContent-Type: application/sdp\r\nContent-Disposition: session\r\nContent-Length: 218\r\nX-FS-Support: update_display,send_info\r\nRemote-Party-ID: <sip:043123456@10.226.97.4>;party=calling;screen=yes;privacy=off\r\n\r\nv=0\r\no=FreeSWITCH 1776573931 1776573932 IN IP4 10.226.97.4\r\ns=FreeSWITCH\r\nc=IN IP4 10.226.97.4\r\nt=0 0\r\nm=audio 20840 RTP/AVP 8 101\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-15\r\na=ptime:20\r\n"}
+2026-04-19 13:32:51.109	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 357}
+2026-04-19 13:32:51.109	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"SU5WSVRF","From":{"Addr":null,"Tag":"NDZEWmcyMDI1OFFyZw=="},"To":{"Addr":null,"Tag":null},"CallID":"ZjU0YTVjMGItYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:51.109	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 100 Trying\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKHNySZU78mca8Q\r\nFrom: <sip:043123456@10.226.97.4>;tag=46DZg20258Qrg\r\nTo: <sip:366510@10.226.97.10:5060>;tag=9\r\nCall-ID: f54a5c0b-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:51.109	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MTAw","Method":null,"From":{"Addr":null,"Tag":"NDZEWmcyMDI1OFFyZw=="},"To":{"Addr":null,"Tag":"OQ=="},"CallID":"ZjU0YTVjMGItYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:51.110	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 358}
+2026-04-19 13:32:51.110	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 180 Ringing\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKHNySZU78mca8Q\r\nFrom: <sip:043123456@10.226.97.4>;tag=46DZg20258Qrg\r\nTo: <sip:366510@10.226.97.10:5060>;tag=9\r\nCall-ID: f54a5c0b-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:51.110	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MTgw","Method":null,"From":{"Addr":null,"Tag":"NDZEWmcyMDI1OFFyZw=="},"To":{"Addr":null,"Tag":"OQ=="},"CallID":"ZjU0YTVjMGItYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:51.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:32:52.113	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 710}
+2026-04-19 13:32:52.113	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 200 OK\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKHNySZU78mca8Q\r\nMax-Forwards: 69\r\nFrom: <sip:043123456@10.226.97.4>;tag=46DZg20258Qrg\r\nTo: <sip:366510@10.226.97.10:5060>;tag=9\r\nCall-ID: f54a5c0b-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 INVITE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nUser-Agent: SIPp\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO\r\nContent-Type: application/sdp\r\nContent-Length:   229\r\n\r\nv=0\r\no=- 2890844526 2890844527 IN IP4 10.226.97.10\r\ns=session\r\nc=IN IP4 10.226.97.10\r\nt=0 0\r\nm=audio 6000 RTP/AVP 0 8 101\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-15\r\na=ptime:20"}
+2026-04-19 13:32:52.114	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MjAw","Method":null,"From":{"Addr":null,"Tag":"NDZEWmcyMDI1OFFyZw=="},"To":{"Addr":null,"Tag":"OQ=="},"CallID":"ZjU0YTVjMGItYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:52.114	DEBUG	exporter/exporter.go:395	handle message	{"200 OK cseq method": "INVITE"}
+2026-04-19 13:32:52.114	DEBUG	exporter/exporter.go:426	create sip dialog	{"session": "f54a5c0b-b67d-123f-ca91-00505699c942:46DZg20258Qrg:9", "expires_sec": 1800}
+2026-04-19 13:32:52.114	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 416}
+2026-04-19 13:32:52.114	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "ACK sip:1001@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKjyQj1prcjN0tK\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=46DZg20258Qrg\r\nTo: <sip:366510@10.226.97.10:5060>;tag=9\r\nCall-ID: f54a5c0b-b67d-123f-ca91-00505699c942\r\nCSeq: 113743593 ACK\r\nContact: <sip:gw+sipp@10.226.97.4:5080;transport=udp;gw=sipp>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:52.115	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"QUNL","From":{"Addr":null,"Tag":"NDZEWmcyMDI1OFFyZw=="},"To":{"Addr":null,"Tag":"OQ=="},"CallID":"ZjU0YTVjMGItYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTkz","Method":"QUNL"},"SessionExpires":0}}
+2026-04-19 13:32:52.135	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 1123}
+2026-04-19 13:32:52.135	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "INVITE sip:0511@10.226.97.9:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKK7gB3H9FFypDF\r\nMax-Forwards: 70\r\nFrom: \"Outbound Call\" <sip:366510@10.226.97.4>;tag=5F7QjXH62HeBc\r\nTo: <sip:0511@10.226.97.9:5060>\r\nCall-ID: f5e6fe5d-b67d-123f-ca91-00505699c942\r\nCSeq: 113743594 INVITE\r\nContact: <sip:gw+dev_test_gateway@10.226.97.4:5080;transport=udp;gw=dev_test_gateway>\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release+git~20260327T100758Z~af5afc62e2~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY\r\nSupported: timer, path, replaces\r\nAllow-Events: talk, hold, conference, refer\r\nContent-Type: application/sdp\r\nContent-Disposition: session\r\nContent-Length: 218\r\nX-FS-Support: update_display,send_info\r\nRemote-Party-ID: \"Outbound Call\" <sip:366510@10.226.97.4>;party=calling;screen=yes;privacy=off\r\n\r\nv=0\r\no=FreeSWITCH 1776575146 1776575147 IN IP4 10.226.97.4\r\ns=FreeSWITCH\r\nc=IN IP4 10.226.97.4\r\nt=0 0\r\nm=audio 19626 RTP/AVP 8 101\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-15\r\na=ptime:20\r\n"}
+2026-04-19 13:32:52.135	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"SU5WSVRF","From":{"Addr":null,"Tag":"NUY3UWpYSDYySGVCYw=="},"To":{"Addr":null,"Tag":null},"CallID":"ZjVlNmZlNWQtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTk0","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:52.136	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 383}
+2026-04-19 13:32:52.136	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 100 Trying\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport=5080;branch=z9hG4bKK7gB3H9FFypDF\r\nFrom: \"Outbound Call\" <sip:366510@10.226.97.4>;tag=5F7QjXH62HeBc\r\nTo: <sip:0511@10.226.97.9:5060>\r\nCall-ID: f5e6fe5d-b67d-123f-ca91-00505699c942\r\nCSeq: 113743594 INVITE\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release~64bit\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:52.136	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MTAw","Method":null,"From":{"Addr":null,"Tag":"NUY3UWpYSDYySGVCYw=="},"To":{"Addr":null,"Tag":null},"CallID":"ZjVlNmZlNWQtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTk0","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:52.140	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 1262}
+2026-04-19 13:32:52.140	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 200 OK\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport=5080;branch=z9hG4bKK7gB3H9FFypDF\r\nFrom: \"Outbound Call\" <sip:366510@10.226.97.4>;tag=5F7QjXH62HeBc\r\nTo: <sip:0511@10.226.97.9:5060>;tag=ymjK6j8NZQKpN\r\nCall-ID: f5e6fe5d-b67d-123f-ca91-00505699c942\r\nCSeq: 113743594 INVITE\r\nContact: <sip:0511@10.226.97.9:5060;transport=udp>\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release~64bit\r\nAccept: application/sdp\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY, PUBLISH, SUBSCRIBE\r\nSupported: timer, path, replaces\r\nAllow-Events: talk, hold, conference, presence, as-feature-event, dialog, line-seize, call-info, sla, include-session-description, presence.winfo, message-summary, refer\r\nContent-Type: application/sdp\r\nContent-Disposition: session\r\nContent-Length: 218\r\nX-FS-Display-Name: 0511\r\nX-FS-Display-Number: sip:0511@10.226.97.9\r\nX-FS-Support: update_display,send_info\r\nRemote-Party-ID: \"0511\" <sip:0511@10.226.97.9>;party=calling;privacy=off;screen=no\r\n\r\nv=0\r\no=FreeSWITCH 1776575184 1776575185 IN IP4 10.226.97.9\r\ns=FreeSWITCH\r\nc=IN IP4 10.226.97.9\r\nt=0 0\r\nm=audio 19588 RTP/AVP 8 101\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-15\r\na=ptime:20\r\n"}
+2026-04-19 13:32:52.140	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MjAw","Method":null,"From":{"Addr":null,"Tag":"NUY3UWpYSDYySGVCYw=="},"To":{"Addr":null,"Tag":"eW1qSzZqOE5aUUtwTg=="},"CallID":"ZjVlNmZlNWQtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTk0","Method":"SU5WSVRF"},"SessionExpires":0}}
+2026-04-19 13:32:52.140	DEBUG	exporter/exporter.go:395	handle message	{"200 OK cseq method": "INVITE"}
+2026-04-19 13:32:52.140	DEBUG	exporter/exporter.go:426	create sip dialog	{"session": "f5e6fe5d-b67d-123f-ca91-00505699c942:5F7QjXH62HeBc:ymjK6j8NZQKpN", "expires_sec": 1800}
+2026-04-19 13:32:52.140	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 475}
+2026-04-19 13:32:52.140	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "ACK sip:0511@10.226.97.9:5060;transport=udp SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKmga44ctKc7c0a\r\nMax-Forwards: 70\r\nFrom: \"Outbound Call\" <sip:366510@10.226.97.4>;tag=5F7QjXH62HeBc\r\nTo: <sip:0511@10.226.97.9:5060>;tag=ymjK6j8NZQKpN\r\nCall-ID: f5e6fe5d-b67d-123f-ca91-00505699c942\r\nCSeq: 113743594 ACK\r\nContact: <sip:gw+dev_test_gateway@10.226.97.4:5080;transport=udp;gw=dev_test_gateway>\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:52.140	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"QUNL","From":{"Addr":null,"Tag":"NUY3UWpYSDYySGVCYw=="},"To":{"Addr":null,"Tag":"eW1qSzZqOE5aUUtwTg=="},"CallID":"ZjVlNmZlNWQtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTk0","Method":"QUNL"},"SessionExpires":0}}
+2026-04-19 13:32:52.157	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 790}
+2026-04-19 13:32:52.157	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "INFO sip:0511@10.226.97.9:5060;transport=udp SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKNS3v67aQ9F3jp\r\nMax-Forwards: 70\r\nFrom: \"Outbound Call\" <sip:366510@10.226.97.4>;tag=5F7QjXH62HeBc\r\nTo: <sip:0511@10.226.97.9:5060>;tag=ymjK6j8NZQKpN\r\nCall-ID: f5e6fe5d-b67d-123f-ca91-00505699c942\r\nCSeq: 113743595 INFO\r\nContact: <sip:gw+dev_test_gateway@10.226.97.4:5080;transport=udp;gw=dev_test_gateway>\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release+git~20260327T100758Z~af5afc62e2~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY\r\nSupported: timer, path, replaces\r\nContent-Type: message/update_display\r\nContent-Length: 0\r\nX-FS-Display-Name: Outbound Call\r\nX-FS-Display-Number: 366510\r\n\r\n"}
+2026-04-19 13:32:52.157	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"SU5GTw==","From":{"Addr":null,"Tag":"NUY3UWpYSDYySGVCYw=="},"To":{"Addr":null,"Tag":"eW1qSzZqOE5aUUtwTg=="},"CallID":"ZjVlNmZlNWQtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTk1","Method":"SU5GTw=="},"SessionExpires":0}}
+2026-04-19 13:32:52.158	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 539}
+2026-04-19 13:32:52.158	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 200 OK\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport=5080;branch=z9hG4bKNS3v67aQ9F3jp\r\nFrom: \"Outbound Call\" <sip:366510@10.226.97.4>;tag=5F7QjXH62HeBc\r\nTo: <sip:0511@10.226.97.9:5060>;tag=ymjK6j8NZQKpN\r\nCall-ID: f5e6fe5d-b67d-123f-ca91-00505699c942\r\nCSeq: 113743595 INFO\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY, PUBLISH, SUBSCRIBE\r\nSupported: timer, path, replaces\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:32:52.158	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MjAw","Method":null,"From":{"Addr":null,"Tag":"NUY3UWpYSDYySGVCYw=="},"To":{"Addr":null,"Tag":"eW1qSzZqOE5aUUtwTg=="},"CallID":"ZjVlNmZlNWQtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTk1","Method":"SU5GTw=="},"SessionExpires":0}}
+2026-04-19 13:32:52.158	DEBUG	exporter/exporter.go:395	handle message	{"200 OK cseq method": "INFO"}
+2026-04-19 13:32:52.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:53.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:54.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:55.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:56.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:57.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:58.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:32:59.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:00.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:01.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:02.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:03.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:04.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:05.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:06.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:07.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:08.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:09.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:10.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:11.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:12.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:13.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:14.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:15.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:16.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:17.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:18.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:19.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:20.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 2, "expired": 0}
+2026-04-19 13:33:21.539	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 665}
+2026-04-19 13:33:21.539	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "BYE sip:gw+dev_test_gateway@10.226.97.4:5080;transport=udp;gw=dev_test_gateway SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.9;rport;branch=z9hG4bKKD8tpy5t8mjyK\r\nMax-Forwards: 70\r\nFrom: <sip:0511@10.226.97.9:5060>;tag=ymjK6j8NZQKpN\r\nTo: \"Outbound Call\" <sip:366510@10.226.97.4>;tag=5F7QjXH62HeBc\r\nCall-ID: f5e6fe5d-b67d-123f-ca91-00505699c942\r\nCSeq: 113743608 BYE\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY, PUBLISH, SUBSCRIBE\r\nSupported: timer, path, replaces\r\nReason: Q.850;cause=16;text=\"NORMAL_CLEARING\"\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:33:21.539	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"QllF","From":{"Addr":null,"Tag":"eW1qSzZqOE5aUUtwTg=="},"To":{"Addr":null,"Tag":"NUY3UWpYSDYySGVCYw=="},"CallID":"ZjVlNmZlNWQtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNjA4","Method":"QllF"},"SessionExpires":0}}
+2026-04-19 13:33:21.541	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 545}
+2026-04-19 13:33:21.541	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 200 OK\r\nVia: SIP/2.0/UDP 10.226.97.9;rport=5060;branch=z9hG4bKKD8tpy5t8mjyK\r\nFrom: <sip:0511@10.226.97.9:5060>;tag=ymjK6j8NZQKpN\r\nTo: \"Outbound Call\" <sip:366510@10.226.97.4>;tag=5F7QjXH62HeBc\r\nCall-ID: f5e6fe5d-b67d-123f-ca91-00505699c942\r\nCSeq: 113743608 BYE\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release+git~20260327T100758Z~af5afc62e2~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY\r\nSupported: timer, path, replaces\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:33:21.541	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MjAw","Method":null,"From":{"Addr":null,"Tag":"eW1qSzZqOE5aUUtwTg=="},"To":{"Addr":null,"Tag":"NUY3UWpYSDYySGVCYw=="},"CallID":"ZjVlNmZlNWQtYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNjA4","Method":"QllF"},"SessionExpires":0}}
+2026-04-19 13:33:21.541	DEBUG	exporter/exporter.go:395	handle message	{"200 OK cseq method": "BYE"}
+2026-04-19 13:33:21.541	DEBUG	exporter/exporter.go:439	delete sip dialog	{"delete session": "f5e6fe5d-b67d-123f-ca91-00505699c942:5F7QjXH62HeBc:ymjK6j8NZQKpN"}
+2026-04-19 13:33:21.556	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 612}
+2026-04-19 13:33:21.556	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "BYE sip:1001@10.226.97.10:5060 SIP/2.0\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKp2vN82Ut6rS5H\r\nMax-Forwards: 70\r\nFrom: <sip:043123456@10.226.97.4>;tag=46DZg20258Qrg\r\nTo: <sip:366510@10.226.97.10:5060>;tag=9\r\nCall-ID: f54a5c0b-b67d-123f-ca91-00505699c942\r\nCSeq: 113743594 BYE\r\nUser-Agent: FreeSWITCH-mod_sofia/1.10.12-release+git~20260327T100758Z~af5afc62e2~64bit\r\nAllow: INVITE, ACK, BYE, CANCEL, OPTIONS, MESSAGE, INFO, UPDATE, REGISTER, REFER, NOTIFY\r\nSupported: timer, path, replaces\r\nReason: Q.850;cause=16;text=\"NORMAL_CLEARING\"\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:33:21.556	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":false,"ResponseStatus":null,"Method":"QllF","From":{"Addr":null,"Tag":"NDZEWmcyMDI1OFFyZw=="},"To":{"Addr":null,"Tag":"OQ=="},"CallID":"ZjU0YTVjMGItYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTk0","Method":"QllF"},"SessionExpires":0}}
+2026-04-19 13:33:21.556	DEBUG	exporter/exporter.go:209	packet from socket	{"len": 374}
+2026-04-19 13:33:21.557	DEBUG	exporter/exporter.go:290	packet raw	{"sip_data": "SIP/2.0 200 OK\r\nVia: SIP/2.0/UDP 10.226.97.4:5080;rport;branch=z9hG4bKp2vN82Ut6rS5H\r\nFrom: <sip:043123456@10.226.97.4>;tag=46DZg20258Qrg\r\nTo: <sip:366510@10.226.97.10:5060>;tag=9;tag=9\r\nCall-ID: f54a5c0b-b67d-123f-ca91-00505699c942\r\nCSeq: 113743594 BYE\r\nContact: <sip:1001@10.226.97.10:5060>\r\nUser-Agent: SIPp\r\nContent-Length: 0\r\n\r\n"}
+2026-04-19 13:33:21.557	DEBUG	exporter/exporter.go:358	parsed packet	{"packet": {"IsResponse":true,"ResponseStatus":"MjAw","Method":null,"From":{"Addr":null,"Tag":"NDZEWmcyMDI1OFFyZw=="},"To":{"Addr":null,"Tag":"OQ=="},"CallID":"ZjU0YTVjMGItYjY3ZC0xMjNmLWNhOTEtMDA1MDU2OTljOTQy","CSeq":{"ID":"MTEzNzQzNTk0","Method":"QllF"},"SessionExpires":0}}
+2026-04-19 13:33:21.557	DEBUG	exporter/exporter.go:395	handle message	{"200 OK cseq method": "BYE"}
+2026-04-19 13:33:21.557	DEBUG	exporter/exporter.go:439	delete sip dialog	{"delete session": "f54a5c0b-b67d-123f-ca91-00505699c942:46DZg20258Qrg:9"}
+2026-04-19 13:33:21.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:22.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:23.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:24.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:25.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:26.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:27.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:28.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:29.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:30.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:31.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:32.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:33.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:34.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:35.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:36.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:37.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:38.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:39.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:40.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:41.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:42.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:43.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:44.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:45.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:46.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:47.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:48.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:49.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:50.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:51.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:52.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:53.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:54.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:55.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:56.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:57.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:58.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:33:59.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:00.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:01.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:02.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:03.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:04.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:05.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:06.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:07.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:08.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:09.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:10.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:11.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:12.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:13.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:14.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:15.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:16.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:17.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:18.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:19.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:20.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:21.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:22.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:23.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:24.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:25.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:26.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:27.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:28.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:29.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:30.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:31.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:32.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:33.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:34.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:35.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:36.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:37.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:38.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:39.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:40.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:41.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:42.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:43.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:44.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:45.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:46.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:47.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:48.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:49.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:50.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:51.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:52.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:53.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:54.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:55.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:56.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:57.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:58.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:34:59.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:00.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:01.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:02.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:03.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:04.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:05.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:06.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:07.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:08.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:09.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:10.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:11.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:12.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:13.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:14.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:15.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:16.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:17.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:18.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:19.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:20.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:21.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:22.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:23.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:24.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:25.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:26.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:27.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:28.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:29.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:30.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:31.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:32.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:33.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:34.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:35.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:36.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:37.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:38.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:39.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:40.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:41.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:42.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:43.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:44.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:45.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:46.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:47.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:48.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:49.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:50.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:51.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:52.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:53.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:54.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:55.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:56.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:57.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:58.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:35:59.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:00.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:01.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:02.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:03.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:04.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:05.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:06.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:07.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:08.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:09.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:10.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:11.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:12.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:13.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:14.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:15.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:16.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:17.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:18.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:19.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:20.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:21.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:22.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:23.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:24.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:25.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:26.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:27.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:28.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:29.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:30.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:31.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:32.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:33.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:34.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:35.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:36.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:37.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:38.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:39.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:40.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:41.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:42.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:43.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:44.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:45.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:46.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:47.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:48.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:49.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:50.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:51.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:52.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:53.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:54.806	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:55.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}
+2026-04-19 13:36:56.807	DEBUG	exporter/exporter.go:148	update metrics	{"size dialogs": 0, "expired": 0}

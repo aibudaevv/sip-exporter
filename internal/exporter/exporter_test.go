@@ -2235,8 +2235,8 @@ func TestHandleMessage_CarrierPropagation_MultiCarrierDialogs(t *testing.T) {
 		e.handleMessage("carrier-A", invite)
 
 		okResp := []byte("SIP/2.0 200 OK\r\n" +
-			"From: <sip:user@domain>;tag=from-a-"+callID+"\r\n" +
-			"To: <sip:other@domain>;tag=to-a-"+callID+"\r\n" +
+			"From: <sip:user@domain>;tag=from-a-" + callID + "\r\n" +
+			"To: <sip:other@domain>;tag=to-a-" + callID + "\r\n" +
 			"Call-ID: " + callID + "\r\n" +
 			"CSeq: 1 INVITE\r\n" +
 			"Session-Expires: 3600\r\n")
@@ -2246,15 +2246,15 @@ func TestHandleMessage_CarrierPropagation_MultiCarrierDialogs(t *testing.T) {
 	for i := 0; i < carrierBCount; i++ {
 		callID := fmt.Sprintf("call-b-%d", i)
 		invite := []byte("INVITE sip:test SIP/2.0\r\n" +
-			"From: <sip:user@domain>;tag=from-b-"+callID+"\r\n" +
+			"From: <sip:user@domain>;tag=from-b-" + callID + "\r\n" +
 			"To: <sip:other@domain>\r\n" +
 			"Call-ID: " + callID + "\r\n" +
 			"CSeq: 1 INVITE\r\n")
 		e.handleMessage("carrier-B", invite)
 
 		okResp := []byte("SIP/2.0 200 OK\r\n" +
-			"From: <sip:user@domain>;tag=from-b-"+callID+"\r\n" +
-			"To: <sip:other@domain>;tag=to-b-"+callID+"\r\n" +
+			"From: <sip:user@domain>;tag=from-b-" + callID + "\r\n" +
+			"To: <sip:other@domain>;tag=to-b-" + callID + "\r\n" +
 			"Call-ID: " + callID + "\r\n" +
 			"CSeq: 1 INVITE\r\n" +
 			"Session-Expires: 3600\r\n")

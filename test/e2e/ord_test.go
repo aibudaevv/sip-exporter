@@ -12,8 +12,8 @@ import (
 // TestORD_OptionsPing tests ORD histogram with OPTIONS requests.
 // ORD measures delay from OPTIONS request to any response.
 // On loopback: Call-ID deduplication in tracker → ORD count = unique transactions.
-
 func TestORD_OptionsPing(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
@@ -25,8 +25,8 @@ func TestORD_OptionsPing(t *testing.T) {
 }
 
 // TestORD_NoOptions verifies ORD = 0 when no OPTIONS traffic.
-
 func TestORD_NoOptions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
@@ -39,8 +39,8 @@ func TestORD_NoOptions(t *testing.T) {
 }
 
 // TestORD_MixedWithOptions tests mixed traffic with some OPTIONS.
-
 func TestORD_MixedWithOptions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
@@ -55,6 +55,7 @@ func TestORD_MixedWithOptions(t *testing.T) {
 
 // TestORD_WithCarrierConfig verifies ORD per-carrier.
 func TestORD_WithCarrierConfig(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnvWithCarriers(ctx, t)
 

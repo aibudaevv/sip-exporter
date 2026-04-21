@@ -30,9 +30,11 @@ type (
 	}
 )
 
+const dialogsInitialSize = 10_000
+
 func NewDialoger() Dialoger {
 	return &dialogs{
-		storage: make(map[string]dialogEntry, 10_000),
+		storage: make(map[string]dialogEntry, dialogsInitialSize),
 	}
 }
 

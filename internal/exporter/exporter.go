@@ -29,6 +29,32 @@ const (
 	defaultRegisterTTL = 60 * time.Second
 	defaultInviteTTL   = 60 * time.Second
 	defaultOptionsTTL  = 60 * time.Second
+
+	messagesChanSize = 10_000
+	socketRecvBufMB  = 4
+
+	ethHeaderLen     = 14
+	vlanEthTypeHi    = 0x81
+	vlanEthTypeLo    = 0x00
+	vlanHeaderLen    = 18
+	ethTypeIPv4Hi    = 0x08
+	ethTypeIPv4Lo    = 0x00
+	ipV4MinHeaderLen = 20
+	ipV4HdrLenMask   = 0x0F
+	ipV4HdrLenShift  = 4
+	ipProtoUDP       = 17
+	udpHeaderLen     = 8
+	minSIPDataLen    = 50
+	minRawPacketLen  = ethHeaderLen + ipV4MinHeaderLen + udpHeaderLen
+	minVLANPacketLen = vlanHeaderLen + ipV4MinHeaderLen + udpHeaderLen
+
+	sipPartsCount         = 3
+	minSIPParts           = 2
+	tagPrefixLen          = 5
+	nanosPerMs    float64 = 1e6
+	htonsShift            = 8
+	htonsMask     uint16  = 0xFF00
+	miB                   = 1024 * 1024
 )
 
 type (
@@ -79,7 +105,7 @@ func NewExporter(m service.Metricser, d service.Dialoger, resolver *carriers.Res
 			dialoger:  d,
 		},
 		carrierResolver: resolver,
-		messages:        make(chan []byte, 10_000),
+		messages:        make(chan []byte, messagesChanSize),
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
 		optionsTracker:  make(map[string]optionsEntry),
@@ -111,11 +137,11 @@ func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPo
 
 	keySIP := uint32(0)
 	keySIPS := uint32(1)
-	if err := sipPortsMap.Update(keySIP, uint16(sipPort), ebpf.UpdateAny); err != nil {
-		return fmt.Errorf("failed to set SIP port: %w", err)
+	if updateErr := sipPortsMap.Update(keySIP, uint16(sipPort), ebpf.UpdateAny); updateErr != nil { //nolint:gosec // port validated by config
+		return fmt.Errorf("failed to set SIP port: %w", updateErr)
 	}
-	if err := sipPortsMap.Update(keySIPS, uint16(sipsPort), ebpf.UpdateAny); err != nil {
-		return fmt.Errorf("failed to set SIPS port: %w", err)
+	if updateErr := sipPortsMap.Update(keySIPS, uint16(sipsPort), ebpf.UpdateAny); updateErr != nil { //nolint:gosec // port validated by config
+		return fmt.Errorf("failed to set SIPS port: %w", updateErr)
 	}
 
 	// Create AF_PACKET socket with SOCK_RAW
@@ -125,7 +151,7 @@ func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPo
 	}
 	e.sock = sock
 
-	socketRecvBufSize := 4 * 1024 * 1024
+	socketRecvBufSize := socketRecvBufMB * miB
 	if setErr := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUF, socketRecvBufSize); setErr != nil {
 		return fmt.Errorf("failed to set SO_RCVBUF: %w", setErr)
 	}
@@ -296,50 +322,50 @@ func (e *exporter) readSocket() {
 
 // parseRawPacket parses raw L2 packet.
 func (e *exporter) parseRawPacket(packet []byte) error {
-	if len(packet) < 42 {
+	if len(packet) < minRawPacketLen {
 		return fmt.Errorf("wrong len packet %d", len(packet))
 	}
 
 	// Parse Ethernet header (14 bytes)
 	ethType := packet[12:14]
-	ipOffset := 14
+	ipOffset := ethHeaderLen
 
 	// VLAN (802.1Q)
-	if ethType[0] == 0x81 && ethType[1] == 0x00 {
-		if len(packet) < 18 {
+	if ethType[0] == vlanEthTypeHi && ethType[1] == vlanEthTypeLo {
+		if len(packet) < minVLANPacketLen {
 			return fmt.Errorf("wrong len packet %d", len(packet))
 		}
 		ethType = packet[16:18]
-		ipOffset = 18
+		ipOffset = vlanHeaderLen
 	}
 
 	// Only IPv4
-	if ethType[0] != 0x08 || ethType[1] != 0x00 {
+	if ethType[0] != ethTypeIPv4Hi || ethType[1] != ethTypeIPv4Lo {
 		return errors.New("not IPv4 packet")
 	}
 
 	// IP header
-	if len(packet) < ipOffset+20 {
+	if len(packet) < ipOffset+ipV4MinHeaderLen {
 		return errors.New("ip header too short")
 	}
 
-	ipHeader := packet[ipOffset : ipOffset+20]
-	ihl := ipHeader[0] & 0x0F
-	ipHeaderLen := int(ihl) * 4
+	ipHeader := packet[ipOffset : ipOffset+ipV4MinHeaderLen]
+	ihl := ipHeader[0] & ipV4HdrLenMask
+	ipHeaderLen := int(ihl) * ipV4HdrLenShift
 	carrier := e.resolveCarrier(ipHeader)
 
-	if ipHeader[9] != 17 { // UDP
+	if ipHeader[9] != ipProtoUDP {
 		return errors.New("not UDP packet")
 	}
 
 	// UDP header (8 bytes)
 	udpOffset := ipOffset + ipHeaderLen
-	if len(packet) < udpOffset+8 {
+	if len(packet) < udpOffset+udpHeaderLen {
 		return errors.New("udp header too short")
 	}
 
 	// SIP data after UDP header
-	sipOffset := udpOffset + 8
+	sipOffset := udpOffset + udpHeaderLen
 	if sipOffset >= len(packet) {
 		return errors.New("no SIP payload")
 	}
@@ -347,7 +373,7 @@ func (e *exporter) parseRawPacket(packet []byte) error {
 	sipData := packet[sipOffset:]
 
 	// Minimum SIP packet should be at least 50 bytes
-	if len(sipData) < 50 {
+	if len(sipData) < minSIPDataLen {
 		return fmt.Errorf("packet too small for SIP: %d", len(sipData))
 	}
 
@@ -390,8 +416,8 @@ func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
 		p.IsResponse = true
 		p.ResponseStatus = bytes.TrimPrefix(lines[0], []byte("SIP/2.0 "))[:3]
 	} else {
-		parts := bytes.SplitN(lines[0], []byte(" "), 3)
-		if len(parts) >= 2 {
+		parts := bytes.SplitN(lines[0], []byte(" "), sipPartsCount)
+		if len(parts) >= minSIPParts {
 			p.IsResponse = false
 			p.Method = bytes.TrimSpace(parts[0])
 		}
@@ -519,7 +545,7 @@ func (e *exporter) handleInviteResponse(fallbackCarrier string, packet dto.Packe
 func (e *exporter) handleRegisterNon200Response(carrier string, packet dto.Packet) {
 	if len(packet.ResponseStatus) > 0 && packet.ResponseStatus[0] == '3' {
 		if startTime, ok := e.getRegisterTime(string(packet.CallID)); ok {
-			delayMs := float64(time.Since(startTime).Nanoseconds()) / 1e6
+			delayMs := float64(time.Since(startTime).Nanoseconds()) / nanosPerMs
 			e.services.metricser.UpdateLRD(carrier, delayMs)
 			e.removeRegisterTime(string(packet.CallID))
 			zap.L().Debug("LRD measured",
@@ -594,7 +620,7 @@ func (e *exporter) handleRegister200OK(carrier string, packet dto.Packet) {
 		return
 	}
 
-	delayMs := float64(time.Since(startTime).Nanoseconds()) / 1e6
+	delayMs := float64(time.Since(startTime).Nanoseconds()) / nanosPerMs
 	e.services.metricser.UpdateRRD(carrier, delayMs)
 	e.removeRegisterTime(string(packet.CallID))
 	zap.L().Debug("RRD measured",
@@ -616,7 +642,7 @@ func extractTag(value []byte) []byte {
 		return nil
 	}
 
-	start := tagIdx + 5
+	start := tagIdx + tagPrefixLen
 	end := start
 
 	for end < len(value) &&
@@ -650,12 +676,12 @@ func normalizeDialogID(callID, fromTag, toTag []byte) (string, error) {
 }
 
 func htons(i uint16) uint16 {
-	return (i<<8)&0xFF00 | i>>8
+	return (i<<htonsShift)&htonsMask | i>>htonsShift
 }
 
 func extractCSeq(value []byte) ([]byte, []byte) {
 	arr := bytes.Split(value, []byte(" "))
-	if len(arr) < 2 {
+	if len(arr) < minSIPParts {
 		return nil, nil
 	}
 
@@ -715,7 +741,7 @@ func (e *exporter) readInviteEntry(callID string) (float64, string, bool) {
 		return 0, "", false
 	}
 
-	delayMs := float64(time.Since(entry.timestamp).Nanoseconds()) / 1e6
+	delayMs := float64(time.Since(entry.timestamp).Nanoseconds()) / nanosPerMs
 
 	zap.L().Debug("TTR read",
 		zap.String("call_id", callID),
@@ -769,7 +795,7 @@ func (e *exporter) measureOptionsTime(callID string) (float64, string, bool) {
 	}
 
 	delete(e.optionsTracker, callID)
-	delayMs := float64(time.Since(entry.timestamp).Nanoseconds()) / 1e6
+	delayMs := float64(time.Since(entry.timestamp).Nanoseconds()) / nanosPerMs
 
 	zap.L().Debug("ORD measured",
 		zap.String("call_id", callID),

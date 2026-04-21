@@ -9,18 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func getTTR(t *testing.T, endpoint string) float64 {
-	t.Helper()
-
-	sum := getMetric(t, endpoint, "sip_exporter_ttr_sum")
-	count := getMetric(t, endpoint, "sip_exporter_ttr_count")
-	if count == 0 {
-		return 0
-	}
-
-	return sum / count
-}
-
 func TestTTR_SuccessfulCalls(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

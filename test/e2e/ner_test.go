@@ -14,47 +14,48 @@ import (
 // On loopback both numerator and denominator double → NER unchanged (like SER).
 
 func TestNER_AllScenarios(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
-		name    string
-		uas     string
-		uac     string
-		count   int
-		wantNER float64
+		name        string
+		uasScenario string
+		uacScenario string
+		callCount   int
+		wantNER     float64
 	}{
 		{
-			name:    "100_percent",
-			uas:     "uas_100.xml",
-			uac:     "uac_100.xml",
-			count:   50,
-			wantNER: 100.0,
+			name:        "100_percent",
+			uasScenario: "uas_100.xml",
+			uacScenario: "uac_100.xml",
+			callCount:   50,
+			wantNER:     100.0,
 		},
 		{
-			name:    "0_percent_486",
-			uas:     "uas_0.xml",
-			uac:     "uac_0.xml",
-			count:   50,
-			wantNER: 100.0,
+			name:        "0_percent_486",
+			uasScenario: "uas_0.xml",
+			uacScenario: "uac_0.xml",
+			callCount:   50,
+			wantNER:     100.0,
 		},
 		{
-			name:    "server_error",
-			uas:     "uas_server_error.xml",
-			uac:     "uac_server_error.xml",
-			count:   50,
-			wantNER: 0.0,
+			name:        "server_error",
+			uasScenario: "uas_server_error.xml",
+			uacScenario: "uac_server_error.xml",
+			callCount:   50,
+			wantNER:     0.0,
 		},
 		{
-			name:    "redirect",
-			uas:     "uas_redirect.xml",
-			uac:     "uac_redirect.xml",
-			count:   50,
-			wantNER: 100.0,
+			name:        "redirect",
+			uasScenario: "uas_redirect.xml",
+			uacScenario: "uac_redirect.xml",
+			callCount:   50,
+			wantNER:     100.0,
 		},
 		{
-			name:    "no_invite",
-			uas:     "uas_no_invite.xml",
-			uac:     "uac_no_invite.xml",
-			count:   50,
-			wantNER: 0.0,
+			name:        "no_invite",
+			uasScenario: "uas_no_invite.xml",
+			uacScenario: "uac_no_invite.xml",
+			callCount:   50,
+			wantNER:     0.0,
 		},
 	}
 
@@ -64,10 +65,12 @@ func TestNER_AllScenarios(t *testing.T) {
 			ctx := context.Background()
 			env := newTestEnv(ctx, t)
 
-			runSippScenario(ctx, t, tt.uas, tt.uac, tt.count, env)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
 			ner := getNER(t, env.endpoint)
 			t.Logf("NER = %.2f (want %.2f)", ner, tt.wantNER)
 			require.Equal(t, tt.wantNER, ner)
+
+			waitForSessionsZero(t, env.endpoint)
 		})
 	}
 }
@@ -76,6 +79,7 @@ func TestNER_AllScenarios(t *testing.T) {
 // ineffective = 15, total = 50 → NER = 35/50 × 100 = 70%.
 
 func TestNER_Mixed(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
@@ -85,11 +89,14 @@ func TestNER_Mixed(t *testing.T) {
 	ner := getNER(t, env.endpoint)
 	t.Logf("NER = %.2f (want %.2f)", ner, 70.0)
 	require.Equal(t, 70.0, ner)
+
+	waitForSessionsZero(t, env.endpoint)
 }
 
 // TestNER_Equals100MinusISA verifies NER = 100 - ISA.
 
 func TestNER_Equals100MinusISA(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
@@ -101,6 +108,8 @@ func TestNER_Equals100MinusISA(t *testing.T) {
 	isa := getISA(t, env.endpoint)
 	t.Logf("NER = %.2f, ISA = %.2f", ner, isa)
 	require.InDelta(t, 100.0-isa, ner, 0.01, "NER must equal 100 - ISA")
+
+	waitForSessionsZero(t, env.endpoint)
 }
 
 // TestNER_WithCarrierConfig verifies NER per-carrier.

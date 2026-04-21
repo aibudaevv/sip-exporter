@@ -157,3 +157,21 @@ func TestSER_MixedWithCarrierConfig(t *testing.T) {
 
 	env.waitForSessionsZeroByCarrier(t)
 }
+
+// TestSER_ConcurrentRequests verifies SER with concurrent INVITE traffic.
+func TestSER_ConcurrentRequests(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnv(ctx, t)
+
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 30, env)
+	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 10, env)
+	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 10, env)
+
+	ser := getSER(t, env.endpoint)
+	t.Logf("SER = %.2f%%", ser)
+	require.Greater(t, ser, 0.0, "SER should be calculated")
+	require.LessOrEqual(t, ser, 100.0, "SER should not exceed 100%")
+
+	waitForSessionsZero(t, env.endpoint)
+}

@@ -107,6 +107,68 @@ All metrics are exposed at `/metrics` in Prometheus exposition format. All SIP m
 
 Full reference with formulas, examples, and RFC section mapping: [docs/METRICS.md](docs/METRICS.md)
 
+### Per-Carrier Metrics
+
+If your SIP infrastructure handles traffic from multiple operators (telecom providers, SIP trunks, PBX clusters), you need to see metrics **per operator**, not in aggregate.
+
+The carrier feature solves this by mapping IP subnets to operator names. Every metric — INVITE count, SER, active sessions, RRD latency — gets a `carrier` label, so you can build separate Grafana dashboards and alerts for each operator.
+
+**How it works:**
+
+The exporter looks at the **source IP** of every SIP request and matches it against CIDR subnets in a YAML config. When UAC at `10.1.5.20` sends an INVITE, the exporter finds that `10.1.5.20` falls within `10.1.0.0/16` defined for carrier "telecom-alpha", and tags all metrics for this call — the INVITE itself, the 200 OK response, the BYE, even the dialog expiry — with `carrier="telecom-alpha"`.
+
+This means:
+- INVITE from `10.1.5.20` → metrics labeled `carrier="telecom-alpha"`
+- INVITE from `192.168.11.3` → metrics labeled `carrier="telecom-beta"`
+- INVITE from `8.8.8.8` (not in any subnet) → metrics labeled `carrier="other"`
+
+**Setup:**
+
+```yaml
+# docker-compose.yml
+services:
+  sip-exporter:
+    image: frzq/sip-exporter:latest
+    privileged: true
+    network_mode: host
+    environment:
+      - SIP_EXPORTER_INTERFACE=eth0
+      - SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml
+    volumes:
+      - ./carriers.yaml:/etc/sip-exporter/carriers.yaml:ro
+```
+
+```yaml
+# carriers.yaml — map your operators' IP subnets
+carriers:
+  - name: "telecom-alpha"
+    cidrs:
+      - "10.1.0.0/16"
+  - name: "telecom-beta"
+    cidrs:
+      - "192.168.10.0/24"
+      - "192.168.11.0/24"
+```
+
+After that, metrics look like:
+
+```
+sip_exporter_invite_total{carrier="telecom-alpha"}  1523
+sip_exporter_ser{carrier="telecom-alpha"}            95.2
+sip_exporter_ser{carrier="telecom-beta"}             87.4
+sip_exporter_ser{carrier="other"}                     0.0
+```
+
+**Things to know:**
+
+- Carrier is determined at **request time** (INVITE/REGISTER/OPTIONS), not response time. If carrier-A sends INVITE and carrier-B answers 200 OK, all metrics still go to carrier-A — the operator who initiated the call
+- If source IP doesn't match any CIDR, destination IP is tried. If neither matches → `carrier="other"`
+- When CIDRs overlap, **first match wins** — list specific subnets before broad ones
+- Without the config file, all metrics get `carrier="other"` — nothing breaks
+- Each carrier can have multiple CIDRs, and multiple carriers can be defined
+
+Full config reference with examples: [`examples/carriers.yaml`](examples/carriers.yaml)
+
 ## Development
 
 ### Requirements
