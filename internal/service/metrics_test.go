@@ -271,6 +271,16 @@ func TestMetricser_Response_AllCodesSingleRun(t *testing.T) {
 		{"503", []byte("503"), false},
 		{"600", []byte("600"), false},
 		{"603", []byte("603"), false},
+		{"181", []byte("181"), false},
+		{"182", []byte("182"), false},
+		{"405", []byte("405"), false},
+		{"481", []byte("481"), false},
+		{"487", []byte("487"), false},
+		{"488", []byte("488"), false},
+		{"501", []byte("501"), false},
+		{"502", []byte("502"), false},
+		{"604", []byte("604"), false},
+		{"606", []byte("606"), false},
 		{"UNKNOWN", []byte("999"), false},
 		{"EMPTY", []byte(""), false},
 	}
@@ -1632,4 +1642,77 @@ func TestMetrics_LRD_Observe(t *testing.T) {
 
 	_, count := m.getLRDFromHistogram("")
 	require.Equal(t, uint64(2), count)
+}
+
+func getCounterValue(cv *prometheus.CounterVec, carrier string) float64 {
+	var dtoMetric dto.Metric
+	if err := cv.WithLabelValues(carrier).Write(&dtoMetric); err != nil {
+		return 0
+	}
+	return dtoMetric.GetCounter().GetValue()
+}
+
+func TestMetrics_NewStatusCodes_IncrementCounters(t *testing.T) {
+	newCodes := []struct {
+		code   string
+		metric string
+	}{
+		{"181", "sip_exporter_181_total"},
+		{"182", "sip_exporter_182_total"},
+		{"405", "sip_exporter_405_total"},
+		{"481", "sip_exporter_481_total"},
+		{"487", "sip_exporter_487_total"},
+		{"488", "sip_exporter_488_total"},
+		{"501", "sip_exporter_501_total"},
+		{"502", "sip_exporter_502_total"},
+		{"604", "sip_exporter_604_total"},
+		{"606", "sip_exporter_606_total"},
+	}
+
+	for _, tc := range newCodes {
+		t.Run(tc.code, func(t *testing.T) {
+			m := NewTestMetricser().(*metrics)
+
+			before := getCounterValue(m.statusCounters[tc.code], "other")
+			require.Equal(t, 0.0, before)
+
+			m.Response("other", []byte(tc.code), false)
+
+			after := getCounterValue(m.statusCounters[tc.code], "other")
+			require.Equal(t, 1.0, after, "counter for status %s should increment", tc.code)
+		})
+	}
+}
+
+func TestMetrics_NewStatusCodes_MultipleIncrements(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	for range 5 {
+		m.Response("other", []byte("487"), false)
+	}
+
+	require.Equal(t, 5.0, getCounterValue(m.statusCounters["487"], "other"))
+}
+
+func TestMetrics_NewStatusCodes_DifferentCarriers(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.Response("carrier-a", []byte("181"), false)
+	m.Response("carrier-b", []byte("181"), false)
+	m.Response("carrier-a", []byte("181"), false)
+
+	require.Equal(t, 2.0, getCounterValue(m.statusCounters["181"], "carrier-a"))
+	require.Equal(t, 1.0, getCounterValue(m.statusCounters["181"], "carrier-b"))
+}
+
+func TestMetrics_NewStatusCodes_DoNotAffectExistingCounters(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	counters := m.getOrCreateCarrierCounters("other")
+
+	m.Response("other", []byte("487"), true)
+
+	require.Equal(t, int64(0), counters.invite200OKTotal.Load())
+	require.Equal(t, int64(0), counters.inviteEffectiveTotal.Load())
+	require.Equal(t, int64(0), counters.inviteIneffectiveTotal.Load())
+	require.Equal(t, int64(0), counters.invite3xxTotal.Load())
 }

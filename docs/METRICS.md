@@ -182,6 +182,8 @@ Carrier-B metrics: only response counters for non-tracked packets (if any)
 
 `sip_exporter_100_total{carrier="..."}`: total number of SIP 100 Trying responses.  
 `sip_exporter_180_total{carrier="..."}`: total number of SIP 180 Ringing responses.  
+`sip_exporter_181_total{carrier="..."}`: total number of SIP 181 Call Is Being Forwarded responses.  
+`sip_exporter_182_total{carrier="..."}`: total number of SIP 182 Queued responses.  
 `sip_exporter_183_total{carrier="..."}`: total number of SIP 183 Session Progress responses.  
 `sip_exporter_200_total{carrier="..."}`: total number of SIP 200 OK responses.  
 `sip_exporter_202_total{carrier="..."}`: total number of SIP 202 Accepted responses.  
@@ -191,15 +193,23 @@ Carrier-B metrics: only response counters for non-tracked packets (if any)
 `sip_exporter_401_total{carrier="..."}`: total number of SIP 401 Unauthorized responses.  
 `sip_exporter_403_total{carrier="..."}`: total number of SIP 403 Forbidden responses.  
 `sip_exporter_404_total{carrier="..."}`: total number of SIP 404 Not Found responses.  
+`sip_exporter_405_total{carrier="..."}`: total number of SIP 405 Method Not Allowed responses.  
 `sip_exporter_proxy_authentication_required_total{carrier="..."}`: total number of SIP 407 Proxy Authentication Required responses.  
 `sip_exporter_408_total{carrier="..."}`: total number of SIP 408 Request Timeout responses.  
 `sip_exporter_480_total{carrier="..."}`: total number of SIP 480 Temporarily Unavailable responses.  
+`sip_exporter_481_total{carrier="..."}`: total number of SIP 481 Dialog/Transaction Does Not Exist responses.  
 `sip_exporter_486_total{carrier="..."}`: total number of SIP 486 Busy Here responses.  
+`sip_exporter_487_total{carrier="..."}`: total number of SIP 487 Request Terminated responses.  
+`sip_exporter_488_total{carrier="..."}`: total number of SIP 488 Not Acceptable Here responses.  
 `sip_exporter_500_total{carrier="..."}`: total number of SIP 500 Server Internal Error responses.  
+`sip_exporter_501_total{carrier="..."}`: total number of SIP 501 Not Implemented responses.  
+`sip_exporter_502_total{carrier="..."}`: total number of SIP 502 Bad Gateway responses.  
 `sip_exporter_503_total{carrier="..."}`: total number of SIP 503 Service Unavailable responses.  
 `sip_exporter_504_total{carrier="..."}`: total number of SIP 504 Server Time-out responses.  
 `sip_exporter_600_total{carrier="..."}`: total number of SIP 600 Busy Everywhere responses.  
-`sip_exporter_603_total{carrier="..."}`: total number of SIP 603 Decline responses.
+`sip_exporter_603_total{carrier="..."}`: total number of SIP 603 Decline responses.  
+`sip_exporter_604_total{carrier="..."}`: total number of SIP 604 Does Not Exist Anywhere responses.  
+`sip_exporter_606_total{carrier="..."}`: total number of SIP 606 Not Acceptable responses.  
 
 ## System metrics
 

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<scenario name="UAC 488 Not Acceptable Here">
+    <send retrans="500">
+        <![CDATA[
+        INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/[transport][local_ip_type] [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+        To: sut <sip:[service]@[remote_ip]:[remote_port]>
+        Call-ID: [call_id]
+        CSeq: 1 INVITE
+        Contact: sip:sipp@[local_ip]:[local_port]
+        Max-Forwards: 70
+        Content-Type: application/sdp
+        Content-Length: [len]
+
+        v=0
+        o=- 1 1 IN IP[local_ip_type] [local_ip]
+        s=-
+        c=IN IP[local_ip_type] [local_ip]
+        t=0 0
+        m=audio 10000 RTP/AVP 0
+        a=rtpmap:0 PCMU/8000
+
+        ]]>
+    </send>
+    <recv response="100" optional="true" crlf="true"/>
+    <recv response="488" crlf="true"/>
+    <send>
+        <![CDATA[
+        ACK sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/[transport][local_ip_type] [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+        To: sut <sip:[service]@[remote_ip]:[remote_port]>[last_To_tag]
+        Call-ID: [call_id]
+        CSeq: 2 ACK
+        Content-Length: 0
+
+        ]]>
+    </send>
+</scenario>

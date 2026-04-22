@@ -1976,9 +1976,27 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
+              "expr": "rate(sip_exporter_181_total{carrier=~\"$carrier\"}[5m])",
+              "legendFormat": "{{carrier}} - 181 Call Is Being Forwarded",
+              "refId": "C"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "rate(sip_exporter_182_total{carrier=~\"$carrier\"}[5m])",
+              "legendFormat": "{{carrier}} - 182 Queued",
+              "refId": "C1"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
               "expr": "rate(sip_exporter_183_total{carrier=~\"$carrier\"}[5m])",
               "legendFormat": "{{carrier}} - 183 Session Progress",
-              "refId": "C"
+              "refId": "C2"
             },
             {
               "datasource": {
@@ -2048,6 +2066,15 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
+              "expr": "rate(sip_exporter_405_total{carrier=~\"$carrier\"}[5m])",
+              "legendFormat": "{{carrier}} - 405 Method Not Allowed",
+              "refId": "J1"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
               "expr": "rate(sip_exporter_408_total{carrier=~\"$carrier\"}[5m])",
               "legendFormat": "{{carrier}} - 408 Request Timeout",
               "refId": "K"
@@ -2066,6 +2093,15 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
+              "expr": "rate(sip_exporter_481_total{carrier=~\"$carrier\"}[5m])",
+              "legendFormat": "{{carrier}} - 481 Dialog/Transaction Not Exist",
+              "refId": "L1"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
               "expr": "rate(sip_exporter_486_total{carrier=~\"$carrier\"}[5m])",
               "legendFormat": "{{carrier}} - 486 Busy Here",
               "refId": "M"
@@ -2075,9 +2111,45 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
+              "expr": "rate(sip_exporter_487_total{carrier=~\"$carrier\"}[5m])",
+              "legendFormat": "{{carrier}} - 487 Request Terminated",
+              "refId": "M1"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "rate(sip_exporter_488_total{carrier=~\"$carrier\"}[5m])",
+              "legendFormat": "{{carrier}} - 488 Not Acceptable Here",
+              "refId": "M2"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
               "expr": "rate(sip_exporter_500_total{carrier=~\"$carrier\"}[5m])",
               "legendFormat": "{{carrier}} - 500 Server Error",
               "refId": "N"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "rate(sip_exporter_501_total{carrier=~\"$carrier\"}[5m])",
+              "legendFormat": "{{carrier}} - 501 Not Implemented",
+              "refId": "N1"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "rate(sip_exporter_502_total{carrier=~\"$carrier\"}[5m])",
+              "legendFormat": "{{carrier}} - 502 Bad Gateway",
+              "refId": "N2"
             },
             {
               "datasource": {
@@ -2114,6 +2186,24 @@
               "expr": "rate(sip_exporter_603_total{carrier=~\"$carrier\"}[5m])",
               "legendFormat": "{{carrier}} - 603 Decline",
               "refId": "R"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "rate(sip_exporter_604_total{carrier=~\"$carrier\"}[5m])",
+              "legendFormat": "{{carrier}} - 604 Does Not Exist Anywhere",
+              "refId": "R1"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "rate(sip_exporter_606_total{carrier=~\"$carrier\"}[5m])",
+              "legendFormat": "{{carrier}} - 606 Not Acceptable",
+              "refId": "R2"
             }
           ],
           "title": "SIP Responses Rate (by status)",
