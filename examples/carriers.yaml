@@ -24,6 +24,9 @@
 #
 #   5. Without this config file (SIP_EXPORTER_CARRIERS_CONFIG not set), all metrics use carrier="other".
 #
+#   6. CIDR notation is required — plain IP addresses are NOT accepted.
+#      Use /32 for a single host, e.g. "10.226.97.5/32" instead of "10.226.97.5".
+#
 # Example metric output:
 #   sip_exporter_invite_total{carrier="telecom-alpha"} 1523
 #   sip_exporter_ser{carrier="telecom-alpha"} 95.2

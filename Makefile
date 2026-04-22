@@ -1,7 +1,7 @@
 version := $(shell cat VERSION)
 .DEFAULT_GOAL := docker_build
 
-.PHONY: build docker_build ebpf_compile go_build clean ebpf_log lint vet imports test test-e2e test-e2e-run test-load test-load-run test-load-update-baseline
+.PHONY: build docker_build ebpf_compile go_build clean ebpf_log lint vet imports test test-e2e test-e2e-run test-load test-load-run test-load-update-baseline vulncheck trivy-fs trivy-image security
 
 build: ebpf_compile go_build
 docker_build:
@@ -43,3 +43,14 @@ vet:
 	go vet -unsafeptr ./...
 imports: vet
 	goimports -l -w .
+
+vulncheck:
+	govulncheck ./...
+
+trivy-fs:
+	trivy fs .
+
+trivy-image: docker_build
+	trivy image sip-exporter:$(version)
+
+security: vulncheck trivy-fs

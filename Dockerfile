@@ -1,4 +1,4 @@
-FROM golang:1.25-alpine AS builder
+FROM golang:1.25.9-alpine AS builder
 LABEL maintainer="Telegram: t.me/abudaev"
 
 RUN apk add --no-cache \
@@ -16,7 +16,7 @@ RUN make build
 RUN ls -la /app/bin
 ENTRYPOINT ["/app/bin/main"]
 
-FROM alpine:3.20
+FROM alpine:3.22
 
 RUN apk add --no-cache libelf bash
 COPY --from=builder /app/bin /usr/local/bin/

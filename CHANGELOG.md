@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## 0.11.0
+### Added
+- Per-carrier SIP metrics with CIDR-based resolution (`SIP_EXPORTER_CARRIERS_CONFIG`)
+- `internal/carriers` package: YAML config loader with CIDR→carrier name mapping
+- Carrier label on all SIP metrics: requests, responses, SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, ORD, LRD, active sessions
+- Carrier resolution: source IP → CIDR match → carrier name; destination IP fallback; `carrier="other"` for unmatched
+- E2E tests for carrier: direction tests (carrier-A INVITE, carrier-B 200 OK → metrics to carrier-A), CIDR overlap, multi-carrier scenarios
+- `examples/carriers.yaml` — example carrier configuration
+- Grafana dashboard updated: carrier-filtered panels for all metrics
+- CI: `govulncheck` workflow — Go dependency vulnerability scanning (push + daily schedule)
+- CI: `trivy` workflow — Docker image vulnerability scanning with SARIF upload to GitHub Security tab
+- `make vulncheck` — local Go vulnerability check via `govulncheck`
+- `make trivy-fs` — local filesystem vulnerability scan via `trivy`
+- `make trivy-image` — local Docker image vulnerability scan (builds image first)
+- `make security` — runs `vulncheck` + `trivy-fs` (quick pre-push check)
+- `docs/SECURITY.md` — security documentation (EN): why `--privileged` is required, attack surface analysis, eBPF code audit guide, industry analogs
+- `docs/SECURITY.ru.md` — security documentation (RU)
+- Badges in README: Go Vulncheck status, Container Scan status
+
+### Changed
+- `Dialoger` interface: `Create`, `Delete`, `Cleanup`, `Size` now accept/return carrier labels
+- `Metricser` interface: all methods accept `carrier string` parameter
+- `exporter.go`: carrier resolution on every packet, carrier passed through all tracker entries
+- Go 1.25.8 → 1.25.9 (fixes CVE in crypto/x509, crypto/tls)
+- Alpine 3.20 → 3.22 (fixes 18 CVE in openssl, musl, zlib)
+- testcontainers-go v0.41.0 → v0.42.0 (fixes CVE-2026-34040, CVE-2026-33997 in docker/docker)
+- `test/e2e/load/load_test.go`: imports migrated from `github.com/docker/docker` to `github.com/moby/moby`
+- Dockerfile: `golang:1.25-alpine` → `golang:1.25.9-alpine`
+- CI workflows: go-version updated to 1.25.9
+- `docker-compose.yaml`: link to `docs/SECURITY.md` in privileged comment
+- README.md / README.ru.md: carrier documentation, Security link in ToC and Install section
+
 ## 0.10.0
 ### Added
 - NER (Network Effectiveness Ratio) metric per GSMA IR.42 (`sip_exporter_ner`)
@@ -19,7 +51,7 @@
 - Grafana dashboard: NER, ISS, ORD, LRD panels with thresholds
 
 ### Changed
-- README updated: 55 E2E tests, 21 dashboard panels, new metrics listed
+- README updated: 55 E2E tests, updated dashboard panels, new metrics listed
 - Grafana dashboard layout: new row with delay/ratio metrics, timeseries shifted
 
 ## 0.9.0

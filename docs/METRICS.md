@@ -374,7 +374,7 @@ SCR = (Completed Sessions) / Total INVITE × 100
 
 **Formula (RFC 6076 §4.1):**
 ```
-RRD = Average(Time of 200 OK - Time of REGISTER request)
+RRD = Time of 200 OK response - Time of REGISTER request
 ```
 
 - Measures the round-trip time for SIP registration transactions
@@ -401,7 +401,7 @@ rate(sip_exporter_rrd_sum[5m]) / rate(sip_exporter_rrd_count[5m])
 - `100-500 ms` — acceptable performance (typical WAN)
 - `> 1000 ms` — potential issues (network congestion, server overload)
 
-**Deprecated metric:** `sip_exporter_rrd_average` — cumulative average (will be removed in next major version). Has `carrier` label.
+**Note:** Use `histogram_quantile()` or `rate(sum)/rate(count)` for averages — the histogram provides full distribution, not just an average.
 
 ---
 
@@ -411,7 +411,7 @@ rate(sip_exporter_rrd_sum[5m]) / rate(sip_exporter_rrd_count[5m])
 
 **Formula (RFC 6076 §4.5):**
 ```
-SPD = (Cumulative Session Duration) / (Completed Session Count)
+SPD = Time of session end - Time of session start (200 OK to INVITE)
 ```
 
 - Measures the time from session establishment (`200 OK` to `INVITE`) to session termination (`200 OK` to `BYE` or Session-Expires timeout)
@@ -441,7 +441,7 @@ rate(sip_exporter_spd_sum[5m]) / rate(sip_exporter_spd_count[5m])
 - `180 s` — typical voice call (~3 minutes)
 - `> 3600 s` — long-duration sessions (conferences, held calls)
 
-**Deprecated metric:** `sip_exporter_spd_average` — cumulative average (will be removed in next major version). Has `carrier` label.
+**Note:** Use `histogram_quantile()` or `rate(sum)/rate(count)` for averages — the histogram provides full distribution, not just an average.
 
 ---
 
@@ -511,6 +511,7 @@ sip_exporter_asr{carrier="carrier-a"}
 
 # Compare ASR across all carriers
 sip_exporter_asr
+```
 
 **Example values:**
 - `100` — all INVITEs received 200 OK

@@ -1,8 +1,13 @@
 # SIP-exporter
+
+**[EN](README.md)** | **[RU](README.ru.md)**
+
 High-performance eBPF-based SIP monitoring service that captures and exports telephony metrics to Prometheus-compatible systems (Prometheus, VictoriaMetrics, etc.).
 Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspace processing overhead.
 
 [![Go Test](https://github.com/aibudaevv/sip-exporter/actions/workflows/go.yml/badge.svg)](https://github.com/aibudaevv/sip-exporter/actions/workflows/go.yml)
+[![Go Vulncheck](https://github.com/aibudaevv/sip-exporter/actions/workflows/vulncheck.yml/badge.svg)](https://github.com/aibudaevv/sip-exporter/actions/workflows/vulncheck.yml)
+[![Container Scan](https://github.com/aibudaevv/sip-exporter/actions/workflows/trivy.yml/badge.svg)](https://github.com/aibudaevv/sip-exporter/actions/workflows/trivy.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/aibudaevv/sip-exporter)](https://goreportcard.com/report/github.com/aibudaevv/sip-exporter)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](https://github.com/aibudaevv/sip-exporter/blob/main/LICENSE)
 [![Issues](https://img.shields.io/github/issues/aibudaevv/sip-exporter)](https://github.com/aibudaevv/sip-exporter/issues)
@@ -16,6 +21,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - [Performance](#performance)
 - [Install](#install)
 - [Metrics](docs/METRICS.md)
+- [Security](docs/SECURITY.md)
 - [Development](#development)
 - [Benchmark](#benchmark)
 - [Integration](#integration)
@@ -95,15 +101,16 @@ Environment variables:
 * `SIP_EXPORTER_OBJECT_FILE_PATH` - path to eBPF object file (default /usr/local/bin/sip.o)
 * `SIP_EXPORTER_CARRIERS_CONFIG` - path to carriers YAML config (optional, see [`examples/carriers.yaml`](examples/carriers.yaml))
 
-Start docker container in privileged mode is true and host mode.
+The container must run with `--privileged` and `--network host` (eBPF requires `CAP_BPF` and access to the network interface). See [Security](docs/SECURITY.md) for details on why this is safe.
+
 ## Metrics
 
 All metrics are exposed at `/metrics` in Prometheus exposition format. All SIP metrics include a `carrier` label for per-provider breakdown (configurable via CIDR mapping). The exporter provides:
 
 - **Traffic counters** — SIP request types (INVITE, BYE, REGISTER, etc.) and response status codes (100–603)
 - **Active sessions** — real-time count of active SIP dialogs
-- **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, NER, RRD, SPD, TTR
-- **Extended metrics** — ISS (ineffective session severity), ORD (OPTIONS response delay), LRD (location registration delay), ASR, SDC
+- **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR
+- **Extended metrics** — ISS, SDC, ORD, LRD
 
 Full reference with formulas, examples, and RFC section mapping: [docs/METRICS.md](docs/METRICS.md)
 
@@ -205,7 +212,7 @@ See [BENCHMARK.md](./docs/BENCHMARK.md) for detailed results, methodology, and o
 Pre-configured alerting examples are available in [ALERTING.md](./docs/ALERTING.md):
 
 - **Prometheus alert rules** — Critical, warning, and info alerts for SER, ISA, RRD, and more
-- **Grafana dashboard** — Ready-to-import JSON with 21 panels
+- **Grafana dashboard** — Ready-to-import JSON with carrier-filtered panels
 - **Alertmanager examples** — Slack, PagerDuty, and Email integrations
 - **Best practices** — Scrape intervals, retention, threshold tuning
 
