@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.12.0
+### Added
+- 10 new SIP response status code counters: 181 (Call Is Being Forwarded), 182 (Queued), 405 (Method Not Allowed), 481 (Dialog/Transaction Does Not Exist), 487 (Request Terminated), 488 (Not Acceptable Here), 501 (Not Implemented), 502 (Bad Gateway), 604 (Does Not Exist Anywhere), 606 (Not Acceptable)
+- E2E tests with SIPp scenarios for all 10 new status codes (including CANCEL flow for 487)
+- E2E tests with carrier label filtering for 4 new status codes (181, 487, 502, 604)
+
+### Changed
+- Refactored `incrementStatusCodeCounter` from 30-case switch to map-based lookup (cyclomatic complexity 31→1)
+- Grafana dashboard: added 10 new status codes to "SIP Responses Rate" panel in numeric order
+- `docs/METRICS.md`: status codes reordered to numeric sort
+
 ## 0.11.0
 ### Added
 - Per-carrier SIP metrics with CIDR-based resolution (`SIP_EXPORTER_CARRIERS_CONFIG`)

@@ -20,7 +20,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -227,7 +226,7 @@ func startExporterWithConfig(ctx context.Context, t *testing.T, exporterPort, si
 		Env:         envVars,
 		Mounts:      mounts,
 		WaitingFor: wait.ForHTTP("/metrics").
-			WithPort(nat.Port(exporterPort)).
+			WithPort(exporterPort + "/tcp").
 			WithStartupTimeout(60 * time.Second),
 	}
 

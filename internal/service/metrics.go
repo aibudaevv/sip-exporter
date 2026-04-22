@@ -40,26 +40,7 @@ type (
 		requestPublishTotal   *prometheus.CounterVec
 		requestMessageTotal   *prometheus.CounterVec
 
-		statusOKTotal                     *prometheus.CounterVec
-		statusTryingTotal                 *prometheus.CounterVec
-		statusRingingTotal                *prometheus.CounterVec
-		statusSessionProgressTotal        *prometheus.CounterVec
-		statusAcceptedTotal               *prometheus.CounterVec
-		statusMultipleChoiceTotal         *prometheus.CounterVec
-		statusMovedTemporarilyTotal       *prometheus.CounterVec
-		statusBadRequestTotal             *prometheus.CounterVec
-		statusUnauthorizedTotal           *prometheus.CounterVec
-		statusForbiddenTotal              *prometheus.CounterVec
-		statusNotFoundTotal               *prometheus.CounterVec
-		proxyAuthenticationRequired       *prometheus.CounterVec
-		statusRequestTimeoutTotal         *prometheus.CounterVec
-		statusTemporarilyUnavailableTotal *prometheus.CounterVec
-		statusBusyHereTotal               *prometheus.CounterVec
-		statusServerInternalTotal         *prometheus.CounterVec
-		statusServiceUnavailableTotal     *prometheus.CounterVec
-		statusServerTimeoutTotal          *prometheus.CounterVec
-		statusBusyEverywhereTotal         *prometheus.CounterVec
-		statusDeclineTotal                *prometheus.CounterVec
+		statusCounters map[string]*prometheus.CounterVec
 
 		sdc *prometheus.CounterVec
 		iss *prometheus.CounterVec
@@ -187,70 +168,49 @@ func (m *metrics) initRequestCounters(reg *prometheus.Registry) {
 
 func (m *metrics) initStatusCounters(reg *prometheus.Registry) {
 	cl := []string{"carrier"}
-	m.statusOKTotal = newCounterVecWithRegistry(
-		"sip_exporter_200_total",
-		"Total number of 200 OK responses", cl, reg)
-	m.statusTryingTotal = newCounterVecWithRegistry(
-		"sip_exporter_100_total",
-		"Total number of 100 Trying responses", cl, reg)
-	m.statusRingingTotal = newCounterVecWithRegistry(
-		"sip_exporter_180_total",
-		"Total number of 180 Ringing responses", cl, reg)
-	m.statusSessionProgressTotal = newCounterVecWithRegistry(
-		"sip_exporter_183_total",
-		"Total number of 183 Session Progress responses", cl, reg)
-	m.statusAcceptedTotal = newCounterVecWithRegistry(
-		"sip_exporter_202_total",
-		"Total number of 202 Accepted responses", cl, reg)
-	m.statusMultipleChoiceTotal = newCounterVecWithRegistry(
-		"sip_exporter_300_total",
-		"Total number of 300 Multiple Choices responses", cl, reg)
-	m.statusMovedTemporarilyTotal = newCounterVecWithRegistry(
-		"sip_exporter_302_total",
-		"Total number of 302 Moved Temporarily responses", cl, reg)
-	m.statusBadRequestTotal = newCounterVecWithRegistry(
-		"sip_exporter_400_total",
-		"Total number of 400 Bad Request responses", cl, reg)
-	m.statusUnauthorizedTotal = newCounterVecWithRegistry(
-		"sip_exporter_401_total",
-		"Total number of 401 Unauthorized responses", cl, reg)
-	m.statusForbiddenTotal = newCounterVecWithRegistry(
-		"sip_exporter_403_total",
-		"Total number of 403 Forbidden responses", cl, reg)
-	m.statusNotFoundTotal = newCounterVecWithRegistry(
-		"sip_exporter_404_total",
-		"Total number of 404 Not Found responses", cl, reg)
-	m.proxyAuthenticationRequired = newCounterVecWithRegistry(
+	statusCodes := []struct {
+		code string
+		help string
+	}{
+		{"100", "Total number of 100 Trying responses"},
+		{"180", "Total number of 180 Ringing responses"},
+		{"181", "Total number of 181 Call Is Being Forwarded responses"},
+		{"182", "Total number of 182 Queued responses"},
+		{"183", "Total number of 183 Session Progress responses"},
+		{"200", "Total number of 200 OK responses"},
+		{"202", "Total number of 202 Accepted responses"},
+		{"300", "Total number of 300 Multiple Choices responses"},
+		{"302", "Total number of 302 Moved Temporarily responses"},
+		{"400", "Total number of 400 Bad Request responses"},
+		{"401", "Total number of 401 Unauthorized responses"},
+		{"403", "Total number of 403 Forbidden responses"},
+		{"404", "Total number of 404 Not Found responses"},
+		{"405", "Total number of 405 Method Not Allowed responses"},
+		{"407", "Total number of 407 Proxy Authentication Required responses"},
+		{"408", "Total number of 408 Request Timeout responses"},
+		{"480", "Total number of 480 Temporarily Unavailable responses"},
+		{"481", "Total number of 481 Dialog/Transaction Does Not Exist responses"},
+		{"486", "Total number of 486 Busy Here responses"},
+		{"487", "Total number of 487 Request Terminated responses"},
+		{"488", "Total number of 488 Not Acceptable Here responses"},
+		{"500", "Total number of 500 Server Internal Error responses"},
+		{"501", "Total number of 501 Not Implemented responses"},
+		{"502", "Total number of 502 Bad Gateway responses"},
+		{"503", "Total number of 503 Service Unavailable responses"},
+		{"504", "Total number of 504 Server Time-out responses"},
+		{"600", "Total number of 600 Busy Everywhere responses"},
+		{"603", "Total number of 603 Decline responses"},
+		{"604", "Total number of 604 Does Not Exist Anywhere responses"},
+		{"606", "Total number of 606 Not Acceptable responses"},
+	}
+	m.statusCounters = make(map[string]*prometheus.CounterVec, len(statusCodes))
+	for _, sc := range statusCodes {
+		m.statusCounters[sc.code] = newCounterVecWithRegistry(
+			"sip_exporter_"+sc.code+"_total", sc.help, cl, reg)
+	}
+	m.statusCounters["407"] = newCounterVecWithRegistry(
 		"sip_exporter_proxy_authentication_required_total",
-		"Total number of 407 Proxy Authentication Required responses",
-		cl, reg)
-	m.statusRequestTimeoutTotal = newCounterVecWithRegistry(
-		"sip_exporter_408_total",
-		"Total number of 408 Request Timeout responses", cl, reg)
-	m.statusTemporarilyUnavailableTotal = newCounterVecWithRegistry(
-		"sip_exporter_480_total",
-		"Total number of 480 Temporarily Unavailable responses",
-		cl, reg)
-	m.statusBusyHereTotal = newCounterVecWithRegistry(
-		"sip_exporter_486_total",
-		"Total number of 486 Busy Here responses", cl, reg)
-	m.statusServerInternalTotal = newCounterVecWithRegistry(
-		"sip_exporter_500_total",
-		"Total number of 500 Server Internal Error responses",
-		cl, reg)
-	m.statusServiceUnavailableTotal = newCounterVecWithRegistry(
-		"sip_exporter_503_total",
-		"Total number of 503 Service Unavailable responses",
-		cl, reg)
-	m.statusServerTimeoutTotal = newCounterVecWithRegistry(
-		"sip_exporter_504_total",
-		"Total number of 504 Server Time-out responses", cl, reg)
-	m.statusBusyEverywhereTotal = newCounterVecWithRegistry(
-		"sip_exporter_600_total",
-		"Total number of 600 Busy Everywhere responses", cl, reg)
-	m.statusDeclineTotal = newCounterVecWithRegistry(
-		"sip_exporter_603_total",
-		"Total number of 603 Decline responses", cl, reg)
+		"Total number of 407 Proxy Authentication Required responses", cl, reg)
 }
 
 func (m *metrics) initSessionMetrics(reg *prometheus.Registry) {
@@ -501,50 +461,12 @@ func (m *metrics) Response(carrier string, in []byte, isInviteResponse bool) {
 }
 
 func (m *metrics) incrementStatusCodeCounter(carrier string, in []byte) {
-	switch {
-	case bytes.Equal(in, []byte("100")):
-		m.statusTryingTotal.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("180")):
-		m.statusRingingTotal.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("183")):
-		m.statusSessionProgressTotal.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("200")):
-		m.statusOKTotal.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("202")):
-		m.statusAcceptedTotal.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("300")):
-		m.statusMultipleChoiceTotal.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("302")):
-		m.statusMovedTemporarilyTotal.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("400")):
-		m.statusBadRequestTotal.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("401")):
-		m.statusUnauthorizedTotal.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("403")):
-		m.statusForbiddenTotal.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("404")):
-		m.statusNotFoundTotal.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("407")):
-		m.proxyAuthenticationRequired.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("408")):
-		m.statusRequestTimeoutTotal.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("480")):
-		m.statusTemporarilyUnavailableTotal.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("486")):
-		m.statusBusyHereTotal.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("500")):
-		m.statusServerInternalTotal.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("503")):
-		m.statusServiceUnavailableTotal.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("504")):
-		m.statusServerTimeoutTotal.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("600")):
-		m.statusBusyEverywhereTotal.WithLabelValues(carrier).Inc()
-	case bytes.Equal(in, []byte("603")):
-		m.statusDeclineTotal.WithLabelValues(carrier).Inc()
-	default:
-		zap.L().Warn("unknown response", zap.ByteString("in", in))
+	counter, ok := m.statusCounters[string(in)]
+	if ok {
+		counter.WithLabelValues(carrier).Inc()
+		return
 	}
+	zap.L().Warn("unknown response", zap.ByteString("in", in))
 }
 
 func (m *metrics) ResponseWithMetrics(carrier string, status []byte, isInviteResponse, is200OK bool) {

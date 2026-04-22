@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<scenario name="UAS 606 Not Acceptable">
+    <recv request="INVITE" crlf="true"/>
+    <send>
+        <![CDATA[
+        SIP/2.0 100 Trying
+        [last_Via:]
+        [last_From:]
+        [last_To:]
+        [last_Call-ID:]
+        [last_CSeq:]
+        Content-Length: 0
+
+        ]]>
+    </send>
+    <send>
+        <![CDATA[
+        SIP/2.0 606 Not Acceptable
+        [last_Via:]
+        [last_From:]
+        [last_To:];tag=[call_number]
+        [last_Call-ID:]
+        [last_CSeq:]
+        Warning: 305 [local_ip] "Incompatible media format"
+        Content-Length: 0
+
+        ]]>
+    </send>
+    <recv request="ACK" crlf="true"/>
+</scenario>
