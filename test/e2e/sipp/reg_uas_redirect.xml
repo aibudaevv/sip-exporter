@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<scenario name="Registrar UAS Redirect">
+    <recv request="REGISTER" crlf="true"/>
+    <send>
+        <![CDATA[
+        SIP/2.0 302 Moved Temporarily
+        [last_Via:]
+        [last_From:]
+        [last_To:];tag=[call_number]
+        [last_Call-ID:]
+        [last_CSeq:]
+        Contact: <sip:[service]@10.0.0.1:5060>
+        Content-Length: 0
+
+        ]]>
+    </send>
+</scenario>

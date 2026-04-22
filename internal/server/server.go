@@ -13,13 +13,15 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
+	"gitlab.com/sip-exporter/internal/carriers"
 	"gitlab.com/sip-exporter/internal/config"
 	"gitlab.com/sip-exporter/internal/exporter"
 	"gitlab.com/sip-exporter/internal/service"
 )
 
 const (
-	shutDownTimeout = 10 * time.Second
+	shutDownTimeout   = 10 * time.Second
+	readHeaderTimeout = 3 * time.Second
 )
 
 type (
@@ -31,8 +33,8 @@ type (
 	}
 )
 
-func NewServer() Server {
-	return &server{exporter: exporter.NewExporter(service.NewMetricser(), service.NewDialoger())}
+func NewServer(resolver *carriers.Resolver) Server {
+	return &server{exporter: exporter.NewExporter(service.NewMetricser(), service.NewDialoger(), resolver)}
 }
 
 func (s *server) Run(cfg *config.App) error {
@@ -53,7 +55,7 @@ func (s *server) Run(cfg *config.App) error {
 
 	h := http.Server{
 		Addr:              ":" + cfg.Port,
-		ReadHeaderTimeout: 3 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
 		Handler:           mux,
 	}
 

@@ -19,6 +19,9 @@ package main
 import (
 	"log"
 
+	"go.uber.org/zap"
+
+	"gitlab.com/sip-exporter/internal/carriers"
 	"gitlab.com/sip-exporter/internal/config"
 	"gitlab.com/sip-exporter/internal/server"
 	pkgLog "gitlab.com/sip-exporter/pkg/log"
@@ -34,7 +37,16 @@ func main() {
 		log.Fatal(err)
 	}
 
-	srv := server.NewServer()
+	var resolver *carriers.Resolver
+	if cfg.CarriersConfigPath != "" {
+		resolver, err = carriers.LoadConfig(cfg.CarriersConfigPath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		zap.L().Info("carriers config loaded", zap.String("path", cfg.CarriersConfigPath))
+	}
+
+	srv := server.NewServer(resolver)
 	if err = srv.Run(cfg); err != nil {
 		log.Fatal(err)
 	}

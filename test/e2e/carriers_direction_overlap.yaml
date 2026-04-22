@@ -1,0 +1,7 @@
+carriers:
+  - name: "carrier-specific"
+    cidrs:
+      - "10.1.1.0/24"
+  - name: "carrier-broad"
+    cidrs:
+      - "10.1.0.0/16"

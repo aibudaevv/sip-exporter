@@ -1,0 +1,55 @@
+# SIP Exporter — Carrier Configuration
+#
+# This file maps IP subnets (CIDRs) to carrier names.
+# All Prometheus SIP metrics will include a "carrier" label based on this mapping.
+#
+# Usage:
+#   SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml
+#
+# Resolution rules:
+#
+#   1. Carrier is resolved from the SOURCE IP of the SIP REQUEST (INVITE, REGISTER, OPTIONS).
+#      The responder's IP does NOT affect carrier assignment for INVITE — it is "locked"
+#      at INVITE time via an internal tracker and reused for all subsequent responses
+#      (100 Trying, 180 Ringing, 200 OK) and dialog lifecycle events (BYE, Session-Expires).
+#
+#   2. For REGISTER responses, carrier is also taken from the tracker (stored at REGISTER time).
+#      This means REGISTER→200 OK and REGISTER→302 redirect both use the REGISTER request's carrier.
+#
+#   3. If the source IP does not match any CIDR, the DESTINATION IP is tried as a fallback.
+#      If neither matches, carrier is set to "other".
+#
+#   4. When multiple carriers have overlapping CIDRs, the FIRST match in this file wins.
+#      Order matters — list more specific subnets BEFORE broader ones.
+#
+#   5. Without this config file (SIP_EXPORTER_CARRIERS_CONFIG not set), all metrics use carrier="other".
+#
+#   6. CIDR notation is required — plain IP addresses are NOT accepted.
+#      Use /32 for a single host, e.g. "10.226.97.5/32" instead of "10.226.97.5".
+#
+# Example metric output:
+#   sip_exporter_invite_total{carrier="telecom-alpha"} 1523
+#   sip_exporter_ser{carrier="telecom-alpha"} 95.2
+#   sip_exporter_sdc_total{carrier="telecom-beta"} 847
+
+carriers:
+  - name: "telecom-alpha"
+    cidrs:
+      - "10.1.0.0/16"
+      - "10.2.0.0/16"
+      - "172.16.0.0/12"
+
+  - name: "telecom-beta"
+    cidrs:
+      - "192.168.10.0/24"
+      - "192.168.11.0/24"
+      - "192.168.12.0/24"
+
+  - name: "voip-provider-gamma"
+    cidrs:
+      - "10.100.0.0/24"
+      - "10.100.1.0/24"
+
+  - name: "trunk-delta"
+    cidrs:
+      - "203.0.113.0/24"

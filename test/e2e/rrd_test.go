@@ -29,18 +29,6 @@ func TestRRD_RegistrationSuccess(t *testing.T) {
 	require.Greater(t, rrd, 0.0, "RRD should be greater than 0 after successful registrations")
 }
 
-func getRRD(t *testing.T, endpoint string) float64 {
-	t.Helper()
-
-	sum := getMetric(t, endpoint, "sip_exporter_rrd_sum")
-	count := getMetric(t, endpoint, "sip_exporter_rrd_count")
-	if count == 0 {
-		return 0
-	}
-
-	return sum / count
-}
-
 func TestRRD_Register401(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -134,17 +122,15 @@ func TestRRD_ConcurrentRegistrations(t *testing.T) {
 	require.Greater(t, rrd, 0.0, "RRD should be measured for all concurrent registrations")
 }
 
-func TestSER_ConcurrentRequests(t *testing.T) {
+// TestRRD_WithCarrierConfig verifies RRD per-carrier.
+func TestRRD_WithCarrierConfig(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	env := newTestEnv(ctx, t)
+	env := newTestEnvWithCarriers(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 30, env)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 10, env)
-	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 10, env)
+	runSippScenario(ctx, t, "reg_uas.xml", "reg_uac.xml", 50, env)
 
-	ser := getMetric(t, env.endpoint, "sip_exporter_ser")
-	t.Logf("SER = %.2f%%", ser)
-	require.Greater(t, ser, 0.0, "SER should be calculated")
-	require.LessOrEqual(t, ser, 100.0, "SER should not exceed 100%")
+	rrd := env.getRRDByCarrier(t)
+	t.Logf("RRD{carrier=%q} = %.2f ms", env.carrier, rrd)
+	require.Greater(t, rrd, 0.0, "RRD should be greater than 0 after successful registrations")
 }

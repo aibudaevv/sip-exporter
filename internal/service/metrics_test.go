@@ -1,7 +1,6 @@
 package service
 
 import (
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,6 +12,202 @@ import (
 func NewTestMetricser() Metricser {
 	reg := prometheus.NewRegistry()
 	return newMetricserWithRegistry(reg)
+}
+
+func (m *metrics) getSER(carrier string) float64 {
+	val, ok := m.carrierCounters.Load(carrier)
+	if !ok {
+		return 0
+	}
+	counters := val.(*carrierAtomicCounters)
+	total := counters.inviteTotal.Load()
+	if total == 0 {
+		return 0
+	}
+	threeXX := counters.invite3xxTotal.Load()
+	denominator := total - threeXX
+	if denominator == 0 {
+		return 0
+	}
+	ok200 := counters.invite200OKTotal.Load()
+	return float64(ok200) / float64(denominator) * 100 //nolint:mnd // percentage
+}
+
+func (m *metrics) getSEER(carrier string) float64 {
+	val, ok := m.carrierCounters.Load(carrier)
+	if !ok {
+		return 0
+	}
+	counters := val.(*carrierAtomicCounters)
+	total := counters.inviteTotal.Load()
+	if total == 0 {
+		return 0
+	}
+	threeXX := counters.invite3xxTotal.Load()
+	denominator := total - threeXX
+	if denominator == 0 {
+		return 0
+	}
+	effective := counters.inviteEffectiveTotal.Load()
+	return float64(effective) / float64(denominator) * 100 //nolint:mnd
+}
+
+func (m *metrics) getISA(carrier string) float64 {
+	val, ok := m.carrierCounters.Load(carrier)
+	if !ok {
+		return 0
+	}
+	counters := val.(*carrierAtomicCounters)
+	total := counters.inviteTotal.Load()
+	if total == 0 {
+		return 0
+	}
+	ineffective := counters.inviteIneffectiveTotal.Load()
+	return float64(ineffective) / float64(total) * 100 //nolint:mnd
+}
+
+func (m *metrics) getASR(carrier string) float64 {
+	val, ok := m.carrierCounters.Load(carrier)
+	if !ok {
+		return 0
+	}
+	counters := val.(*carrierAtomicCounters)
+	total := counters.inviteTotal.Load()
+	if total == 0 {
+		return 0
+	}
+	ok200 := counters.invite200OKTotal.Load()
+	return float64(ok200) / float64(total) * 100 //nolint:mnd
+}
+
+func (m *metrics) getNER(carrier string) float64 {
+	val, ok := m.carrierCounters.Load(carrier)
+	if !ok {
+		return 0
+	}
+	counters := val.(*carrierAtomicCounters)
+	total := counters.inviteTotal.Load()
+	if total == 0 {
+		return 0
+	}
+	ineffective := counters.inviteIneffectiveTotal.Load()
+	return float64(total-ineffective) / float64(total) * 100 //nolint:mnd
+}
+
+func (m *metrics) getSCR(carrier string) float64 {
+	val, ok := m.carrierCounters.Load(carrier)
+	if !ok {
+		return 0
+	}
+	counters := val.(*carrierAtomicCounters)
+	total := counters.inviteTotal.Load()
+	if total == 0 {
+		return 0
+	}
+	completed := counters.sessionCompletedTotal.Load()
+	return float64(completed) / float64(total) * 100 //nolint:mnd
+}
+
+func (m *metrics) getRRDFromHistogram(carrier string) (sum float64, count uint64) {
+	if m.rrd == nil {
+		return 0, 0
+	}
+	hist, ok := m.rrd.WithLabelValues(carrier).(prometheus.Histogram)
+	if !ok {
+		return 0, 0
+	}
+	var dtoMetric dto.Metric
+	if err := hist.Write(&dtoMetric); err != nil {
+		return 0, 0
+	}
+	h := dtoMetric.GetHistogram()
+	return h.GetSampleSum(), h.GetSampleCount()
+}
+
+func (m *metrics) getTTRFromHistogram(carrier string) (sum float64, count uint64) {
+	if m.ttr == nil {
+		return 0, 0
+	}
+	hist, ok := m.ttr.WithLabelValues(carrier).(prometheus.Histogram)
+	if !ok {
+		return 0, 0
+	}
+	var dtoMetric dto.Metric
+	if err := hist.Write(&dtoMetric); err != nil {
+		return 0, 0
+	}
+	h := dtoMetric.GetHistogram()
+	return h.GetSampleSum(), h.GetSampleCount()
+}
+
+func (m *metrics) getORDFromHistogram(carrier string) (sum float64, count uint64) {
+	if m.ord == nil {
+		return 0, 0
+	}
+	hist, ok := m.ord.WithLabelValues(carrier).(prometheus.Histogram)
+	if !ok {
+		return 0, 0
+	}
+	var dtoMetric dto.Metric
+	if err := hist.Write(&dtoMetric); err != nil {
+		return 0, 0
+	}
+	h := dtoMetric.GetHistogram()
+	return h.GetSampleSum(), h.GetSampleCount()
+}
+
+func (m *metrics) getLRDFromHistogram(carrier string) (sum float64, count uint64) {
+	if m.lrd == nil {
+		return 0, 0
+	}
+	hist, ok := m.lrd.WithLabelValues(carrier).(prometheus.Histogram)
+	if !ok {
+		return 0, 0
+	}
+	var dtoMetric dto.Metric
+	if err := hist.Write(&dtoMetric); err != nil {
+		return 0, 0
+	}
+	h := dtoMetric.GetHistogram()
+	return h.GetSampleSum(), h.GetSampleCount()
+}
+
+func (m *metrics) getSPDFromHistogram(carrier string) (sum float64, count uint64) {
+	if m.spd == nil {
+		return 0, 0
+	}
+	hist, ok := m.spd.WithLabelValues(carrier).(prometheus.Histogram)
+	if !ok {
+		return 0, 0
+	}
+	var dtoMetric dto.Metric
+	if err := hist.Write(&dtoMetric); err != nil {
+		return 0, 0
+	}
+	h := dtoMetric.GetHistogram()
+	return h.GetSampleSum(), h.GetSampleCount()
+}
+
+func (m *metrics) getSDCFromCounter(carrier string) float64 {
+	if m.sdc == nil {
+		return 0
+	}
+	var dtoMetric dto.Metric
+	if err := m.sdc.WithLabelValues(carrier).Write(&dtoMetric); err != nil {
+		return 0
+	}
+	return dtoMetric.GetCounter().GetValue()
+}
+
+func (m *metrics) getISSFromCounter(carrier string) float64 {
+	if m.iss == nil {
+		return 0
+	}
+	var dtoMetric dto.Metric
+	if err := m.iss.WithLabelValues(carrier).Write(&dtoMetric); err != nil {
+		return 0
+	}
+	return dtoMetric.GetCounter().GetValue()
 }
 
 func TestMetricser_Request_AllMethodsSingleRun(t *testing.T) {
@@ -43,7 +238,7 @@ func TestMetricser_Request_AllMethodsSingleRun(t *testing.T) {
 
 	for _, method := range methods {
 		t.Run(method.name, func(t *testing.T) {
-			m.Request(method.data)
+			m.Request("", method.data)
 		})
 	}
 }
@@ -82,7 +277,7 @@ func TestMetricser_Response_AllCodesSingleRun(t *testing.T) {
 
 	for _, code := range codes {
 		t.Run(code.name, func(t *testing.T) {
-			m.Response(code.data, code.isInviteResponse)
+			m.Response("", code.data, code.isInviteResponse)
 		})
 	}
 }
@@ -103,7 +298,7 @@ func TestMetricser_UpdateSession_VariousValues(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			m.UpdateSession(tc.size)
+			m.UpdateSession("", tc.size)
 		})
 	}
 }
@@ -123,101 +318,84 @@ func TestMetricser_Combined(t *testing.T) {
 	m := NewTestMetricser()
 	require.NotNil(t, m)
 
-	m.Request([]byte("INVITE"))
-	m.Response([]byte("200"), false)
-	m.UpdateSession(10)
+	m.Request("", []byte("INVITE"))
+	m.Response("", []byte("200"), false)
+	m.UpdateSession("", 10)
 	m.SystemError()
 }
 
-// SER (Session Establishment Ratio) tests per RFC 6076
-// Formula: SER = (INVITE → 200 OK) / (Total INVITE - INVITE → 3xx) × 100
-
 func TestMetrics_UpdateSER_NoInvites(t *testing.T) {
 	m := &metrics{}
-	// SER should be 0 when no INVITE
-	require.Equal(t, 0.0, m.getSER())
+	require.Equal(t, 0.0, m.getSER(""))
 }
 
 func TestMetrics_UpdateSER_AllSuccessful(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(100)
+	counters.invite200OKTotal.Store(100)
+	counters.invite3xxTotal.Store(0)
 
-	// 100 INVITE, all successful
-	atomic.StoreInt64(&m.inviteTotal, 100)
-	atomic.StoreInt64(&m.invite200OKTotal, 100)
-	atomic.StoreInt64(&m.invite3xxTotal, 0)
-
-	// SER = 100 / (100 - 0) * 100 = 100%
-	require.Equal(t, 100.0, m.getSER())
+	require.Equal(t, 100.0, m.getSER(""))
 }
 
 func TestMetrics_UpdateSER_HalfSuccessful(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(100)
+	counters.invite200OKTotal.Store(50)
+	counters.invite3xxTotal.Store(0)
 
-	// 100 INVITE, 50 successful
-	atomic.StoreInt64(&m.inviteTotal, 100)
-	atomic.StoreInt64(&m.invite200OKTotal, 50)
-	atomic.StoreInt64(&m.invite3xxTotal, 0)
-
-	// SER = 50 / (100 - 0) * 100 = 50%
-	require.Equal(t, 50.0, m.getSER())
+	require.Equal(t, 50.0, m.getSER(""))
 }
 
 func TestMetrics_UpdateSER_With3xxExcluded(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(100)
+	counters.invite200OKTotal.Store(45)
+	counters.invite3xxTotal.Store(10)
 
-	// 100 INVITE, 10 with 3xx, 45 successful
-	// SER = 45 / (100 - 10) * 100 = 50%
-	atomic.StoreInt64(&m.inviteTotal, 100)
-	atomic.StoreInt64(&m.invite200OKTotal, 45)
-	atomic.StoreInt64(&m.invite3xxTotal, 10)
-
-	require.Equal(t, 50.0, m.getSER())
+	require.Equal(t, 50.0, m.getSER(""))
 }
 
 func TestMetrics_UpdateSER_DenominatorZero(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(10)
+	counters.invite200OKTotal.Store(0)
+	counters.invite3xxTotal.Store(10)
 
-	// All INVITE received 3xx
-	atomic.StoreInt64(&m.inviteTotal, 10)
-	atomic.StoreInt64(&m.invite200OKTotal, 0)
-	atomic.StoreInt64(&m.invite3xxTotal, 10)
-
-	// SER should be 0 (denominator = 0)
-	require.Equal(t, 0.0, m.getSER())
+	require.Equal(t, 0.0, m.getSER(""))
 }
 
 func TestMetrics_Invite200OK(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(10)
+	counters.invite200OKTotal.Store(0)
+	counters.invite3xxTotal.Store(0)
 
-	// Set initial state
-	atomic.StoreInt64(&m.inviteTotal, 10)
-	atomic.StoreInt64(&m.invite200OKTotal, 0)
-	atomic.StoreInt64(&m.invite3xxTotal, 0)
+	m.Invite200OK("")
 
-	m.Invite200OK()
-
-	got := atomic.LoadInt64(&m.invite200OKTotal)
-	require.Equal(t, int64(1), got)
+	require.Equal(t, int64(1), counters.invite200OKTotal.Load())
 }
 
 func TestMetrics_Integration_SER(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
 
-	// 10 INVITE requests
 	for i := 0; i < 10; i++ {
-		atomic.AddInt64(&m.inviteTotal, 1)
+		counters.inviteTotal.Add(1)
 	}
 
-	// 5 200 OK responses to INVITE
 	for i := 0; i < 5; i++ {
-		atomic.AddInt64(&m.invite200OKTotal, 1)
+		counters.invite200OKTotal.Add(1)
 	}
 
-	// 2 3xx responses to INVITE
-	atomic.AddInt64(&m.invite3xxTotal, 2)
+	counters.invite3xxTotal.Add(2)
 
-	// Expected: SER = 5 / (10 - 2) * 100 = 62.5%
-	require.Equal(t, 62.5, m.getSER())
+	require.Equal(t, 62.5, m.getSER(""))
 }
 
 func TestMetrics_SER_Values(t *testing.T) {
@@ -254,7 +432,7 @@ func TestMetrics_SER_Values(t *testing.T) {
 			invites:     100,
 			invite200OK: 45,
 			invite3xx:   10,
-			wantSER:     50, // 45 / (100 - 10) * 100 = 50
+			wantSER:     50,
 		},
 		{
 			name:        "denominator_zero",
@@ -268,271 +446,170 @@ func TestMetrics_SER_Values(t *testing.T) {
 			invites:     10,
 			invite200OK: 5,
 			invite3xx:   2,
-			wantSER:     62.5, // 5 / (10 - 2) * 100 = 62.5
+			wantSER:     62.5,
 		},
 		{
 			name:        "75_percent",
 			invites:     8,
 			invite200OK: 6,
 			invite3xx:   0,
-			wantSER:     75, // 6 / 8 * 100 = 75
+			wantSER:     75,
 		},
 		{
 			name:        "25_percent",
 			invites:     100,
 			invite200OK: 20,
 			invite3xx:   20,
-			wantSER:     25, // 20 / (100 - 20) * 100 = 25
+			wantSER:     25,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &metrics{}
-			atomic.StoreInt64(&m.inviteTotal, tt.invites)
-			atomic.StoreInt64(&m.invite200OKTotal, tt.invite200OK)
-			atomic.StoreInt64(&m.invite3xxTotal, tt.invite3xx)
+			counters := m.getOrCreateCarrierCounters("")
+			counters.inviteTotal.Store(tt.invites)
+			counters.invite200OKTotal.Store(tt.invite200OK)
+			counters.invite3xxTotal.Store(tt.invite3xx)
 
-			got := m.getSER()
+			got := m.getSER("")
 			require.Equal(t, tt.wantSER, got)
 		})
 	}
 }
 
-// getSER returns current SER value for tests
-func (m *metrics) getSER() float64 {
-	total := atomic.LoadInt64(&m.inviteTotal)
-	if total == 0 {
-		return 0
-	}
-
-	threeXX := atomic.LoadInt64(&m.invite3xxTotal)
-	denominator := total - threeXX
-
-	if denominator == 0 {
-		return 0
-	}
-
-	ok := atomic.LoadInt64(&m.invite200OKTotal)
-	return float64(ok) / float64(denominator) * 100
-}
-
-// TestMetrics_SER_FullCycle tests full SER change cycle
 func TestMetrics_SER_FullCycle(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
 
-	// Initial state: SER = 0
-	require.Equal(t, 0.0, m.getSER())
+	require.Equal(t, 0.0, m.getSER(""))
 
-	// 10 INVITE requests
 	for i := 0; i < 10; i++ {
-		atomic.AddInt64(&m.inviteTotal, 1)
+		counters.inviteTotal.Add(1)
 	}
-	// SER = 0 / (10 - 0) * 100 = 0%
-	require.Equal(t, 0.0, m.getSER())
+	require.Equal(t, 0.0, m.getSER(""))
 
-	// 5 200 OK responses to INVITE
 	for i := 0; i < 5; i++ {
-		atomic.AddInt64(&m.invite200OKTotal, 1)
+		counters.invite200OKTotal.Add(1)
 	}
-	// SER = 5 / (10 - 0) * 100 = 50%
-	require.Equal(t, 50.0, m.getSER())
+	require.Equal(t, 50.0, m.getSER(""))
 
-	// 2 3xx responses to INVITE
 	for i := 0; i < 2; i++ {
-		atomic.AddInt64(&m.invite3xxTotal, 1)
+		counters.invite3xxTotal.Add(1)
 	}
-	// SER = 5 / (10 - 2) * 100 = 62.5%
-	require.Equal(t, 62.5, m.getSER())
+	require.Equal(t, 62.5, m.getSER(""))
 
-	// 3 more 200 OK responses
 	for i := 0; i < 3; i++ {
-		atomic.AddInt64(&m.invite200OKTotal, 1)
+		counters.invite200OKTotal.Add(1)
 	}
-	// SER = 8 / (10 - 2) * 100 = 100%
-	require.Equal(t, 100.0, m.getSER())
+	require.Equal(t, 100.0, m.getSER(""))
 }
 
-// TestMetrics_SER_RequestResponseFlow models Request/Response flow
 func TestMetrics_SER_RequestResponseFlow(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
 
-	// Scenario: 20 INVITE, of which:
-	// - 10 successful (200 OK)
-	// - 5 redirects (3xx)
-	// - 5 errors (4xx/5xx)
-
-	// All INVITE requests
 	for i := 0; i < 20; i++ {
-		atomic.AddInt64(&m.inviteTotal, 1)
+		counters.inviteTotal.Add(1)
 	}
 
-	// 10 200 OK responses
-	atomic.StoreInt64(&m.invite200OKTotal, 10)
+	counters.invite200OKTotal.Store(10)
+	counters.invite3xxTotal.Store(5)
 
-	// 5 3xx responses
-	atomic.StoreInt64(&m.invite3xxTotal, 5)
-
-	// SER = 10 / (20 - 5) * 100 = 66.67%
-	got := m.getSER()
+	got := m.getSER("")
 	require.InDelta(t, 66.67, got, 0.01)
 }
 
 func TestMetrics_Response_3xxWithInviteResponse(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(10)
+	counters.invite3xxTotal.Store(0)
 
-	// Set initial state
-	atomic.StoreInt64(&m.inviteTotal, 10)
-	atomic.StoreInt64(&m.invite3xxTotal, 0)
+	counters.invite3xxTotal.Add(1)
 
-	// 3xx response to INVITE
-	atomic.AddInt64(&m.invite3xxTotal, 1)
-
-	got := atomic.LoadInt64(&m.invite3xxTotal)
-	require.Equal(t, int64(1), got)
+	require.Equal(t, int64(1), counters.invite3xxTotal.Load())
 }
 
 func TestMetrics_Response_3xxWithoutInviteResponse(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(10)
+	counters.invite3xxTotal.Store(0)
 
-	// Set initial state
-	atomic.StoreInt64(&m.inviteTotal, 10)
-	atomic.StoreInt64(&m.invite3xxTotal, 0)
-
-	// 3xx response not to INVITE (should not be counted)
-	// Don't call Response, just verify counter didn't change
-	got := atomic.LoadInt64(&m.invite3xxTotal)
-	require.Equal(t, int64(0), got)
+	require.Equal(t, int64(0), counters.invite3xxTotal.Load())
 }
 
 func TestMetrics_Response_200WithInviteResponse(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.invite3xxTotal.Store(0)
 
-	// 200 OK doesn't increment invite3xxTotal
-	atomic.StoreInt64(&m.invite3xxTotal, 0)
-	// Don't call Response, just verify counter didn't change
-	got := atomic.LoadInt64(&m.invite3xxTotal)
-	require.Equal(t, int64(0), got)
+	require.Equal(t, int64(0), counters.invite3xxTotal.Load())
 }
 
 func TestMetrics_Request_INVITE(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(0)
+	counters.inviteTotal.Add(1)
 
-	atomic.StoreInt64(&m.inviteTotal, 0)
-	atomic.AddInt64(&m.inviteTotal, 1)
-
-	got := atomic.LoadInt64(&m.inviteTotal)
-	require.Equal(t, int64(1), got)
+	require.Equal(t, int64(1), counters.inviteTotal.Load())
 }
 
 func TestMetrics_Request_NotINVITE(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(0)
 
-	atomic.StoreInt64(&m.inviteTotal, 0)
-	// Request not INVITE shouldn't change inviteTotal
-
-	got := atomic.LoadInt64(&m.inviteTotal)
-	require.Equal(t, int64(0), got)
+	require.Equal(t, int64(0), counters.inviteTotal.Load())
 }
 
-// SEER (Session Establishment Effectiveness Ratio) tests per RFC 6076
-// Formula: SEER = (INVITE → 200, 480, 486, 600, 603) / (Total INVITE - INVITE → 3xx) × 100
-
-// getSEER returns current SEER value for tests
-func (m *metrics) getSEER() float64 {
-	total := atomic.LoadInt64(&m.inviteTotal)
-	if total == 0 {
-		return 0
-	}
-
-	threeXX := atomic.LoadInt64(&m.invite3xxTotal)
-	denominator := total - threeXX
-
-	if denominator == 0 {
-		return 0
-	}
-
-	effective := atomic.LoadInt64(&m.inviteEffectiveTotal)
-	return float64(effective) / float64(denominator) * 100
-}
-
-// getISA returns current ISA value for tests
-func (m *metrics) getISA() float64 {
-	total := atomic.LoadInt64(&m.inviteTotal)
-	if total == 0 {
-		return 0
-	}
-
-	ineffective := atomic.LoadInt64(&m.inviteIneffectiveTotal)
-	return float64(ineffective) / float64(total) * 100
-}
-
-// getASR returns current ASR value for tests
-// ASR = invite200OKTotal / inviteTotal × 100 (3xx NOT excluded, unlike SER)
-func (m *metrics) getASR() float64 {
-	total := atomic.LoadInt64(&m.inviteTotal)
-	if total == 0 {
-		return 0
-	}
-	ok := atomic.LoadInt64(&m.invite200OKTotal)
-	return float64(ok) / float64(total) * 100 //nolint:mnd // percentage formula
-}
-
-// TestMetrics_SEER_NoInvites — MC/DC: total == 0
 func TestMetrics_SEER_NoInvites(t *testing.T) {
 	m := &metrics{}
-	require.Equal(t, 0.0, m.getSEER())
+	require.Equal(t, 0.0, m.getSEER(""))
 }
 
-// TestMetrics_SEER_AllEffective — MC/DC: all responses are effective (200)
 func TestMetrics_SEER_AllEffective(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(100)
+	counters.inviteEffectiveTotal.Store(100)
+	counters.invite3xxTotal.Store(0)
 
-	atomic.StoreInt64(&m.inviteTotal, 100)
-	atomic.StoreInt64(&m.inviteEffectiveTotal, 100)
-	atomic.StoreInt64(&m.invite3xxTotal, 0)
-
-	// SEER = 100 / (100 - 0) * 100 = 100%
-	require.Equal(t, 100.0, m.getSEER())
+	require.Equal(t, 100.0, m.getSEER(""))
 }
 
-// TestMetrics_SEER_HalfEffective — MC/DC: partial effective
 func TestMetrics_SEER_HalfEffective(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(100)
+	counters.inviteEffectiveTotal.Store(50)
+	counters.invite3xxTotal.Store(0)
 
-	atomic.StoreInt64(&m.inviteTotal, 100)
-	atomic.StoreInt64(&m.inviteEffectiveTotal, 50)
-	atomic.StoreInt64(&m.invite3xxTotal, 0)
-
-	// SEER = 50 / (100 - 0) * 100 = 50%
-	require.Equal(t, 50.0, m.getSEER())
+	require.Equal(t, 50.0, m.getSEER(""))
 }
 
-// TestMetrics_SEER_With3xxExcluded — MC/DC: 3xx excluded from denominator
 func TestMetrics_SEER_With3xxExcluded(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(100)
+	counters.inviteEffectiveTotal.Store(45)
+	counters.invite3xxTotal.Store(10)
 
-	// 100 INVITE, 10 with 3xx, 45 effective
-	// SEER = 45 / (100 - 10) * 100 = 50%
-	atomic.StoreInt64(&m.inviteTotal, 100)
-	atomic.StoreInt64(&m.inviteEffectiveTotal, 45)
-	atomic.StoreInt64(&m.invite3xxTotal, 10)
-
-	require.Equal(t, 50.0, m.getSEER())
+	require.Equal(t, 50.0, m.getSEER(""))
 }
 
-// TestMetrics_SEER_DenominatorZero — MC/DC: denominator == 0
 func TestMetrics_SEER_DenominatorZero(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(10)
+	counters.inviteEffectiveTotal.Store(0)
+	counters.invite3xxTotal.Store(10)
 
-	atomic.StoreInt64(&m.inviteTotal, 10)
-	atomic.StoreInt64(&m.inviteEffectiveTotal, 0)
-	atomic.StoreInt64(&m.invite3xxTotal, 10)
-
-	require.Equal(t, 0.0, m.getSEER())
+	require.Equal(t, 0.0, m.getSEER(""))
 }
 
-// TestMetrics_SEER_EachCodeIndependent — MC/DC: each effective code separately
 func TestMetrics_SEER_EachCodeIndependent(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -589,90 +666,69 @@ func TestMetrics_SEER_EachCodeIndependent(t *testing.T) {
 			effective600: 5,
 			effective603: 5,
 			threeXX:      10,
-			wantSEER:     77.78, // 70 / (100 - 10) * 100 = 77.78
+			wantSEER:     77.78,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &metrics{}
-			atomic.StoreInt64(&m.inviteTotal, tt.invites)
-			atomic.StoreInt64(&m.inviteEffectiveTotal,
-				tt.effective200+tt.effective480+tt.effective486+tt.effective600+tt.effective603)
-			atomic.StoreInt64(&m.invite3xxTotal, tt.threeXX)
+			counters := m.getOrCreateCarrierCounters("")
+			counters.inviteTotal.Store(tt.invites)
+			counters.inviteEffectiveTotal.Store(
+				tt.effective200 + tt.effective480 + tt.effective486 + tt.effective600 + tt.effective603)
+			counters.invite3xxTotal.Store(tt.threeXX)
 
-			got := m.getSEER()
+			got := m.getSEER("")
 			require.InDelta(t, tt.wantSEER, got, 0.01)
 		})
 	}
 }
 
-// TestMetrics_SEER_FullCycle — full lifecycle test
 func TestMetrics_SEER_FullCycle(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
 
-	// Initial state: SEER = 0
-	require.Equal(t, 0.0, m.getSEER())
+	require.Equal(t, 0.0, m.getSEER(""))
 
-	// 20 INVITE requests
 	for i := 0; i < 20; i++ {
-		atomic.AddInt64(&m.inviteTotal, 1)
+		counters.inviteTotal.Add(1)
 	}
-	require.Equal(t, 0.0, m.getSEER())
+	require.Equal(t, 0.0, m.getSEER(""))
 
-	// 10 200 OK (effective)
 	for i := 0; i < 10; i++ {
-		atomic.AddInt64(&m.inviteEffectiveTotal, 1)
+		counters.inviteEffectiveTotal.Add(1)
 	}
-	// SEER = 10 / (20 - 0) * 100 = 50%
-	require.Equal(t, 50.0, m.getSEER())
+	require.Equal(t, 50.0, m.getSEER(""))
 
-	// 5 480 Busy Here (effective)
 	for i := 0; i < 5; i++ {
-		atomic.AddInt64(&m.inviteEffectiveTotal, 1)
+		counters.inviteEffectiveTotal.Add(1)
 	}
-	// SEER = 15 / (20 - 0) * 100 = 75%
-	require.Equal(t, 75.0, m.getSEER())
+	require.Equal(t, 75.0, m.getSEER(""))
 
-	// 4 3xx redirects (excluded from denominator)
 	for i := 0; i < 4; i++ {
-		atomic.AddInt64(&m.invite3xxTotal, 1)
+		counters.invite3xxTotal.Add(1)
 	}
-	// SEER = 15 / (20 - 4) * 100 = 93.75%
-	require.Equal(t, 93.75, m.getSEER())
+	require.Equal(t, 93.75, m.getSEER(""))
 
-	// 2 500 Server Error (NOT effective)
-	// SEER unchanged: 15 / 16 * 100 = 93.75%
-	require.Equal(t, 93.75, m.getSEER())
+	require.Equal(t, 93.75, m.getSEER(""))
 }
 
-// TestMetrics_SEER_RequestResponseFlow models Request/Response flow
 func TestMetrics_SEER_RequestResponseFlow(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
 
-	// Scenario: 20 INVITE, of which:
-	// - 8 successful (200 OK)
-	// - 4 busy (480)
-	// - 3 redirects (3xx)
-	// - 5 errors (4xx/5xx, not effective)
-
-	// All INVITE requests
 	for i := 0; i < 20; i++ {
-		atomic.AddInt64(&m.inviteTotal, 1)
+		counters.inviteTotal.Add(1)
 	}
 
-	// 8 200 OK + 4 480 = 12 effective
-	atomic.StoreInt64(&m.inviteEffectiveTotal, 12)
+	counters.inviteEffectiveTotal.Store(12)
+	counters.invite3xxTotal.Store(5)
 
-	// 5 3xx responses
-	atomic.StoreInt64(&m.invite3xxTotal, 5)
-
-	// SEER = 12 / (20 - 5) * 100 = 80%
-	got := m.getSEER()
+	got := m.getSEER("")
 	require.Equal(t, 80.0, got)
 }
 
-// TestMetrics_SEER_SER_Comparison verifies SEER >= SER always
 func TestMetrics_SEER_SER_Comparison(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -689,78 +745,69 @@ func TestMetrics_SEER_SER_Comparison(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &metrics{}
-			atomic.StoreInt64(&m.inviteTotal, tt.invites)
-			atomic.StoreInt64(&m.invite200OKTotal, tt.invite200OK)
-			atomic.StoreInt64(&m.inviteEffectiveTotal, tt.effective)
-			atomic.StoreInt64(&m.invite3xxTotal, tt.invite3xx)
+			counters := m.getOrCreateCarrierCounters("")
+			counters.inviteTotal.Store(tt.invites)
+			counters.invite200OKTotal.Store(tt.invite200OK)
+			counters.inviteEffectiveTotal.Store(tt.effective)
+			counters.invite3xxTotal.Store(tt.invite3xx)
 
-			ser := m.getSER()
-			seer := m.getSEER()
+			ser := m.getSER("")
+			seer := m.getSEER("")
 
-			// SEER should always be >= SER
 			require.GreaterOrEqual(t, seer, ser, "SEER must be >= SER")
 		})
 	}
 }
 
-// TestMetrics_SEER_NonEffectiveCodes verifies non-effective codes don't affect numerator
 func TestMetrics_SEER_NonEffectiveCodes(t *testing.T) {
 	nonEffectiveCodes := []string{"400", "401", "403", "404", "408", "500", "503"}
 
 	for _, code := range nonEffectiveCodes {
 		t.Run(code, func(t *testing.T) {
 			m := &metrics{}
-			atomic.StoreInt64(&m.inviteTotal, 10)
-			atomic.StoreInt64(&m.inviteEffectiveTotal, 0)
-			atomic.StoreInt64(&m.invite3xxTotal, 0)
+			counters := m.getOrCreateCarrierCounters("")
+			counters.inviteTotal.Store(10)
+			counters.inviteEffectiveTotal.Store(0)
+			counters.invite3xxTotal.Store(0)
 
-			require.Equal(t, 0.0, m.getSEER())
+			require.Equal(t, 0.0, m.getSEER(""))
 		})
 	}
 }
 
-// ASR (Answer Seizure Ratio) tests per ITU-T E.411
-// Formula: ASR = (INVITE → 200 OK) / Total INVITE × 100
-// 3xx NOT excluded from denominator (difference from SER)
-
-// TestMetrics_ASR_NoInvites — MC/DC: total == 0
 func TestMetrics_ASR_NoInvites(t *testing.T) {
 	m := &metrics{}
-	require.Equal(t, 0.0, m.getASR())
+	require.Equal(t, 0.0, m.getASR(""))
 }
 
-// TestMetrics_ASR_AllSuccessful — all INVITE → 200 OK
 func TestMetrics_ASR_AllSuccessful(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(100)
+	counters.invite200OKTotal.Store(100)
 
-	atomic.StoreInt64(&m.inviteTotal, 100)
-	atomic.StoreInt64(&m.invite200OKTotal, 100)
-
-	require.Equal(t, 100.0, m.getASR())
+	require.Equal(t, 100.0, m.getASR(""))
 }
 
-// TestMetrics_ASR_HalfSuccessful — MC/DC: partial success
 func TestMetrics_ASR_HalfSuccessful(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(100)
+	counters.invite200OKTotal.Store(50)
 
-	atomic.StoreInt64(&m.inviteTotal, 100)
-	atomic.StoreInt64(&m.invite200OKTotal, 50)
-
-	require.Equal(t, 50.0, m.getASR())
+	require.Equal(t, 50.0, m.getASR(""))
 }
 
-// TestMetrics_ASR_3xxNotExcluded — 3xx NOT excluded (key difference from SER)
 func TestMetrics_ASR_3xxNotExcluded(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(100)
+	counters.invite200OKTotal.Store(45)
+	counters.invite3xxTotal.Store(10)
 
-	atomic.StoreInt64(&m.inviteTotal, 100)
-	atomic.StoreInt64(&m.invite200OKTotal, 45)
-	atomic.StoreInt64(&m.invite3xxTotal, 10)
-
-	require.Equal(t, 45.0, m.getASR())
+	require.Equal(t, 45.0, m.getASR(""))
 }
 
-// TestMetrics_ASR_Values — table-driven MC/DC tests
 func TestMetrics_ASR_Values(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -809,38 +856,38 @@ func TestMetrics_ASR_Values(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &metrics{}
-			atomic.StoreInt64(&m.inviteTotal, tt.invites)
-			atomic.StoreInt64(&m.invite200OKTotal, tt.invite200OK)
+			counters := m.getOrCreateCarrierCounters("")
+			counters.inviteTotal.Store(tt.invites)
+			counters.invite200OKTotal.Store(tt.invite200OK)
 
-			got := m.getASR()
+			got := m.getASR("")
 			require.Equal(t, tt.wantASR, got)
 		})
 	}
 }
 
-// TestMetrics_ASR_FullCycle — full lifecycle test
 func TestMetrics_ASR_FullCycle(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
 
-	require.Equal(t, 0.0, m.getASR())
+	require.Equal(t, 0.0, m.getASR(""))
 
 	for i := 0; i < 20; i++ {
-		atomic.AddInt64(&m.inviteTotal, 1)
+		counters.inviteTotal.Add(1)
 	}
-	require.Equal(t, 0.0, m.getASR())
+	require.Equal(t, 0.0, m.getASR(""))
 
 	for i := 0; i < 10; i++ {
-		atomic.AddInt64(&m.invite200OKTotal, 1)
+		counters.invite200OKTotal.Add(1)
 	}
-	require.Equal(t, 50.0, m.getASR())
+	require.Equal(t, 50.0, m.getASR(""))
 
 	for i := 0; i < 5; i++ {
-		atomic.AddInt64(&m.invite3xxTotal, 1)
+		counters.invite3xxTotal.Add(1)
 	}
-	require.Equal(t, 50.0, m.getASR())
+	require.Equal(t, 50.0, m.getASR(""))
 }
 
-// TestMetrics_ASR_ComparedToSER verifies ASR <= SER always
 func TestMetrics_ASR_ComparedToSER(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -856,47 +903,150 @@ func TestMetrics_ASR_ComparedToSER(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &metrics{}
-			atomic.StoreInt64(&m.inviteTotal, tt.invites)
-			atomic.StoreInt64(&m.invite200OKTotal, tt.invite200OK)
-			atomic.StoreInt64(&m.invite3xxTotal, tt.invite3xx)
+			counters := m.getOrCreateCarrierCounters("")
+			counters.inviteTotal.Store(tt.invites)
+			counters.invite200OKTotal.Store(tt.invite200OK)
+			counters.invite3xxTotal.Store(tt.invite3xx)
 
-			asr := m.getASR()
-			ser := m.getSER()
+			asr := m.getASR("")
+			ser := m.getSER("")
 
 			require.LessOrEqual(t, asr, ser, "ASR must be <= SER")
 		})
 	}
 }
 
-// TestMetrics_ISA_NoInvites — MC/DC: total == 0
+func TestMetrics_NER_NoInvites(t *testing.T) {
+	m := &metrics{}
+	require.Equal(t, 0.0, m.getNER(""))
+}
+
+func TestMetrics_NER_AllEffective(t *testing.T) {
+	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(100)
+	counters.inviteIneffectiveTotal.Store(0)
+	require.Equal(t, 100.0, m.getNER(""))
+}
+
+func TestMetrics_NER_AllIneffective(t *testing.T) {
+	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(100)
+	counters.inviteIneffectiveTotal.Store(100)
+	require.Equal(t, 0.0, m.getNER(""))
+}
+
+func TestMetrics_NER_HalfIneffective(t *testing.T) {
+	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(100)
+	counters.inviteIneffectiveTotal.Store(30)
+	require.Equal(t, 70.0, m.getNER(""))
+}
+
+func TestMetrics_NER_Equals100MinusISA(t *testing.T) {
+	tests := []struct {
+		name        string
+		invites     int64
+		ineffective int64
+	}{
+		{"all_effective", 100, 0},
+		{"half_ineffective", 100, 50},
+		{"all_ineffective", 100, 100},
+		{"partial", 200, 15},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			counters := m.getOrCreateCarrierCounters("")
+			counters.inviteTotal.Store(tt.invites)
+			counters.inviteIneffectiveTotal.Store(tt.ineffective)
+
+			ner := m.getNER("")
+			isa := m.getISA("")
+			require.InDelta(t, 100.0-isa, ner, 0.01, "NER must equal 100 - ISA")
+		})
+	}
+}
+
+func TestMetrics_NER_Values(t *testing.T) {
+	tests := []struct {
+		name        string
+		invites     int64
+		ineffective int64
+		wantNER     float64
+	}{
+		{"zero_invites", 0, 0, 0},
+		{"all_effective", 100, 0, 100},
+		{"30_percent_ineffective", 100, 30, 70},
+		{"one_of_ten_ineffective", 10, 1, 90},
+		{"zero_ineffective", 50, 0, 100},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			counters := m.getOrCreateCarrierCounters("")
+			counters.inviteTotal.Store(tt.invites)
+			counters.inviteIneffectiveTotal.Store(tt.ineffective)
+			require.Equal(t, tt.wantNER, m.getNER(""))
+		})
+	}
+}
+
+func TestMetrics_NER_GreaterOrEqualSEER(t *testing.T) {
+	tests := []struct {
+		name        string
+		invites     int64
+		ineffective int64
+		effective   int64
+		invite3xx   int64
+	}{
+		{"equal_no_3xx", 100, 10, 90, 0},
+		{"ner_higher_with_3xx", 100, 10, 60, 20},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &metrics{}
+			counters := m.getOrCreateCarrierCounters("")
+			counters.inviteTotal.Store(tt.invites)
+			counters.inviteIneffectiveTotal.Store(tt.ineffective)
+			counters.inviteEffectiveTotal.Store(tt.effective)
+			counters.invite3xxTotal.Store(tt.invite3xx)
+
+			ner := m.getNER("")
+			seer := m.getSEER("")
+			require.GreaterOrEqual(t, ner, seer, "NER must be >= SEER")
+		})
+	}
+}
+
 func TestMetrics_ISA_NoInvites(t *testing.T) {
 	m := &metrics{}
-	require.Equal(t, 0.0, m.getISA())
+	require.Equal(t, 0.0, m.getISA(""))
 }
 
-// TestMetrics_ISA_AllIneffective — MC/DC: all responses are ineffective (500)
 func TestMetrics_ISA_AllIneffective(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(100)
+	counters.inviteIneffectiveTotal.Store(100)
 
-	atomic.StoreInt64(&m.inviteTotal, 100)
-	atomic.StoreInt64(&m.inviteIneffectiveTotal, 100)
-
-	// ISA = 100 / 100 * 100 = 100%
-	require.Equal(t, 100.0, m.getISA())
+	require.Equal(t, 100.0, m.getISA(""))
 }
 
-// TestMetrics_ISA_HalfIneffective — MC/DC: partial ineffective
 func TestMetrics_ISA_HalfIneffective(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(100)
+	counters.inviteIneffectiveTotal.Store(50)
 
-	atomic.StoreInt64(&m.inviteTotal, 100)
-	atomic.StoreInt64(&m.inviteIneffectiveTotal, 50)
-
-	// ISA = 50 / 100 * 100 = 50%
-	require.Equal(t, 50.0, m.getISA())
+	require.Equal(t, 50.0, m.getISA(""))
 }
 
-// TestMetrics_ISA_EachCode — MC/DC: each ineffective code separately
 func TestMetrics_ISA_EachCode(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -938,180 +1088,95 @@ func TestMetrics_ISA_EachCode(t *testing.T) {
 			ineffective500: 15,
 			ineffective503: 10,
 			ineffective504: 5,
-			wantISA:        40.0, // (10+15+10+5) / 100 * 100
+			wantISA:        40.0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &metrics{}
-			atomic.StoreInt64(&m.inviteTotal, tt.invites)
-			atomic.StoreInt64(&m.inviteIneffectiveTotal,
-				tt.ineffective408+tt.ineffective500+tt.ineffective503+tt.ineffective504)
+			counters := m.getOrCreateCarrierCounters("")
+			counters.inviteTotal.Store(tt.invites)
+			counters.inviteIneffectiveTotal.Store(
+				tt.ineffective408 + tt.ineffective500 + tt.ineffective503 + tt.ineffective504)
 
-			got := m.getISA()
+			got := m.getISA("")
 			require.Equal(t, tt.wantISA, got)
 		})
 	}
 }
 
-// TestMetrics_ISA_Mixed — mixed responses, verify formula with 3xx in denominator
 func TestMetrics_ISA_Mixed(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(100)
+	counters.inviteIneffectiveTotal.Store(20)
 
-	// 100 INVITE, of which:
-	// - 50 effective (200, 480)
-	// - 20 ineffective (500, 503)
-	// - 20 3xx redirects
-	// - 10 other (400, 401)
-	// ISA = 20 / 100 * 100 = 20% (3xx NOT excluded)
-	atomic.StoreInt64(&m.inviteTotal, 100)
-	atomic.StoreInt64(&m.inviteIneffectiveTotal, 20)
-
-	require.Equal(t, 20.0, m.getISA())
+	require.Equal(t, 20.0, m.getISA(""))
 }
 
-// TestMetrics_ISA_FullCycle — full lifecycle test
 func TestMetrics_ISA_FullCycle(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
 
-	// Initial state: ISA = 0
-	require.Equal(t, 0.0, m.getISA())
+	require.Equal(t, 0.0, m.getISA(""))
 
-	// 20 INVITE requests
 	for i := 0; i < 20; i++ {
-		atomic.AddInt64(&m.inviteTotal, 1)
+		counters.inviteTotal.Add(1)
 	}
-	require.Equal(t, 0.0, m.getISA())
+	require.Equal(t, 0.0, m.getISA(""))
 
-	// 5 500 Server Error (ineffective)
 	for i := 0; i < 5; i++ {
-		atomic.AddInt64(&m.inviteIneffectiveTotal, 1)
+		counters.inviteIneffectiveTotal.Add(1)
 	}
-	// ISA = 5 / 20 * 100 = 25%
-	require.Equal(t, 25.0, m.getISA())
+	require.Equal(t, 25.0, m.getISA(""))
 
-	// 3 408 Timeout (ineffective)
 	for i := 0; i < 3; i++ {
-		atomic.AddInt64(&m.inviteIneffectiveTotal, 1)
+		counters.inviteIneffectiveTotal.Add(1)
 	}
-	// ISA = 8 / 20 * 100 = 40%
-	require.Equal(t, 40.0, m.getISA())
+	require.Equal(t, 40.0, m.getISA(""))
 
-	// 5 200 OK (NOT ineffective)
-	// ISA unchanged: 8 / 20 * 100 = 40%
-	require.Equal(t, 40.0, m.getISA())
+	require.Equal(t, 40.0, m.getISA(""))
 
-	// 3 3xx redirects (NOT excluded from ISA denominator, changes denominator)
 	for i := 0; i < 3; i++ {
-		atomic.AddInt64(&m.invite3xxTotal, 1)
-		atomic.AddInt64(&m.inviteTotal, 1)
+		counters.invite3xxTotal.Add(1)
+		counters.inviteTotal.Add(1)
 	}
-	// ISA unchanged numerator, but denominator changes: 8 / 23 * 100 = 34.78%
-	require.InDelta(t, 34.78, m.getISA(), 0.01)
+	require.InDelta(t, 34.78, m.getISA(""), 0.01)
 }
 
-// SCR (Session Completion Ratio) tests per RFC 6076 §4.9
-// Formula: SCR = (Successfully Completed Sessions) / (Total INVITE) × 100
-// 3xx NOT excluded from denominator (same as ISA)
-
-// getSCR returns current SCR value for tests
-func (m *metrics) getSCR() float64 {
-	total := atomic.LoadInt64(&m.inviteTotal)
-	if total == 0 {
-		return 0
-	}
-
-	completed := atomic.LoadInt64(&m.sessionCompletedTotal)
-	return float64(completed) / float64(total) * 100 //nolint:mnd // percentage formula
-}
-
-// getRRD returns current RRD value for tests (in milliseconds)
-func (m *metrics) getRRD() float64 {
-	count := atomic.LoadInt64(&m.rrdCount)
-	if count == 0 {
-		return 0
-	}
-	total := atomic.LoadUint64(&m.rrdTotal)
-	return float64(total) / float64(count) / 1e3 //nolint:mnd // convert microseconds to milliseconds
-}
-
-func (m *metrics) getRRDFromHistogram() (sum float64, count uint64) {
-	if m.rrd == nil {
-		return 0, 0
-	}
-	var dtoMetric dto.Metric
-	if err := m.rrd.Write(&dtoMetric); err != nil {
-		return 0, 0
-	}
-	h := dtoMetric.GetHistogram()
-	return h.GetSampleSum(), h.GetSampleCount()
-}
-
-func (m *metrics) getTTRFromHistogram() (sum float64, count uint64) {
-	if m.ttr == nil {
-		return 0, 0
-	}
-	var dtoMetric dto.Metric
-	if err := m.ttr.Write(&dtoMetric); err != nil {
-		return 0, 0
-	}
-	h := dtoMetric.GetHistogram()
-	return h.GetSampleSum(), h.GetSampleCount()
-}
-
-func (m *metrics) getSDCFromCounter() float64 {
-	if m.sdc == nil {
-		return 0
-	}
-	var dtoMetric dto.Metric
-	if err := m.sdc.Write(&dtoMetric); err != nil {
-		return 0
-	}
-	return dtoMetric.GetCounter().GetValue()
-}
-
-// TestMetrics_SCR_NoInvites — MC/DC: total == 0
 func TestMetrics_SCR_NoInvites(t *testing.T) {
 	m := &metrics{}
-	require.Equal(t, 0.0, m.getSCR())
+	require.Equal(t, 0.0, m.getSCR(""))
 }
 
-// TestMetrics_SCR_AllCompleted — all sessions completed
 func TestMetrics_SCR_AllCompleted(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(100)
+	counters.sessionCompletedTotal.Store(100)
 
-	atomic.StoreInt64(&m.inviteTotal, 100)
-	atomic.StoreInt64(&m.sessionCompletedTotal, 100)
-
-	// SCR = 100 / 100 * 100 = 100%
-	require.Equal(t, 100.0, m.getSCR())
+	require.Equal(t, 100.0, m.getSCR(""))
 }
 
-// TestMetrics_SCR_HalfCompleted — half sessions completed
 func TestMetrics_SCR_HalfCompleted(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(100)
+	counters.sessionCompletedTotal.Store(50)
 
-	atomic.StoreInt64(&m.inviteTotal, 100)
-	atomic.StoreInt64(&m.sessionCompletedTotal, 50)
-
-	// SCR = 50 / 100 * 100 = 50%
-	require.Equal(t, 50.0, m.getSCR())
+	require.Equal(t, 50.0, m.getSCR(""))
 }
 
-// TestMetrics_SCR_3xxNotExcluded — 3xx NOT excluded from denominator (unlike SER)
 func TestMetrics_SCR_3xxNotExcluded(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteTotal.Store(100)
+	counters.sessionCompletedTotal.Store(40)
 
-	// 100 INVITE total (including 10 that got 3xx), 40 completed
-	// SCR = 40 / 100 * 100 = 40% (3xx stay in denominator)
-	atomic.StoreInt64(&m.inviteTotal, 100)
-	atomic.StoreInt64(&m.sessionCompletedTotal, 40)
-
-	require.Equal(t, 40.0, m.getSCR())
+	require.Equal(t, 40.0, m.getSCR(""))
 }
 
-// TestMetrics_SCR_Values — table-driven MC/DC tests
 func TestMetrics_SCR_Values(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -1166,94 +1231,105 @@ func TestMetrics_SCR_Values(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &metrics{}
-			atomic.StoreInt64(&m.inviteTotal, tt.invites)
-			atomic.StoreInt64(&m.sessionCompletedTotal, tt.completed)
+			counters := m.getOrCreateCarrierCounters("")
+			counters.inviteTotal.Store(tt.invites)
+			counters.sessionCompletedTotal.Store(tt.completed)
 
-			got := m.getSCR()
+			got := m.getSCR("")
 			require.Equal(t, tt.wantSCR, got)
 		})
 	}
 }
 
-// TestMetrics_SCR_FullCycle — full lifecycle test
 func TestMetrics_SCR_FullCycle(t *testing.T) {
 	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("")
 
-	// Initial state: SCR = 0
-	require.Equal(t, 0.0, m.getSCR())
+	require.Equal(t, 0.0, m.getSCR(""))
 
-	// 20 INVITE requests
 	for i := 0; i < 20; i++ {
-		atomic.AddInt64(&m.inviteTotal, 1)
+		counters.inviteTotal.Add(1)
 	}
-	// SCR = 0 / 20 * 100 = 0%
-	require.Equal(t, 0.0, m.getSCR())
+	require.Equal(t, 0.0, m.getSCR(""))
 
-	// 10 sessions completed (BYE→200 OK)
 	for i := 0; i < 10; i++ {
-		atomic.AddInt64(&m.sessionCompletedTotal, 1)
+		counters.sessionCompletedTotal.Add(1)
 	}
-	// SCR = 10 / 20 * 100 = 50%
-	require.Equal(t, 50.0, m.getSCR())
+	require.Equal(t, 50.0, m.getSCR(""))
 
-	// 5 more sessions completed
 	for i := 0; i < 5; i++ {
-		atomic.AddInt64(&m.sessionCompletedTotal, 1)
+		counters.sessionCompletedTotal.Add(1)
 	}
-	// SCR = 15 / 20 * 100 = 75%
-	require.Equal(t, 75.0, m.getSCR())
+	require.Equal(t, 75.0, m.getSCR(""))
 
-	// 3xx redirects do NOT change SCR denominator (unlike SER)
-	// SCR remains 75%
-	require.Equal(t, 75.0, m.getSCR())
+	require.Equal(t, 75.0, m.getSCR(""))
 }
 
-// TestMetrics_SessionCompleted increments counter
 func TestMetrics_SessionCompleted(t *testing.T) {
-	m := &metrics{}
+	m := NewTestMetricser().(*metrics)
+	counters := m.getOrCreateCarrierCounters("")
 
-	atomic.StoreInt64(&m.sessionCompletedTotal, 0)
+	m.SessionCompleted("")
+	require.Equal(t, int64(1), counters.sessionCompletedTotal.Load())
 
-	m.SessionCompleted()
-	require.Equal(t, int64(1), atomic.LoadInt64(&m.sessionCompletedTotal))
-
-	m.SessionCompleted()
-	require.Equal(t, int64(2), atomic.LoadInt64(&m.sessionCompletedTotal))
+	m.SessionCompleted("")
+	require.Equal(t, int64(2), counters.sessionCompletedTotal.Load())
 }
 
-// SDC (Session Duration Counter) tests
-// Prometheus Counter incremented on each completed session (BYE→200 OK + expired dialogs)
-
-// TestMetrics_SDC_IncrementOnSessionCompleted verifies Counter increments with atomic
 func TestMetrics_SDC_IncrementOnSessionCompleted(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
+	counters := m.getOrCreateCarrierCounters("")
 
-	require.Equal(t, 0.0, m.getSDCFromCounter())
-	require.Equal(t, int64(0), atomic.LoadInt64(&m.sessionCompletedTotal))
+	require.Equal(t, 0.0, m.getSDCFromCounter(""))
+	require.Equal(t, int64(0), counters.sessionCompletedTotal.Load())
 
-	m.SessionCompleted()
-	require.Equal(t, 1.0, m.getSDCFromCounter())
-	require.Equal(t, int64(1), atomic.LoadInt64(&m.sessionCompletedTotal))
+	m.SessionCompleted("")
+	require.Equal(t, 1.0, m.getSDCFromCounter(""))
+	require.Equal(t, int64(1), counters.sessionCompletedTotal.Load())
 
-	m.SessionCompleted()
-	require.Equal(t, 2.0, m.getSDCFromCounter())
-	require.Equal(t, int64(2), atomic.LoadInt64(&m.sessionCompletedTotal))
+	m.SessionCompleted("")
+	require.Equal(t, 2.0, m.getSDCFromCounter(""))
+	require.Equal(t, int64(2), counters.sessionCompletedTotal.Load())
 }
 
-// TestMetrics_SDC_NilSafe verifies SessionCompleted works without init (sdc == nil)
-func TestMetrics_SDC_NilSafe(t *testing.T) {
+func TestMetrics_ISS_IncrementOnIneffective(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	ineffectiveCodes := []string{"408", "500", "503", "504"}
+	for _, code := range ineffectiveCodes {
+		before := m.getISSFromCounter("")
+		m.ResponseWithMetrics("", []byte(code), true, false)
+		require.Equal(t, before+1, m.getISSFromCounter(""), "ISS should increment on %s", code)
+	}
+	require.Equal(t, 4.0, m.getISSFromCounter(""))
+}
+
+func TestMetrics_ISS_NotIncrementOnEffective(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	effectiveCodes := []string{"200", "480", "486", "600", "603"}
+	for _, code := range effectiveCodes {
+		is200OK := code == "200"
+		m.ResponseWithMetrics("", []byte(code), true, is200OK)
+	}
+	require.Equal(t, 0.0, m.getISSFromCounter(""))
+}
+
+func TestMetrics_ISS_NotIncrementOnNonInvite(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.ResponseWithMetrics("", []byte("500"), false, false)
+	require.Equal(t, 0.0, m.getISSFromCounter(""))
+}
+
+func TestMetrics_ISS_NilSafe(t *testing.T) {
 	m := &metrics{}
-
-	atomic.StoreInt64(&m.sessionCompletedTotal, 0)
-	require.Equal(t, 0.0, m.getSDCFromCounter())
-
-	m.SessionCompleted()
-	require.Equal(t, int64(1), atomic.LoadInt64(&m.sessionCompletedTotal))
-	require.Equal(t, 0.0, m.getSDCFromCounter(), "SDC Counter should be 0 when nil")
+	counters := m.getOrCreateCarrierCounters("")
+	counters.inviteIneffectiveTotal.Add(1)
+	require.Equal(t, int64(1), counters.inviteIneffectiveTotal.Load())
+	require.Equal(t, 0.0, m.getISSFromCounter(""))
 }
 
-// TestMetrics_SCR_ComparedToSER verifies SCR <= SER always
-// (completed sessions ⊆ established sessions)
 func TestMetrics_SCR_ComparedToSER(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -1270,71 +1346,74 @@ func TestMetrics_SCR_ComparedToSER(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &metrics{}
-			atomic.StoreInt64(&m.inviteTotal, tt.invites)
-			atomic.StoreInt64(&m.invite200OKTotal, tt.invite200OK)
-			atomic.StoreInt64(&m.sessionCompletedTotal, tt.completed)
-			atomic.StoreInt64(&m.invite3xxTotal, tt.invite3xx)
+			counters := m.getOrCreateCarrierCounters("")
+			counters.inviteTotal.Store(tt.invites)
+			counters.invite200OKTotal.Store(tt.invite200OK)
+			counters.sessionCompletedTotal.Store(tt.completed)
+			counters.invite3xxTotal.Store(tt.invite3xx)
 
-			scr := m.getSCR()
-			ser := m.getSER()
+			scr := m.getSCR("")
+			ser := m.getSER("")
 
 			require.LessOrEqual(t, scr, ser, "SCR must be <= SER")
 		})
 	}
 }
 
-// ResponseWithMetrics tests
-
 func TestMetricser_ResponseWithMetrics_200OK_Invite(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
+	counters := m.getOrCreateCarrierCounters("")
 
-	invite200OKBefore := atomic.LoadInt64(&m.invite200OKTotal)
-	invite3xxBefore := atomic.LoadInt64(&m.invite3xxTotal)
-	inviteEffectiveBefore := atomic.LoadInt64(&m.inviteEffectiveTotal)
-	inviteIneffectiveBefore := atomic.LoadInt64(&m.inviteIneffectiveTotal)
+	invite200OKBefore := counters.invite200OKTotal.Load()
+	invite3xxBefore := counters.invite3xxTotal.Load()
+	inviteEffectiveBefore := counters.inviteEffectiveTotal.Load()
+	inviteIneffectiveBefore := counters.inviteIneffectiveTotal.Load()
 
-	m.ResponseWithMetrics([]byte("200"), true, true)
+	m.ResponseWithMetrics("", []byte("200"), true, true)
 
-	require.Equal(t, invite200OKBefore+1, atomic.LoadInt64(&m.invite200OKTotal))
-	require.Equal(t, inviteEffectiveBefore+1, atomic.LoadInt64(&m.inviteEffectiveTotal))
-	require.Equal(t, invite3xxBefore, atomic.LoadInt64(&m.invite3xxTotal))
-	require.Equal(t, inviteIneffectiveBefore, atomic.LoadInt64(&m.inviteIneffectiveTotal))
+	require.Equal(t, invite200OKBefore+1, counters.invite200OKTotal.Load())
+	require.Equal(t, inviteEffectiveBefore+1, counters.inviteEffectiveTotal.Load())
+	require.Equal(t, invite3xxBefore, counters.invite3xxTotal.Load())
+	require.Equal(t, inviteIneffectiveBefore, counters.inviteIneffectiveTotal.Load())
 }
 
 func TestMetricser_ResponseWithMetrics_200OK_Register(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
+	counters := m.getOrCreateCarrierCounters("")
 
-	invite200OKBefore := atomic.LoadInt64(&m.invite200OKTotal)
+	invite200OKBefore := counters.invite200OKTotal.Load()
 
-	m.ResponseWithMetrics([]byte("200"), false, true)
+	m.ResponseWithMetrics("", []byte("200"), false, true)
 
-	require.Equal(t, invite200OKBefore, atomic.LoadInt64(&m.invite200OKTotal), "invite200OKTotal should not increment for non-INVITE")
+	require.Equal(t, invite200OKBefore, counters.invite200OKTotal.Load(), "invite200OKTotal should not increment for non-INVITE")
 }
 
 func TestMetricser_ResponseWithMetrics_401(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
+	counters := m.getOrCreateCarrierCounters("")
 
-	invite200OKBefore := atomic.LoadInt64(&m.invite200OKTotal)
-	inviteEffectiveBefore := atomic.LoadInt64(&m.inviteEffectiveTotal)
-	inviteIneffectiveBefore := atomic.LoadInt64(&m.inviteIneffectiveTotal)
+	invite200OKBefore := counters.invite200OKTotal.Load()
+	inviteEffectiveBefore := counters.inviteEffectiveTotal.Load()
+	inviteIneffectiveBefore := counters.inviteIneffectiveTotal.Load()
 
-	m.ResponseWithMetrics([]byte("401"), true, false)
+	m.ResponseWithMetrics("", []byte("401"), true, false)
 
-	require.Equal(t, invite200OKBefore, atomic.LoadInt64(&m.invite200OKTotal))
-	require.Equal(t, inviteEffectiveBefore, atomic.LoadInt64(&m.inviteEffectiveTotal))
-	require.Equal(t, inviteIneffectiveBefore, atomic.LoadInt64(&m.inviteIneffectiveTotal))
+	require.Equal(t, invite200OKBefore, counters.invite200OKTotal.Load())
+	require.Equal(t, inviteEffectiveBefore, counters.inviteEffectiveTotal.Load())
+	require.Equal(t, inviteIneffectiveBefore, counters.inviteIneffectiveTotal.Load())
 }
 
 func TestMetricser_ResponseWithMetrics_3xx(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
+	counters := m.getOrCreateCarrierCounters("")
 
-	invite3xxBefore := atomic.LoadInt64(&m.invite3xxTotal)
-	invite200OKBefore := atomic.LoadInt64(&m.invite200OKTotal)
+	invite3xxBefore := counters.invite3xxTotal.Load()
+	invite200OKBefore := counters.invite200OKTotal.Load()
 
-	m.ResponseWithMetrics([]byte("302"), true, false)
+	m.ResponseWithMetrics("", []byte("302"), true, false)
 
-	require.Equal(t, invite3xxBefore+1, atomic.LoadInt64(&m.invite3xxTotal))
-	require.Equal(t, invite200OKBefore, atomic.LoadInt64(&m.invite200OKTotal))
+	require.Equal(t, invite3xxBefore+1, counters.invite3xxTotal.Load())
+	require.Equal(t, invite200OKBefore, counters.invite200OKTotal.Load())
 }
 
 func TestMetricser_ResponseWithMetrics_SEER_EffectiveCodes(t *testing.T) {
@@ -1343,12 +1422,13 @@ func TestMetricser_ResponseWithMetrics_SEER_EffectiveCodes(t *testing.T) {
 	for _, code := range effectiveCodes {
 		t.Run(code, func(t *testing.T) {
 			m := NewTestMetricser().(*metrics)
-			inviteEffectiveBefore := atomic.LoadInt64(&m.inviteEffectiveTotal)
+			counters := m.getOrCreateCarrierCounters("")
+			inviteEffectiveBefore := counters.inviteEffectiveTotal.Load()
 
 			is200OK := code == "200"
-			m.ResponseWithMetrics([]byte(code), true, is200OK)
+			m.ResponseWithMetrics("", []byte(code), true, is200OK)
 
-			require.Equal(t, inviteEffectiveBefore+1, atomic.LoadInt64(&m.inviteEffectiveTotal), "code %s should be effective", code)
+			require.Equal(t, inviteEffectiveBefore+1, counters.inviteEffectiveTotal.Load(), "code %s should be effective", code)
 		})
 	}
 }
@@ -1359,175 +1439,73 @@ func TestMetricser_ResponseWithMetrics_ISA_IneffectiveCodes(t *testing.T) {
 	for _, code := range ineffectiveCodes {
 		t.Run(code, func(t *testing.T) {
 			m := NewTestMetricser().(*metrics)
-			inviteIneffectiveBefore := atomic.LoadInt64(&m.inviteIneffectiveTotal)
+			counters := m.getOrCreateCarrierCounters("")
+			inviteIneffectiveBefore := counters.inviteIneffectiveTotal.Load()
 
-			m.ResponseWithMetrics([]byte(code), true, false)
+			m.ResponseWithMetrics("", []byte(code), true, false)
 
-			require.Equal(t, inviteIneffectiveBefore+1, atomic.LoadInt64(&m.inviteIneffectiveTotal), "code %s should be ineffective", code)
+			require.Equal(t, inviteIneffectiveBefore+1, counters.inviteIneffectiveTotal.Load(), "code %s should be ineffective", code)
 		})
 	}
 }
 
 func TestMetricser_ResponseWithMetrics_NonInvite(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
+	counters := m.getOrCreateCarrierCounters("")
 
-	invite200OKBefore := atomic.LoadInt64(&m.invite200OKTotal)
-	invite3xxBefore := atomic.LoadInt64(&m.invite3xxTotal)
-	inviteEffectiveBefore := atomic.LoadInt64(&m.inviteEffectiveTotal)
-	inviteIneffectiveBefore := atomic.LoadInt64(&m.inviteIneffectiveTotal)
+	invite200OKBefore := counters.invite200OKTotal.Load()
+	invite3xxBefore := counters.invite3xxTotal.Load()
+	inviteEffectiveBefore := counters.inviteEffectiveTotal.Load()
+	inviteIneffectiveBefore := counters.inviteIneffectiveTotal.Load()
 
-	m.ResponseWithMetrics([]byte("200"), false, true)
+	m.ResponseWithMetrics("", []byte("200"), false, true)
 
-	require.Equal(t, invite200OKBefore, atomic.LoadInt64(&m.invite200OKTotal))
-	require.Equal(t, invite3xxBefore, atomic.LoadInt64(&m.invite3xxTotal))
-	require.Equal(t, inviteEffectiveBefore, atomic.LoadInt64(&m.inviteEffectiveTotal))
-	require.Equal(t, inviteIneffectiveBefore, atomic.LoadInt64(&m.inviteIneffectiveTotal))
+	require.Equal(t, invite200OKBefore, counters.invite200OKTotal.Load())
+	require.Equal(t, invite3xxBefore, counters.invite3xxTotal.Load())
+	require.Equal(t, inviteEffectiveBefore, counters.inviteEffectiveTotal.Load())
+	require.Equal(t, inviteIneffectiveBefore, counters.inviteIneffectiveTotal.Load())
 }
 
 func TestMetricser_ResponseWithMetrics_AllInOne(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
+	counters := m.getOrCreateCarrierCounters("")
 
-	invite200OKBefore := atomic.LoadInt64(&m.invite200OKTotal)
-	inviteEffectiveBefore := atomic.LoadInt64(&m.inviteEffectiveTotal)
-	inviteIneffectiveBefore := atomic.LoadInt64(&m.inviteIneffectiveTotal)
-	invite3xxBefore := atomic.LoadInt64(&m.invite3xxTotal)
+	invite200OKBefore := counters.invite200OKTotal.Load()
+	inviteEffectiveBefore := counters.inviteEffectiveTotal.Load()
+	inviteIneffectiveBefore := counters.inviteIneffectiveTotal.Load()
+	invite3xxBefore := counters.invite3xxTotal.Load()
 
-	m.ResponseWithMetrics([]byte("200"), true, true)
-	require.Equal(t, invite200OKBefore+1, atomic.LoadInt64(&m.invite200OKTotal))
-	require.Equal(t, inviteEffectiveBefore+1, atomic.LoadInt64(&m.inviteEffectiveTotal))
+	m.ResponseWithMetrics("", []byte("200"), true, true)
+	require.Equal(t, invite200OKBefore+1, counters.invite200OKTotal.Load())
+	require.Equal(t, inviteEffectiveBefore+1, counters.inviteEffectiveTotal.Load())
 
-	m.ResponseWithMetrics([]byte("480"), true, false)
-	require.Equal(t, invite200OKBefore+1, atomic.LoadInt64(&m.invite200OKTotal))
-	require.Equal(t, inviteEffectiveBefore+2, atomic.LoadInt64(&m.inviteEffectiveTotal))
+	m.ResponseWithMetrics("", []byte("480"), true, false)
+	require.Equal(t, invite200OKBefore+1, counters.invite200OKTotal.Load())
+	require.Equal(t, inviteEffectiveBefore+2, counters.inviteEffectiveTotal.Load())
 
-	m.ResponseWithMetrics([]byte("500"), true, false)
-	require.Equal(t, inviteIneffectiveBefore+1, atomic.LoadInt64(&m.inviteIneffectiveTotal))
+	m.ResponseWithMetrics("", []byte("500"), true, false)
+	require.Equal(t, inviteIneffectiveBefore+1, counters.inviteIneffectiveTotal.Load())
 
-	m.ResponseWithMetrics([]byte("302"), true, false)
-	require.Equal(t, invite3xxBefore+1, atomic.LoadInt64(&m.invite3xxTotal))
-}
-
-// SPD (Session Process Duration) tests per RFC 6076 §4.5
-
-func (m *metrics) getSPD() float64 {
-	count := atomic.LoadInt64(&m.spdCount)
-	if count == 0 {
-		return 0
-	}
-	totalNs := atomic.LoadUint64(&m.spdTotalNs)
-	return float64(totalNs) / float64(count) / 1e9
-}
-
-func (m *metrics) getSPDFromHistogram() (sum float64, count uint64) {
-	if m.spd == nil {
-		return 0, 0
-	}
-	var dtoMetric dto.Metric
-	if err := m.spd.Write(&dtoMetric); err != nil {
-		return 0, 0
-	}
-	h := dtoMetric.GetHistogram()
-	return h.GetSampleSum(), h.GetSampleCount()
-}
-
-func TestMetrics_SPD_NoCompleted(t *testing.T) {
-	m := &metrics{}
-	require.Equal(t, 0.0, m.getSPD())
-}
-
-func TestMetrics_SPD_SingleSession(t *testing.T) {
-	m := &metrics{}
-
-	atomic.StoreUint64(&m.spdTotalNs, uint64(5*time.Second))
-	atomic.StoreInt64(&m.spdCount, 1)
-
-	require.Equal(t, 5.0, m.getSPD())
-}
-
-func TestMetrics_SPD_MultipleSessions(t *testing.T) {
-	m := &metrics{}
-
-	atomic.StoreUint64(&m.spdTotalNs, uint64(10*time.Second))
-	atomic.StoreInt64(&m.spdCount, 2)
-
-	require.Equal(t, 5.0, m.getSPD())
-}
-
-func TestMetrics_SPD_ZeroDuration(t *testing.T) {
-	m := &metrics{}
-
-	m.UpdateSPD(0)
-
-	require.Equal(t, 0.0, m.getSPD())
-}
-
-func TestMetrics_SPD_UpdateSPD(t *testing.T) {
-	m := &metrics{}
-
-	m.UpdateSPD(3 * time.Second)
-	require.Equal(t, 3.0, m.getSPD())
-
-	m.UpdateSPD(7 * time.Second)
-	require.Equal(t, 5.0, m.getSPD())
-}
-
-func TestMetrics_SPD_Values(t *testing.T) {
-	tests := []struct {
-		name    string
-		totalNs uint64
-		count   int64
-		wantSPD float64
-	}{
-		{"zero_count", 0, 0, 0},
-		{"single_1s", uint64(1 * time.Second), 1, 1.0},
-		{"single_10s", uint64(10 * time.Second), 1, 10.0},
-		{"two_5s_avg", uint64(10 * time.Second), 2, 5.0},
-		{"three_mixed", uint64(30 * time.Second), 3, 10.0},
-		{"zero_duration_with_count", 0, 5, 0},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := &metrics{}
-			atomic.StoreUint64(&m.spdTotalNs, tt.totalNs)
-			atomic.StoreInt64(&m.spdCount, tt.count)
-
-			require.Equal(t, tt.wantSPD, m.getSPD())
-		})
-	}
-}
-
-func TestMetrics_SPD_FullCycle(t *testing.T) {
-	m := &metrics{}
-
-	require.Equal(t, 0.0, m.getSPD())
-
-	m.UpdateSPD(10 * time.Second)
-	require.Equal(t, 10.0, m.getSPD())
-
-	m.UpdateSPD(20 * time.Second)
-	require.Equal(t, 15.0, m.getSPD())
-
-	m.UpdateSPD(0)
-	require.InDelta(t, 10.0, m.getSPD(), 0.01)
+	m.ResponseWithMetrics("", []byte("302"), true, false)
+	require.Equal(t, invite3xxBefore+1, counters.invite3xxTotal.Load())
 }
 
 func TestMetrics_SPD_Histogram(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 
-	sum, count := m.getSPDFromHistogram()
+	sum, count := m.getSPDFromHistogram("")
 	require.Equal(t, 0.0, sum)
 	require.Equal(t, uint64(0), count)
 
-	m.UpdateSPD(5 * time.Second)
+	m.UpdateSPD("", 5*time.Second)
 
-	sum, count = m.getSPDFromHistogram()
+	sum, count = m.getSPDFromHistogram("")
 	require.Equal(t, 5.0, sum)
 	require.Equal(t, uint64(1), count)
 
-	m.UpdateSPD(15 * time.Second)
+	m.UpdateSPD("", 15*time.Second)
 
-	sum, count = m.getSPDFromHistogram()
+	sum, count = m.getSPDFromHistogram("")
 	require.Equal(t, 20.0, sum)
 	require.Equal(t, uint64(2), count)
 }
@@ -1535,9 +1513,9 @@ func TestMetrics_SPD_Histogram(t *testing.T) {
 func TestMetrics_SPD_Histogram_NegativeIgnored(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 
-	m.UpdateSPD(-1 * time.Second)
+	m.UpdateSPD("", -1*time.Second)
 
-	sum, count := m.getSPDFromHistogram()
+	sum, count := m.getSPDFromHistogram("")
 	require.Equal(t, 0.0, sum)
 	require.Equal(t, uint64(0), count)
 }
@@ -1545,42 +1523,29 @@ func TestMetrics_SPD_Histogram_NegativeIgnored(t *testing.T) {
 func TestMetrics_SPD_Histogram_ZeroDuration(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 
-	m.UpdateSPD(0)
+	m.UpdateSPD("", 0)
 
-	sum, count := m.getSPDFromHistogram()
+	sum, count := m.getSPDFromHistogram("")
 	require.Equal(t, 0.0, sum)
 	require.Equal(t, uint64(1), count)
-}
-
-func TestMetrics_SPD_DeprecatedAverageMatches(t *testing.T) {
-	m := NewTestMetricser().(*metrics)
-
-	m.UpdateSPD(3 * time.Second)
-	m.UpdateSPD(7 * time.Second)
-
-	sum, count := m.getSPDFromHistogram()
-	require.Equal(t, 10.0, sum)
-	require.Equal(t, uint64(2), count)
-
-	require.Equal(t, 5.0, m.getSPD())
 }
 
 func TestMetrics_RRD_Histogram(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 
-	sum, count := m.getRRDFromHistogram()
+	sum, count := m.getRRDFromHistogram("")
 	require.Equal(t, 0.0, sum)
 	require.Equal(t, uint64(0), count)
 
-	m.UpdateRRD(100.5)
+	m.UpdateRRD("", 100.5)
 
-	sum, count = m.getRRDFromHistogram()
+	sum, count = m.getRRDFromHistogram("")
 	require.InDelta(t, 100.5, sum, 0.01)
 	require.Equal(t, uint64(1), count)
 
-	m.UpdateRRD(200.5)
+	m.UpdateRRD("", 200.5)
 
-	sum, count = m.getRRDFromHistogram()
+	sum, count = m.getRRDFromHistogram("")
 	require.InDelta(t, 301.0, sum, 0.01)
 	require.Equal(t, uint64(2), count)
 }
@@ -1589,47 +1554,30 @@ func TestMetrics_RRD_Histogram_MultipleObservations(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 
 	for i := range 100 {
-		m.UpdateRRD(float64(i) * 10.0)
+		m.UpdateRRD("", float64(i)*10.0)
 	}
 
-	sum, count := m.getRRDFromHistogram()
+	sum, count := m.getRRDFromHistogram("")
 	require.Equal(t, uint64(100), count)
 	require.InDelta(t, 49500.0, sum, 1.0)
-
-	require.InDelta(t, 495.0, m.getRRD(), 0.01)
 }
-
-func TestMetrics_RRD_DeprecatedAverageMatches(t *testing.T) {
-	m := NewTestMetricser().(*metrics)
-
-	m.UpdateRRD(50.0)
-	m.UpdateRRD(150.0)
-
-	sum, count := m.getRRDFromHistogram()
-	require.InDelta(t, 200.0, sum, 0.01)
-	require.Equal(t, uint64(2), count)
-
-	require.InDelta(t, 100.0, m.getRRD(), 0.01)
-}
-
-// ==================== TTR Histogram tests ====================
 
 func TestMetrics_TTR_Histogram(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 
-	sum, count := m.getTTRFromHistogram()
+	sum, count := m.getTTRFromHistogram("")
 	require.Equal(t, 0.0, sum)
 	require.Equal(t, uint64(0), count)
 
-	m.UpdateTTR(50.0)
+	m.UpdateTTR("", 50.0)
 
-	sum, count = m.getTTRFromHistogram()
+	sum, count = m.getTTRFromHistogram("")
 	require.InDelta(t, 50.0, sum, 0.01)
 	require.Equal(t, uint64(1), count)
 
-	m.UpdateTTR(150.0)
+	m.UpdateTTR("", 150.0)
 
-	sum, count = m.getTTRFromHistogram()
+	sum, count = m.getTTRFromHistogram("")
 	require.InDelta(t, 200.0, sum, 0.01)
 	require.Equal(t, uint64(2), count)
 }
@@ -1638,10 +1586,10 @@ func TestMetrics_TTR_Histogram_MultipleObservations(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 
 	for i := range 100 {
-		m.UpdateTTR(float64(i) * 10.0)
+		m.UpdateTTR("", float64(i)*10.0)
 	}
 
-	sum, count := m.getTTRFromHistogram()
+	sum, count := m.getTTRFromHistogram("")
 	require.Equal(t, uint64(100), count)
 	require.InDelta(t, 49500.0, sum, 1.0)
 }
@@ -1649,9 +1597,9 @@ func TestMetrics_TTR_Histogram_MultipleObservations(t *testing.T) {
 func TestMetrics_TTR_Histogram_ZeroValue(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 
-	m.UpdateTTR(0.0)
+	m.UpdateTTR("", 0.0)
 
-	sum, count := m.getTTRFromHistogram()
+	sum, count := m.getTTRFromHistogram("")
 	require.InDelta(t, 0.0, sum, 0.01)
 	require.Equal(t, uint64(1), count)
 }
@@ -1659,9 +1607,29 @@ func TestMetrics_TTR_Histogram_ZeroValue(t *testing.T) {
 func TestMetrics_TTR_Histogram_LargeValue(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 
-	m.UpdateTTR(5000.0)
+	m.UpdateTTR("", 5000.0)
 
-	sum, count := m.getTTRFromHistogram()
+	sum, count := m.getTTRFromHistogram("")
 	require.InDelta(t, 5000.0, sum, 0.01)
 	require.Equal(t, uint64(1), count)
+}
+
+func TestMetrics_ORD_Observe(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateORD("", 10.5)
+	m.UpdateORD("", 25.0)
+
+	_, count := m.getORDFromHistogram("")
+	require.Equal(t, uint64(2), count)
+}
+
+func TestMetrics_LRD_Observe(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateLRD("", 5.5)
+	m.UpdateLRD("", 15.0)
+
+	_, count := m.getLRDFromHistogram("")
+	require.Equal(t, uint64(2), count)
 }

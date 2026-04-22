@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -34,9 +35,10 @@ const (
 // testEnv holds per-test network configuration.
 // Each parallel test gets its own set of free ports to avoid conflicts.
 type testEnv struct {
-	endpoint       string // http://localhost:PORT — exporter /metrics endpoint
-	sippPort       string // UAS listens here; UAC connects here; exporter SIP_PORT
-	sippClientPort string // UAC listens here; exporter SIPS_PORT
+	endpoint       string
+	sippPort       string
+	sippClientPort string
+	carrier        string
 }
 
 var (
@@ -58,13 +60,86 @@ func allocatePorts() (exporter, sipp, sippClient string) {
 // newTestEnv allocates free ports and starts an exporter container for the test.
 func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
 	t.Helper()
+	return newTestEnvWithConfig(ctx, t, "")
+}
+
+// newTestEnvWithCarriers starts an exporter with carrier config.
+// Uses test/e2e/carriers.yaml which maps 127.0.0.0/8 to a carrier name.
+// The carrier name is stored in env.carrier for use by env.*ByCarrier() methods.
+func newTestEnvWithCarriers(ctx context.Context, t *testing.T) *testEnv {
+	t.Helper()
+	carriersYAML := loadCarriersYAML(t, "carriers.yaml")
+
+	var cfg struct {
+		Carriers []struct {
+			Name string `yaml:"name"`
+		} `yaml:"carriers"`
+	}
+	require.NoError(t, yaml.Unmarshal([]byte(carriersYAML), &cfg))
+	require.NotEmpty(t, cfg.Carriers, "carriers.yaml must define at least one carrier")
+
+	env := newTestEnvWithConfig(ctx, t, carriersYAML)
+	env.carrier = cfg.Carriers[0].Name
+	return env
+}
+
+// newTestEnvWithCarriersYAML starts an exporter with arbitrary carriers YAML content
+// and sets env.carrier to the given carrierName for use by env.*ByCarrier() methods.
+func newTestEnvWithCarriersYAML(ctx context.Context, t *testing.T, carriersYAML string, carrierName string) *testEnv {
+	t.Helper()
+	env := newTestEnvWithConfig(ctx, t, carriersYAML)
+	env.carrier = carrierName
+	return env
+}
+
+// loadCarriersYAML reads a carriers YAML file from test/e2e/ directory.
+func loadCarriersYAML(t *testing.T, filename string) string {
+	t.Helper()
+	path := filepath.Join(projectRoot, "test", "e2e", filename)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return string(data)
+}
+
+// setupSecondaryIPs adds test IP addresses to loopback interface
+// using a privileged Docker container (avoids requiring root on the host).
+// Addresses are removed via t.Cleanup when the test finishes.
+func setupSecondaryIPs(t *testing.T) {
+	t.Helper()
+	addrs := []string{
+		"10.1.0.1/32",
+		"10.2.0.1/32",
+		"172.16.0.1/32",
+		"172.16.0.2/32",
+		"10.1.1.5/32",
+	}
+	for _, addr := range addrs {
+		err := exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
+			"--entrypoint", "", "alpine",
+			"ip", "addr", "add", addr, "dev", "lo",
+		).Run()
+		require.NoError(t, err, "failed to add %s to lo", addr)
+	}
+	t.Cleanup(func() {
+		for _, addr := range addrs {
+			_ = exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
+				"--entrypoint", "", "alpine",
+				"ip", "addr", "del", addr, "dev", "lo",
+			).Run()
+		}
+	})
+}
+
+// newTestEnvWithConfig starts exporter, optionally with carriers config.
+func newTestEnvWithConfig(ctx context.Context, t *testing.T, carriersYAML string) *testEnv {
+	t.Helper()
 	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
 
 	env := &testEnv{
 		sippPort:       sippPort,
 		sippClientPort: sippClientPort,
 	}
-	env.endpoint = startExporter(ctx, t, exporterHTTPPort, sippPort, sippClientPort)
+	env.endpoint = startExporterWithConfig(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML)
 	return env
 }
 
@@ -108,11 +183,10 @@ type sippResult struct {
 	failedCalls  int
 }
 
-// startExporter starts exporter container and returns HTTP endpoint.
-// Image is pre-built via Makefile (docker_build target) and passed through
-// SIP_EXPORTER_E2E_IMAGE environment variable.
-// Called only from newTestEnv; ports are allocated by freePort.
-func startExporter(ctx context.Context, t *testing.T, exporterPort, sippPort, sippClientPort string) string {
+// startExporterWithConfig starts exporter container and returns HTTP endpoint.
+// If carriersYAML is non-empty, it is written to a temp file and mounted into
+// the container with SIP_EXPORTER_CARRIERS_CONFIG set accordingly.
+func startExporterWithConfig(ctx context.Context, t *testing.T, exporterPort, sippPort, sippClientPort string, carriersYAML string) string {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -123,17 +197,35 @@ func startExporter(ctx context.Context, t *testing.T, exporterPort, sippPort, si
 		exporterLogLevel = "debug"
 	}
 
+	envVars := map[string]string{
+		"SIP_EXPORTER_INTERFACE":    testInterface,
+		"SIP_EXPORTER_HTTP_PORT":    exporterPort,
+		"SIP_EXPORTER_SIP_PORT":     sippPort,
+		"SIP_EXPORTER_SIPS_PORT":    sippClientPort,
+		"SIP_EXPORTER_LOGGER_LEVEL": exporterLogLevel,
+	}
+
+	var mounts testcontainers.ContainerMounts
+	if carriersYAML != "" {
+		tmpFile, err := os.CreateTemp("", "carriers-*.yaml")
+		require.NoError(t, err)
+		_, err = tmpFile.WriteString(carriersYAML)
+		require.NoError(t, err)
+		require.NoError(t, tmpFile.Close())
+		t.Cleanup(func() { os.Remove(tmpFile.Name()) })
+
+		mounts = testcontainers.Mounts(
+			testcontainers.BindMount(tmpFile.Name(), "/etc/sip-exporter/carriers.yaml"),
+		)
+		envVars["SIP_EXPORTER_CARRIERS_CONFIG"] = "/etc/sip-exporter/carriers.yaml"
+	}
+
 	req := testcontainers.ContainerRequest{
 		Image:       exporterImage,
 		Privileged:  true,
 		NetworkMode: "host",
-		Env: map[string]string{
-			"SIP_EXPORTER_INTERFACE":    testInterface,
-			"SIP_EXPORTER_HTTP_PORT":    exporterPort,
-			"SIP_EXPORTER_SIP_PORT":     sippPort,
-			"SIP_EXPORTER_SIPS_PORT":    sippClientPort,
-			"SIP_EXPORTER_LOGGER_LEVEL": exporterLogLevel,
-		},
+		Env:         envVars,
+		Mounts:      mounts,
 		WaitingFor: wait.ForHTTP("/metrics").
 			WithPort(nat.Port(exporterPort)).
 			WithStartupTimeout(60 * time.Second),
@@ -211,6 +303,14 @@ func waitForMetricStable(t *testing.T, endpoint string) {
 // getMetric reads a single numeric metric value from the exporter /metrics endpoint.
 func getMetric(t *testing.T, endpoint string, metricName string) float64 {
 	t.Helper()
+	return getMetricWithLabel(t, endpoint, metricName, "")
+}
+
+// getMetricWithLabel reads a metric with an optional label filter.
+// If labelFilter is empty, matches any label set (first match).
+// If labelFilter is set (e.g. `carrier="loopback-carrier"`), matches that exact label.
+func getMetricWithLabel(t *testing.T, endpoint string, metricName string, labelFilter string) float64 {
+	t.Helper()
 
 	resp, err := http.Get(endpoint + "/metrics") //nolint:noctx // test helper
 	require.NoError(t, err)
@@ -219,7 +319,13 @@ func getMetric(t *testing.T, endpoint string, metricName string) float64 {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 
-	re := regexp.MustCompile(`^` + metricName + `\s+([0-9.]+)`)
+	var pattern string
+	if labelFilter != "" {
+		pattern = `^` + metricName + `\{[^}]*` + regexp.QuoteMeta(labelFilter) + `[^}]*\}\s+([0-9.]+)`
+	} else {
+		pattern = `^` + metricName + `(?:\{[^}]*\})?\s+([0-9.]+)`
+	}
+	re := regexp.MustCompile(pattern)
 	for _, line := range strings.Split(string(body), "\n") {
 		matches := re.FindStringSubmatch(strings.TrimSpace(line))
 		if len(matches) == 2 {
@@ -230,6 +336,12 @@ func getMetric(t *testing.T, endpoint string, metricName string) float64 {
 	}
 
 	return 0
+}
+
+// getMetricWithCarrier reads a metric filtered by carrier label.
+func getMetricWithCarrier(t *testing.T, endpoint string, metricName string, carrier string) float64 {
+	t.Helper()
+	return getMetricWithLabel(t, endpoint, metricName, `carrier="`+carrier+`"`)
 }
 
 // runSippScenario starts SIPp server and client via docker CLI (host network mode),
@@ -287,6 +399,105 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 	return sippResult{totalCalls: callCount}
 }
 
+// runSippScenarioWithIPs starts SIPp server and client with custom source IPs
+// using testcontainers. uasIP and uacIP are bound via SIPp -i flag so packets
+// have the specified source address. The target address for UAC is uasIP:env.sippPort.
+func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacScenario string, callCount int, env *testEnv, uasIP, uacIP string) sippResult {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	uasPath := absScenarioPath(t, uasScenario)
+	sippVol := filepath.Dir(uasPath)
+	uasScenarioFile := filepath.Base(uasScenario)
+	uacScenarioFile := filepath.Base(uacScenario)
+
+	uasReq := testcontainers.ContainerRequest{
+		Image:       sippImage,
+		NetworkMode: "host",
+		Cmd: []string{
+			"-sf", "/scenarios/" + uasScenarioFile,
+			"-i", uasIP,
+			"-p", env.sippPort,
+			"-m", strconv.Itoa(callCount),
+			"-nostdin",
+		},
+		Mounts: testcontainers.Mounts(
+			testcontainers.BindMount(sippVol, "/scenarios"),
+		),
+	}
+
+	uasC, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: uasReq,
+		Started:          true,
+		Logger:           log.New(io.Discard, "", 0),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = uasC.Terminate(ctx) })
+
+	if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
+		logs, logErr := uasC.Logs(ctx)
+		if logErr == nil {
+			defer logs.Close()
+			logBytes, _ := io.ReadAll(logs)
+			t.Logf("UAS logs:\n%s", strings.TrimSpace(string(logBytes)))
+		}
+	}
+
+	time.Sleep(1 * time.Second)
+
+	uacReq := testcontainers.ContainerRequest{
+		Image:       sippImage,
+		NetworkMode: "host",
+		Cmd: []string{
+			"-sf", "/scenarios/" + uacScenarioFile,
+			"-i", uacIP,
+			"-p", env.sippClientPort,
+			"-m", strconv.Itoa(callCount),
+			uasIP + ":" + env.sippPort,
+		},
+		Mounts: testcontainers.Mounts(
+			testcontainers.BindMount(sippVol, "/scenarios"),
+		),
+		WaitingFor: wait.ForExit().WithExitTimeout(60 * time.Second),
+	}
+
+	uacC, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: uacReq,
+		Started:          true,
+		Logger:           log.New(io.Discard, "", 0),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = uacC.Terminate(ctx) })
+
+	if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
+		logs, logErr := uacC.Logs(ctx)
+		if logErr == nil {
+			defer logs.Close()
+			logBytes, _ := io.ReadAll(logs)
+			t.Logf("UAC logs:\n%s", strings.TrimSpace(string(logBytes)))
+		}
+	}
+
+	waitForContainerExitLogless(t, uasC)
+	waitForMetricStable(t, env.endpoint)
+
+	return sippResult{totalCalls: callCount}
+}
+
+// waitForContainerExitLogless waits for a container to stop running.
+func waitForContainerExitLogless(t *testing.T, c testcontainers.Container) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		state, err := c.State(context.Background())
+		if err != nil {
+			return false
+		}
+		return !state.Running
+	}, 60*time.Second, 500*time.Millisecond, "container did not exit in time")
+}
+
 // runSippUACOnly starts SIPp client only (no server) for timeout tests.
 func runSippUACOnly(ctx context.Context, t *testing.T, uacScenario string, callCount int, env *testEnv) {
 	t.Helper()
@@ -324,142 +535,33 @@ func runSippUACOnly(ctx context.Context, t *testing.T, uacScenario string, callC
 // getSER reads sip_exporter_ser metric from exporter endpoint.
 func getSER(t *testing.T, endpoint string) float64 {
 	t.Helper()
-
-	resp, err := http.Get(endpoint + "/metrics")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	re := regexp.MustCompile(`^sip_exporter_ser\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 2 {
-			val, err := strconv.ParseFloat(matches[1], 64)
-			require.NoError(t, err)
-			return val
-		}
-	}
-
-	return 0
+	return getMetric(t, endpoint, "sip_exporter_ser")
 }
 
 // ADDED: getSEER reads sip_exporter_seer metric from exporter endpoint.
 func getSEER(t *testing.T, endpoint string) float64 {
 	t.Helper()
-
-	resp, err := http.Get(endpoint + "/metrics")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	re := regexp.MustCompile(`^sip_exporter_seer\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 2 {
-			val, err := strconv.ParseFloat(matches[1], 64)
-			require.NoError(t, err)
-			return val
-		}
-	}
-
-	return 0
+	return getMetric(t, endpoint, "sip_exporter_seer")
 }
 
-// ADDED: getISA reads sip_exporter_isa metric from exporter endpoint.
 func getISA(t *testing.T, endpoint string) float64 {
 	t.Helper()
-
-	resp, err := http.Get(endpoint + "/metrics")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	re := regexp.MustCompile(`^sip_exporter_isa\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 2 {
-			val, err := strconv.ParseFloat(matches[1], 64)
-			require.NoError(t, err)
-			return val
-		}
-	}
-
-	return 0
+	return getMetric(t, endpoint, "sip_exporter_isa")
 }
 
 func getSessions(t *testing.T, endpoint string) float64 {
 	t.Helper()
-
-	resp, err := http.Get(endpoint + "/metrics")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	re := regexp.MustCompile(`^sip_exporter_sessions\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 2 {
-			val, err := strconv.ParseFloat(matches[1], 64)
-			require.NoError(t, err)
-			return val
-		}
-	}
-
-	return 0
+	return getMetric(t, endpoint, "sip_exporter_sessions")
 }
 
 func getSCR(t *testing.T, endpoint string) float64 {
 	t.Helper()
-
-	resp, err := http.Get(endpoint + "/metrics")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	re := regexp.MustCompile(`^sip_exporter_scr\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 2 {
-			val, err := strconv.ParseFloat(matches[1], 64)
-			require.NoError(t, err)
-			return val
-		}
-	}
-
-	return 0
+	return getMetric(t, endpoint, "sip_exporter_scr")
 }
 
 func getASR(t *testing.T, endpoint string) float64 {
 	t.Helper()
-
-	resp, err := http.Get(endpoint + "/metrics")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	re := regexp.MustCompile(`^sip_exporter_asr\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 2 {
-			val, err := strconv.ParseFloat(matches[1], 64)
-			require.NoError(t, err)
-			return val
-		}
-	}
-
-	return 0
+	return getMetric(t, endpoint, "sip_exporter_asr")
 }
 
 func getSDC(t *testing.T, endpoint string) float64 {
@@ -477,6 +579,133 @@ func getSPD(t *testing.T, endpoint string) float64 {
 	}
 
 	return sum / count
+}
+
+func getNER(t *testing.T, endpoint string) float64 {
+	t.Helper()
+	return getMetric(t, endpoint, "sip_exporter_ner")
+}
+
+func getISS(t *testing.T, endpoint string) float64 {
+	t.Helper()
+	return getMetric(t, endpoint, "sip_exporter_iss_total")
+}
+
+func getORD(t *testing.T, endpoint string) float64 {
+	t.Helper()
+	return getMetric(t, endpoint, "sip_exporter_ord_count")
+}
+
+func getLRD(t *testing.T, endpoint string) float64 {
+	t.Helper()
+	return getMetric(t, endpoint, "sip_exporter_lrd_count")
+}
+
+func getRRD(t *testing.T, endpoint string) float64 {
+	t.Helper()
+	sum := getMetric(t, endpoint, "sip_exporter_rrd_sum")
+	count := getMetric(t, endpoint, "sip_exporter_rrd_count")
+	if count == 0 {
+		return 0
+	}
+	return sum / count
+}
+
+func getTTR(t *testing.T, endpoint string) float64 {
+	t.Helper()
+	sum := getMetric(t, endpoint, "sip_exporter_ttr_sum")
+	count := getMetric(t, endpoint, "sip_exporter_ttr_count")
+	if count == 0 {
+		return 0
+	}
+	return sum / count
+}
+
+func (e *testEnv) getSERByCarrier(t *testing.T) float64 {
+	t.Helper()
+	return getMetricWithCarrier(t, e.endpoint, "sip_exporter_ser", e.carrier)
+}
+
+func (e *testEnv) getSEERByCarrier(t *testing.T) float64 {
+	t.Helper()
+	return getMetricWithCarrier(t, e.endpoint, "sip_exporter_seer", e.carrier)
+}
+
+func (e *testEnv) getISAByCarrier(t *testing.T) float64 {
+	t.Helper()
+	return getMetricWithCarrier(t, e.endpoint, "sip_exporter_isa", e.carrier)
+}
+
+func (e *testEnv) getSCRByCarrier(t *testing.T) float64 {
+	t.Helper()
+	return getMetricWithCarrier(t, e.endpoint, "sip_exporter_scr", e.carrier)
+}
+
+func (e *testEnv) getASRByCarrier(t *testing.T) float64 {
+	t.Helper()
+	return getMetricWithCarrier(t, e.endpoint, "sip_exporter_asr", e.carrier)
+}
+
+func (e *testEnv) getNERByCarrier(t *testing.T) float64 {
+	t.Helper()
+	return getMetricWithCarrier(t, e.endpoint, "sip_exporter_ner", e.carrier)
+}
+
+func (e *testEnv) getSDCByCarrier(t *testing.T) float64 {
+	t.Helper()
+	return getMetricWithCarrier(t, e.endpoint, "sip_exporter_sdc_total", e.carrier)
+}
+
+func (e *testEnv) getISSByCarrier(t *testing.T) float64 {
+	t.Helper()
+	return getMetricWithCarrier(t, e.endpoint, "sip_exporter_iss_total", e.carrier)
+}
+
+func (e *testEnv) getSPDByCarrier(t *testing.T) float64 {
+	t.Helper()
+	sum := getMetricWithCarrier(t, e.endpoint, "sip_exporter_spd_sum", e.carrier)
+	count := getMetricWithCarrier(t, e.endpoint, "sip_exporter_spd_count", e.carrier)
+	if count == 0 {
+		return 0
+	}
+	return sum / count
+}
+
+func (e *testEnv) getRRDByCarrier(t *testing.T) float64 {
+	t.Helper()
+	sum := getMetricWithCarrier(t, e.endpoint, "sip_exporter_rrd_sum", e.carrier)
+	count := getMetricWithCarrier(t, e.endpoint, "sip_exporter_rrd_count", e.carrier)
+	if count == 0 {
+		return 0
+	}
+	return sum / count
+}
+
+func (e *testEnv) getTTRByCarrier(t *testing.T) float64 {
+	t.Helper()
+	sum := getMetricWithCarrier(t, e.endpoint, "sip_exporter_ttr_sum", e.carrier)
+	count := getMetricWithCarrier(t, e.endpoint, "sip_exporter_ttr_count", e.carrier)
+	if count == 0 {
+		return 0
+	}
+	return sum / count
+}
+
+func (e *testEnv) getORDByCarrier(t *testing.T) float64 {
+	t.Helper()
+	return getMetricWithCarrier(t, e.endpoint, "sip_exporter_ord_count", e.carrier)
+}
+
+func (e *testEnv) getLRDByCarrier(t *testing.T) float64 {
+	t.Helper()
+	return getMetricWithCarrier(t, e.endpoint, "sip_exporter_lrd_count", e.carrier)
+}
+
+func (e *testEnv) waitForSessionsZeroByCarrier(t *testing.T) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		return getMetricWithCarrier(t, e.endpoint, "sip_exporter_sessions", e.carrier) == 0
+	}, 5*time.Second, 300*time.Millisecond, "sessions should reach 0 after all calls terminated")
 }
 
 // absScenarioPath returns absolute path to SIPp scenario.

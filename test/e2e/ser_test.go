@@ -97,3 +97,81 @@ func TestSER_Mixed3xx(t *testing.T) {
 
 	waitForSessionsZero(t, env.endpoint)
 }
+
+// TestSER_WithCarrierConfig verifies SER is computed per-carrier when carriers.yaml is configured.
+// On loopback with carrier config, all traffic gets carrier="loopback-carrier".
+func TestSER_WithCarrierConfig(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		uasScenario string
+		uacScenario string
+		callCount   int
+		wantSER     float64
+	}{
+		{
+			name:        "100_percent",
+			uasScenario: "uas_100.xml",
+			uacScenario: "uac_100.xml",
+			callCount:   50,
+			wantSER:     100.0,
+		},
+		{
+			name:        "0_percent",
+			uasScenario: "uas_0.xml",
+			uacScenario: "uac_0.xml",
+			callCount:   50,
+			wantSER:     0.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			env := newTestEnvWithCarriers(ctx, t)
+
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
+
+			ser := env.getSERByCarrier(t)
+			t.Logf("SER{carrier=%q} = %.2f (want %.2f)", env.carrier, ser, tt.wantSER)
+			require.Equal(t, tt.wantSER, ser)
+
+			env.waitForSessionsZeroByCarrier(t)
+		})
+	}
+}
+
+// TestSER_MixedWithCarrierConfig verifies SER per-carrier for mixed traffic.
+func TestSER_MixedWithCarrierConfig(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnvWithCarriers(ctx, t)
+
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 35, env)
+	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 15, env)
+
+	ser := env.getSERByCarrier(t)
+	t.Logf("SER{carrier=%q} = %.2f (want %.2f)", env.carrier, ser, 70.0)
+	require.Equal(t, 70.0, ser)
+
+	env.waitForSessionsZeroByCarrier(t)
+}
+
+// TestSER_ConcurrentRequests verifies SER with concurrent INVITE traffic.
+func TestSER_ConcurrentRequests(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnv(ctx, t)
+
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 30, env)
+	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 10, env)
+	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 10, env)
+
+	ser := getSER(t, env.endpoint)
+	t.Logf("SER = %.2f%%", ser)
+	require.Greater(t, ser, 0.0, "SER should be calculated")
+	require.LessOrEqual(t, ser, 100.0, "SER should not exceed 100%")
+
+	waitForSessionsZero(t, env.endpoint)
+}

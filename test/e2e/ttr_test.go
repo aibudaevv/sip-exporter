@@ -9,18 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func getTTR(t *testing.T, endpoint string) float64 {
-	t.Helper()
-
-	sum := getMetric(t, endpoint, "sip_exporter_ttr_sum")
-	count := getMetric(t, endpoint, "sip_exporter_ttr_count")
-	if count == 0 {
-		return 0
-	}
-
-	return sum / count
-}
-
 func TestTTR_SuccessfulCalls(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -150,4 +138,19 @@ func TestTTR_MixedScenarios(t *testing.T) {
 	require.Greater(t, ttr, 0.0, "TTR should be measured for mixed scenarios")
 
 	waitForSessionsZero(t, env.endpoint)
+}
+
+// TestTTR_WithCarrierConfig verifies TTR per-carrier.
+func TestTTR_WithCarrierConfig(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnvWithCarriers(ctx, t)
+
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 50, env)
+
+	ttr := env.getTTRByCarrier(t)
+	t.Logf("TTR{carrier=%q} = %.2f ms", env.carrier, ttr)
+	require.Greater(t, ttr, 0.0, "TTR should be greater than 0 when 1xx responses are sent")
+
+	env.waitForSessionsZeroByCarrier(t)
 }

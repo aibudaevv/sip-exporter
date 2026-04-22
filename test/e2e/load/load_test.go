@@ -20,9 +20,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -138,7 +138,7 @@ func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
 		Env:         envVars,
 		WaitingFor: wait.ForHTTP("/metrics").
 			WithPort(nat.Port(exporterHTTPPort)).
-			WithStartupTimeout(60 * time.Second),
+			WithStartupTimeout(120 * time.Second),
 	}
 
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
@@ -197,7 +197,7 @@ func getMetric(t *testing.T, endpoint, metricName string) float64 {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 
-	re := regexp.MustCompile(`^` + metricName + `\s+([0-9.]+)`)
+	re := regexp.MustCompile(`^` + metricName + `(?:\{[^}]*\})?\s+([0-9.]+)`)
 	for _, line := range strings.Split(string(body), "\n") {
 		matches := re.FindStringSubmatch(strings.TrimSpace(line))
 		if len(matches) == 2 {

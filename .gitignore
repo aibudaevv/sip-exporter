@@ -15,9 +15,12 @@ exporter.test
 test/e2e/load/load_result.json
 
 # Session notes
+session*
 SESSION_NOTES.md
+RELEASE_NOTES.md
 TODO.md
 .CLAUDE.md
 ISSUES.md
 WHATS_NEXT.md
 .claudedocs/superpowers/
+docs/superpowers/

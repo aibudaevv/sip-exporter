@@ -1,8 +1,13 @@
 # SIP-exporter
+
+**[EN](README.md)** | **[RU](README.ru.md)**
+
 High-performance eBPF-based SIP monitoring service that captures and exports telephony metrics to Prometheus-compatible systems (Prometheus, VictoriaMetrics, etc.).
 Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspace processing overhead.
 
 [![Go Test](https://github.com/aibudaevv/sip-exporter/actions/workflows/go.yml/badge.svg)](https://github.com/aibudaevv/sip-exporter/actions/workflows/go.yml)
+[![Go Vulncheck](https://github.com/aibudaevv/sip-exporter/actions/workflows/vulncheck.yml/badge.svg)](https://github.com/aibudaevv/sip-exporter/actions/workflows/vulncheck.yml)
+[![Container Scan](https://github.com/aibudaevv/sip-exporter/actions/workflows/trivy.yml/badge.svg)](https://github.com/aibudaevv/sip-exporter/actions/workflows/trivy.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/aibudaevv/sip-exporter)](https://goreportcard.com/report/github.com/aibudaevv/sip-exporter)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](https://github.com/aibudaevv/sip-exporter/blob/main/LICENSE)
 [![Issues](https://img.shields.io/github/issues/aibudaevv/sip-exporter)](https://github.com/aibudaevv/sip-exporter/issues)
@@ -16,6 +21,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - [Performance](#performance)
 - [Install](#install)
 - [Metrics](docs/METRICS.md)
+- [Security](docs/SECURITY.md)
 - [Development](#development)
 - [Benchmark](#benchmark)
 - [Integration](#integration)
@@ -28,6 +34,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - 🐳 **Single container deployment** — no external dependencies
 - 🔧 **Configurable SIP ports** — monitor custom ports via environment variables
 - 📈 **Prometheus native** — standard `/metrics` endpoint for scraping
+- 🏷️ **Per-carrier metrics** — CIDR-based carrier resolution for all SIP metrics
 
 ## Quick Start
 
@@ -40,6 +47,10 @@ services:
     network_mode: host
     environment:
       - SIP_EXPORTER_INTERFACE=eth0
+      # Optional: carrier labels for per-provider metrics
+      # - SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml
+    # volumes:
+    #   - ./examples/carriers.yaml:/etc/sip-exporter/carriers.yaml:ro
 ```
 
 ```bash
@@ -88,17 +99,82 @@ Environment variables:
 * `SIP_EXPORTER_SIP_PORT` - SIP port (default 5060)
 * `SIP_EXPORTER_SIPS_PORT` - SIPS port (default 5061)
 * `SIP_EXPORTER_OBJECT_FILE_PATH` - path to eBPF object file (default /usr/local/bin/sip.o)
+* `SIP_EXPORTER_CARRIERS_CONFIG` - path to carriers YAML config (optional, see [`examples/carriers.yaml`](examples/carriers.yaml))
 
-Start docker container in privileged mode is true and host mode.
+The container must run with `--privileged` and `--network host` (eBPF requires `CAP_BPF` and access to the network interface). See [Security](docs/SECURITY.md) for details on why this is safe.
+
 ## Metrics
 
-All metrics are exposed at `/metrics` in Prometheus exposition format. The exporter provides:
+All metrics are exposed at `/metrics` in Prometheus exposition format. All SIP metrics include a `carrier` label for per-provider breakdown (configurable via CIDR mapping). The exporter provides:
 
 - **Traffic counters** — SIP request types (INVITE, BYE, REGISTER, etc.) and response status codes (100–603)
 - **Active sessions** — real-time count of active SIP dialogs
-- **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, RRD, SPD
+- **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR
+- **Extended metrics** — ISS, SDC, ORD, LRD
 
 Full reference with formulas, examples, and RFC section mapping: [docs/METRICS.md](docs/METRICS.md)
+
+### Per-Carrier Metrics
+
+If your SIP infrastructure handles traffic from multiple operators (telecom providers, SIP trunks, PBX clusters), you need to see metrics **per operator**, not in aggregate.
+
+The carrier feature solves this by mapping IP subnets to operator names. Every metric — INVITE count, SER, active sessions, RRD latency — gets a `carrier` label, so you can build separate Grafana dashboards and alerts for each operator.
+
+**How it works:**
+
+The exporter looks at the **source IP** of every SIP request and matches it against CIDR subnets in a YAML config. When UAC at `10.1.5.20` sends an INVITE, the exporter finds that `10.1.5.20` falls within `10.1.0.0/16` defined for carrier "telecom-alpha", and tags all metrics for this call — the INVITE itself, the 200 OK response, the BYE, even the dialog expiry — with `carrier="telecom-alpha"`.
+
+This means:
+- INVITE from `10.1.5.20` → metrics labeled `carrier="telecom-alpha"`
+- INVITE from `192.168.11.3` → metrics labeled `carrier="telecom-beta"`
+- INVITE from `8.8.8.8` (not in any subnet) → metrics labeled `carrier="other"`
+
+**Setup:**
+
+```yaml
+# docker-compose.yml
+services:
+  sip-exporter:
+    image: frzq/sip-exporter:latest
+    privileged: true
+    network_mode: host
+    environment:
+      - SIP_EXPORTER_INTERFACE=eth0
+      - SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml
+    volumes:
+      - ./carriers.yaml:/etc/sip-exporter/carriers.yaml:ro
+```
+
+```yaml
+# carriers.yaml — map your operators' IP subnets
+carriers:
+  - name: "telecom-alpha"
+    cidrs:
+      - "10.1.0.0/16"
+  - name: "telecom-beta"
+    cidrs:
+      - "192.168.10.0/24"
+      - "192.168.11.0/24"
+```
+
+After that, metrics look like:
+
+```
+sip_exporter_invite_total{carrier="telecom-alpha"}  1523
+sip_exporter_ser{carrier="telecom-alpha"}            95.2
+sip_exporter_ser{carrier="telecom-beta"}             87.4
+sip_exporter_ser{carrier="other"}                     0.0
+```
+
+**Things to know:**
+
+- Carrier is determined at **request time** (INVITE/REGISTER/OPTIONS), not response time. If carrier-A sends INVITE and carrier-B answers 200 OK, all metrics still go to carrier-A — the operator who initiated the call
+- If source IP doesn't match any CIDR, destination IP is tried. If neither matches → `carrier="other"`
+- When CIDRs overlap, **first match wins** — list specific subnets before broad ones
+- Without the config file, all metrics get `carrier="other"` — nothing breaks
+- Each carrier can have multiple CIDRs, and multiple carriers can be defined
+
+Full config reference with examples: [`examples/carriers.yaml`](examples/carriers.yaml)
 
 ## Development
 
@@ -120,7 +196,7 @@ Full reference with formulas, examples, and RFC section mapping: [docs/METRICS.m
 
 Test suite:
 - **Unit tests** — MC/DC standard, all business logic covered
-- **27 E2E tests** — real SIP traffic via SIPp + testcontainers-go, validates all RFC 6076 metrics
+- **55 E2E tests** — real SIP traffic via SIPp + testcontainers-go, validates all RFC 6076 metrics
 - **8 load tests** — PPS throughput, concurrent sessions, memory stability, GC pauses, scrape latency
 
 ## Benchmark
@@ -136,7 +212,7 @@ See [BENCHMARK.md](./docs/BENCHMARK.md) for detailed results, methodology, and o
 Pre-configured alerting examples are available in [ALERTING.md](./docs/ALERTING.md):
 
 - **Prometheus alert rules** — Critical, warning, and info alerts for SER, ISA, RRD, and more
-- **Grafana dashboard** — Ready-to-import JSON with 8 panels
+- **Grafana dashboard** — Ready-to-import JSON with carrier-filtered panels
 - **Alertmanager examples** — Slack, PagerDuty, and Email integrations
 - **Best practices** — Scrape intervals, retention, threshold tuning
 
@@ -147,7 +223,7 @@ Import the pre-built dashboard into your Grafana instance:
 2. Upload `examples/grafana-dashboard.json` or copy the JSON content
 3. Select your Prometheus or VictoriaMetrics datasource
 
-The dashboard includes all available metrics: traffic counters, SIP request/response breakdowns, active sessions, RFC 6076 performance metrics, and system errors.
+The dashboard includes all available metrics: traffic counters, SIP request/response breakdowns, active sessions, RFC 6076 performance metrics (SER, SEER, ISA, SCR, NER), delay histograms (RRD, TTR, SPD, ORD, LRD), session quality metrics (ISS, ASR, SDC), and system errors.
 
 Dashboard file: [`examples/grafana-dashboard.json`](examples/grafana-dashboard.json)
 

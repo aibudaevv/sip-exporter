@@ -127,3 +127,34 @@ func TestASR_Complex(t *testing.T) {
 
 	waitForSessionsZero(t, env.endpoint)
 }
+
+// TestASR_WithCarrierConfig verifies ASR per-carrier.
+func TestASR_WithCarrierConfig(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnvWithCarriers(ctx, t)
+
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 50, env)
+
+	asr := env.getASRByCarrier(t)
+	t.Logf("ASR{carrier=%q} = %.2f (want %.2f)", env.carrier, asr, 100.0)
+	require.Equal(t, 100.0, asr)
+
+	env.waitForSessionsZeroByCarrier(t)
+}
+
+// TestASR_MixedWithCarrierConfig verifies ASR per-carrier for mixed traffic.
+func TestASR_MixedWithCarrierConfig(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnvWithCarriers(ctx, t)
+
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 35, env)
+	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 15, env)
+
+	asr := env.getASRByCarrier(t)
+	t.Logf("ASR{carrier=%q} = %.2f (want %.2f)", env.carrier, asr, 70.0)
+	require.Equal(t, 70.0, asr)
+
+	env.waitForSessionsZeroByCarrier(t)
+}
