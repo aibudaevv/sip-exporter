@@ -41,7 +41,7 @@ That's it. No packet modification, no packet injection, no network redirection, 
 
 | Layer | Details |
 |---|---|
-| Base image | `alpine:3.20` — minimal (~5 MB) |
+| Base image | `alpine:3.22` — minimal (~5 MB) |
 | Runtime dependencies | `libelf` (for eBPF), `bash` (for healthcheck) |
 | Application | Single statically-linked Go binary |
 | Volumes | `/etc/localtime:ro`, `/etc/timezone:ro` — read-only timezone files |
