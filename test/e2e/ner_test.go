@@ -15,6 +15,9 @@ import (
 
 func TestNER_AllScenarios(t *testing.T) {
 	t.Parallel()
+	ctx := context.Background()
+	env := newSharedTestEnv(ctx, t)
+
 	tests := []struct {
 		name        string
 		uasScenario string
@@ -61,11 +64,8 @@ func TestNER_AllScenarios(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			ctx := context.Background()
-			env := newTestEnv(ctx, t)
-
-			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
+			env.restart(t)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
 			ner := getNER(t, env.endpoint)
 			t.Logf("NER = %.2f (want %.2f)", ner, tt.wantNER)
 			require.Equal(t, tt.wantNER, ner)

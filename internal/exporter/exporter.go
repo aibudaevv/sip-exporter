@@ -469,22 +469,30 @@ func (e *exporter) handleMessage(carrier string, rawPacket []byte) error {
 	if packet.IsResponse {
 		e.handleResponse(carrier, packet)
 	} else {
-		e.services.metricser.Request(carrier, packet.Method)
-
-		if bytes.Equal(packet.Method, []byte("REGISTER")) {
-			e.storeRegisterTime(string(packet.CallID), carrier)
-		}
-
-		if bytes.Equal(packet.Method, []byte("INVITE")) {
-			e.storeInviteTime(string(packet.CallID), carrier)
-		}
-
-		if bytes.Equal(packet.Method, []byte("OPTIONS")) {
-			e.storeOptionsTime(string(packet.CallID), carrier)
-		}
+		e.handleRequest(carrier, packet)
 	}
 
 	return nil
+}
+
+func (e *exporter) handleRequest(carrier string, packet dto.Packet) {
+	e.services.metricser.Request(carrier, packet.Method)
+
+	if bytes.Equal(packet.Method, []byte("REGISTER")) {
+		e.storeRegisterTime(string(packet.CallID), carrier)
+	}
+
+	if bytes.Equal(packet.Method, []byte("INVITE")) {
+		e.storeInviteTime(string(packet.CallID), carrier)
+	}
+
+	if bytes.Equal(packet.Method, []byte("CANCEL")) {
+		e.removeInviteTime(string(packet.CallID))
+	}
+
+	if bytes.Equal(packet.Method, []byte("OPTIONS")) {
+		e.storeOptionsTime(string(packet.CallID), carrier)
+	}
 }
 
 func (e *exporter) handleResponse(packetCarrier string, packet dto.Packet) {

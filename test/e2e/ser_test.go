@@ -11,6 +11,9 @@ import (
 
 func TestSER_AllScenarios(t *testing.T) {
 	t.Parallel()
+	ctx := context.Background()
+	env := newSharedTestEnv(ctx, t)
+
 	tests := []struct {
 		name        string
 		uasScenario string
@@ -50,11 +53,8 @@ func TestSER_AllScenarios(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			ctx := context.Background()
-			env := newTestEnv(ctx, t)
-
-			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
+			env.restart(t)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
 
 			ser := getSER(t, env.endpoint)
 			t.Logf("SER = %.2f (want %.2f)", ser, tt.wantSER)
@@ -102,6 +102,9 @@ func TestSER_Mixed3xx(t *testing.T) {
 // On loopback with carrier config, all traffic gets carrier="loopback-carrier".
 func TestSER_WithCarrierConfig(t *testing.T) {
 	t.Parallel()
+	ctx := context.Background()
+	env := newSharedTestEnvWithCarriers(ctx, t)
+
 	tests := []struct {
 		name        string
 		uasScenario string
@@ -127,11 +130,8 @@ func TestSER_WithCarrierConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			ctx := context.Background()
-			env := newTestEnvWithCarriers(ctx, t)
-
-			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
+			env.restart(t)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
 
 			ser := env.getSERByCarrier(t)
 			t.Logf("SER{carrier=%q} = %.2f (want %.2f)", env.carrier, ser, tt.wantSER)
