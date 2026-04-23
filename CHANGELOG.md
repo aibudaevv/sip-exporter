@@ -3,13 +3,20 @@
 ## 0.12.0
 ### Added
 - 10 new SIP response status code counters: 181 (Call Is Being Forwarded), 182 (Queued), 405 (Method Not Allowed), 481 (Dialog/Transaction Does Not Exist), 487 (Request Terminated), 488 (Not Acceptable Here), 501 (Not Implemented), 502 (Bad Gateway), 604 (Does Not Exist Anywhere), 606 (Not Acceptable)
+- CANCEL request now cleans up `inviteTracker` entry immediately (previously waited for TTL)
 - E2E tests with SIPp scenarios for all 10 new status codes (including CANCEL flow for 487)
 - E2E tests with carrier label filtering for 4 new status codes (181, 487, 502, 604)
+- E2E test for CANCEL inviteTracker cleanup verification
 
 ### Changed
 - Refactored `incrementStatusCodeCounter` from 30-case switch to map-based lookup (cyclomatic complexity 31→1)
+- Extracted `handleRequest()` from `handleMessage()` to reduce nesting complexity
 - Grafana dashboard: added 10 new status codes to "SIP Responses Rate" panel in numeric order
 - `docs/METRICS.md`: status codes reordered to numeric sort
+- E2E: reduced `-parallel` from 4 to 2 to prevent AF_PACKET socket contention on loopback
+- E2E: `runSippScenario` uses `exec.CommandContext` for proper context-aware timeout
+- E2E: `setupSecondaryIPs` tolerates "File exists" when adding duplicate addresses
+- Carrier direction e2e tests: removed `t.Parallel()` to avoid secondary IP conflicts
 
 ## 0.11.0
 ### Added

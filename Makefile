@@ -5,7 +5,7 @@ version := $(shell cat VERSION)
 
 build: ebpf_compile go_build
 docker_build:
-	docker build  --progress=plain --no-cache -t sip-exporter:${version} .
+	docker inspect sip-exporter:$(version) > /dev/null 2>&1 || docker build --progress=plain -t sip-exporter:${version} .
 ebpf_compile:
 	clang -O2 -target bpf -c internal/bpf/sip.c -o bin/sip.o -g -fno-stack-protector
 go_build:
@@ -19,12 +19,12 @@ test:
 
 test-e2e: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
-		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 4 -failfast -timeout 5m ./test/e2e/
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 2 -failfast -timeout 10m ./test/e2e/
 
 #example: make test-e2e-run TEST=TestSER_AllScenarios/100_percent
 test-e2e-run: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
-		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 4 -failfast -timeout 5m -run "$(TEST)" ./test/e2e/
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 2 -failfast -timeout 10m -run "$(TEST)" ./test/e2e/
 
 test-load: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
