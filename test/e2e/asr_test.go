@@ -15,6 +15,9 @@ import (
 // On loopback both numerator and denominator double → ASR unchanged (like SER).
 func TestASR_AllScenarios(t *testing.T) {
 	t.Parallel()
+	ctx := context.Background()
+	env := newSharedTestEnv(ctx, t)
+
 	tests := []struct {
 		name        string
 		uasScenario string
@@ -54,11 +57,8 @@ func TestASR_AllScenarios(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			ctx := context.Background()
-			env := newTestEnv(ctx, t)
-
-			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
+			env.restart(t)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
 
 			asr := getASR(t, env.endpoint)
 			t.Logf("ASR = %.2f (want %.2f)", asr, tt.wantASR)

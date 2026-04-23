@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -91,6 +92,78 @@ func newTestEnvWithCarriersYAML(ctx context.Context, t *testing.T, carriersYAML 
 	return env
 }
 
+func newSharedTestEnvWithCarriersYAML(ctx context.Context, t *testing.T, carriersYAML string, carrierName string) *sharedTestEnv {
+	t.Helper()
+	env := newSharedTestEnvWithConfig(ctx, t, carriersYAML)
+	env.carrier = carrierName
+	return env
+}
+
+type sharedTestEnv struct {
+	testEnv
+	container    testcontainers.Container
+	exporterPort string
+}
+
+func newSharedTestEnv(ctx context.Context, t *testing.T) *sharedTestEnv {
+	t.Helper()
+	return newSharedTestEnvWithConfig(ctx, t, "")
+}
+
+func newSharedTestEnvWithCarriers(ctx context.Context, t *testing.T) *sharedTestEnv {
+	t.Helper()
+	carriersYAML := loadCarriersYAML(t, "carriers.yaml")
+
+	var cfg struct {
+		Carriers []struct {
+			Name string `yaml:"name"`
+		} `yaml:"carriers"`
+	}
+	require.NoError(t, yaml.Unmarshal([]byte(carriersYAML), &cfg))
+	require.NotEmpty(t, cfg.Carriers, "carriers.yaml must define at least one carrier")
+
+	env := newSharedTestEnvWithConfig(ctx, t, carriersYAML)
+	env.carrier = cfg.Carriers[0].Name
+	return env
+}
+
+func newSharedTestEnvWithConfig(ctx context.Context, t *testing.T, carriersYAML string) *sharedTestEnv {
+	t.Helper()
+	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
+
+	env := &sharedTestEnv{
+		testEnv: testEnv{
+			sippPort:       sippPort,
+			sippClientPort: sippClientPort,
+		},
+		exporterPort: exporterHTTPPort,
+	}
+	endpoint, container := startExporterWithConfig(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML)
+	env.endpoint = endpoint
+	env.container = container
+	registerExporterCleanup(t, container, exporterHTTPPort)
+	return env
+}
+
+func (s *sharedTestEnv) restart(t *testing.T) {
+	t.Helper()
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stopCancel()
+	require.NoError(t, s.container.Stop(stopCtx, nil))
+
+	require.NoError(t, s.container.Start(context.Background()))
+
+	require.Eventually(t, func() bool {
+		resp, err := http.Get(s.endpoint + "/metrics") //nolint:noctx // test helper
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == 200
+	}, 30*time.Second, 500*time.Millisecond, "exporter should be ready after restart")
+}
+
 // loadCarriersYAML reads a carriers YAML file from test/e2e/ directory.
 func loadCarriersYAML(t *testing.T, filename string) string {
 	t.Helper()
@@ -113,11 +186,13 @@ func setupSecondaryIPs(t *testing.T) {
 		"10.1.1.5/32",
 	}
 	for _, addr := range addrs {
-		err := exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
+		out, err := exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
 			"--entrypoint", "", "alpine",
 			"ip", "addr", "add", addr, "dev", "lo",
-		).Run()
-		require.NoError(t, err, "failed to add %s to lo", addr)
+		).CombinedOutput()
+		if err != nil && !bytes.Contains(out, []byte("File exists")) {
+			require.NoError(t, err, "failed to add %s to lo: %s", addr, string(out))
+		}
 	}
 	t.Cleanup(func() {
 		for _, addr := range addrs {
@@ -138,7 +213,9 @@ func newTestEnvWithConfig(ctx context.Context, t *testing.T, carriersYAML string
 		sippPort:       sippPort,
 		sippClientPort: sippClientPort,
 	}
-	env.endpoint = startExporterWithConfig(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML)
+	endpoint, container := startExporterWithConfig(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML)
+	env.endpoint = endpoint
+	registerExporterCleanup(t, container, exporterHTTPPort)
 	return env
 }
 
@@ -182,10 +259,7 @@ type sippResult struct {
 	failedCalls  int
 }
 
-// startExporterWithConfig starts exporter container and returns HTTP endpoint.
-// If carriersYAML is non-empty, it is written to a temp file and mounted into
-// the container with SIP_EXPORTER_CARRIERS_CONFIG set accordingly.
-func startExporterWithConfig(ctx context.Context, t *testing.T, exporterPort, sippPort, sippClientPort string, carriersYAML string) string {
+func startExporterWithConfig(ctx context.Context, t *testing.T, exporterPort, sippPort, sippClientPort string, carriersYAML string) (string, testcontainers.Container) {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -244,6 +318,12 @@ func startExporterWithConfig(ctx context.Context, t *testing.T, exporterPort, si
 		}
 	}
 	require.NoError(t, err)
+
+	return fmt.Sprintf("http://localhost:%s", exporterPort), container
+}
+
+func registerExporterCleanup(t *testing.T, container testcontainers.Container, exporterPort string) {
+	t.Helper()
 	t.Cleanup(func() {
 		if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
 			logs, logErr := container.Logs(context.Background())
@@ -256,7 +336,7 @@ func startExporterWithConfig(ctx context.Context, t *testing.T, exporterPort, si
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer stopCancel()
 		_ = container.Stop(stopCtx, nil)
-		_ = container.Terminate(ctx)
+		_ = container.Terminate(context.Background())
 		for i := 0; i < 10; i++ {
 			conn, err := net.DialTimeout("tcp", "localhost:"+exporterPort, 500*time.Millisecond)
 			if err != nil {
@@ -266,8 +346,6 @@ func startExporterWithConfig(ctx context.Context, t *testing.T, exporterPort, si
 			time.Sleep(500 * time.Millisecond)
 		}
 	})
-
-	return fmt.Sprintf("http://localhost:%s", exporterPort)
 }
 
 // waitForSessionsZero polls sip_exporter_sessions until it reaches 0.
@@ -361,7 +439,7 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 	uasScenarioFile := filepath.Base(uasScenario)
 	uacScenarioFile := filepath.Base(uacScenario)
 
-	uasCmd := exec.Command("docker", "run", "--rm",
+	uasCmd := exec.CommandContext(ctx, "docker", "run", "--rm",
 		"--network", "host",
 		"-v", sippVol+":/scenarios:ro",
 		sippImage,
@@ -375,9 +453,20 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 	uasCmd.Stderr = stderr
 	require.NoError(t, uasCmd.Start())
 
-	time.Sleep(1 * time.Second)
+	require.Eventually(t, func() bool {
+		addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:"+env.sippPort)
+		if err != nil {
+			return false
+		}
+		conn, err := net.ListenUDP("udp", addr)
+		if err != nil {
+			return true
+		}
+		conn.Close()
+		return false
+	}, 5*time.Second, 50*time.Millisecond, "UAS should start listening on port %s", env.sippPort)
 
-	uacCmd := exec.Command("docker", "run", "--rm",
+	uacCmd := exec.CommandContext(ctx, "docker", "run", "--rm",
 		"--network", "host",
 		"-v", sippVol+":/scenarios:ro",
 		sippImage,
@@ -394,6 +483,19 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 	_ = uasCmd.Wait()
 
 	waitForMetricStable(t, env.endpoint)
+
+	require.Eventually(t, func() bool {
+		addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:"+env.sippPort)
+		if err != nil {
+			return false
+		}
+		conn, err := net.ListenUDP("udp", addr)
+		if err != nil {
+			return false
+		}
+		conn.Close()
+		return true
+	}, 3*time.Second, 100*time.Millisecond, "port %s should be free after SIPp exit", env.sippPort)
 
 	return sippResult{totalCalls: callCount}
 }

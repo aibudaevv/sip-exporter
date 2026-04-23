@@ -22,7 +22,6 @@ import (
 // SER{carrier-B}=0 because carrier-B has no INVITEs (only second-echo responses with dead tracker).
 // sessionCompletedTotal{carrier-A}=50 (dialog created with carrier-A), sessionCompletedTotal{carrier-B}=0.
 func TestCarrierDirection_InviteResponseMismatch(t *testing.T) {
-	t.Parallel()
 	ctx := context.Background()
 	setupSecondaryIPs(t)
 
@@ -62,7 +61,6 @@ func TestCarrierDirection_InviteResponseMismatch(t *testing.T) {
 //
 // Both carriers have SER > 0 due to their own INVITEs and tracker/fallback carrier resolution.
 func TestCarrierDirection_MultipleCarriers(t *testing.T) {
-	t.Parallel()
 	ctx := context.Background()
 	setupSecondaryIPs(t)
 
@@ -91,7 +89,6 @@ func TestCarrierDirection_MultipleCarriers(t *testing.T) {
 // UAC at 172.16.0.1 sends INVITE to UAS at 172.16.0.2 — both IPs are outside all CIDRs.
 // resolveCarrier tries srcIP (172.16.0.1 → "other"), then dstIP (172.16.0.2 → "other") → "other".
 func TestCarrierDirection_UnknownIPOther(t *testing.T) {
-	t.Parallel()
 	ctx := context.Background()
 	setupSecondaryIPs(t)
 
@@ -120,7 +117,6 @@ func TestCarrierDirection_UnknownIPOther(t *testing.T) {
 //
 // INVITE from 10.1.1.5 matches both, but carrier-specific should win.
 func TestCarrierDirection_OverlappingCIDRs(t *testing.T) {
-	t.Parallel()
 	ctx := context.Background()
 	setupSecondaryIPs(t)
 

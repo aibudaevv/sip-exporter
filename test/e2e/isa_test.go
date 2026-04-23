@@ -13,6 +13,9 @@ import (
 // ISA = (INVITE → 408, 500, 503, 504) / Total INVITE × 100
 func TestISA_AllScenarios(t *testing.T) {
 	t.Parallel()
+	ctx := context.Background()
+	env := newSharedTestEnv(ctx, t)
+
 	tests := []struct {
 		name        string
 		uasScenario string
@@ -45,11 +48,8 @@ func TestISA_AllScenarios(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			ctx := context.Background()
-			env := newTestEnv(ctx, t)
-
-			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
+			env.restart(t)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
 
 			isa := getISA(t, env.endpoint)
 			t.Logf("ISA = %.2f (want %.2f)", isa, tt.wantISA)

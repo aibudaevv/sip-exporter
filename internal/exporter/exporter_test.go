@@ -2800,3 +2800,117 @@ func TestMCDC_TC20_OtherCarrier_20Known_10Other(t *testing.T) {
 	require.Equal(t, 10, carrierOther)
 	require.Equal(t, 0, carrierB)
 }
+
+func TestHandleMessage_CANCEL_RemovesInviteTracker(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		inviteTracker:   make(map[string]inviteEntry),
+		optionsTracker:  make(map[string]optionsEntry),
+		registerTracker: make(map[string]registerEntry),
+	}
+
+	invitePkt := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: cancel-test-1\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	err := e.handleMessage("other", invitePkt)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		_, _, ok := e.readInviteEntry("cancel-test-1")
+		return ok
+	}, 100*time.Millisecond, 10*time.Millisecond, "inviteTracker should have entry after INVITE")
+
+	cancelPkt := []byte("CANCEL sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: cancel-test-1\r\n" +
+		"CSeq: 2 CANCEL\r\n")
+
+	err = e.handleMessage("other", cancelPkt)
+	require.NoError(t, err)
+
+	_, _, ok := e.readInviteEntry("cancel-test-1")
+	require.False(t, ok, "inviteTracker entry should be removed after CANCEL")
+}
+
+func TestHandleMessage_CANCEL_NoEntry_NoOp(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		inviteTracker:   make(map[string]inviteEntry),
+		optionsTracker:  make(map[string]optionsEntry),
+		registerTracker: make(map[string]registerEntry),
+	}
+
+	cancelPkt := []byte("CANCEL sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: nonexistent-call\r\n" +
+		"CSeq: 2 CANCEL\r\n")
+
+	err := e.handleMessage("other", cancelPkt)
+	require.NoError(t, err)
+}
+
+func TestHandleMessage_CANCEL_ThenProvisional_NoTTR(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		inviteTracker:   make(map[string]inviteEntry),
+		optionsTracker:  make(map[string]optionsEntry),
+		registerTracker: make(map[string]registerEntry),
+	}
+
+	invitePkt := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: cancel-ttr-test\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	err := e.handleMessage("other", invitePkt)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		_, _, ok := e.readInviteEntry("cancel-ttr-test")
+		return ok
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	cancelPkt := []byte("CANCEL sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: cancel-ttr-test\r\n" +
+		"CSeq: 2 CANCEL\r\n")
+
+	err = e.handleMessage("other", cancelPkt)
+	require.NoError(t, err)
+
+	provisionalPkt := []byte("SIP/2.0 100 Trying\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: cancel-ttr-test\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	err = e.handleMessage("other", provisionalPkt)
+	require.NoError(t, err)
+
+	require.False(t, mm.ttrUpdated, "TTR should not be measured after CANCEL removed tracker entry")
+}

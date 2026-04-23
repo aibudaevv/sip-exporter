@@ -18,6 +18,9 @@ import (
 // So expected SCR values are half of theoretical: e.g. all_completed → 50% not 100%.
 func TestSCR_AllScenarios(t *testing.T) {
 	t.Parallel()
+	ctx := context.Background()
+	env := newSharedTestEnv(ctx, t)
+
 	tests := []struct {
 		name        string
 		uasScenario string
@@ -64,11 +67,8 @@ func TestSCR_AllScenarios(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			ctx := context.Background()
-			env := newTestEnv(ctx, t)
-
-			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
+			env.restart(t)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
 
 			scr := getSCR(t, env.endpoint)
 			t.Logf("SCR = %.2f (want %.2f)", scr, tt.wantSCR)

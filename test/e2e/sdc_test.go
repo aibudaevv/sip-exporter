@@ -15,6 +15,9 @@ import (
 // On loopback SDC is NOT doubled (dialog map deduplicates).
 func TestSDC_AllScenarios(t *testing.T) {
 	t.Parallel()
+	ctx := context.Background()
+	env := newSharedTestEnv(ctx, t)
+
 	tests := []struct {
 		name        string
 		uasScenario string
@@ -61,11 +64,8 @@ func TestSDC_AllScenarios(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			ctx := context.Background()
-			env := newTestEnv(ctx, t)
-
-			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
+			env.restart(t)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
 
 			sdc := getSDC(t, env.endpoint)
 			t.Logf("SDC = %.0f (want %.0f)", sdc, tt.wantSDC)
