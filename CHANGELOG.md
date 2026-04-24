@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## 0.13.0
+### Added
+- Per-device-type SIP metrics with User-Agent header classification (`SIP_EXPORTER_USER_AGENTS_CONFIG`)
+- `internal/ua` package: YAML config loader with regex→UA type mapping, first-match-wins, case-insensitive support
+- `ua_type` label on all SIP metrics: requests, responses, SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, ORD, LRD, ISS, SDC, active sessions
+- UA type resolution: `User-Agent` header → regex match → label; `ua_type="other"` for unmatched
+- UA type tracker propagation: stored at request time (INVITE/REGISTER/OPTIONS), inherited by responses via tracker, persisted in dialog entries
+- Composite key `carrier+"\x00"+ua_type` in `carrierAtomicCounters` sync.Map for ratio collectors
+- `examples/user_agents.yaml` — example UA config with 11 patterns (Yealink, Grandstream, Cisco, Kamailio, OpenSIPS, Asterisk, FreeSWITCH, Linphone, MicroSIP, Zoiper, SIPp)
+- E2E tests for UA classification: Yealink, Grandstream, multiple types isolated, no-UA fallback, no-config fallback, SDC by ua_type, rated metrics (SEER/ASR/NER) by ua_type, combined carrier+ua_type labels
+- SIPp scenarios: `uac_yealink.xml`, `uas_yealink.xml`, `uac_grandstream.xml`, `uas_grandstream.xml` with User-Agent headers
+- Load test `TestLoad_DualUAType`: 1 carrier + 2 ua_types (Yealink + Grandstream) at 500/1000/1800 CPS, CPU/RAM overhead validation
+- SIPp scenarios: `call_highrate_yealink_uac.xml`, `call_highrate_grandstream_uac.xml` for load testing
+- Grafana dashboard: `ua_type` template variable for filtering by device type, all panels show `carrier / ua_type` in legends
+- `docs/METRICS.md`: User-Agent Type Label section with resolution algorithm, ua_type semantics per metric, combined carrier+ua_type analysis examples
+- README.md (EN): Per-Device-Type Metrics section with setup, examples, PromQL queries
+- README.ru.md (RU): Метрики по типам устройств section
+
+### Changed
+- `Metricser` interface: all methods accept `uaType string` parameter alongside `carrier`
+- `Dialoger` interface: `Create` accepts `uaType`, `CleanupResult` includes `UAType`, `SizeByCarrierAndUA()` returns `map[string]map[string]int`
+- `exporter.go`: UA classification on every request packet, `resolveUA()` helper, ua_type propagation through all trackers
+- `internal/service/metrics.go`: all Prometheus metrics use `[]string{"carrier", "ua_type"}` labels, `UpdateSessionsByCarrierAndUA` for gauge updates
+- `internal/dto/sip.go`: `Packet.UserAgent []byte` field added
+- `internal/config/config.go`: `UserAgentsConfigPath` env var added
+- `internal/server/server.go`: `NewServer` accepts `*ua.Classifier`
+- `cmd/main.go`: loads UA config, passes classifier to server
+- All metric examples in docs updated with `{carrier="...",ua_type="..."}` labels
+- `test/e2e/load/load_test.go`: `newTestEnvWithCarrierAndUA`, `allocatePortsN`, `getMetricWithLabel` helpers; fixed `nat.Port` → `string` and `ContainerStats` API for testcontainers-go v0.42.0
+
+### Fixed
+- `sip_exporter_sessions` gauge now includes `ua_type` dimension via `SizeByCarrierAndUA()`
+- `test/e2e/load/load_test.go`: compilation with testcontainers-go v0.42.0 (`WithPort` string, `ContainerStatsOptions` struct)
+
 ## 0.12.0
 ### Added
 - 10 new SIP response status code counters: 181 (Call Is Being Forwarded), 182 (Queued), 405 (Method Not Allowed), 481 (Dialog/Transaction Does Not Exist), 487 (Request Terminated), 488 (Not Acceptable Here), 501 (Not Implemented), 502 (Bad Gateway), 604 (Does Not Exist Anywhere), 606 (Not Acceptable)

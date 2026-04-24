@@ -10,11 +10,13 @@ type (
 		expiresAt time.Time
 		createdAt time.Time
 		carrier   string
+		uaType    string
 	}
 
 	CleanupResult struct {
 		Duration time.Duration
 		Carrier  string
+		UAType   string
 	}
 
 	dialogs struct {
@@ -22,10 +24,10 @@ type (
 		storage map[string]dialogEntry
 	}
 	Dialoger interface {
-		Create(dialogID string, expiresAt time.Time, createdAt time.Time, carrier string)
+		Create(dialogID string, expiresAt time.Time, createdAt time.Time, carrier string, uaType string)
 		Delete(dialogID string) CleanupResult
 		Size() int
-		SizeByCarrier() map[string]int
+		SizeByCarrierAndUA() map[string]map[string]int
 		Cleanup() []CleanupResult
 	}
 )
@@ -48,12 +50,12 @@ func (c *dialogs) Delete(dialogID string) CleanupResult {
 	delete(c.storage, dialogID)
 	d := time.Since(entry.createdAt)
 	if d < 0 {
-		return CleanupResult{Carrier: entry.carrier}
+		return CleanupResult{Carrier: entry.carrier, UAType: entry.uaType}
 	}
-	return CleanupResult{Duration: d, Carrier: entry.carrier}
+	return CleanupResult{Duration: d, Carrier: entry.carrier, UAType: entry.uaType}
 }
 
-func (c *dialogs) Create(dialogID string, expiresAt time.Time, createdAt time.Time, carrier string) {
+func (c *dialogs) Create(dialogID string, expiresAt time.Time, createdAt time.Time, carrier string, uaType string) {
 	c.m.Lock()
 	defer c.m.Unlock()
 	if _, exists := c.storage[dialogID]; !exists {
@@ -61,6 +63,7 @@ func (c *dialogs) Create(dialogID string, expiresAt time.Time, createdAt time.Ti
 			expiresAt: expiresAt,
 			createdAt: createdAt,
 			carrier:   carrier,
+			uaType:    uaType,
 		}
 	}
 }
@@ -71,12 +74,15 @@ func (c *dialogs) Size() int {
 	return len(c.storage)
 }
 
-func (c *dialogs) SizeByCarrier() map[string]int {
+func (c *dialogs) SizeByCarrierAndUA() map[string]map[string]int {
 	c.m.Lock()
 	defer c.m.Unlock()
-	result := make(map[string]int)
+	result := make(map[string]map[string]int)
 	for _, entry := range c.storage {
-		result[entry.carrier]++
+		if result[entry.carrier] == nil {
+			result[entry.carrier] = make(map[string]int)
+		}
+		result[entry.carrier][entry.uaType]++
 	}
 	return result
 }
@@ -90,7 +96,7 @@ func (c *dialogs) Cleanup() []CleanupResult {
 		if now.After(entry.expiresAt) {
 			d := now.Sub(entry.createdAt)
 			if d > 0 {
-				results = append(results, CleanupResult{Duration: d, Carrier: entry.carrier})
+				results = append(results, CleanupResult{Duration: d, Carrier: entry.carrier, UAType: entry.uaType})
 			}
 			delete(c.storage, id)
 		}

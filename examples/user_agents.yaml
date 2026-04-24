@@ -1,0 +1,48 @@
+# SIP Exporter — User-Agent Classification Configuration
+#
+# Maps SIP User-Agent header values to labels using regex patterns.
+# All Prometheus SIP metrics will include a "ua_type" label.
+#
+# Usage:
+#   SIP_EXPORTER_USER_AGENTS_CONFIG=/etc/sip-exporter/user_agents.yaml
+#
+# Rules:
+#   1. User-Agent header is extracted from all SIP packets (requests and responses).
+#   2. First matching pattern wins — order matters.
+#   3. If no pattern matches, ua_type="other" is used.
+#   4. If this config is not set, all metrics use ua_type="other".
+#   5. Patterns are case-insensitive.
+
+user_agents:
+  - regex: '(?i)^Yealink'
+    label: yealink
+
+  - regex: '(?i)^Grandstream'
+    label: grandstream
+
+  - regex: '(?i)^Cisco/SPA'
+    label: cisco_spa
+
+  - regex: '(?i)^Kamailio'
+    label: kamailio
+
+  - regex: '(?i)^OpenSIPS'
+    label: opensips
+
+  - regex: '(?i)^Asterisk'
+    label: asterisk
+
+  - regex: '(?i)^FreeSWITCH'
+    label: freeswitch
+
+  - regex: '(?i)^Linphone'
+    label: linphone
+
+  - regex: '(?i)^MicroSIP'
+    label: microsip
+
+  - regex: '(?i)^Zoiper'
+    label: zoiper
+
+  - regex: '(?i)^SIPp'
+    label: sipp

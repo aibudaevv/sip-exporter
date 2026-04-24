@@ -145,6 +145,53 @@ func newSharedTestEnvWithConfig(ctx context.Context, t *testing.T, carriersYAML 
 	return env
 }
 
+func loadUserAgentsYAML(t *testing.T, filename string) string {
+	t.Helper()
+	path := filepath.Join(projectRoot, "test", "e2e", filename)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return string(data)
+}
+
+func newSharedTestEnvWithUAConfig(ctx context.Context, t *testing.T, uaYAMLFile string) *sharedTestEnv {
+	t.Helper()
+	uaYAML := loadUserAgentsYAML(t, uaYAMLFile)
+	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
+
+	env := &sharedTestEnv{
+		testEnv: testEnv{
+			sippPort:       sippPort,
+			sippClientPort: sippClientPort,
+		},
+		exporterPort: exporterHTTPPort,
+	}
+	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, "", uaYAML)
+	env.endpoint = endpoint
+	env.container = container
+	registerExporterCleanup(t, container, exporterHTTPPort)
+	return env
+}
+
+func newSharedTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML string, carrierName string, uaYAMLFile string) *sharedTestEnv {
+	t.Helper()
+	uaYAML := loadUserAgentsYAML(t, uaYAMLFile)
+	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
+
+	env := &sharedTestEnv{
+		testEnv: testEnv{
+			sippPort:       sippPort,
+			sippClientPort: sippClientPort,
+			carrier:        carrierName,
+		},
+		exporterPort: exporterHTTPPort,
+	}
+	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML, uaYAML)
+	env.endpoint = endpoint
+	env.container = container
+	registerExporterCleanup(t, container, exporterHTTPPort)
+	return env
+}
+
 func (s *sharedTestEnv) restart(t *testing.T) {
 	t.Helper()
 
@@ -261,6 +308,11 @@ type sippResult struct {
 
 func startExporterWithConfig(ctx context.Context, t *testing.T, exporterPort, sippPort, sippClientPort string, carriersYAML string) (string, testcontainers.Container) {
 	t.Helper()
+	return startExporterWithConfigAndUA(ctx, t, exporterPort, sippPort, sippClientPort, carriersYAML, "")
+}
+
+func startExporterWithConfigAndUA(ctx context.Context, t *testing.T, exporterPort, sippPort, sippClientPort string, carriersYAML string, userAgentsYAML string) (string, testcontainers.Container) {
+	t.Helper()
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -287,10 +339,20 @@ func startExporterWithConfig(ctx context.Context, t *testing.T, exporterPort, si
 		require.NoError(t, tmpFile.Close())
 		t.Cleanup(func() { os.Remove(tmpFile.Name()) })
 
-		mounts = testcontainers.Mounts(
-			testcontainers.BindMount(tmpFile.Name(), "/etc/sip-exporter/carriers.yaml"),
-		)
+		mounts = append(mounts, testcontainers.BindMount(tmpFile.Name(), "/etc/sip-exporter/carriers.yaml"))
 		envVars["SIP_EXPORTER_CARRIERS_CONFIG"] = "/etc/sip-exporter/carriers.yaml"
+	}
+
+	if userAgentsYAML != "" {
+		tmpFile, err := os.CreateTemp("", "user-agents-*.yaml")
+		require.NoError(t, err)
+		_, err = tmpFile.WriteString(userAgentsYAML)
+		require.NoError(t, err)
+		require.NoError(t, tmpFile.Close())
+		t.Cleanup(func() { os.Remove(tmpFile.Name()) })
+
+		mounts = append(mounts, testcontainers.BindMount(tmpFile.Name(), "/etc/sip-exporter/user_agents.yaml"))
+		envVars["SIP_EXPORTER_USER_AGENTS_CONFIG"] = "/etc/sip-exporter/user_agents.yaml"
 	}
 
 	req := testcontainers.ContainerRequest{
@@ -419,6 +481,16 @@ func getMetricWithLabel(t *testing.T, endpoint string, metricName string, labelF
 func getMetricWithCarrier(t *testing.T, endpoint string, metricName string, carrier string) float64 {
 	t.Helper()
 	return getMetricWithLabel(t, endpoint, metricName, `carrier="`+carrier+`"`)
+}
+
+func getMetricWithUA(t *testing.T, endpoint string, metricName string, uaType string) float64 {
+	t.Helper()
+	return getMetricWithLabel(t, endpoint, metricName, `ua_type="`+uaType+`"`)
+}
+
+func getMetricWithCarrierAndUA(t *testing.T, endpoint string, metricName string, carrier string, uaType string) float64 {
+	t.Helper()
+	return getMetricWithLabel(t, endpoint, metricName, `carrier="`+carrier+`",ua_type="`+uaType+`"`)
 }
 
 // runSippScenario starts SIPp server and client via docker CLI (host network mode),

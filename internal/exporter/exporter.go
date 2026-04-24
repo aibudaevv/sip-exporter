@@ -17,6 +17,7 @@ import (
 	"gitlab.com/sip-exporter/internal/carriers"
 	"gitlab.com/sip-exporter/internal/dto"
 	"gitlab.com/sip-exporter/internal/service"
+	"gitlab.com/sip-exporter/internal/ua"
 )
 
 var (
@@ -55,22 +56,26 @@ const (
 	htonsShift            = 8
 	htonsMask     uint16  = 0xFF00
 	miB                   = 1024 * 1024
+	defaultUAType         = "other"
 )
 
 type (
 	registerEntry struct {
 		timestamp time.Time
 		carrier   string
+		uaType    string
 	}
 
 	inviteEntry struct {
 		timestamp time.Time
 		carrier   string
+		uaType    string
 	}
 
 	optionsEntry struct {
 		timestamp time.Time
 		carrier   string
+		uaType    string
 	}
 
 	exporter struct {
@@ -79,6 +84,7 @@ type (
 		messages        chan []byte
 		services        services
 		carrierResolver *carriers.Resolver
+		uaClassifier    *ua.Classifier
 		registerTracker map[string]registerEntry
 		registerMutex   sync.RWMutex
 		inviteTracker   map[string]inviteEntry
@@ -98,13 +104,19 @@ type (
 	}
 )
 
-func NewExporter(m service.Metricser, d service.Dialoger, resolver *carriers.Resolver) Exporter {
+func NewExporter(
+	m service.Metricser,
+	d service.Dialoger,
+	resolver *carriers.Resolver,
+	classifier *ua.Classifier,
+) Exporter {
 	return &exporter{
 		services: services{
 			metricser: m,
 			dialoger:  d,
 		},
 		carrierResolver: resolver,
+		uaClassifier:    classifier,
 		messages:        make(chan []byte, messagesChanSize),
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
@@ -219,6 +231,10 @@ func (e *exporter) resolveCarrier(ipHeader []byte) string {
 	return carrier
 }
 
+func (e *exporter) resolveUA(userAgent []byte) string {
+	return e.uaClassifier.Classify(userAgent)
+}
+
 func (e *exporter) sipDialogMetricsUpdate() {
 	ticker := time.NewTicker(1 * time.Second)
 	for {
@@ -230,13 +246,13 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		s := e.services.dialoger.Size()
 
 		for _, r := range results {
-			e.services.metricser.SessionCompleted(r.Carrier)
-			e.services.metricser.UpdateSPD(r.Carrier, r.Duration)
+			e.services.metricser.SessionCompleted(r.Carrier, r.UAType)
+			e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.Duration)
 		}
 
 		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", len(results)))
 
-		e.services.metricser.UpdateSessionsByCarrier(e.services.dialoger.SizeByCarrier())
+		e.services.metricser.UpdateSessionsByCarrierAndUA(e.services.dialoger.SizeByCarrierAndUA())
 	}
 }
 
@@ -452,6 +468,10 @@ func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
 			p.CSeq.ID = id
 		case bytes.Equal(header, []byte("Session-Expires")):
 			p.SessionExpires = extractSessionExpires(value)
+		case bytes.Equal(header, []byte("User-Agent")):
+			if p.UserAgent == nil {
+				p.UserAgent = value
+			}
 		}
 	}
 
@@ -466,24 +486,26 @@ func (e *exporter) handleMessage(carrier string, rawPacket []byte) error {
 
 	zap.L().Debug("parsed packet", zap.Any("packet", packet))
 
+	uaType := e.resolveUA(packet.UserAgent)
+
 	if packet.IsResponse {
-		e.handleResponse(carrier, packet)
+		e.handleResponse(carrier, uaType, packet)
 	} else {
-		e.handleRequest(carrier, packet)
+		e.handleRequest(carrier, uaType, packet)
 	}
 
 	return nil
 }
 
-func (e *exporter) handleRequest(carrier string, packet dto.Packet) {
-	e.services.metricser.Request(carrier, packet.Method)
+func (e *exporter) handleRequest(carrier string, uaType string, packet dto.Packet) {
+	e.services.metricser.Request(carrier, uaType, packet.Method)
 
 	if bytes.Equal(packet.Method, []byte("REGISTER")) {
-		e.storeRegisterTime(string(packet.CallID), carrier)
+		e.storeRegisterTime(string(packet.CallID), carrier, uaType)
 	}
 
 	if bytes.Equal(packet.Method, []byte("INVITE")) {
-		e.storeInviteTime(string(packet.CallID), carrier)
+		e.storeInviteTime(string(packet.CallID), carrier, uaType)
 	}
 
 	if bytes.Equal(packet.Method, []byte("CANCEL")) {
@@ -491,70 +513,79 @@ func (e *exporter) handleRequest(carrier string, packet dto.Packet) {
 	}
 
 	if bytes.Equal(packet.Method, []byte("OPTIONS")) {
-		e.storeOptionsTime(string(packet.CallID), carrier)
+		e.storeOptionsTime(string(packet.CallID), carrier, uaType)
 	}
 }
 
-func (e *exporter) handleResponse(packetCarrier string, packet dto.Packet) {
+func (e *exporter) handleResponse(packetCarrier string, packetUAType string, packet dto.Packet) {
 	isInviteResponse := bytes.Equal(packet.CSeq.Method, []byte("INVITE"))
 	isRegisterResponse := bytes.Equal(packet.CSeq.Method, []byte("REGISTER"))
 	is200OK := bytes.Equal(packet.ResponseStatus, []byte("200"))
 
 	carrier := packetCarrier
+	uaType := packetUAType
 
 	if isInviteResponse {
-		carrier = e.handleInviteResponse(carrier, packet)
+		carrier, uaType = e.handleInviteResponse(carrier, uaType, packet)
 	}
 
 	if isRegisterResponse {
-		if regCarrier, ok := e.getRegisterCarrier(string(packet.CallID)); ok {
+		if regCarrier, regUAType, ok := e.getRegisterCarrier(string(packet.CallID)); ok {
 			carrier = regCarrier
+			uaType = regUAType
 		}
 	}
 
 	isOptionsResponse := bytes.Equal(packet.CSeq.Method, []byte("OPTIONS"))
 	if isOptionsResponse {
-		if delayMs, optionsCarrier, ok := e.measureOptionsTime(string(packet.CallID)); ok {
-			e.services.metricser.UpdateORD(optionsCarrier, delayMs)
+		if delayMs, optionsCarrier, optionsUAType, ok := e.measureOptionsTime(string(packet.CallID)); ok {
+			e.services.metricser.UpdateORD(optionsCarrier, optionsUAType, delayMs)
 		}
 	}
 
 	e.services.metricser.ResponseWithMetrics(
 		carrier,
+		uaType,
 		packet.ResponseStatus,
 		isInviteResponse,
 		is200OK,
 	)
 
 	if is200OK {
-		e.handle200OKResponse(carrier, packet, isRegisterResponse)
+		e.handle200OKResponse(carrier, uaType, packet, isRegisterResponse)
 	} else if isRegisterResponse {
-		e.handleRegisterNon200Response(carrier, packet)
+		e.handleRegisterNon200Response(carrier, uaType, packet)
 	}
 }
 
-func (e *exporter) handleInviteResponse(fallbackCarrier string, packet dto.Packet) string {
+func (e *exporter) handleInviteResponse(
+	fallbackCarrier string,
+	fallbackUAType string,
+	packet dto.Packet,
+) (string, string) {
 	carrier := fallbackCarrier
-	if inviteCarrier, ok := e.getInviteCarrier(string(packet.CallID)); ok {
+	uaType := fallbackUAType
+	if inviteCarrier, inviteUAType, ok := e.getInviteCarrier(string(packet.CallID)); ok {
 		carrier = inviteCarrier
+		uaType = inviteUAType
 	}
 	if len(packet.ResponseStatus) > 0 {
 		if packet.ResponseStatus[0] == '1' {
-			if delayMs, inviteCarrier, ok := e.readInviteEntry(string(packet.CallID)); ok {
-				e.services.metricser.UpdateTTR(inviteCarrier, delayMs)
+			if delayMs, inviteCarrier, inviteUAType, ok := e.readInviteEntry(string(packet.CallID)); ok {
+				e.services.metricser.UpdateTTR(inviteCarrier, inviteUAType, delayMs)
 			}
 		} else {
 			e.removeInviteTime(string(packet.CallID))
 		}
 	}
-	return carrier
+	return carrier, uaType
 }
 
-func (e *exporter) handleRegisterNon200Response(carrier string, packet dto.Packet) {
+func (e *exporter) handleRegisterNon200Response(carrier string, uaType string, packet dto.Packet) {
 	if len(packet.ResponseStatus) > 0 && packet.ResponseStatus[0] == '3' {
 		if startTime, ok := e.getRegisterTime(string(packet.CallID)); ok {
 			delayMs := float64(time.Since(startTime).Nanoseconds()) / nanosPerMs
-			e.services.metricser.UpdateLRD(carrier, delayMs)
+			e.services.metricser.UpdateLRD(carrier, uaType, delayMs)
 			e.removeRegisterTime(string(packet.CallID))
 			zap.L().Debug("LRD measured",
 				zap.String("call_id", string(packet.CallID)),
@@ -568,27 +599,27 @@ func (e *exporter) handleRegisterNon200Response(carrier string, packet dto.Packe
 		zap.ByteString("status", packet.ResponseStatus))
 }
 
-func (e *exporter) handle200OKResponse(carrier string, packet dto.Packet, isRegisterResponse bool) {
+func (e *exporter) handle200OKResponse(carrier string, uaType string, packet dto.Packet, isRegisterResponse bool) {
 	zap.L().Debug("handle message", zap.ByteString("200 OK cseq method", packet.CSeq.Method))
 
 	if bytes.Equal(packet.CSeq.Method, []byte("INVITE")) {
-		if err := e.handleInvite200OK(carrier, packet); err != nil {
+		if err := e.handleInvite200OK(carrier, uaType, packet); err != nil {
 			zap.L().Error("handle INVITE 200 OK", zap.Error(err))
 		}
 	}
 
 	if bytes.Equal(packet.CSeq.Method, []byte("BYE")) {
-		if err := e.handleBye200OK(carrier, packet); err != nil {
+		if err := e.handleBye200OK(packet); err != nil {
 			zap.L().Error("handle BYE 200 OK", zap.Error(err))
 		}
 	}
 
 	if isRegisterResponse {
-		e.handleRegister200OK(carrier, packet)
+		e.handleRegister200OK(carrier, uaType, packet)
 	}
 }
 
-func (e *exporter) handleInvite200OK(carrier string, packet dto.Packet) error {
+func (e *exporter) handleInvite200OK(carrier string, uaType string, packet dto.Packet) error {
 	dialogID, err := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag)
 	if err != nil {
 		return fmt.Errorf("normalize dialog ID: %w", err)
@@ -603,11 +634,11 @@ func (e *exporter) handleInvite200OK(carrier string, packet dto.Packet) error {
 	zap.L().Debug("create sip dialog",
 		zap.String("session", dialogID),
 		zap.Int("expires_sec", expires))
-	e.services.dialoger.Create(dialogID, expiresAt, time.Now(), carrier)
+	e.services.dialoger.Create(dialogID, expiresAt, time.Now(), carrier, uaType)
 	return nil
 }
 
-func (e *exporter) handleBye200OK(_ string, packet dto.Packet) error {
+func (e *exporter) handleBye200OK(packet dto.Packet) error {
 	dialogID, err := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag)
 	if err != nil {
 		return fmt.Errorf("normalize dialog ID: %w", err)
@@ -616,20 +647,20 @@ func (e *exporter) handleBye200OK(_ string, packet dto.Packet) error {
 	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
 	result := e.services.dialoger.Delete(dialogID)
 	if result.Duration > 0 {
-		e.services.metricser.UpdateSPD(result.Carrier, result.Duration)
-		e.services.metricser.SessionCompleted(result.Carrier)
+		e.services.metricser.UpdateSPD(result.Carrier, result.UAType, result.Duration)
+		e.services.metricser.SessionCompleted(result.Carrier, result.UAType)
 	}
 	return nil
 }
 
-func (e *exporter) handleRegister200OK(carrier string, packet dto.Packet) {
+func (e *exporter) handleRegister200OK(carrier string, uaType string, packet dto.Packet) {
 	startTime, ok := e.getRegisterTime(string(packet.CallID))
 	if !ok {
 		return
 	}
 
 	delayMs := float64(time.Since(startTime).Nanoseconds()) / nanosPerMs
-	e.services.metricser.UpdateRRD(carrier, delayMs)
+	e.services.metricser.UpdateRRD(carrier, uaType, delayMs)
 	e.removeRegisterTime(string(packet.CallID))
 	zap.L().Debug("RRD measured",
 		zap.String("call_id", string(packet.CallID)),
@@ -709,12 +740,13 @@ func extractSessionExpires(value []byte) int {
 	return n
 }
 
-func (e *exporter) storeRegisterTime(callID string, carrier string) {
+func (e *exporter) storeRegisterTime(callID string, carrier string, uaType string) {
 	e.registerMutex.Lock()
 	defer e.registerMutex.Unlock()
 	e.registerTracker[callID] = registerEntry{
 		timestamp: time.Now(),
 		carrier:   carrier,
+		uaType:    uaType,
 	}
 }
 
@@ -731,22 +763,23 @@ func (e *exporter) removeRegisterTime(callID string) {
 	delete(e.registerTracker, callID)
 }
 
-func (e *exporter) storeInviteTime(callID string, carrier string) {
+func (e *exporter) storeInviteTime(callID string, carrier string, uaType string) {
 	e.inviteMutex.Lock()
 	defer e.inviteMutex.Unlock()
 	e.inviteTracker[callID] = inviteEntry{
 		timestamp: time.Now(),
 		carrier:   carrier,
+		uaType:    uaType,
 	}
 }
 
-func (e *exporter) readInviteEntry(callID string) (float64, string, bool) {
+func (e *exporter) readInviteEntry(callID string) (float64, string, string, bool) {
 	e.inviteMutex.RLock()
 	defer e.inviteMutex.RUnlock()
 
 	entry, ok := e.inviteTracker[callID]
 	if !ok {
-		return 0, "", false
+		return 0, "", defaultUAType, false
 	}
 
 	delayMs := float64(time.Since(entry.timestamp).Nanoseconds()) / nanosPerMs
@@ -755,7 +788,7 @@ func (e *exporter) readInviteEntry(callID string) (float64, string, bool) {
 		zap.String("call_id", callID),
 		zap.Float64("delay_ms", delayMs))
 
-	return delayMs, entry.carrier, true
+	return delayMs, entry.carrier, entry.uaType, true
 }
 
 func (e *exporter) removeInviteTime(callID string) {
@@ -764,42 +797,43 @@ func (e *exporter) removeInviteTime(callID string) {
 	delete(e.inviteTracker, callID)
 }
 
-func (e *exporter) getRegisterCarrier(callID string) (string, bool) {
+func (e *exporter) getRegisterCarrier(callID string) (string, string, bool) {
 	e.registerMutex.RLock()
 	defer e.registerMutex.RUnlock()
 	entry, ok := e.registerTracker[callID]
 	if !ok {
-		return "", false
+		return "", defaultUAType, false
 	}
-	return entry.carrier, true
+	return entry.carrier, entry.uaType, true
 }
 
-func (e *exporter) getInviteCarrier(callID string) (string, bool) {
+func (e *exporter) getInviteCarrier(callID string) (string, string, bool) {
 	e.inviteMutex.RLock()
 	defer e.inviteMutex.RUnlock()
 	entry, ok := e.inviteTracker[callID]
 	if !ok {
-		return "", false
+		return "", defaultUAType, false
 	}
-	return entry.carrier, true
+	return entry.carrier, entry.uaType, true
 }
 
-func (e *exporter) storeOptionsTime(callID string, carrier string) {
+func (e *exporter) storeOptionsTime(callID string, carrier string, uaType string) {
 	e.optionsMutex.Lock()
 	defer e.optionsMutex.Unlock()
 	e.optionsTracker[callID] = optionsEntry{
 		timestamp: time.Now(),
 		carrier:   carrier,
+		uaType:    uaType,
 	}
 }
 
-func (e *exporter) measureOptionsTime(callID string) (float64, string, bool) {
+func (e *exporter) measureOptionsTime(callID string) (float64, string, string, bool) {
 	e.optionsMutex.Lock()
 	defer e.optionsMutex.Unlock()
 
 	entry, ok := e.optionsTracker[callID]
 	if !ok {
-		return 0, "", false
+		return 0, "", defaultUAType, false
 	}
 
 	delete(e.optionsTracker, callID)
@@ -809,7 +843,7 @@ func (e *exporter) measureOptionsTime(callID string) (float64, string, bool) {
 		zap.String("call_id", callID),
 		zap.Float64("delay_ms", delayMs))
 
-	return delayMs, entry.carrier, true
+	return delayMs, entry.carrier, entry.uaType, true
 }
 
 func (e *exporter) cleanupOptionsTracker() {

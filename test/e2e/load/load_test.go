@@ -20,7 +20,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/go-connections/nat"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
@@ -38,6 +37,8 @@ type (
 		endpoint          string
 		sippPort          string
 		sippClientPort    string
+		sippPort2         string
+		sippClientPort2   string
 		exporterContainer testcontainers.Container
 	}
 
@@ -103,6 +104,18 @@ func allocatePorts() (exporter, sipp, sippClient string) {
 	return strconv.Itoa(base), strconv.Itoa(base + 1), strconv.Itoa(base + 2)
 }
 
+func allocatePortsN(n int) []string {
+	portMu.Lock()
+	defer portMu.Unlock()
+	base := nextBasePort
+	nextBasePort += n
+	result := make([]string, n)
+	for i := 0; i < n; i++ {
+		result[i] = strconv.Itoa(base + i)
+	}
+	return result
+}
+
 func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
 	t.Helper()
 	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
@@ -137,7 +150,7 @@ func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
 		NetworkMode: "host",
 		Env:         envVars,
 		WaitingFor: wait.ForHTTP("/metrics").
-			WithPort(nat.Port(exporterHTTPPort)).
+			WithPort(exporterHTTPPort + "/tcp").
 			WithStartupTimeout(120 * time.Second),
 	}
 
@@ -187,6 +200,124 @@ func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
 	}
 }
 
+func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML, userAgentsYAML string) *testEnv {
+	t.Helper()
+	ports := allocatePortsN(5)
+	exporterHTTPPort := ports[0]
+	sippPort := ports[1]
+	sippClientPort := ports[2]
+	sippPort2 := ports[3]
+	sippClientPort2 := ports[4]
+
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+
+	exporterLogLevel := "error"
+	if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
+		exporterLogLevel = "debug"
+	}
+
+	envVars := map[string]string{
+		"SIP_EXPORTER_INTERFACE":    testInterface,
+		"SIP_EXPORTER_HTTP_PORT":    exporterHTTPPort,
+		"SIP_EXPORTER_SIP_PORT":     sippPort,
+		"SIP_EXPORTER_SIPS_PORT":    sippPort2,
+		"SIP_EXPORTER_LOGGER_LEVEL": exporterLogLevel,
+	}
+
+	if maxProcs := os.Getenv("SIP_EXPORTER_E2E_GOMAXPROCS"); maxProcs != "" {
+		envVars["GOMAXPROCS"] = maxProcs
+	}
+
+	if goDebug := os.Getenv("SIP_EXPORTER_E2E_GODEBUG"); goDebug != "" {
+		envVars["GODEBUG"] = goDebug
+	}
+
+	var mounts testcontainers.ContainerMounts
+
+	if carriersYAML != "" {
+		tmpFile, tmpErr := os.CreateTemp("", "carriers-*.yaml")
+		require.NoError(t, tmpErr)
+		_, writeErr := tmpFile.WriteString(carriersYAML)
+		require.NoError(t, writeErr)
+		require.NoError(t, tmpFile.Close())
+		t.Cleanup(func() { os.Remove(tmpFile.Name()) })
+
+		mounts = append(mounts, testcontainers.BindMount(tmpFile.Name(), "/etc/sip-exporter/carriers.yaml"))
+		envVars["SIP_EXPORTER_CARRIERS_CONFIG"] = "/etc/sip-exporter/carriers.yaml"
+	}
+
+	if userAgentsYAML != "" {
+		tmpFile, tmpErr := os.CreateTemp("", "user-agents-*.yaml")
+		require.NoError(t, tmpErr)
+		_, writeErr := tmpFile.WriteString(userAgentsYAML)
+		require.NoError(t, writeErr)
+		require.NoError(t, tmpFile.Close())
+		t.Cleanup(func() { os.Remove(tmpFile.Name()) })
+
+		mounts = append(mounts, testcontainers.BindMount(tmpFile.Name(), "/etc/sip-exporter/user_agents.yaml"))
+		envVars["SIP_EXPORTER_USER_AGENTS_CONFIG"] = "/etc/sip-exporter/user_agents.yaml"
+	}
+
+	req := testcontainers.ContainerRequest{
+		Image:       exporterImage,
+		Privileged:  true,
+		NetworkMode: "host",
+		Env:         envVars,
+		Mounts:      mounts,
+		WaitingFor: wait.ForHTTP("/metrics").
+			WithPort(exporterHTTPPort + "/tcp").
+			WithStartupTimeout(120 * time.Second),
+	}
+
+	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+		Logger:           log.New(io.Discard, "", 0),
+	})
+	if err != nil && c != nil {
+		logs, logErr := c.Logs(ctx)
+		if logErr == nil {
+			defer logs.Close()
+			logBytes, _ := io.ReadAll(logs)
+			t.Logf("Exporter logs:\n%s", strings.TrimSpace(string(logBytes)))
+		}
+	}
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
+			logs, logErr := c.Logs(context.Background())
+			if logErr == nil {
+				defer logs.Close()
+				logBytes, _ := io.ReadAll(logs)
+				t.Logf("Exporter logs:\n%s", strings.TrimSpace(string(logBytes)))
+			}
+		}
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer stopCancel()
+		_ = c.Stop(stopCtx, nil)
+		_ = c.Terminate(ctx)
+		for i := 0; i < 10; i++ {
+			conn, dialErr := net.DialTimeout("tcp", "localhost:"+exporterHTTPPort, 500*time.Millisecond)
+			if dialErr != nil {
+				return
+			}
+			conn.Close()
+			time.Sleep(500 * time.Millisecond)
+		}
+	})
+
+	return &testEnv{
+		endpoint:          fmt.Sprintf("http://localhost:%s", exporterHTTPPort),
+		sippPort:          sippPort,
+		sippClientPort:    sippClientPort,
+		sippPort2:         sippPort2,
+		sippClientPort2:   sippClientPort2,
+		exporterContainer: c,
+	}
+}
+
 func getMetric(t *testing.T, endpoint, metricName string) float64 {
 	t.Helper()
 
@@ -198,6 +329,29 @@ func getMetric(t *testing.T, endpoint, metricName string) float64 {
 	require.NoError(t, err)
 
 	re := regexp.MustCompile(`^` + metricName + `(?:\{[^}]*\})?\s+([0-9.]+)`)
+	for _, line := range strings.Split(string(body), "\n") {
+		matches := re.FindStringSubmatch(strings.TrimSpace(line))
+		if len(matches) == 2 {
+			val, parseErr := strconv.ParseFloat(matches[1], 64)
+			require.NoError(t, parseErr)
+			return val
+		}
+	}
+
+	return 0
+}
+
+func getMetricWithLabel(t *testing.T, endpoint, metricName, labelFilter string) float64 {
+	t.Helper()
+
+	resp, err := http.Get(endpoint + "/metrics") //nolint:noctx // test helper
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	re := regexp.MustCompile(`^` + metricName + `\{[^}]*` + regexp.QuoteMeta(labelFilter) + `[^}]*\}\s+([0-9.]+)`)
 	for _, line := range strings.Split(string(body), "\n") {
 		matches := re.FindStringSubmatch(strings.TrimSpace(line))
 		if len(matches) == 2 {
@@ -313,7 +467,7 @@ func (s *statsCollector) start(ctx context.Context, containerID string) {
 	ctx, s.cancel = context.WithCancel(ctx)
 	go func() {
 		defer close(s.done)
-		resp, err := s.dockerCli.ContainerStats(ctx, containerID, true)
+		resp, err := s.dockerCli.ContainerStats(ctx, containerID, client.ContainerStatsOptions{Stream: true})
 		if err != nil {
 			return
 		}

@@ -35,6 +35,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - 🔧 **Configurable SIP ports** — monitor custom ports via environment variables
 - 📈 **Prometheus native** — standard `/metrics` endpoint for scraping
 - 🏷️ **Per-carrier metrics** — CIDR-based carrier resolution for all SIP metrics
+- 🏷️ **Per-device-type metrics** — User-Agent classification for all SIP metrics
 
 ## Quick Start
 
@@ -49,8 +50,11 @@ services:
       - SIP_EXPORTER_INTERFACE=eth0
       # Optional: carrier labels for per-provider metrics
       # - SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml
+      # Optional: user-agent labels for per-device-type metrics
+      # - SIP_EXPORTER_USER_AGENTS_CONFIG=/etc/sip-exporter/user_agents.yaml
     # volumes:
     #   - ./examples/carriers.yaml:/etc/sip-exporter/carriers.yaml:ro
+    #   - ./examples/user_agents.yaml:/etc/sip-exporter/user_agents.yaml:ro
 ```
 
 ```bash
@@ -100,12 +104,13 @@ Environment variables:
 * `SIP_EXPORTER_SIPS_PORT` - SIPS port (default 5061)
 * `SIP_EXPORTER_OBJECT_FILE_PATH` - path to eBPF object file (default /usr/local/bin/sip.o)
 * `SIP_EXPORTER_CARRIERS_CONFIG` - path to carriers YAML config (optional, see [`examples/carriers.yaml`](examples/carriers.yaml))
+* `SIP_EXPORTER_USER_AGENTS_CONFIG` - path to user-agents YAML config (optional, see [`examples/user_agents.yaml`](examples/user_agents.yaml))
 
 The container must run with `--privileged` and `--network host` (eBPF requires `CAP_BPF` and access to the network interface). See [Security](docs/SECURITY.md) for details on why this is safe.
 
 ## Metrics
 
-All metrics are exposed at `/metrics` in Prometheus exposition format. All SIP metrics include a `carrier` label for per-provider breakdown (configurable via CIDR mapping). The exporter provides:
+All metrics are exposed at `/metrics` in Prometheus exposition format. All SIP metrics include `carrier` and `ua_type` labels for multi-dimensional analysis. The exporter provides:
 
 - **Traffic counters** — SIP request types (INVITE, BYE, REGISTER, etc.) and response status codes (100–606)
 - **Active sessions** — real-time count of active SIP dialogs
@@ -160,10 +165,10 @@ carriers:
 After that, metrics look like:
 
 ```
-sip_exporter_invite_total{carrier="telecom-alpha"}  1523
-sip_exporter_ser{carrier="telecom-alpha"}            95.2
-sip_exporter_ser{carrier="telecom-beta"}             87.4
-sip_exporter_ser{carrier="other"}                     0.0
+sip_exporter_invite_total{carrier="telecom-alpha",ua_type="other"}  1523
+sip_exporter_ser{carrier="telecom-alpha",ua_type="other"}            95.2
+sip_exporter_ser{carrier="telecom-beta",ua_type="other"}             87.4
+sip_exporter_ser{carrier="other",ua_type="other"}                     0.0
 ```
 
 **Things to know:**
@@ -175,6 +180,86 @@ sip_exporter_ser{carrier="other"}                     0.0
 - Each carrier can have multiple CIDRs, and multiple carriers can be defined
 
 Full config reference with examples: [`examples/carriers.yaml`](examples/carriers.yaml)
+
+### Per-Device-Type Metrics (User-Agent Classification)
+
+If you need to see metrics **per SIP device type** — IP phones vs softphones vs SBCs — the User-Agent classification feature adds a `ua_type` label to every metric.
+
+The exporter reads the `User-Agent` SIP header from each request and matches it against regex patterns in a YAML config. Every metric — INVITE count, SER, active sessions, SPD duration — gets a `ua_type` label, so you can build separate Grafana dashboards and alerts for each device family.
+
+**How it works:**
+
+The exporter parses the `User-Agent` header of every SIP request and matches it against regex patterns in a YAML config. When a phone with `User-Agent: Yealink SIP-T46S 66.15.0.10` sends an INVITE, the exporter matches `^Yealink` and tags all metrics for this call with `ua_type="yealink"`.
+
+This means:
+- INVITE from Yealink phone → metrics labeled `ua_type="yealink"`
+- INVITE from Grandstream phone → metrics labeled `ua_type="grandstream"`
+- INVITE with unknown User-Agent → metrics labeled `ua_type="other"`
+
+**Setup:**
+
+```yaml
+# docker-compose.yml
+services:
+  sip-exporter:
+    image: frzq/sip-exporter:latest
+    privileged: true
+    network_mode: host
+    environment:
+      - SIP_EXPORTER_INTERFACE=eth0
+      - SIP_EXPORTER_USER_AGENTS_CONFIG=/etc/sip-exporter/user_agents.yaml
+    volumes:
+      - ./user_agents.yaml:/etc/sip-exporter/user_agents.yaml:ro
+```
+
+```yaml
+# user_agents.yaml — map User-Agent patterns to device types
+user_agents:
+  - regex: '(?i)^Yealink'
+    label: yealink
+  - regex: '(?i)^Grandstream'
+    label: grandstream
+  - regex: '(?i)^Cisco/SPA'
+    label: cisco_spa
+  - regex: '(?i)^Kamailio'
+    label: kamailio
+  - regex: '(?i)^Asterisk'
+    label: asterisk
+```
+
+After that, metrics look like:
+
+```
+sip_exporter_invite_total{carrier="telecom-alpha",ua_type="yealink"}     1523
+sip_exporter_ser{carrier="telecom-alpha",ua_type="yealink"}               95.2
+sip_exporter_ser{carrier="telecom-alpha",ua_type="grandstream"}           87.4
+sip_exporter_ser{carrier="telecom-alpha",ua_type="other"}                  0.0
+```
+
+**Things to know:**
+
+- UA type is determined at **request time** (INVITE/REGISTER/OPTIONS), using the same tracker mechanism as carrier. Responses inherit `ua_type` from the request tracker, not from the response's own headers
+- The `User-Agent` header is extracted from all SIP packets, but SIP responses typically use the `Server` header, so in practice only requests provide meaningful classification
+- If no pattern matches → `ua_type="other"`
+- When patterns overlap, **first match wins** — list specific patterns before broad ones
+- Without the config file, all metrics get `ua_type="other"` — nothing breaks
+- Patterns are case-insensitive when using `(?i)` prefix
+- Works **together with carrier** — every metric has both `carrier` and `ua_type` labels for two-dimensional analysis
+
+**Combined carrier + ua_type queries:**
+
+```promql
+# SER for Yealink phones on a specific carrier
+sip_exporter_ser{carrier="telecom-alpha",ua_type="yealink"}
+
+# Active sessions by device type (across all carriers)
+sum by (ua_type) (sip_exporter_sessions)
+
+# INVITE rate per carrier per device type
+sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
+```
+
+Full config reference with examples: [`examples/user_agents.yaml`](examples/user_agents.yaml)
 
 ## Development
 

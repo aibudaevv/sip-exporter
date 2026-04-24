@@ -2,37 +2,46 @@
 
 All metrics are exposed at `/metrics` endpoint in Prometheus exposition format.
 
-## Carrier Label
+## Labels
 
-All SIP metrics include a `carrier` label that identifies the carrier that **initiated** the SIP transaction. The carrier is resolved from the source IP address of the **request** (INVITE, REGISTER, OPTIONS) and then propagated to all related responses and dialog lifecycle events.
+All SIP metrics include **two labels** for multi-dimensional analysis:
 
 | Label | Value | Description |
 |-------|-------|-------------|
-| `carrier` | Carrier name from config | Determined at request time from source IP, inherited by responses via tracker |
+| `carrier` | Carrier name from config | Source IP → CIDR mapping, resolved at request time |
+| `ua_type` | UA type from config | `User-Agent` header → regex mapping, resolved at request time |
+
+Both labels default to `"other"` when not configured or when no pattern matches.
 
 **Example:**
 ```
-sip_exporter_invite_total{carrier="carrier-a"} 1523
-sip_exporter_200_total{carrier="carrier-a"} 847
-sip_exporter_ser{carrier="carrier-a"} 95.2
+sip_exporter_invite_total{carrier="carrier-a",ua_type="yealink"} 1523
+sip_exporter_200_total{carrier="carrier-a",ua_type="yealink"} 847
+sip_exporter_ser{carrier="carrier-a",ua_type="yealink"} 95.2
 ```
 
-### Metrics WITHOUT `carrier` label
+### Metrics WITHOUT `carrier` and `ua_type` labels
 
-The following metrics are system-level and do not include the `carrier` label:
+The following metrics are system-level and do not include either label:
 
 - `sip_exporter_system_error_total` — internal exporter errors (not SIP traffic)
 - `sip_exporter_packets_total` — counts all parsed SIP packets regardless of source
 
 ### Default behavior
 
-If no carriers config is provided (`SIP_EXPORTER_CARRIERS_CONFIG` not set), all SIP metrics use `carrier="other"`.
+- If no carriers config is provided (`SIP_EXPORTER_CARRIERS_CONFIG` not set), all SIP metrics use `carrier="other"`.
+- If no user-agents config is provided (`SIP_EXPORTER_USER_AGENTS_CONFIG` not set), all SIP metrics use `ua_type="other"`.
+
+### Carrier Label
+
+The `carrier` label identifies the network operator that **initiated** the SIP transaction. It is resolved from the source IP address of the **request** (INVITE, REGISTER, OPTIONS) and propagated to all related responses and dialog lifecycle events via tracker.
 
 ### Configuration
 
 | Variable | Default | Required | Description |
 |----------|---------|----------|-------------|
 | `SIP_EXPORTER_CARRIERS_CONFIG` | — | no | Path to YAML file with CIDR-to-carrier mapping |
+| `SIP_EXPORTER_USER_AGENTS_CONFIG` | — | no | Path to YAML file with User-Agent-to-type mapping |
 
 **Config file format:**
 ```yaml
@@ -127,11 +136,11 @@ BYE                     | 10.0.1.5   | carrier-A         | IP (request)
 200 OK to BYE           | 10.0.2.5   | carrier-A         | dialog entry
 
 Result:
-  invite_total{carrier="carrier-A"} += 1
-  invite200OK_total{carrier="carrier-A"} += 1
-  sessions{carrier="carrier-A"} = N
-  sessionCompleted_total{carrier="carrier-A"} += 1
-  SER{carrier="carrier-A"} is correct
+  invite_total{carrier="carrier-A",ua_type="yealink"} += 1
+  invite200OK_total{carrier="carrier-A",ua_type="yealink"} += 1
+  sessions{carrier="carrier-A",ua_type="yealink"} = N
+  sessionCompleted_total{carrier="carrier-A",ua_type="yealink"} += 1
+  SER{carrier="carrier-A",ua_type="yealink"} is correct
 
 Carrier-B metrics: only response counters for non-tracked packets (if any)
 ```
@@ -143,13 +152,169 @@ Carrier-B metrics: only response counters for non-tracked packets (if any)
 
 ---
 
+## User-Agent Type Label
+
+The `ua_type` label identifies the **type of SIP device** that sent the request, based on the `User-Agent` header. It is resolved from the header value using regex patterns defined in a YAML config, and propagated to all related responses and dialog lifecycle events via the same tracker mechanism as `carrier`.
+
+**Why it matters:**
+- Different SIP devices have different failure patterns — IP phones fail differently than softphones or SBCs
+- Troubleshooting: "Yealink phones get 408 timeouts, but Grandstream phones don't" — impossible to see without `ua_type`
+- Capacity planning: "how many calls come from mobile clients vs desk phones?"
+
+### Default behavior
+
+If no user-agents config is provided (`SIP_EXPORTER_USER_AGENTS_CONFIG` not set), all SIP metrics use `ua_type="other"`.
+
+### Configuration
+
+| Variable | Default | Required | Description |
+|----------|---------|----------|-------------|
+| `SIP_EXPORTER_USER_AGENTS_CONFIG` | — | no | Path to YAML file with User-Agent regex patterns |
+
+**Config file format:**
+```yaml
+user_agents:
+  - regex: '(?i)^Yealink'
+    label: yealink
+
+  - regex: '(?i)^Grandstream'
+    label: grandstream
+
+  - regex: '(?i)^Cisco/SPA'
+    label: cisco_spa
+
+  - regex: '(?i)^Kamailio'
+    label: kamailio
+
+  - regex: '(?i)^Asterisk'
+    label: asterisk
+
+  - regex: '(?i)^FreeSWITCH'
+    label: freeswitch
+```
+
+See [`examples/user_agents.yaml`](../examples/user_agents.yaml) for a complete example with 11 patterns.
+
+#### How to fill the configuration
+
+- `regex` — Go-compatible regular expression matched against the full `User-Agent` header value. Use `(?i)` prefix for case-insensitive matching, or anchoring like `^Yealink` to match from the start.
+- `label` — arbitrary string used as the `ua_type` label value in Prometheus. Avoid spaces and special characters.
+- **Order matters**: first matching regex wins (first match wins).
+- `User-Agent` values not matching any regex → `ua_type="other"`.
+- If `SIP_EXPORTER_USER_AGENTS_CONFIG` is not set → all metrics use `ua_type="other"`.
+
+**Recommendations:**
+- Group patterns by **device family** (Yealink SIP-T46S, SIP-T42S → both match `^Yealink`).
+- Use broad patterns for device families, specific patterns for problematic models.
+- Typical categories: IP phones (Yealink, Grandstream, Cisco), softphones (MicroSIP, Zoiper, Linphone), servers (Asterisk, Kamailio, FreeSWITCH), SBCs.
+- The `User-Agent` header is extracted from all SIP packets (requests and responses). However, SIP responses typically use the `Server` header instead of `User-Agent`, so in practice only requests provide meaningful classification.
+
+### Resolution algorithm
+
+UA type is determined at **request time** and inherited by all responses in the same transaction, using the same tracker mechanism as `carrier`:
+
+```
+1. SIP request arrives (INVITE/REGISTER/OPTIONS):
+   - User-Agent header extracted from SIP packet
+   - Header value matched against configured regex patterns (first match wins)
+   - If no match → ua_type="other"
+   - ua_type saved in tracker by Call-ID (alongside carrier)
+
+2. SIP response arrives:
+   - ua_type retrieved from tracker (by Call-ID), NOT from response packet
+   - INVITE responses → ua_type from inviteTracker
+   - REGISTER responses → ua_type from registerTracker
+   - OPTIONS responses → ua_type from optionsTracker
+   - If tracker entry expired (TTL 60s) → falls back to response packet's User-Agent
+   - If response has no User-Agent → ua_type="other"
+
+3. Dialog lifecycle:
+   - Dialog created with ua_type from INVITE tracker
+   - BYE 200 OK → ua_type from dialog entry
+   - Session-Expires expiry → ua_type from dialog entry
+```
+
+### ua_type semantics per metric
+
+| Metric | UA type source | Meaning |
+|--------|---------------|---------|
+| `invite_total{ua_type}` | INVITE User-Agent header | How many calls this device type initiated |
+| `200_total{ua_type}` | Request tracker | How many 200 OK for this device type's transactions |
+| `sessions{ua_type}` | INVITE tracker → dialog | Active dialogs from this device type |
+| SER, SEER, ISA, SCR, ASR, NER | INVITE tracker | Quality of calls from this device type |
+| RRD | Register tracker | Registration delay for this device type |
+| TTR | Invite tracker | Time to first response for this device type |
+| SPD | Dialog (INVITE ua_type) | Duration of sessions from this device type |
+| ORD | Options tracker | OPTIONS response delay for this device type |
+| LRD | Register tracker | Registration redirect delay for this device type |
+| `system_error_total` | No ua_type | System-level errors |
+| `packets_total` | No ua_type | All SIP packets |
+
+### Example scenario
+
+```
+Configuration:
+  ua_type patterns:
+    - regex: '(?i)^Yealink'     → label: yealink
+    - regex: '(?i)^Grandstream'  → label: grandstream
+
+Scenario: Yealink phone calls through SIP platform
+
+Packet                      | User-Agent              | ua_type resolved | Source
+INVITE                      | Yealink SIP-T46S 66.15  | yealink          | header → tracker
+100 Trying                  | (none / Server header)  | yealink          | inviteTracker
+200 OK                      | (none / Server header)  | yealink          | inviteTracker
+ACK                         | Yealink SIP-T46S 66.15  | yealink          | header (request)
+BYE                         | Yealink SIP-T46S 66.15  | yealink          | header (request)
+200 OK to BYE               | (none / Server header)  | yealink          | dialog entry
+
+Result:
+  invite_total{carrier="...",ua_type="yealink"} += 1
+  sessions{carrier="...",ua_type="yealink"} = N
+  SER{carrier="...",ua_type="yealink"} is correct
+  SPD{carrier="...",ua_type="yealink"} observed
+
+Grandstream phone INVITE with "Grandstream GXP2160" → ua_type="grandstream"
+Unknown device with "SomeUnknownClient/1.0"         → ua_type="other"
+No User-Agent header at all                         → ua_type="other"
+```
+
+**Analytical meaning:** `ua_type` represents the **device type of the call initiator**. This aligns with:
+- Troubleshooting by device family ("Yealink phones have low SER")
+- Firmware issue detection ("specific model gets 503 errors")
+- Capacity planning per device type ("how many calls from mobile softphones?")
+
+### Combined carrier + ua_type analysis
+
+Both labels work together for two-dimensional analysis:
+
+```promql
+# SER per carrier AND device type
+sip_exporter_ser
+
+# SER for Yealink phones on carrier-a
+sip_exporter_ser{carrier="carrier-a",ua_type="yealink"}
+
+# Compare Yealink vs Grandstream on same carrier
+sip_exporter_ser{carrier="carrier-a",ua_type="yealink"}
+  - sip_exporter_ser{carrier="carrier-a",ua_type="grandstream"}
+
+# Active sessions by device type (across all carriers)
+sum by (ua_type) (sip_exporter_sessions)
+
+# INVITE rate per carrier per device type
+sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
+```
+
+---
+
 ## SIP traffic
 
-`sip_exporter_packets_total`: total number of parsed SIP packets (requests + responses). **No `carrier` label.**
+`sip_exporter_packets_total`: total number of parsed SIP packets (requests + responses). **No `carrier` or `ua_type` label.**
 
 ## Active sessions
 
-`sip_exporter_sessions{carrier="..."}`: number of active SIP dialogs (RFC 3261).
+`sip_exporter_sessions{carrier="...",ua_type="..."}`: number of active SIP dialogs (RFC 3261).
 
 **How dialogs are counted:**
 - A dialog is created when a `200 OK` response is received for an `INVITE` request
@@ -164,65 +329,68 @@ Carrier-B metrics: only response counters for non-tracked packets (if any)
 
 ## SIP request metrics
 
-`sip_exporter_invite_total{carrier="..."}`: total number of received SIP INVITE requests.  
-`sip_exporter_register_total{carrier="..."}`: total number of received SIP REGISTER requests.  
-`sip_exporter_options_total{carrier="..."}`: total number of received SIP OPTIONS requests.  
-`sip_exporter_cancel_total{carrier="..."}`: total number of received SIP CANCEL requests.  
-`sip_exporter_bye_total{carrier="..."}`: total number of received SIP BYE requests.  
-`sip_exporter_ack_total{carrier="..."}`: total number of received SIP ACK requests.  
-`sip_exporter_publish_total{carrier="..."}`: total number of received SIP PUBLISH requests.  
-`sip_exporter_prack_total{carrier="..."}`: total number of received SIP PRACK requests.  
-`sip_exporter_notify_total{carrier="..."}`: total number of received SIP NOTIFY requests.  
-`sip_exporter_subscribe_total{carrier="..."}`: total number of received SIP SUBSCRIBE requests.  
-`sip_exporter_refer_total{carrier="..."}`: total number of received SIP REFER requests.  
-`sip_exporter_info_total{carrier="..."}`: total number of received SIP INFO requests.  
-`sip_exporter_update_total{carrier="..."}`: total number of received SIP UPDATE requests.
+`sip_exporter_invite_total{carrier="...",ua_type="..."}`: total number of received SIP INVITE requests.  
+`sip_exporter_register_total{carrier="...",ua_type="..."}`: total number of received SIP REGISTER requests.  
+`sip_exporter_options_total{carrier="...",ua_type="..."}`: total number of received SIP OPTIONS requests.  
+`sip_exporter_cancel_total{carrier="...",ua_type="..."}`: total number of received SIP CANCEL requests.  
+`sip_exporter_bye_total{carrier="...",ua_type="..."}`: total number of received SIP BYE requests.  
+`sip_exporter_ack_total{carrier="...",ua_type="..."}`: total number of received SIP ACK requests.  
+`sip_exporter_publish_total{carrier="...",ua_type="..."}`: total number of received SIP PUBLISH requests.  
+`sip_exporter_prack_total{carrier="...",ua_type="..."}`: total number of received SIP PRACK requests.  
+`sip_exporter_notify_total{carrier="...",ua_type="..."}`: total number of received SIP NOTIFY requests.  
+`sip_exporter_subscribe_total{carrier="...",ua_type="..."}`: total number of received SIP SUBSCRIBE requests.  
+`sip_exporter_refer_total{carrier="...",ua_type="..."}`: total number of received SIP REFER requests.  
+`sip_exporter_info_total{carrier="...",ua_type="..."}`: total number of received SIP INFO requests.  
+`sip_exporter_update_total{carrier="...",ua_type="..."}`: total number of received SIP UPDATE requests.
 
 ## SIP response metrics (by status code)
 
-`sip_exporter_100_total{carrier="..."}`: total number of SIP 100 Trying responses.  
-`sip_exporter_180_total{carrier="..."}`: total number of SIP 180 Ringing responses.  
-`sip_exporter_181_total{carrier="..."}`: total number of SIP 181 Call Is Being Forwarded responses.  
-`sip_exporter_182_total{carrier="..."}`: total number of SIP 182 Queued responses.  
-`sip_exporter_183_total{carrier="..."}`: total number of SIP 183 Session Progress responses.  
-`sip_exporter_200_total{carrier="..."}`: total number of SIP 200 OK responses.  
-`sip_exporter_202_total{carrier="..."}`: total number of SIP 202 Accepted responses.  
-`sip_exporter_300_total{carrier="..."}`: total number of SIP 300 Multiple Choices responses.  
-`sip_exporter_302_total{carrier="..."}`: total number of SIP 302 Moved Temporarily responses.  
-`sip_exporter_400_total{carrier="..."}`: total number of SIP 400 Bad Request responses.  
-`sip_exporter_401_total{carrier="..."}`: total number of SIP 401 Unauthorized responses.  
-`sip_exporter_403_total{carrier="..."}`: total number of SIP 403 Forbidden responses.  
-`sip_exporter_404_total{carrier="..."}`: total number of SIP 404 Not Found responses.  
-`sip_exporter_405_total{carrier="..."}`: total number of SIP 405 Method Not Allowed responses.  
-`sip_exporter_proxy_authentication_required_total{carrier="..."}`: total number of SIP 407 Proxy Authentication Required responses.  
-`sip_exporter_408_total{carrier="..."}`: total number of SIP 408 Request Timeout responses.  
-`sip_exporter_480_total{carrier="..."}`: total number of SIP 480 Temporarily Unavailable responses.  
-`sip_exporter_481_total{carrier="..."}`: total number of SIP 481 Dialog/Transaction Does Not Exist responses.  
-`sip_exporter_486_total{carrier="..."}`: total number of SIP 486 Busy Here responses.  
-`sip_exporter_487_total{carrier="..."}`: total number of SIP 487 Request Terminated responses.  
-`sip_exporter_488_total{carrier="..."}`: total number of SIP 488 Not Acceptable Here responses.  
-`sip_exporter_500_total{carrier="..."}`: total number of SIP 500 Server Internal Error responses.  
-`sip_exporter_501_total{carrier="..."}`: total number of SIP 501 Not Implemented responses.  
-`sip_exporter_502_total{carrier="..."}`: total number of SIP 502 Bad Gateway responses.  
-`sip_exporter_503_total{carrier="..."}`: total number of SIP 503 Service Unavailable responses.  
-`sip_exporter_504_total{carrier="..."}`: total number of SIP 504 Server Time-out responses.  
-`sip_exporter_600_total{carrier="..."}`: total number of SIP 600 Busy Everywhere responses.  
-`sip_exporter_603_total{carrier="..."}`: total number of SIP 603 Decline responses.  
-`sip_exporter_604_total{carrier="..."}`: total number of SIP 604 Does Not Exist Anywhere responses.  
-`sip_exporter_606_total{carrier="..."}`: total number of SIP 606 Not Acceptable responses.  
+`sip_exporter_100_total{carrier="...",ua_type="..."}`: total number of SIP 100 Trying responses.  
+`sip_exporter_180_total{carrier="...",ua_type="..."}`: total number of SIP 180 Ringing responses.  
+`sip_exporter_181_total{carrier="...",ua_type="..."}`: total number of SIP 181 Call Is Being Forwarded responses.  
+`sip_exporter_182_total{carrier="...",ua_type="..."}`: total number of SIP 182 Queued responses.  
+`sip_exporter_183_total{carrier="...",ua_type="..."}`: total number of SIP 183 Session Progress responses.  
+`sip_exporter_200_total{carrier="...",ua_type="..."}`: total number of SIP 200 OK responses.  
+`sip_exporter_202_total{carrier="...",ua_type="..."}`: total number of SIP 202 Accepted responses.  
+`sip_exporter_300_total{carrier="...",ua_type="..."}`: total number of SIP 300 Multiple Choices responses.  
+`sip_exporter_302_total{carrier="...",ua_type="..."}`: total number of SIP 302 Moved Temporarily responses.  
+`sip_exporter_400_total{carrier="...",ua_type="..."}`: total number of SIP 400 Bad Request responses.  
+`sip_exporter_401_total{carrier="...",ua_type="..."}`: total number of SIP 401 Unauthorized responses.  
+`sip_exporter_403_total{carrier="...",ua_type="..."}`: total number of SIP 403 Forbidden responses.  
+`sip_exporter_404_total{carrier="...",ua_type="..."}`: total number of SIP 404 Not Found responses.  
+`sip_exporter_405_total{carrier="...",ua_type="..."}`: total number of SIP 405 Method Not Allowed responses.  
+`sip_exporter_proxy_authentication_required_total{carrier="...",ua_type="..."}`: total number of SIP 407 Proxy Authentication Required responses.  
+`sip_exporter_408_total{carrier="...",ua_type="..."}`: total number of SIP 408 Request Timeout responses.  
+`sip_exporter_480_total{carrier="...",ua_type="..."}`: total number of SIP 480 Temporarily Unavailable responses.  
+`sip_exporter_481_total{carrier="...",ua_type="..."}`: total number of SIP 481 Dialog/Transaction Does Not Exist responses.  
+`sip_exporter_486_total{carrier="...",ua_type="..."}`: total number of SIP 486 Busy Here responses.  
+`sip_exporter_487_total{carrier="...",ua_type="..."}`: total number of SIP 487 Request Terminated responses.  
+`sip_exporter_488_total{carrier="...",ua_type="..."}`: total number of SIP 488 Not Acceptable Here responses.  
+`sip_exporter_500_total{carrier="...",ua_type="..."}`: total number of SIP 500 Server Internal Error responses.  
+`sip_exporter_501_total{carrier="...",ua_type="..."}`: total number of SIP 501 Not Implemented responses.  
+`sip_exporter_502_total{carrier="...",ua_type="..."}`: total number of SIP 502 Bad Gateway responses.  
+`sip_exporter_503_total{carrier="...",ua_type="..."}`: total number of SIP 503 Service Unavailable responses.  
+`sip_exporter_504_total{carrier="...",ua_type="..."}`: total number of SIP 504 Server Time-out responses.  
+`sip_exporter_600_total{carrier="...",ua_type="..."}`: total number of SIP 600 Busy Everywhere responses.  
+`sip_exporter_603_total{carrier="...",ua_type="..."}`: total number of SIP 603 Decline responses.  
+`sip_exporter_604_total{carrier="...",ua_type="..."}`: total number of SIP 604 Does Not Exist Anywhere responses.  
+`sip_exporter_606_total{carrier="...",ua_type="..."}`: total number of SIP 606 Not Acceptable responses.  
 
 ## System metrics
 
-`sip_exporter_system_error_total`: total number internal SIP exporter errors. **No `carrier` label.**
+`sip_exporter_system_error_total`: total number internal SIP exporter errors. **No `carrier` or `ua_type` label.**
 
 ## RFC 6076 Performance Metrics
 
-All RFC 6076 metrics are **scoped per carrier** — each ratio/histogram is computed independently for each `carrier` label value. This allows comparing SER, SEER, ISA, SCR, ASR, NER across carriers in a single Prometheus query.
+All RFC 6076 metrics are **scoped per carrier and ua_type** — each ratio/histogram is computed independently for each `carrier` and `ua_type` label combination. This allows comparing SER, SEER, ISA, SCR, ASR, NER across carriers and device types in a single Prometheus query.
 
 **Example:**
 ```promql
 # SER per carrier
 sip_exporter_ser
+
+# Compare SER across carriers for a specific device type
+sip_exporter_ser{ua_type="yealink"}
 
 # Compare SER across carriers
 sip_exporter_ser{carrier="carrier-a"} - sip_exporter_ser{carrier="carrier-b"}
@@ -262,7 +430,7 @@ Dialogs are tracked with Session-Expires (RFC 4028). If no BYE is received befor
 
 ### Session Establishment Ratio (SER)
 
-`sip_exporter_ser{carrier="..."}`: percentage of successfully established sessions relative to total INVITE attempts.
+`sip_exporter_ser{carrier="...",ua_type="..."}`: percentage of successfully established sessions relative to total INVITE attempts.
 
 **Formula (RFC 6076 §4.6):**
 ```
@@ -280,7 +448,7 @@ SER = (INVITE → 200 OK) / (Total INVITE - INVITE → 3xx) × 100
 
 ### Session Establishment Effectiveness Ratio (SEER)
 
-`sip_exporter_seer{carrier="..."}`: percentage of "effective" INVITE responses relative to total non-redirected INVITE attempts.
+`sip_exporter_seer{carrier="...",ua_type="..."}`: percentage of "effective" INVITE responses relative to total non-redirected INVITE attempts.
 
 **Formula (RFC 6076 §4.7):**
 ```
@@ -311,7 +479,7 @@ SEER = (INVITE → 200, 480, 486, 600, 603) / (Total INVITE - INVITE → 3xx) ×
 
 ### Ineffective Session Attempts (ISA)
 
-`sip_exporter_isa{carrier="..."}`: percentage of INVITE requests that resulted in server error or timeout responses.
+`sip_exporter_isa{carrier="...",ua_type="..."}`: percentage of INVITE requests that resulted in server error or timeout responses.
 
 **Formula (RFC 6076 §4.8):**
 ```
@@ -352,7 +520,7 @@ ISA measures infrastructure health, not user experience. Unlike SER/SEER which m
 
 ### Session Completion Ratio (SCR)
 
-`sip_exporter_scr{carrier="..."}`: percentage of INVITE sessions that were fully completed (established and terminated) relative to total INVITE attempts.
+`sip_exporter_scr{carrier="...",ua_type="..."}`: percentage of INVITE sessions that were fully completed (established and terminated) relative to total INVITE attempts.
 
 **Formula (RFC 6076 §4.9):**
 ```
@@ -380,7 +548,7 @@ SCR = (Completed Sessions) / Total INVITE × 100
 
 ### Registration Request Delay (RRD)
 
-`sip_exporter_rrd{carrier="..."}`: histogram of delays in milliseconds between sending a REGISTER request and receiving a 200 OK response.
+`sip_exporter_rrd{carrier="...",ua_type="..."}`: histogram of delays in milliseconds between sending a REGISTER request and receiving a 200 OK response.
 
 **Formula (RFC 6076 §4.1):**
 ```
@@ -397,8 +565,8 @@ RRD = Time of 200 OK response - Time of REGISTER request
 # 95th percentile registration delay (all carriers)
 histogram_quantile(0.95, sum(rate(sip_exporter_rrd_bucket[5m])) by (le))
 
-# 95th percentile registration delay (specific carrier)
-histogram_quantile(0.95, sum(rate(sip_exporter_rrd_bucket{carrier="carrier-a"}[5m])) by (le))
+# 95th percentile registration delay (specific carrier and device type)
+histogram_quantile(0.95, sum(rate(sip_exporter_rrd_bucket{carrier="carrier-a",ua_type="yealink"}[5m])) by (le))
 
 # Average registration delay
 rate(sip_exporter_rrd_sum[5m]) / rate(sip_exporter_rrd_count[5m])
@@ -417,7 +585,7 @@ rate(sip_exporter_rrd_sum[5m]) / rate(sip_exporter_rrd_count[5m])
 
 ### Session Process Duration (SPD)
 
-`sip_exporter_spd{carrier="..."}`: histogram of completed SIP session durations in seconds.
+`sip_exporter_spd{carrier="...",ua_type="..."}`: histogram of completed SIP session durations in seconds.
 
 **Formula (RFC 6076 §4.5):**
 ```
@@ -437,8 +605,8 @@ SPD = Time of session end - Time of session start (200 OK to INVITE)
 # 99th percentile session duration (all carriers)
 histogram_quantile(0.99, sum(rate(sip_exporter_spd_bucket[5m])) by (le))
 
-# 99th percentile session duration (specific carrier)
-histogram_quantile(0.99, sum(rate(sip_exporter_spd_bucket{carrier="carrier-a"}[5m])) by (le))
+# 99th percentile session duration (specific carrier and device type)
+histogram_quantile(0.99, sum(rate(sip_exporter_spd_bucket{carrier="carrier-a",ua_type="yealink"}[5m])) by (le))
 
 # Average session duration
 rate(sip_exporter_spd_sum[5m]) / rate(sip_exporter_spd_count[5m])
@@ -457,7 +625,7 @@ rate(sip_exporter_spd_sum[5m]) / rate(sip_exporter_spd_count[5m])
 
 ### Time to First Response (TTR)
 
-`sip_exporter_ttr{carrier="..."}`: histogram of delays in milliseconds between an INVITE request and the first provisional (1xx) response.
+`sip_exporter_ttr{carrier="...",ua_type="..."}`: histogram of delays in milliseconds between an INVITE request and the first provisional (1xx) response.
 
 **Formula:**
 ```
@@ -476,8 +644,8 @@ TTR = Time of first 1xx response - Time of INVITE request
 # 95th percentile time to first response (all carriers)
 histogram_quantile(0.95, sum(rate(sip_exporter_ttr_bucket[5m])) by (le))
 
-# 95th percentile time to first response (specific carrier)
-histogram_quantile(0.95, sum(rate(sip_exporter_ttr_bucket{carrier="carrier-a"}[5m])) by (le))
+# 95th percentile time to first response (specific carrier and device type)
+histogram_quantile(0.95, sum(rate(sip_exporter_ttr_bucket{carrier="carrier-a",ua_type="yealink"}[5m])) by (le))
 
 # Average time to first response
 rate(sip_exporter_ttr_sum[5m]) / rate(sip_exporter_ttr_count[5m])
@@ -492,7 +660,7 @@ rate(sip_exporter_ttr_sum[5m]) / rate(sip_exporter_ttr_count[5m])
 
 ### Answer Seizure Ratio (ASR)
 
-`sip_exporter_asr{carrier="..."}`: percentage of INVITE requests that received a 200 OK response.
+`sip_exporter_asr{carrier="...",ua_type="..."}`: percentage of INVITE requests that received a 200 OK response.
 
 **Formula (ITU-T E.411):**
 ```
@@ -516,8 +684,8 @@ sip_exporter_ser - sip_exporter_asr
 
 **Carrier-scoped queries:**
 ```promql
-# ASR for a specific carrier
-sip_exporter_asr{carrier="carrier-a"}
+# ASR for a specific carrier and device type
+sip_exporter_asr{carrier="carrier-a",ua_type="yealink"}
 
 # Compare ASR across all carriers
 sip_exporter_asr
@@ -532,7 +700,7 @@ sip_exporter_asr
 
 ### Session Duration Counter (SDC)
 
-`sip_exporter_sdc_total{carrier="..."}`: total number of completed SIP sessions (Prometheus Counter).
+`sip_exporter_sdc_total{carrier="...",ua_type="..."}`: total number of completed SIP sessions (Prometheus Counter).
 
 - Counts sessions that ended via:
   1. `200 OK` received for `BYE` (normal termination), **OR**
@@ -544,8 +712,8 @@ sip_exporter_asr
 # Session completion rate (sessions per second, per carrier)
 rate(sip_exporter_sdc_total[5m])
 
-# Session completion rate for specific carrier
-rate(sip_exporter_sdc_total{carrier="carrier-a"}[5m])
+# Session completion rate for specific carrier and device type
+rate(sip_exporter_sdc_total{carrier="carrier-a",ua_type="yealink"}[5m])
 
 # Session completion rate per minute
 rate(sip_exporter_sdc_total[1m]) * 60
@@ -555,7 +723,7 @@ rate(sip_exporter_sdc_total[1m]) * 60
 
 ### Network Effectiveness Ratio (NER)
 
-`sip_exporter_ner{carrier="..."}`: percentage of INVITE requests that did **not** result in ineffective (infrastructure failure) responses.
+`sip_exporter_ner{carrier="...",ua_type="..."}`: percentage of INVITE requests that did **not** result in ineffective (infrastructure failure) responses.
 
 **Formula (GSMA IR.42):**
 ```
@@ -578,8 +746,8 @@ sip_exporter_ner
 # Verify NER = 100 - ISA
 sip_exporter_ner + sip_exporter_isa
 
-# NER for a specific carrier
-sip_exporter_ner{carrier="carrier-a"}
+# NER for a specific carrier and device type
+sip_exporter_ner{carrier="carrier-a",ua_type="yealink"}
 ```
 
 **Example values:**
@@ -591,7 +759,7 @@ sip_exporter_ner{carrier="carrier-a"}
 
 ### Ineffective Session Severity (ISS)
 
-`sip_exporter_iss_total{carrier="..."}`: total number of INVITE requests that resulted in ineffective responses (Prometheus Counter).
+`sip_exporter_iss_total{carrier="...",ua_type="..."}`: total number of INVITE requests that resulted in ineffective responses (Prometheus Counter).
 
 - Counts INVITE responses with status codes: `408`, `500`, `503`, `504`
 - Same codes used by ISA numerator, but exposed as an absolute Counter
@@ -618,7 +786,7 @@ rate(sip_exporter_iss_total[5m]) > 20
 
 ### OPTIONS Response Delay (ORD)
 
-`sip_exporter_ord{carrier="..."}`: histogram of delays in milliseconds between sending an OPTIONS request and receiving any response.
+`sip_exporter_ord{carrier="...",ua_type="..."}`: histogram of delays in milliseconds between sending an OPTIONS request and receiving any response.
 
 **Formula:**
 ```
@@ -635,8 +803,8 @@ ORD = Time of OPTIONS response - Time of OPTIONS request
 # 95th percentile OPTIONS response delay (all carriers)
 histogram_quantile(0.95, sum(rate(sip_exporter_ord_bucket[5m])) by (le))
 
-# 95th percentile OPTIONS response delay (specific carrier)
-histogram_quantile(0.95, sum(rate(sip_exporter_ord_bucket{carrier="carrier-a"}[5m])) by (le))
+# 95th percentile OPTIONS response delay (specific carrier and device type)
+histogram_quantile(0.95, sum(rate(sip_exporter_ord_bucket{carrier="carrier-a",ua_type="yealink"}[5m])) by (le))
 
 # Average OPTIONS response delay
 rate(sip_exporter_ord_sum[5m]) / rate(sip_exporter_ord_count[5m])
@@ -651,7 +819,7 @@ rate(sip_exporter_ord_sum[5m]) / rate(sip_exporter_ord_count[5m])
 
 ### Location Registration Delay (LRD)
 
-`sip_exporter_lrd{carrier="..."}`: histogram of delays in milliseconds between sending a REGISTER request and receiving a 3xx redirect response.
+`sip_exporter_lrd{carrier="...",ua_type="..."}`: histogram of delays in milliseconds between sending a REGISTER request and receiving a 3xx redirect response.
 
 **Formula:**
 ```
@@ -668,8 +836,8 @@ LRD = Time of REGISTER 3xx response - Time of REGISTER request
 # 95th percentile location registration delay (all carriers)
 histogram_quantile(0.95, sum(rate(sip_exporter_lrd_bucket[5m])) by (le))
 
-# 95th percentile location registration delay (specific carrier)
-histogram_quantile(0.95, sum(rate(sip_exporter_lrd_bucket{carrier="carrier-a"}[5m])) by (le))
+# 95th percentile location registration delay (specific carrier and device type)
+histogram_quantile(0.95, sum(rate(sip_exporter_lrd_bucket{carrier="carrier-a",ua_type="yealink"}[5m])) by (le))
 
 # Average location registration delay
 rate(sip_exporter_lrd_sum[5m]) / rate(sip_exporter_lrd_count[5m])

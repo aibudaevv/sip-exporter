@@ -17,6 +17,7 @@ import (
 	"gitlab.com/sip-exporter/internal/config"
 	"gitlab.com/sip-exporter/internal/exporter"
 	"gitlab.com/sip-exporter/internal/service"
+	"gitlab.com/sip-exporter/internal/ua"
 )
 
 const (
@@ -33,8 +34,8 @@ type (
 	}
 )
 
-func NewServer(resolver *carriers.Resolver) Server {
-	return &server{exporter: exporter.NewExporter(service.NewMetricser(), service.NewDialoger(), resolver)}
+func NewServer(resolver *carriers.Resolver, classifier *ua.Classifier) Server {
+	return &server{exporter: exporter.NewExporter(service.NewMetricser(), service.NewDialoger(), resolver, classifier)}
 }
 
 func (s *server) Run(cfg *config.App) error {

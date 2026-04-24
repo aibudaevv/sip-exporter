@@ -1,0 +1,7 @@
+user_agents:
+  - regex: '(?i)^Yealink'
+    label: yealink
+  - regex: '(?i)^Grandstream'
+    label: grandstream
+  - regex: '(?i)^SIPp'
+    label: sipp
