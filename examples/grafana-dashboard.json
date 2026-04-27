@@ -78,7 +78,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sip_exporter_sessions{carrier=~\"$carrier\",ua_type=~\"$ua_type\",ua_type=~\"$ua_type\"}",
+          "expr": "sip_exporter_sessions{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}",
           "legendFormat": "{{carrier}} / {{ua_type}}",
           "refId": "A"
         }
