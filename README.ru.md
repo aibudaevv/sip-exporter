@@ -34,6 +34,7 @@
 - 🔧 **Настраиваемые SIP-порты** — мониторинг нестандартных портов через переменные окружения
 - 📈 **Нативный Prometheus** — стандартный эндпоинт `/metrics`
 - 🏷️ **Метрики по операторам** — разрешение carrier на основе CIDR для всех SIP-метрик
+- 🏷️ **Метрики по типам устройств** — классификация User-Agent для всех SIP-метрик
 
 ## Быстрый старт
 
@@ -48,8 +49,11 @@ services:
       - SIP_EXPORTER_INTERFACE=eth0
       # Опционально: метки carrier для мониторинга по операторам
       # - SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml
+      # Опционально: метки ua_type для мониторинга по типам устройств
+      # - SIP_EXPORTER_USER_AGENTS_CONFIG=/etc/sip-exporter/user_agents.yaml
     # volumes:
     #   - ./examples/carriers.yaml:/etc/sip-exporter/carriers.yaml:ro
+    #   - ./examples/user_agents.yaml:/etc/sip-exporter/user_agents.yaml:ro
 ```
 
 ```bash
@@ -98,12 +102,13 @@ docker pull frzq/sip-exporter:latest
 * `SIP_EXPORTER_SIPS_PORT` — SIPS-порт (по умолчанию 5061)
 * `SIP_EXPORTER_OBJECT_FILE_PATH` — путь к eBPF-объектному файлу (по умолчанию /usr/local/bin/sip.o)
 * `SIP_EXPORTER_CARRIERS_CONFIG` — путь к YAML-конфигурации carriers (опционально, см. [`examples/carriers.yaml`](examples/carriers.yaml))
+* `SIP_EXPORTER_USER_AGENTS_CONFIG` — путь к YAML-конфигурации user-agents (опционально, см. [`examples/user_agents.yaml`](examples/user_agents.yaml))
 
 Контейнер должен запускаться с `--privileged` и `--network host` (eBPF требует `CAP_BPF` и доступ к сетевому интерфейсу). Подробнее о безопасности — в [Безопасность](docs/SECURITY.ru.md).
 
 ## Метрики
 
-Все метрики доступны на `/metrics` в формате Prometheus. Все SIP-метрики содержат лейбл `carrier` для разбивки по операторам (настраивается через CIDR-маппинг). Экспортер предоставляет:
+Все метрики доступны на `/metrics` в формате Prometheus. Все SIP-метрики содержат лейблы `carrier` и `ua_type` для многомерного анализа. Экспортер предоставляет:
 
 - **Счётчики трафика** — типы SIP-запросов (INVITE, BYE, REGISTER и т.д.) и коды ответов (100–606)
 - **Активные сессии** — количество активных SIP-диалогов в реальном времени
@@ -158,10 +163,10 @@ carriers:
 После настройки метрики выглядят так:
 
 ```
-sip_exporter_invite_total{carrier="telecom-alpha"}  1523
-sip_exporter_ser{carrier="telecom-alpha"}            95.2
-sip_exporter_ser{carrier="telecom-beta"}             87.4
-sip_exporter_ser{carrier="other"}                     0.0
+sip_exporter_invite_total{carrier="telecom-alpha",ua_type="other"}  1523
+sip_exporter_ser{carrier="telecom-alpha",ua_type="other"}            95.2
+sip_exporter_ser{carrier="telecom-beta",ua_type="other"}             87.4
+sip_exporter_ser{carrier="other",ua_type="other"}                     0.0
 ```
 
 **Важно знать:**
@@ -174,6 +179,86 @@ sip_exporter_ser{carrier="other"}                     0.0
 - CIDR-нотация обязательна — обычные IP-адреса без `/` не принимаются. Используйте `/32` для одного хоста, например `"10.226.97.5/32"` вместо `"10.226.97.5"`
 
 Полный пример конфигурации: [`examples/carriers.yaml`](examples/carriers.yaml)
+
+### Метрики по типам устройств (User-Agent)
+
+Если вам нужно видеть метрики **по типам SIP-устройств** — IP-телефоны, софтфоны, SBC — функция классификации User-Agent добавляет лейбл `ua_type` к каждой метрике.
+
+Экспортер читает заголовок `User-Agent` из каждого SIP-запроса и сопоставляет его с regex-паттернами из YAML-конфигурации. Каждая метрика — количество INVITE, SER, активные сессии, длительность SPD — получает лейбл `ua_type`, что позволяет строить отдельные дашборды Grafana и алерты для каждого семейства устройств.
+
+**Как это работает:**
+
+Экспортер парсит заголовок `User-Agent` каждого SIP-запроса и сопоставляет его с regex-паттернами из конфигурации. Когда телефон с `User-Agent: Yealink SIP-T46S 66.15.0.10` отправляет INVITE, экспортер находит совпадение с паттерном `^Yealink` и помечает все метрики этого звонка лейблом `ua_type="yealink"`.
+
+Это означает:
+- INVITE от телефона Yealink → метрики с `ua_type="yealink"`
+- INVITE от телефона Grandstream → метрики с `ua_type="grandstream"`
+- INVITE с неизвестным User-Agent → метрики с `ua_type="other"`
+
+**Настройка:**
+
+```yaml
+# docker-compose.yml
+services:
+  sip-exporter:
+    image: frzq/sip-exporter:latest
+    privileged: true
+    network_mode: host
+    environment:
+      - SIP_EXPORTER_INTERFACE=eth0
+      - SIP_EXPORTER_USER_AGENTS_CONFIG=/etc/sip-exporter/user_agents.yaml
+    volumes:
+      - ./user_agents.yaml:/etc/sip-exporter/user_agents.yaml:ro
+```
+
+```yaml
+# user_agents.yaml — привязка User-Agent паттернов к типам устройств
+user_agents:
+  - regex: '(?i)^Yealink'
+    label: yealink
+  - regex: '(?i)^Grandstream'
+    label: grandstream
+  - regex: '(?i)^Cisco/SPA'
+    label: cisco_spa
+  - regex: '(?i)^Kamailio'
+    label: kamailio
+  - regex: '(?i)^Asterisk'
+    label: asterisk
+```
+
+После настройки метрики выглядят так:
+
+```
+sip_exporter_invite_total{carrier="telecom-alpha",ua_type="yealink"}     1523
+sip_exporter_ser{carrier="telecom-alpha",ua_type="yealink"}               95.2
+sip_exporter_ser{carrier="telecom-alpha",ua_type="grandstream"}           87.4
+sip_exporter_ser{carrier="telecom-alpha",ua_type="other"}                  0.0
+```
+
+**Важно знать:**
+
+- Тип устройства определяется в момент **запроса** (INVITE/REGISTER/OPTIONS), используя тот же механизм трекера, что и carrier. Ответы наследуют `ua_type` из трекера запроса, а не из собственных заголовков ответа
+- Заголовок `User-Agent` извлекается из всех SIP-пакетов, но SIP-ответы обычно используют заголовок `Server`, поэтому на практике только запросы дают осмысленную классификацию
+- Если ни один паттерн не совпал → `ua_type="other"`
+- При пересечении паттернов **побеждает первое совпадение** — указывайте специфичные паттерны перед широкими
+- Без файла конфигурации все метрики получают `ua_type="other"` — ничего не ломается
+- Паттерны нечувствительны к регистру при использовании префикса `(?i)`
+- Работает **совместно с carrier** — каждая метрика имеет оба лейбла `carrier` и `ua_type` для двумерного анализа
+
+**Совместные запросы carrier + ua_type:**
+
+```promql
+# SER для телефонов Yealink у конкретного оператора
+sip_exporter_ser{carrier="telecom-alpha",ua_type="yealink"}
+
+# Активные сессии по типам устройств (по всем операторам)
+sum by (ua_type) (sip_exporter_sessions)
+
+# Частота INVITE по операторам и типам устройств
+sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
+```
+
+Полный пример конфигурации: [`examples/user_agents.yaml`](examples/user_agents.yaml)
 
 ## Разработка
 

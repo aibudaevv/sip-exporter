@@ -10,6 +10,7 @@ type (
 		CallID         []byte
 		CSeq           CSeq
 		SessionExpires int // seconds
+		UserAgent      []byte
 	}
 	From struct {
 		Addr []byte

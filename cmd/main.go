@@ -24,6 +24,7 @@ import (
 	"gitlab.com/sip-exporter/internal/carriers"
 	"gitlab.com/sip-exporter/internal/config"
 	"gitlab.com/sip-exporter/internal/server"
+	"gitlab.com/sip-exporter/internal/ua"
 	pkgLog "gitlab.com/sip-exporter/pkg/log"
 )
 
@@ -46,7 +47,16 @@ func main() {
 		zap.L().Info("carriers config loaded", zap.String("path", cfg.CarriersConfigPath))
 	}
 
-	srv := server.NewServer(resolver)
+	var classifier *ua.Classifier
+	if cfg.UserAgentsConfigPath != "" {
+		classifier, err = ua.LoadConfig(cfg.UserAgentsConfigPath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		zap.L().Info("user agents config loaded", zap.String("path", cfg.UserAgentsConfigPath))
+	}
+
+	srv := server.NewServer(resolver, classifier)
 	if err = srv.Run(cfg); err != nil {
 		log.Fatal(err)
 	}

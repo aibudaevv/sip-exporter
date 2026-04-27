@@ -78,8 +78,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sip_exporter_sessions{carrier=~\"$carrier\"}",
-          "legendFormat": "{{carrier}}",
+          "expr": "sip_exporter_sessions{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}",
+          "legendFormat": "{{carrier}} / {{ua_type}}",
           "refId": "A"
         }
       ],
@@ -198,7 +198,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(sip_exporter_invite_total{carrier=~\"$carrier\"}[5m]))",
+          "expr": "sum(rate(sip_exporter_invite_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m]))",
           "legendFormat": "INVITE/sec",
           "refId": "A"
         }
@@ -258,7 +258,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(sip_exporter_sdc_total{carrier=~\"$carrier\"}[5m]))",
+          "expr": "sum(rate(sip_exporter_sdc_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m]))",
           "legendFormat": "Completed/sec",
           "refId": "A"
         }
@@ -340,8 +340,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sip_exporter_ser{carrier=~\"$carrier\"}",
-              "legendFormat": "{{carrier}}",
+              "expr": "sip_exporter_ser{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}",
+              "legendFormat": "{{carrier}} / {{ua_type}}",
               "refId": "A"
             }
           ],
@@ -408,8 +408,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sip_exporter_seer{carrier=~\"$carrier\"}",
-              "legendFormat": "{{carrier}}",
+              "expr": "sip_exporter_seer{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}",
+              "legendFormat": "{{carrier}} / {{ua_type}}",
               "refId": "A"
             }
           ],
@@ -476,8 +476,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sip_exporter_isa{carrier=~\"$carrier\"}",
-              "legendFormat": "{{carrier}}",
+              "expr": "sip_exporter_isa{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}",
+              "legendFormat": "{{carrier}} / {{ua_type}}",
               "refId": "A"
             }
           ],
@@ -544,8 +544,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sip_exporter_scr{carrier=~\"$carrier\"}",
-              "legendFormat": "{{carrier}}",
+              "expr": "sip_exporter_scr{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}",
+              "legendFormat": "{{carrier}} / {{ua_type}}",
               "refId": "A"
             }
           ],
@@ -612,8 +612,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sip_exporter_asr{carrier=~\"$carrier\"}",
-              "legendFormat": "{{carrier}}",
+              "expr": "sip_exporter_asr{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}",
+              "legendFormat": "{{carrier}} / {{ua_type}}",
               "refId": "A"
             }
           ],
@@ -680,8 +680,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sip_exporter_ner{carrier=~\"$carrier\"}",
-              "legendFormat": "{{carrier}}",
+              "expr": "sip_exporter_ner{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}",
+              "legendFormat": "{{carrier}} / {{ua_type}}",
               "refId": "A"
             }
           ],
@@ -772,8 +772,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sip_exporter_ser{carrier=~\"$carrier\"}",
-              "legendFormat": "{{carrier}} - SER",
+              "expr": "sip_exporter_ser{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}",
+              "legendFormat": "{{carrier}} / {{ua_type}} - SER",
               "refId": "A"
             },
             {
@@ -781,8 +781,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sip_exporter_seer{carrier=~\"$carrier\"}",
-              "legendFormat": "{{carrier}} - SEER",
+              "expr": "sip_exporter_seer{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}",
+              "legendFormat": "{{carrier}} / {{ua_type}} - SEER",
               "refId": "B"
             },
             {
@@ -790,8 +790,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sip_exporter_isa{carrier=~\"$carrier\"}",
-              "legendFormat": "{{carrier}} - ISA",
+              "expr": "sip_exporter_isa{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}",
+              "legendFormat": "{{carrier}} / {{ua_type}} - ISA",
               "refId": "C"
             },
             {
@@ -799,8 +799,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sip_exporter_scr{carrier=~\"$carrier\"}",
-              "legendFormat": "{{carrier}} - SCR",
+              "expr": "sip_exporter_scr{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}",
+              "legendFormat": "{{carrier}} / {{ua_type}} - SCR",
               "refId": "D"
             },
             {
@@ -808,8 +808,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sip_exporter_asr{carrier=~\"$carrier\"}",
-              "legendFormat": "{{carrier}} - ASR",
+              "expr": "sip_exporter_asr{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}",
+              "legendFormat": "{{carrier}} / {{ua_type}} - ASR",
               "refId": "E"
             },
             {
@@ -817,8 +817,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sip_exporter_ner{carrier=~\"$carrier\"}",
-              "legendFormat": "{{carrier}} - NER",
+              "expr": "sip_exporter_ner{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}",
+              "legendFormat": "{{carrier}} / {{ua_type}} - NER",
               "refId": "F"
             }
           ],
@@ -903,7 +903,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_rrd_bucket{carrier=~\"$carrier\"}[5m])) by (le))",
+              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_rrd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le))",
               "legendFormat": "RRD p95",
               "refId": "A"
             }
@@ -971,7 +971,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_ttr_bucket{carrier=~\"$carrier\"}[5m])) by (le))",
+              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_ttr_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le))",
               "legendFormat": "TTR p95",
               "refId": "A"
             }
@@ -1039,7 +1039,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_spd_bucket{carrier=~\"$carrier\"}[5m])) by (le))",
+              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_spd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le))",
               "legendFormat": "SPD p95",
               "refId": "A"
             }
@@ -1107,7 +1107,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_ord_bucket{carrier=~\"$carrier\"}[5m])) by (le))",
+              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_ord_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le))",
               "legendFormat": "ORD p95",
               "refId": "A"
             }
@@ -1197,8 +1197,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.5, sum(rate(sip_exporter_rrd_bucket{carrier=~\"$carrier\"}[5m])) by (le, carrier))",
-              "legendFormat": "{{carrier}} - p50",
+              "expr": "histogram_quantile(0.5, sum(rate(sip_exporter_rrd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le, carrier, ua_type))",
+              "legendFormat": "{{carrier}} / {{ua_type}} - p50",
               "refId": "A"
             },
             {
@@ -1206,8 +1206,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_rrd_bucket{carrier=~\"$carrier\"}[5m])) by (le, carrier))",
-              "legendFormat": "{{carrier}} - p95",
+              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_rrd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le, carrier, ua_type))",
+              "legendFormat": "{{carrier}} / {{ua_type}} - p95",
               "refId": "B"
             },
             {
@@ -1215,8 +1215,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.99, sum(rate(sip_exporter_rrd_bucket{carrier=~\"$carrier\"}[5m])) by (le, carrier))",
-              "legendFormat": "{{carrier}} - p99",
+              "expr": "histogram_quantile(0.99, sum(rate(sip_exporter_rrd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le, carrier, ua_type))",
+              "legendFormat": "{{carrier}} / {{ua_type}} - p99",
               "refId": "C"
             }
           ],
@@ -1305,8 +1305,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.5, sum(rate(sip_exporter_ttr_bucket{carrier=~\"$carrier\"}[5m])) by (le, carrier))",
-              "legendFormat": "{{carrier}} - p50",
+              "expr": "histogram_quantile(0.5, sum(rate(sip_exporter_ttr_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le, carrier, ua_type))",
+              "legendFormat": "{{carrier}} / {{ua_type}} - p50",
               "refId": "A"
             },
             {
@@ -1314,8 +1314,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_ttr_bucket{carrier=~\"$carrier\"}[5m])) by (le, carrier))",
-              "legendFormat": "{{carrier}} - p95",
+              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_ttr_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le, carrier, ua_type))",
+              "legendFormat": "{{carrier}} / {{ua_type}} - p95",
               "refId": "B"
             },
             {
@@ -1323,8 +1323,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.99, sum(rate(sip_exporter_ttr_bucket{carrier=~\"$carrier\"}[5m])) by (le, carrier))",
-              "legendFormat": "{{carrier}} - p99",
+              "expr": "histogram_quantile(0.99, sum(rate(sip_exporter_ttr_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le, carrier, ua_type))",
+              "legendFormat": "{{carrier}} / {{ua_type}} - p99",
               "refId": "C"
             }
           ],
@@ -1413,8 +1413,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.5, sum(rate(sip_exporter_spd_bucket{carrier=~\"$carrier\"}[5m])) by (le, carrier))",
-              "legendFormat": "{{carrier}} - p50",
+              "expr": "histogram_quantile(0.5, sum(rate(sip_exporter_spd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le, carrier, ua_type))",
+              "legendFormat": "{{carrier}} / {{ua_type}} - p50",
               "refId": "A"
             },
             {
@@ -1422,8 +1422,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_spd_bucket{carrier=~\"$carrier\"}[5m])) by (le, carrier))",
-              "legendFormat": "{{carrier}} - p95",
+              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_spd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le, carrier, ua_type))",
+              "legendFormat": "{{carrier}} / {{ua_type}} - p95",
               "refId": "B"
             },
             {
@@ -1431,8 +1431,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.99, sum(rate(sip_exporter_spd_bucket{carrier=~\"$carrier\"}[5m])) by (le, carrier))",
-              "legendFormat": "{{carrier}} - p99",
+              "expr": "histogram_quantile(0.99, sum(rate(sip_exporter_spd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le, carrier, ua_type))",
+              "legendFormat": "{{carrier}} / {{ua_type}} - p99",
               "refId": "C"
             }
           ],
@@ -1521,8 +1521,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.5, sum(rate(sip_exporter_ord_bucket{carrier=~\"$carrier\"}[5m])) by (le, carrier))",
-              "legendFormat": "{{carrier}} - p50",
+              "expr": "histogram_quantile(0.5, sum(rate(sip_exporter_ord_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le, carrier, ua_type))",
+              "legendFormat": "{{carrier}} / {{ua_type}} - p50",
               "refId": "A"
             },
             {
@@ -1530,8 +1530,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_ord_bucket{carrier=~\"$carrier\"}[5m])) by (le, carrier))",
-              "legendFormat": "{{carrier}} - p95",
+              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_ord_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le, carrier, ua_type))",
+              "legendFormat": "{{carrier}} / {{ua_type}} - p95",
               "refId": "B"
             },
             {
@@ -1539,8 +1539,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.99, sum(rate(sip_exporter_ord_bucket{carrier=~\"$carrier\"}[5m])) by (le, carrier))",
-              "legendFormat": "{{carrier}} - p99",
+              "expr": "histogram_quantile(0.99, sum(rate(sip_exporter_ord_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le, carrier, ua_type))",
+              "legendFormat": "{{carrier}} / {{ua_type}} - p99",
               "refId": "C"
             }
           ],
@@ -1629,8 +1629,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.5, sum(rate(sip_exporter_lrd_bucket{carrier=~\"$carrier\"}[5m])) by (le, carrier))",
-              "legendFormat": "{{carrier}} - p50",
+              "expr": "histogram_quantile(0.5, sum(rate(sip_exporter_lrd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le, carrier, ua_type))",
+              "legendFormat": "{{carrier}} / {{ua_type}} - p50",
               "refId": "A"
             },
             {
@@ -1638,8 +1638,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_lrd_bucket{carrier=~\"$carrier\"}[5m])) by (le, carrier))",
-              "legendFormat": "{{carrier}} - p95",
+              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_lrd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le, carrier, ua_type))",
+              "legendFormat": "{{carrier}} / {{ua_type}} - p95",
               "refId": "B"
             },
             {
@@ -1647,8 +1647,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.99, sum(rate(sip_exporter_lrd_bucket{carrier=~\"$carrier\"}[5m])) by (le, carrier))",
-              "legendFormat": "{{carrier}} - p99",
+              "expr": "histogram_quantile(0.99, sum(rate(sip_exporter_lrd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (le, carrier, ua_type))",
+              "legendFormat": "{{carrier}} / {{ua_type}} - p99",
               "refId": "C"
             }
           ],
@@ -1753,8 +1753,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_invite_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - INVITE",
+              "expr": "rate(sip_exporter_invite_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - INVITE",
               "refId": "A"
             },
             {
@@ -1762,8 +1762,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_ack_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - ACK",
+              "expr": "rate(sip_exporter_ack_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - ACK",
               "refId": "B"
             },
             {
@@ -1771,8 +1771,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_bye_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - BYE",
+              "expr": "rate(sip_exporter_bye_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - BYE",
               "refId": "C"
             },
             {
@@ -1780,8 +1780,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_cancel_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - CANCEL",
+              "expr": "rate(sip_exporter_cancel_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - CANCEL",
               "refId": "D"
             },
             {
@@ -1789,8 +1789,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_register_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - REGISTER",
+              "expr": "rate(sip_exporter_register_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - REGISTER",
               "refId": "E"
             },
             {
@@ -1798,8 +1798,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_options_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - OPTIONS",
+              "expr": "rate(sip_exporter_options_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - OPTIONS",
               "refId": "F"
             },
             {
@@ -1807,8 +1807,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_update_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - UPDATE",
+              "expr": "rate(sip_exporter_update_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - UPDATE",
               "refId": "G"
             },
             {
@@ -1816,8 +1816,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_info_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - INFO",
+              "expr": "rate(sip_exporter_info_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - INFO",
               "refId": "H"
             },
             {
@@ -1825,8 +1825,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_refer_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - REFER",
+              "expr": "rate(sip_exporter_refer_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - REFER",
               "refId": "I"
             },
             {
@@ -1834,8 +1834,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_subscribe_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - SUBSCRIBE",
+              "expr": "rate(sip_exporter_subscribe_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - SUBSCRIBE",
               "refId": "J"
             },
             {
@@ -1843,8 +1843,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_notify_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - NOTIFY",
+              "expr": "rate(sip_exporter_notify_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - NOTIFY",
               "refId": "K"
             },
             {
@@ -1852,8 +1852,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_prack_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - PRACK",
+              "expr": "rate(sip_exporter_prack_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - PRACK",
               "refId": "L"
             },
             {
@@ -1861,8 +1861,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_publish_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - PUBLISH",
+              "expr": "rate(sip_exporter_publish_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - PUBLISH",
               "refId": "M"
             },
             {
@@ -1870,8 +1870,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_message_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - MESSAGE",
+              "expr": "rate(sip_exporter_message_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - MESSAGE",
               "refId": "N"
             }
           ],
@@ -1958,8 +1958,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_100_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 100 Trying",
+              "expr": "rate(sip_exporter_100_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 100 Trying",
               "refId": "A"
             },
             {
@@ -1967,8 +1967,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_180_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 180 Ringing",
+              "expr": "rate(sip_exporter_180_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 180 Ringing",
               "refId": "B"
             },
             {
@@ -1976,8 +1976,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_181_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 181 Call Is Being Forwarded",
+              "expr": "rate(sip_exporter_181_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 181 Call Is Being Forwarded",
               "refId": "C"
             },
             {
@@ -1985,8 +1985,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_182_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 182 Queued",
+              "expr": "rate(sip_exporter_182_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 182 Queued",
               "refId": "C1"
             },
             {
@@ -1994,8 +1994,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_183_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 183 Session Progress",
+              "expr": "rate(sip_exporter_183_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 183 Session Progress",
               "refId": "C2"
             },
             {
@@ -2003,8 +2003,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_200_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 200 OK",
+              "expr": "rate(sip_exporter_200_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 200 OK",
               "refId": "D"
             },
             {
@@ -2012,8 +2012,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_300_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 300 Multiple Choices",
+              "expr": "rate(sip_exporter_300_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 300 Multiple Choices",
               "refId": "E"
             },
             {
@@ -2021,8 +2021,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_302_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 302 Moved Temporarily",
+              "expr": "rate(sip_exporter_302_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 302 Moved Temporarily",
               "refId": "F"
             },
             {
@@ -2030,8 +2030,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_400_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 400 Bad Request",
+              "expr": "rate(sip_exporter_400_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 400 Bad Request",
               "refId": "G"
             },
             {
@@ -2039,8 +2039,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_401_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 401 Unauthorized",
+              "expr": "rate(sip_exporter_401_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 401 Unauthorized",
               "refId": "H"
             },
             {
@@ -2048,8 +2048,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_403_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 403 Forbidden",
+              "expr": "rate(sip_exporter_403_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 403 Forbidden",
               "refId": "I"
             },
             {
@@ -2057,8 +2057,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_404_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 404 Not Found",
+              "expr": "rate(sip_exporter_404_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 404 Not Found",
               "refId": "J"
             },
             {
@@ -2066,8 +2066,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_405_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 405 Method Not Allowed",
+              "expr": "rate(sip_exporter_405_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 405 Method Not Allowed",
               "refId": "J1"
             },
             {
@@ -2075,8 +2075,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_408_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 408 Request Timeout",
+              "expr": "rate(sip_exporter_408_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 408 Request Timeout",
               "refId": "K"
             },
             {
@@ -2084,8 +2084,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_480_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 480 Temporarily Unavailable",
+              "expr": "rate(sip_exporter_480_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 480 Temporarily Unavailable",
               "refId": "L"
             },
             {
@@ -2093,8 +2093,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_481_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 481 Dialog/Transaction Not Exist",
+              "expr": "rate(sip_exporter_481_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 481 Dialog/Transaction Not Exist",
               "refId": "L1"
             },
             {
@@ -2102,8 +2102,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_486_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 486 Busy Here",
+              "expr": "rate(sip_exporter_486_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 486 Busy Here",
               "refId": "M"
             },
             {
@@ -2111,8 +2111,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_487_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 487 Request Terminated",
+              "expr": "rate(sip_exporter_487_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 487 Request Terminated",
               "refId": "M1"
             },
             {
@@ -2120,8 +2120,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_488_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 488 Not Acceptable Here",
+              "expr": "rate(sip_exporter_488_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 488 Not Acceptable Here",
               "refId": "M2"
             },
             {
@@ -2129,8 +2129,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_500_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 500 Server Error",
+              "expr": "rate(sip_exporter_500_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 500 Server Error",
               "refId": "N"
             },
             {
@@ -2138,8 +2138,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_501_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 501 Not Implemented",
+              "expr": "rate(sip_exporter_501_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 501 Not Implemented",
               "refId": "N1"
             },
             {
@@ -2147,8 +2147,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_502_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 502 Bad Gateway",
+              "expr": "rate(sip_exporter_502_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 502 Bad Gateway",
               "refId": "N2"
             },
             {
@@ -2156,8 +2156,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_503_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 503 Service Unavailable",
+              "expr": "rate(sip_exporter_503_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 503 Service Unavailable",
               "refId": "O"
             },
             {
@@ -2165,8 +2165,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_504_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 504 Server Time-out",
+              "expr": "rate(sip_exporter_504_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 504 Server Time-out",
               "refId": "P"
             },
             {
@@ -2174,8 +2174,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_600_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 600 Busy Everywhere",
+              "expr": "rate(sip_exporter_600_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 600 Busy Everywhere",
               "refId": "Q"
             },
             {
@@ -2183,8 +2183,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_603_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 603 Decline",
+              "expr": "rate(sip_exporter_603_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 603 Decline",
               "refId": "R"
             },
             {
@@ -2192,8 +2192,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_604_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 604 Does Not Exist Anywhere",
+              "expr": "rate(sip_exporter_604_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 604 Does Not Exist Anywhere",
               "refId": "R1"
             },
             {
@@ -2201,8 +2201,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_606_total{carrier=~\"$carrier\"}[5m])",
-              "legendFormat": "{{carrier}} - 606 Not Acceptable",
+              "expr": "rate(sip_exporter_606_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])",
+              "legendFormat": "{{carrier}} / {{ua_type}} - 606 Not Acceptable",
               "refId": "R2"
             }
           ],
@@ -2397,8 +2397,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(sip_exporter_iss_total{carrier=~\"$carrier\"}[5m])) by (carrier)",
-              "legendFormat": "{{carrier}}",
+"expr": "sum(rate(sip_exporter_iss_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}[5m])) by (carrier, ua_type)",
+          "legendFormat": "{{carrier}} / {{ua_type}}",
               "refId": "A"
             }
           ],
@@ -2465,6 +2465,38 @@
         "query": {
           "qryType": 1,
           "query": "label_values(sip_exporter_invite_total, carrier)",
+          "refId": "VariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(sip_exporter_invite_total, ua_type)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "UA Type",
+        "multi": true,
+        "name": "ua_type",
+        "options": [],
+        "query": {
+          "qryType": 1,
+          "query": "label_values(sip_exporter_invite_total, ua_type)",
           "refId": "VariableQuery"
         },
         "refresh": 2,

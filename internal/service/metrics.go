@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
 )
+
+const compositeKeyParts = 2
 
 type (
 	carrierAtomicCounters struct {
@@ -57,18 +60,18 @@ type (
 	}
 
 	Metricser interface {
-		Request(carrier string, in []byte)
-		Response(carrier string, in []byte, isInviteResponse bool)
-		ResponseWithMetrics(carrier string, status []byte, isInviteResponse, is200OK bool)
-		Invite200OK(carrier string)
-		SessionCompleted(carrier string)
-		UpdateRRD(carrier string, delayMs float64)
-		UpdateSPD(carrier string, duration time.Duration)
-		UpdateTTR(carrier string, delayMs float64)
-		UpdateORD(carrier string, delayMs float64)
-		UpdateLRD(carrier string, delayMs float64)
-		UpdateSession(carrier string, size int)
-		UpdateSessionsByCarrier(counts map[string]int)
+		Request(carrier string, uaType string, in []byte)
+		Response(carrier string, uaType string, in []byte, isInviteResponse bool)
+		ResponseWithMetrics(carrier string, uaType string, status []byte, isInviteResponse, is200OK bool)
+		Invite200OK(carrier string, uaType string)
+		SessionCompleted(carrier string, uaType string)
+		UpdateRRD(carrier string, uaType string, delayMs float64)
+		UpdateSPD(carrier string, uaType string, duration time.Duration)
+		UpdateTTR(carrier string, uaType string, delayMs float64)
+		UpdateORD(carrier string, uaType string, delayMs float64)
+		UpdateLRD(carrier string, uaType string, delayMs float64)
+		UpdateSession(carrier string, uaType string, size int)
+		UpdateSessionsByCarrierAndUA(counts map[string]map[string]int)
 		SystemError()
 	}
 
@@ -85,16 +88,22 @@ func (rc *ratioCollector) Describe(ch chan<- *prometheus.Desc) {
 
 func (rc *ratioCollector) Collect(ch chan<- prometheus.Metric) {
 	rc.m.carrierCounters.Range(func(key, value any) bool {
-		carrier, ok := key.(string)
+		keyStr, ok := key.(string)
 		if !ok {
 			return true
+		}
+		parts := strings.SplitN(keyStr, "\x00", compositeKeyParts) //nolint:mnd // split into exactly 2 parts
+		carrier := parts[0]
+		uaType := "other"
+		if len(parts) == compositeKeyParts {
+			uaType = parts[1]
 		}
 		counters, ok := value.(*carrierAtomicCounters)
 		if !ok {
 			return true
 		}
 		val := rc.calcFn(counters)
-		ch <- prometheus.MustNewConstMetric(rc.desc, prometheus.GaugeValue, val, carrier)
+		ch <- prometheus.MustNewConstMetric(rc.desc, prometheus.GaugeValue, val, carrier, uaType)
 		return true
 	})
 }
@@ -121,7 +130,7 @@ func newMetricserWithRegistry(reg *prometheus.Registry) Metricser {
 }
 
 func (m *metrics) initRequestCounters(reg *prometheus.Registry) {
-	cl := []string{"carrier"}
+	cl := []string{"carrier", "ua_type"}
 	m.requestInviteTotal = newCounterVecWithRegistry(
 		"sip_exporter_invite_total",
 		"Total number of INVITE requests", cl, reg)
@@ -167,7 +176,7 @@ func (m *metrics) initRequestCounters(reg *prometheus.Registry) {
 }
 
 func (m *metrics) initStatusCounters(reg *prometheus.Registry) {
-	cl := []string{"carrier"}
+	cl := []string{"carrier", "ua_type"}
 	statusCodes := []struct {
 		code string
 		help string
@@ -214,7 +223,7 @@ func (m *metrics) initStatusCounters(reg *prometheus.Registry) {
 }
 
 func (m *metrics) initSessionMetrics(reg *prometheus.Registry) {
-	cl := []string{"carrier"}
+	cl := []string{"carrier", "ua_type"}
 	m.sdc = newCounterVecWithRegistry(
 		"sip_exporter_sdc_total",
 		"Total number of completed SIP sessions", cl, reg)
@@ -228,7 +237,7 @@ func (m *metrics) initSessionMetrics(reg *prometheus.Registry) {
 }
 
 func (m *metrics) initHistograms(reg *prometheus.Registry) {
-	cl := []string{"carrier"}
+	cl := []string{"carrier", "ua_type"}
 	m.rrd = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_rrd",
 		Help:    "Registration Request Delay in milliseconds (RFC 6076)",
@@ -392,7 +401,7 @@ func registerRatioCollector(
 	calcFn func(c *carrierAtomicCounters) float64,
 ) {
 	rc := &ratioCollector{
-		desc:   prometheus.NewDesc(name, help, []string{"carrier"}, nil),
+		desc:   prometheus.NewDesc(name, help, []string{"carrier", "ua_type"}, nil),
 		m:      m,
 		calcFn: calcFn,
 	}
@@ -403,120 +412,122 @@ func registerRatioCollector(
 	}
 }
 
-func (m *metrics) Request(carrier string, in []byte) {
+func (m *metrics) Request(carrier string, uaType string, in []byte) {
 	defer m.sipPacketsTotal.Inc()
 
 	switch {
 	case bytes.Equal(in, []byte("PUBLISH")):
-		m.requestPublishTotal.WithLabelValues(carrier).Inc()
+		m.requestPublishTotal.WithLabelValues(carrier, uaType).Inc()
 	case bytes.Equal(in, []byte("PRACK")):
-		m.requestPrackTotal.WithLabelValues(carrier).Inc()
+		m.requestPrackTotal.WithLabelValues(carrier, uaType).Inc()
 	case bytes.Equal(in, []byte("NOTIFY")):
-		m.requestNotifyTotal.WithLabelValues(carrier).Inc()
+		m.requestNotifyTotal.WithLabelValues(carrier, uaType).Inc()
 	case bytes.Equal(in, []byte("SUBSCRIBE")):
-		m.requestSubscribeTotal.WithLabelValues(carrier).Inc()
+		m.requestSubscribeTotal.WithLabelValues(carrier, uaType).Inc()
 	case bytes.Equal(in, []byte("REFER")):
-		m.requestReferTotal.WithLabelValues(carrier).Inc()
+		m.requestReferTotal.WithLabelValues(carrier, uaType).Inc()
 	case bytes.Equal(in, []byte("INFO")):
-		m.requestInfoTotal.WithLabelValues(carrier).Inc()
+		m.requestInfoTotal.WithLabelValues(carrier, uaType).Inc()
 	case bytes.Equal(in, []byte("UPDATE")):
-		m.requestUpdateTotal.WithLabelValues(carrier).Inc()
+		m.requestUpdateTotal.WithLabelValues(carrier, uaType).Inc()
 	case bytes.Equal(in, []byte("REGISTER")):
-		m.requestRegisterTotal.WithLabelValues(carrier).Inc()
+		m.requestRegisterTotal.WithLabelValues(carrier, uaType).Inc()
 	case bytes.Equal(in, []byte("OPTIONS")):
-		m.requestOptionsTotal.WithLabelValues(carrier).Inc()
+		m.requestOptionsTotal.WithLabelValues(carrier, uaType).Inc()
 	case bytes.Equal(in, []byte("CANCEL")):
-		m.requestCancelTotal.WithLabelValues(carrier).Inc()
+		m.requestCancelTotal.WithLabelValues(carrier, uaType).Inc()
 	case bytes.Equal(in, []byte("BYE")):
-		m.requestByeTotal.WithLabelValues(carrier).Inc()
+		m.requestByeTotal.WithLabelValues(carrier, uaType).Inc()
 	case bytes.Equal(in, []byte("ACK")):
-		m.requestACKTotal.WithLabelValues(carrier).Inc()
+		m.requestACKTotal.WithLabelValues(carrier, uaType).Inc()
 	case bytes.Equal(in, []byte("INVITE")):
-		m.requestInviteTotal.WithLabelValues(carrier).Inc()
-		m.getOrCreateCarrierCounters(carrier).inviteTotal.Add(1)
+		m.requestInviteTotal.WithLabelValues(carrier, uaType).Inc()
+		m.getOrCreateCarrierCounters(carrier, uaType).inviteTotal.Add(1)
 	case bytes.Equal(in, []byte("MESSAGE")):
-		m.requestMessageTotal.WithLabelValues(carrier).Inc()
+		m.requestMessageTotal.WithLabelValues(carrier, uaType).Inc()
 	default:
 		zap.L().Warn("unknown request", zap.ByteString("in", in))
 	}
 }
 
-func (m *metrics) Response(carrier string, in []byte, isInviteResponse bool) {
+func (m *metrics) Response(carrier string, uaType string, in []byte, isInviteResponse bool) {
 	defer m.sipPacketsTotal.Inc()
 
-	m.incrementStatusCodeCounter(carrier, in)
+	m.incrementStatusCodeCounter(carrier, uaType, in)
 
 	if isInviteResponse && len(in) == 3 && in[0] == '3' {
-		m.getOrCreateCarrierCounters(carrier).invite3xxTotal.Add(1)
+		m.getOrCreateCarrierCounters(carrier, uaType).invite3xxTotal.Add(1)
 	}
 
 	if isInviteResponse && isEffectiveResponse(in) {
-		m.getOrCreateCarrierCounters(carrier).inviteEffectiveTotal.Add(1)
+		m.getOrCreateCarrierCounters(carrier, uaType).inviteEffectiveTotal.Add(1)
 	}
 
 	if isInviteResponse && isIneffectiveResponse(in) {
-		m.getOrCreateCarrierCounters(carrier).inviteIneffectiveTotal.Add(1)
-		m.iss.WithLabelValues(carrier).Inc()
+		m.getOrCreateCarrierCounters(carrier, uaType).inviteIneffectiveTotal.Add(1)
+		m.iss.WithLabelValues(carrier, uaType).Inc()
 	}
 }
 
-func (m *metrics) incrementStatusCodeCounter(carrier string, in []byte) {
+func (m *metrics) incrementStatusCodeCounter(carrier string, uaType string, in []byte) {
 	counter, ok := m.statusCounters[string(in)]
 	if ok {
-		counter.WithLabelValues(carrier).Inc()
+		counter.WithLabelValues(carrier, uaType).Inc()
 		return
 	}
 	zap.L().Warn("unknown response", zap.ByteString("in", in))
 }
 
-func (m *metrics) ResponseWithMetrics(carrier string, status []byte, isInviteResponse, is200OK bool) {
-	m.Response(carrier, status, isInviteResponse)
+func (m *metrics) ResponseWithMetrics(carrier string, uaType string, status []byte, isInviteResponse, is200OK bool) {
+	m.Response(carrier, uaType, status, isInviteResponse)
 
 	if isInviteResponse && is200OK {
-		m.getOrCreateCarrierCounters(carrier).invite200OKTotal.Add(1)
+		m.getOrCreateCarrierCounters(carrier, uaType).invite200OKTotal.Add(1)
 	}
 }
 
-func (m *metrics) Invite200OK(carrier string) {
-	m.getOrCreateCarrierCounters(carrier).invite200OKTotal.Add(1)
+func (m *metrics) Invite200OK(carrier string, uaType string) {
+	m.getOrCreateCarrierCounters(carrier, uaType).invite200OKTotal.Add(1)
 }
 
-func (m *metrics) SessionCompleted(carrier string) {
-	m.getOrCreateCarrierCounters(carrier).sessionCompletedTotal.Add(1)
-	m.sdc.WithLabelValues(carrier).Inc()
+func (m *metrics) SessionCompleted(carrier string, uaType string) {
+	m.getOrCreateCarrierCounters(carrier, uaType).sessionCompletedTotal.Add(1)
+	m.sdc.WithLabelValues(carrier, uaType).Inc()
 }
 
-func (m *metrics) UpdateSPD(carrier string, duration time.Duration) {
+func (m *metrics) UpdateSPD(carrier string, uaType string, duration time.Duration) {
 	if duration < 0 {
 		return
 	}
-	m.spd.WithLabelValues(carrier).Observe(duration.Seconds())
+	m.spd.WithLabelValues(carrier, uaType).Observe(duration.Seconds())
 }
 
-func (m *metrics) UpdateRRD(carrier string, delayMs float64) {
-	m.rrd.WithLabelValues(carrier).Observe(delayMs)
+func (m *metrics) UpdateRRD(carrier string, uaType string, delayMs float64) {
+	m.rrd.WithLabelValues(carrier, uaType).Observe(delayMs)
 }
 
-func (m *metrics) UpdateTTR(carrier string, delayMs float64) {
-	m.ttr.WithLabelValues(carrier).Observe(delayMs)
+func (m *metrics) UpdateTTR(carrier string, uaType string, delayMs float64) {
+	m.ttr.WithLabelValues(carrier, uaType).Observe(delayMs)
 }
 
-func (m *metrics) UpdateORD(carrier string, delayMs float64) {
-	m.ord.WithLabelValues(carrier).Observe(delayMs)
+func (m *metrics) UpdateORD(carrier string, uaType string, delayMs float64) {
+	m.ord.WithLabelValues(carrier, uaType).Observe(delayMs)
 }
 
-func (m *metrics) UpdateLRD(carrier string, delayMs float64) {
-	m.lrd.WithLabelValues(carrier).Observe(delayMs)
+func (m *metrics) UpdateLRD(carrier string, uaType string, delayMs float64) {
+	m.lrd.WithLabelValues(carrier, uaType).Observe(delayMs)
 }
 
-func (m *metrics) UpdateSession(carrier string, size int) {
-	m.sessions.WithLabelValues(carrier).Set(float64(size))
+func (m *metrics) UpdateSession(carrier string, uaType string, size int) {
+	m.sessions.WithLabelValues(carrier, uaType).Set(float64(size))
 }
 
-func (m *metrics) UpdateSessionsByCarrier(counts map[string]int) {
+func (m *metrics) UpdateSessionsByCarrierAndUA(counts map[string]map[string]int) {
 	m.sessions.Reset()
-	for carrier, count := range counts {
-		m.sessions.WithLabelValues(carrier).Set(float64(count))
+	for carrier, uaCounts := range counts {
+		for uaType, count := range uaCounts {
+			m.sessions.WithLabelValues(carrier, uaType).Set(float64(count))
+		}
 	}
 }
 
@@ -539,13 +550,14 @@ func isIneffectiveResponse(code []byte) bool {
 		bytes.Equal(code, []byte("504"))
 }
 
-func (m *metrics) getOrCreateCarrierCounters(carrier string) *carrierAtomicCounters {
-	if v, ok := m.carrierCounters.Load(carrier); ok {
+func (m *metrics) getOrCreateCarrierCounters(carrier string, uaType string) *carrierAtomicCounters {
+	key := carrier + "\x00" + uaType
+	if v, ok := m.carrierCounters.Load(key); ok {
 		c, _ := v.(*carrierAtomicCounters)
 		return c
 	}
 	c := &carrierAtomicCounters{}
-	actual, _ := m.carrierCounters.LoadOrStore(carrier, c)
+	actual, _ := m.carrierCounters.LoadOrStore(key, c)
 	result, _ := actual.(*carrierAtomicCounters)
 	return result
 }
