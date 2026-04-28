@@ -847,3 +847,231 @@ rate(sip_exporter_lrd_sum[5m]) / rate(sip_exporter_lrd_count[5m])
 - `< 50 ms` — fast redirect processing
 - `100-500 ms` — acceptable (redirect involves DNS or database lookup)
 - `> 1000 ms` — potential issues (slow redirect server, DNS resolution delays)
+
+---
+
+## Voice Quality Metrics (RFC 6035)
+
+Voice quality metrics are extracted from SIP PUBLISH and NOTIFY requests carrying `Content-Type: application/vq-rtcpxr` bodies per RFC 6035 (RTCP XR SIP Package). The exporter parses `VQSessionReport: CallTerm` report blocks and exposes each metric field as a labeled Prometheus histogram.
+
+### How It Works
+
+**Data source:** SIP endpoints (IP phones, PBXs, SBCs, media gateways) generate voice quality reports after each call completes. These reports contain RTP-level statistics measured during the call — packet loss, jitter, delay, MOS scores, R-factor values. Reports are sent as SIP PUBLISH or NOTIFY requests with `Content-Type: application/vq-rtcpxr` to a collector endpoint.
+
+**Capture path:**
+```
+SIP Endpoint → PUBLISH/NOTIFY → Network → eBPF capture → SIP parser → VQ parser → Prometheus histogram
+```
+
+The exporter does **not** generate or calculate voice quality metrics itself. It only parses and exports the values reported by SIP endpoints. The accuracy of metrics depends entirely on the reporting endpoint's RTP statistics implementation.
+
+**PUBLISH vs NOTIFY:**
+- **PUBLISH** — endpoint sends VQ report to a dedicated collector URI (e.g., `sip:collector@example.com`). Most common method in enterprise and carrier environments.
+- **NOTIFY** — endpoint sends VQ report via a SIP event package subscription. Used when the collector subscribes to `vq-rtcpxr` events from the endpoint.
+
+Both methods produce identical VQ report bodies. The exporter treats them equivalently — the only difference is the SIP method counter (`sip_exporter_publish_total` vs `sip_exporter_notify_total`).
+
+### Detection
+
+The exporter detects VQ reports when:
+1. A SIP request (PUBLISH or NOTIFY) is received
+2. The `Content-Type` header contains `application/vq-rtcpxr`
+3. The body starts with `VQSessionReport: CallTerm`
+
+If the body fails to parse, the exporter increments `sip_exporter_system_error_total` and skips the report.
+
+### Label Resolution
+
+All VQ metrics include `carrier` and `ua_type` labels, resolved from the SIP PUBLISH/NOTIFY packet itself:
+
+| Label | Resolution |
+|-------|-----------|
+| `carrier` | Source IP of the PUBLISH/NOTIFY request → CIDR matching against `carriers.yaml` |
+| `ua_type` | `User-Agent` header of the PUBLISH/NOTIFY request → regex matching against `user_agents.yaml` |
+
+Unlike call setup metrics (INVITE/BYE) where carrier is resolved from the INVITE and propagated through trackers, VQ metrics use the carrier/ua_type of the PUBLISH/NOTIFY request directly. This is because VQ reports are sent **after** the call ends and may come from a different device than the one that initiated the call (e.g., an SBC generating reports for all calls it proxies).
+
+### What Each Metric Measures
+
+The 13 VQ metrics correspond to fields in the RFC 6035 `VQSessionReport` block. Each field is reported by the SIP endpoint based on its RTP statistics:
+
+| Category | Metrics | Source |
+|----------|---------|--------|
+| **Packet loss** | NLR, JDR, BLD, GLD | RTP packet loss statistics (RTCP XR blocks) |
+| **Delay** | RTD, ESD | Round trip time measurement + endpoint processing delay |
+| **Jitter** | IAJ, MAJ | RTP timestamp interarrival variance |
+| **MOS scores** | MOSLQ, MOSCQ | Estimated by endpoint based on ITU-T G.107 (E-Model) |
+| **R-factor** | RLQ, RCQ | ITU-T G.107 E-Model output (0–120 scale) |
+| **Echo** | RERL | Echo return loss after echo cancellation |
+
+**Important:** Not all endpoints report all 13 metrics. The exporter only observes histograms for fields present in the report body. Absent fields are silently skipped (see [Partial Reports](#partial-reports) below).
+
+### Voice Quality Reports Total
+
+`sip_exporter_vq_reports_total{carrier="...",ua_type="..."}`: total number of VQ session reports successfully processed (Prometheus Counter).
+
+**PromQL examples:**
+```promql
+# VQ report processing rate
+rate(sip_exporter_vq_reports_total[5m])
+
+# VQ reports per carrier
+sip_exporter_vq_reports_total{carrier="carrier-a"}
+```
+
+### Network Loss Rate (NLR)
+
+`sip_exporter_vq_nlr_percent{carrier="...",ua_type="..."}`: histogram of network packet loss rate percentage.
+
+- Measures the percentage of RTP packets lost in the network (not recovered by jitter buffer)
+- Range: 0–100%
+- Buckets: `[0, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100]`
+
+**PromQL examples:**
+```promql
+# Average NLR per carrier
+rate(sip_exporter_vq_nlr_percent_sum[5m]) / rate(sip_exporter_vq_nlr_percent_count[5m])
+
+# 95th percentile packet loss
+histogram_quantile(0.95, sum(rate(sip_exporter_vq_nlr_percent_bucket[5m])) by (le))
+```
+
+### Jitter Buffer Discard Rate (JDR)
+
+`sip_exporter_vq_jdr_percent{carrier="...",ua_type="..."}`: histogram of jitter buffer discard rate percentage.
+
+- Measures the percentage of RTP packets discarded by the jitter buffer (too late or early)
+- Range: 0–100%
+- Buckets: `[0, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100]`
+
+### Burst Loss Density (BLD)
+
+`sip_exporter_vq_bld_percent{carrier="...",ua_type="..."}`: histogram of burst loss density percentage.
+
+- Measures the density of packet loss during burst periods
+- Range: 0–100%
+- Buckets: `[0, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100]`
+
+### Gap Loss Density (GLD)
+
+`sip_exporter_vq_gld_percent{carrier="...",ua_type="..."}`: histogram of gap loss density percentage.
+
+- Measures the density of packet loss during gap (non-burst) periods
+- Range: 0–100%
+- Buckets: `[0, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100]`
+
+### Round Trip Delay (RTD)
+
+`sip_exporter_vq_rtd_ms{carrier="...",ua_type="..."}`: histogram of round trip delay in milliseconds.
+
+- Measures the network round trip time for the RTP stream
+- Buckets: `[1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000]` ms
+
+**PromQL examples:**
+```promql
+# 95th percentile round trip delay
+histogram_quantile(0.95, sum(rate(sip_exporter_vq_rtd_ms_bucket[5m])) by (le))
+```
+
+### End System Delay (ESD)
+
+`sip_exporter_vq_esd_ms{carrier="...",ua_type="..."}`: histogram of end system delay in milliseconds.
+
+- Measures the total delay added by the end system (jitter buffer, codec, etc.)
+- Buckets: `[1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000]` ms
+
+### Interarrival Jitter (IAJ)
+
+`sip_exporter_vq_iaj_ms{carrier="...",ua_type="..."}`: histogram of interarrival jitter in milliseconds.
+
+- Measures the statistical variance of RTP packet interarrival time
+- Buckets: `[0.1, 0.5, 1, 5, 10, 20, 50, 100, 200, 500]` ms
+
+### Mean Absolute Jitter (MAJ)
+
+`sip_exporter_vq_maj_ms{carrier="...",ua_type="..."}`: histogram of mean absolute jitter in milliseconds.
+
+- Measures the mean absolute value of jitter
+- Buckets: `[0.1, 0.5, 1, 5, 10, 20, 50, 100, 200, 500]` ms
+
+### MOS Listening Quality (MOSLQ)
+
+`sip_exporter_vq_mos_lq{carrier="...",ua_type="..."}`: histogram of MOS Listening Quality score.
+
+- Estimated MOS score for one-way listening quality (no echo consideration)
+- Range: 1.0–4.9
+- Buckets: `[1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]`
+
+**PromQL examples:**
+```promql
+# Average MOS Listening Quality
+rate(sip_exporter_vq_mos_lq_sum[5m]) / rate(sip_exporter_vq_mos_lq_count[5m])
+
+# Percentage of calls with MOS below 3.0
+sum(rate(sip_exporter_vq_mos_lq_bucket{le="2.5"}[5m]))
+  / sum(rate(sip_exporter_vq_mos_lq_count[5m])) * 100
+```
+
+**Example values:**
+- `4.0–4.9` — excellent quality
+- `3.5–4.0` — good quality
+- `3.0–3.5` — acceptable quality
+- `1.0–3.0` — poor quality, investigate
+
+### MOS Conversational Quality (MOSCQ)
+
+`sip_exporter_vq_mos_cq{carrier="...",ua_type="..."}`: histogram of MOS Conversational Quality score.
+
+- Estimated MOS score including both directions and echo effects
+- Range: 1.0–4.9
+- Buckets: `[1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]`
+
+### R-factor Listening Quality (RLQ)
+
+`sip_exporter_vq_rlq{carrier="...",ua_type="..."}`: histogram of R-factor Listening Quality.
+
+- R-factor for one-way listening quality (ITU-T G.107)
+- Range: 0–120 (typically 0–100)
+- Buckets: `[0, 10, 20, 30, 50, 60, 70, 80, 90, 100, 120]`
+
+**Example values:**
+- `90–100` — excellent
+- `80–90` — good
+- `70–80` — acceptable
+- `< 70` — poor
+
+### R-factor Conversational Quality (RCQ)
+
+`sip_exporter_vq_rcq{carrier="...",ua_type="..."}`: histogram of R-factor Conversational Quality.
+
+- R-factor including both directions and echo effects
+- Range: 0–120
+- Buckets: `[0, 10, 20, 30, 50, 60, 70, 80, 90, 100, 120]`
+
+### Residual Echo Return Loss (RERL)
+
+`sip_exporter_vq_rerl_db{carrier="...",ua_type="..."}`: histogram of residual echo return loss in dB.
+
+- Measures the echo return loss after echo cancellation
+- Higher values mean less echo
+- Buckets: `[0, 5, 10, 15, 20, 30, 40, 50, 60, 80, 100]` dB
+
+### Partial Reports
+
+Not all VQ session reports contain all 13 metrics. The exporter only observes histograms for fields that are present in the report body. Absent fields are silently skipped. This means histogram `*_count` values may differ across VQ metrics.
+
+### VQ Report Format
+
+Expected body format (RFC 6035):
+```
+VQSessionReport: CallTerm
+CallID: <call-id>
+LocalID: <sip-uri>
+RemoteID: <sip-uri>
+NLR=0.50 JDR=1.20 BLD=0.30 GLD=0.10
+RTD=45.5 ESD=20.3 IAJ=5.2 MAJ=3.1
+MOSLQ=4.5 MOSCQ=4.2 RLQ=92.0 RCQ=88.0
+RERL=55.0
+```
+
+Multiple metrics can appear on the same line (space-separated) or on separate lines. Header lines (containing `:` but not `=`) are ignored.

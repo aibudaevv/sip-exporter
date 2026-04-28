@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<scenario name="UAC VQ NOTIFY">
+    <send retrans="500">
+        <![CDATA[
+        NOTIFY sip:user@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/[transport][local_ip_type] [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+        To: user <sip:user@[remote_ip]:[remote_port]>
+        Call-ID: [call_id]
+        CSeq: 1 NOTIFY
+        Contact: sip:sipp@[local_ip]:[local_port]
+        Max-Forwards: 70
+        Event: vq-rtcpxr
+        Subscription-State: terminated
+        Content-Type: application/vq-rtcpxr
+        Content-Length: [len]
+
+        VQSessionReport: CallTerm
+        CallID: [call_id]@[local_ip]
+        LocalID: sip:user1@[local_ip]
+        RemoteID: sip:user2@[remote_ip]
+        NLR=0.50 JDR=1.20 BLD=0.30 GLD=0.10
+        RTD=45.5 ESD=20.3 IAJ=5.2 MAJ=3.1
+        MOSLQ=4.5 MOSCQ=4.2 RLQ=92.0 RCQ=88.0
+        RERL=55.0
+
+        ]]>
+    </send>
+    <recv response="200" crlf="true"/>
+</scenario>

@@ -7,6 +7,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
+
+	"gitlab.com/sip-exporter/internal/vq"
 )
 
 func NewTestMetricser() Metricser {
@@ -1721,4 +1723,197 @@ func TestMetrics_NewStatusCodes_DoNotAffectExistingCounters(t *testing.T) {
 	require.Equal(t, int64(0), counters.inviteEffectiveTotal.Load())
 	require.Equal(t, int64(0), counters.inviteIneffectiveTotal.Load())
 	require.Equal(t, int64(0), counters.invite3xxTotal.Load())
+}
+
+func (m *metrics) getVQHistogram(hv *prometheus.HistogramVec, carrier, uaType string) (sum float64, count uint64) {
+	if hv == nil {
+		return 0, 0
+	}
+	hist, ok := hv.WithLabelValues(carrier, uaType).(prometheus.Histogram)
+	if !ok {
+		return 0, 0
+	}
+	var dtoMetric dto.Metric
+	if err := hist.Write(&dtoMetric); err != nil {
+		return 0, 0
+	}
+	h := dtoMetric.GetHistogram()
+	return h.GetSampleSum(), h.GetSampleCount()
+}
+
+func (m *metrics) getVQCounter(cv *prometheus.CounterVec, carrier, uaType string) float64 {
+	if cv == nil {
+		return 0
+	}
+	var dtoMetric dto.Metric
+	if err := cv.WithLabelValues(carrier, uaType).Write(&dtoMetric); err != nil {
+		return 0
+	}
+	return dtoMetric.GetCounter().GetValue()
+}
+
+func TestVQ_NLR_Observe(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateVQReport("carrier-a", "yealink", &vq.SessionReport{
+		NLR:     1.5,
+		Present: map[string]bool{"NLR": true},
+	})
+	sum, count := m.getVQHistogram(m.vqNLR, "carrier-a", "yealink")
+	require.InDelta(t, 1.5, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestVQ_JDR_Observe(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateVQReport("carrier-a", "yealink", &vq.SessionReport{
+		JDR:     2.3,
+		Present: map[string]bool{"JDR": true},
+	})
+	sum, count := m.getVQHistogram(m.vqJDR, "carrier-a", "yealink")
+	require.InDelta(t, 2.3, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestVQ_BLD_Observe(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateVQReport("carrier-a", "yealink", &vq.SessionReport{
+		BLD:     0.8,
+		Present: map[string]bool{"BLD": true},
+	})
+	sum, count := m.getVQHistogram(m.vqBLD, "carrier-a", "yealink")
+	require.InDelta(t, 0.8, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestVQ_GLD_Observe(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateVQReport("carrier-a", "yealink", &vq.SessionReport{
+		GLD:     0.15,
+		Present: map[string]bool{"GLD": true},
+	})
+	sum, count := m.getVQHistogram(m.vqGLD, "carrier-a", "yealink")
+	require.InDelta(t, 0.15, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestVQ_RTD_Observe(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateVQReport("carrier-a", "yealink", &vq.SessionReport{
+		RTD:     45.5,
+		Present: map[string]bool{"RTD": true},
+	})
+	sum, count := m.getVQHistogram(m.vqRTD, "carrier-a", "yealink")
+	require.InDelta(t, 45.5, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestVQ_ESD_Observe(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateVQReport("carrier-a", "yealink", &vq.SessionReport{
+		ESD:     20.3,
+		Present: map[string]bool{"ESD": true},
+	})
+	sum, count := m.getVQHistogram(m.vqESD, "carrier-a", "yealink")
+	require.InDelta(t, 20.3, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestVQ_IAJ_Observe(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateVQReport("carrier-a", "yealink", &vq.SessionReport{
+		IAJ:     5.2,
+		Present: map[string]bool{"IAJ": true},
+	})
+	sum, count := m.getVQHistogram(m.vqIAJ, "carrier-a", "yealink")
+	require.InDelta(t, 5.2, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestVQ_MAJ_Observe(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateVQReport("carrier-a", "yealink", &vq.SessionReport{
+		MAJ:     3.1,
+		Present: map[string]bool{"MAJ": true},
+	})
+	sum, count := m.getVQHistogram(m.vqMAJ, "carrier-a", "yealink")
+	require.InDelta(t, 3.1, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestVQ_MOSLQ_Observe(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateVQReport("carrier-a", "yealink", &vq.SessionReport{
+		MOSLQ:   4.5,
+		Present: map[string]bool{"MOSLQ": true},
+	})
+	sum, count := m.getVQHistogram(m.vqMOSLQ, "carrier-a", "yealink")
+	require.InDelta(t, 4.5, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestVQ_MOSCQ_Observe(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateVQReport("carrier-a", "yealink", &vq.SessionReport{
+		MOSCQ:   4.2,
+		Present: map[string]bool{"MOSCQ": true},
+	})
+	sum, count := m.getVQHistogram(m.vqMOSCQ, "carrier-a", "yealink")
+	require.InDelta(t, 4.2, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestVQ_RLQ_Observe(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateVQReport("carrier-a", "yealink", &vq.SessionReport{
+		RLQ:     92.0,
+		Present: map[string]bool{"RLQ": true},
+	})
+	sum, count := m.getVQHistogram(m.vqRLQ, "carrier-a", "yealink")
+	require.InDelta(t, 92.0, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestVQ_RCQ_Observe(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateVQReport("carrier-a", "yealink", &vq.SessionReport{
+		RCQ:     88.0,
+		Present: map[string]bool{"RCQ": true},
+	})
+	sum, count := m.getVQHistogram(m.vqRCQ, "carrier-a", "yealink")
+	require.InDelta(t, 88.0, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestVQ_RERL_Observe(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateVQReport("carrier-a", "yealink", &vq.SessionReport{
+		RERL:    55.0,
+		Present: map[string]bool{"RERL": true},
+	})
+	sum, count := m.getVQHistogram(m.vqRERL, "carrier-a", "yealink")
+	require.InDelta(t, 55.0, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestVQ_ReportsTotal_Increment(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	report := &vq.SessionReport{Present: map[string]bool{}}
+	m.UpdateVQReport("carrier-a", "yealink", report)
+	m.UpdateVQReport("carrier-b", "grandstream", report)
+	require.Equal(t, 1.0, m.getVQCounter(m.vqReports, "carrier-a", "yealink"))
+	require.Equal(t, 1.0, m.getVQCounter(m.vqReports, "carrier-b", "grandstream"))
+	require.Equal(t, 0.0, m.getVQCounter(m.vqReports, "carrier-c", "other"))
+}
+
+func TestVQ_AbsentFieldNotObserved(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateVQReport("carrier-a", "yealink", &vq.SessionReport{
+		MOSLQ:   4.5,
+		Present: map[string]bool{"MOSLQ": true},
+	})
+	_, nlRCount := m.getVQHistogram(m.vqNLR, "carrier-a", "yealink")
+	require.Equal(t, uint64(0), nlRCount)
+	sum, count := m.getVQHistogram(m.vqMOSLQ, "carrier-a", "yealink")
+	require.InDelta(t, 4.5, sum, 0.01)
+	require.Equal(t, uint64(1), count)
 }

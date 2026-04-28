@@ -35,6 +35,7 @@
 - 📈 **Нативный Prometheus** — стандартный эндпоинт `/metrics`
 - 🏷️ **Метрики по операторам** — разрешение carrier на основе CIDR для всех SIP-метрик
 - 🏷️ **Метрики по типам устройств** — классификация User-Agent для всех SIP-метрик
+- 📞 **Качество голоса (RFC 6035)** — MOS, джиттер, потери пакетов из SIP PUBLISH/NOTIFY
 
 ## Быстрый старт
 
@@ -113,6 +114,7 @@ docker pull frzq/sip-exporter:latest
 - **Счётчики трафика** — типы SIP-запросов (INVITE, BYE, REGISTER и т.д.) и коды ответов (100–606)
 - **Активные сессии** — количество активных SIP-диалогов в реальном времени
 - **Метрики RFC 6076** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR
+- **Метрики качества голоса RFC 6035** — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
 - **Расширенные метрики** — ISS, SDC, ORD, LRD
 
 Полный справочник с формулами, примерами и привязкой к RFC: [docs/METRICS.md](docs/METRICS.md)
@@ -308,7 +310,7 @@ sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
 2. Загрузите `examples/grafana-dashboard.json` или вставьте JSON
 3. Выберите datasource Prometheus или VictoriaMetrics
 
-Дашборд содержит: счётчики трафика, разбивку SIP-запросов/ответов, активные сессии, метрики RFC 6076 (SER, SEER, ISA, SCR, NER), гистограммы задержек (RRD, TTR, SPD, ORD, LRD), метрики качества (ISS, ASR, SDC) и системные ошибки.
+Дашборд содержит: счётчики трафика, разбивку SIP-запросов/ответов, активные сессии, метрики RFC 6076 (SER, SEER, ISA, SCR, NER), метрики качества голоса RFC 6035 (MOS, jitter, потери пакетов), гистограммы задержек (RRD, TTR, SPD, ORD, LRD), метрики качества (ISS, ASR, SDC) и системные ошибки.
 
 Файл дашборда: [`examples/grafana-dashboard.json`](examples/grafana-dashboard.json)
 

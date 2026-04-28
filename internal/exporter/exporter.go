@@ -18,6 +18,7 @@ import (
 	"gitlab.com/sip-exporter/internal/dto"
 	"gitlab.com/sip-exporter/internal/service"
 	"gitlab.com/sip-exporter/internal/ua"
+	"gitlab.com/sip-exporter/internal/vq"
 )
 
 var (
@@ -85,6 +86,7 @@ type (
 		services        services
 		carrierResolver *carriers.Resolver
 		uaClassifier    *ua.Classifier
+		vqHandler       *vq.Handler
 		registerTracker map[string]registerEntry
 		registerMutex   sync.RWMutex
 		inviteTracker   map[string]inviteEntry
@@ -117,6 +119,7 @@ func NewExporter(
 		},
 		carrierResolver: resolver,
 		uaClassifier:    classifier,
+		vqHandler:       vq.NewHandler(m),
 		messages:        make(chan []byte, messagesChanSize),
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
@@ -439,6 +442,18 @@ func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
 		}
 	}
 
+	if err := e.parseHeaders(lines, &p); err != nil {
+		return dto.Packet{}, err
+	}
+
+	if idx := bytes.Index(raw, []byte("\r\n\r\n")); idx != -1 {
+		p.Body = raw[idx+4:]
+	}
+
+	return p, nil
+}
+
+func (e *exporter) parseHeaders(lines [][]byte, p *dto.Packet) error {
 	for i, line := range lines {
 		if i == 0 {
 			continue
@@ -450,7 +465,7 @@ func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
 		case bytes.Equal(header, []byte("From")):
 			tag := extractTag(value)
 			if tag == nil {
-				return dto.Packet{}, fmt.Errorf("fail extract tag from '%b'", value)
+				return fmt.Errorf("fail extract tag from '%b'", value)
 			}
 
 			p.From.Tag = tag
@@ -461,7 +476,7 @@ func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
 		case bytes.Equal(header, []byte("CSeq")):
 			id, method := extractCSeq(value)
 			if id == nil || method == nil {
-				return dto.Packet{}, fmt.Errorf("fail extract CSeq from '%b'", value)
+				return fmt.Errorf("fail extract CSeq from '%b'", value)
 			}
 
 			p.CSeq.Method = method
@@ -472,10 +487,14 @@ func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
 			if p.UserAgent == nil {
 				p.UserAgent = value
 			}
+		case bytes.Equal(header, []byte("Content-Type")):
+			if p.ContentType == nil {
+				p.ContentType = value
+			}
 		}
 	}
 
-	return p, nil
+	return nil
 }
 
 func (e *exporter) handleMessage(carrier string, rawPacket []byte) error {
@@ -514,6 +533,10 @@ func (e *exporter) handleRequest(carrier string, uaType string, packet dto.Packe
 
 	if bytes.Equal(packet.Method, []byte("OPTIONS")) {
 		e.storeOptionsTime(string(packet.CallID), carrier, uaType)
+	}
+
+	if bytes.Contains(packet.ContentType, []byte("application/vq-rtcpxr")) {
+		e.vqHandler.HandleVQReport(packet.Body, carrier, uaType)
 	}
 }
 

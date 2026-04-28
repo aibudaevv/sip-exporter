@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"gitlab.com/sip-exporter/internal/service"
+	"gitlab.com/sip-exporter/internal/vq"
 )
 
 // Mock services for testing
@@ -32,6 +33,10 @@ type mockMetricser struct {
 	ordDelay                  float64
 	lrdUpdated                bool
 	lrdDelay                  float64
+	vqReportCalled            bool
+	vqCarrier                 string
+	vqUAType                  string
+	vqReport                  *vq.SessionReport
 }
 
 func (m *mockMetricser) UpdateSessionsByCarrierAndUA(counts map[string]map[string]int) {}
@@ -96,6 +101,13 @@ func (m *mockMetricser) UpdateLRD(carrier string, uaType string, delayMs float64
 
 func (m *mockMetricser) SystemError() {
 	m.systemErrorCalled = true
+}
+
+func (m *mockMetricser) UpdateVQReport(carrier string, uaType string, report *vq.SessionReport) {
+	m.vqReportCalled = true
+	m.vqCarrier = carrier
+	m.vqUAType = uaType
+	m.vqReport = report
 }
 
 type dialogCreateArgs struct {
@@ -2294,6 +2306,7 @@ type carrierCall struct {
 	carrier string
 	method  string
 	value   float64
+	uaType  string
 }
 
 type carrierTrackingMetricser struct {
@@ -2306,6 +2319,7 @@ type carrierTrackingMetricser struct {
 	spdCalls               []carrierCall
 	sessionCompleted       []carrierCall
 	invite200OK            []carrierCall
+	vqReports              []carrierCall
 	packetsTotal           int
 	systemErrors           int
 	sessionsByCarrierAndUA map[string]map[string]int
@@ -2375,6 +2389,10 @@ func (m *carrierTrackingMetricser) UpdateSessionsByCarrierAndUA(counts map[strin
 
 func (m *carrierTrackingMetricser) SystemError() {
 	m.systemErrors++
+}
+
+func (m *carrierTrackingMetricser) UpdateVQReport(carrier string, uaType string, report *vq.SessionReport) {
+	m.vqReports = append(m.vqReports, carrierCall{carrier: carrier, uaType: uaType})
 }
 
 // ==================== SIP message builders for MC/DC tests ====================
@@ -2458,6 +2476,7 @@ func newTestExporter(mm *carrierTrackingMetricser, md *mockDialoger) *exporter {
 			metricser: mm,
 			dialoger:  md,
 		},
+		vqHandler:       vq.NewHandler(mm),
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
 		optionsTracker:  make(map[string]optionsEntry),
@@ -2468,6 +2487,16 @@ func countCarrier(calls []carrierCall, carrier string) int {
 	n := 0
 	for _, c := range calls {
 		if c.carrier == carrier {
+			n++
+		}
+	}
+	return n
+}
+
+func countCarrierMethod(calls []carrierCall, carrier, method string) int {
+	n := 0
+	for _, c := range calls {
+		if c.carrier == carrier && c.method == method {
 			n++
 		}
 	}
@@ -2920,4 +2949,133 @@ func TestHandleMessage_CANCEL_ThenProvisional_NoTTR(t *testing.T) {
 	require.NoError(t, err)
 
 	require.False(t, mm.ttrUpdated, "TTR should not be measured after CANCEL removed tracker entry")
+}
+
+func TestHandleRequest_PUBLISH_VQReport(t *testing.T) {
+	mm := newCarrierTrackingMetricser()
+	md := &mockDialoger{}
+	e := newTestExporter(mm, md)
+
+	vqBody := "VQSessionReport: CallTerm\r\nMOSLQ=4.5 NLR=0.50\r\n"
+	publish := []byte("PUBLISH sip:collector@example.com SIP/2.0\r\n" +
+		"Via: SIP/2.0/UDP 10.0.1.5:5060\r\n" +
+		"From: <sip:user1@example.com>;tag=abc123\r\n" +
+		"To: <sip:collector@example.com>;tag=xyz789\r\n" +
+		"Call-ID: vq-test-publish@example.com\r\n" +
+		"CSeq: 1 PUBLISH\r\n" +
+		"Content-Type: application/vq-rtcpxr\r\n" +
+		"\r\n" +
+		vqBody)
+
+	err := e.handleMessage("carrier-a", publish)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, countCarrierMethod(mm.requests, "carrier-a", "PUBLISH"), "PUBLISH request should be counted")
+	require.Equal(t, 0, mm.systemErrors, "VQ report should not trigger system error")
+	require.Len(t, mm.vqReports, 1, "VQ handler should be called once")
+	require.Equal(t, "carrier-a", mm.vqReports[0].carrier)
+}
+
+func TestHandleRequest_NOTIFY_VQReport(t *testing.T) {
+	mm := newCarrierTrackingMetricser()
+	md := &mockDialoger{}
+	e := newTestExporter(mm, md)
+
+	vqBody := "VQSessionReport: CallTerm\r\nMOSLQ=4.2 IAJ=5.2\r\n"
+	notify := []byte("NOTIFY sip:user@example.com SIP/2.0\r\n" +
+		"Via: SIP/2.0/UDP 10.0.1.5:5060\r\n" +
+		"From: <sip:server@example.com>;tag=abc123\r\n" +
+		"To: <sip:user@example.com>;tag=xyz789\r\n" +
+		"Call-ID: vq-test-notify@example.com\r\n" +
+		"CSeq: 2 NOTIFY\r\n" +
+		"Content-Type: application/vq-rtcpxr\r\n" +
+		"\r\n" +
+		vqBody)
+
+	err := e.handleMessage("carrier-b", notify)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, countCarrierMethod(mm.requests, "carrier-b", "NOTIFY"), "NOTIFY request should be counted")
+	require.Equal(t, 0, mm.systemErrors, "VQ report should not trigger system error")
+	require.Len(t, mm.vqReports, 1, "VQ handler should be called once")
+	require.Equal(t, "carrier-b", mm.vqReports[0].carrier)
+}
+
+func TestHandleRequest_PUBLISH_NoVQContentType(t *testing.T) {
+	mm := newCarrierTrackingMetricser()
+	md := &mockDialoger{}
+	e := newTestExporter(mm, md)
+
+	publish := []byte("PUBLISH sip:collector@example.com SIP/2.0\r\n" +
+		"From: <sip:user1@example.com>;tag=abc123\r\n" +
+		"To: <sip:collector@example.com>;tag=xyz789\r\n" +
+		"Call-ID: no-vq-test@example.com\r\n" +
+		"CSeq: 1 PUBLISH\r\n" +
+		"Content-Type: application/sdp\r\n" +
+		"\r\n" +
+		"some sdp body")
+
+	err := e.handleMessage("carrier-a", publish)
+	require.NoError(t, err)
+	require.Equal(t, 0, mm.systemErrors)
+	require.Empty(t, mm.vqReports, "VQ handler should not be called for non-vq content type")
+}
+
+func TestHandleRequest_NOTIFY_NoVQContentType(t *testing.T) {
+	mm := newCarrierTrackingMetricser()
+	md := &mockDialoger{}
+	e := newTestExporter(mm, md)
+
+	notify := []byte("NOTIFY sip:user@example.com SIP/2.0\r\n" +
+		"From: <sip:server@example.com>;tag=abc123\r\n" +
+		"To: <sip:user@example.com>;tag=xyz789\r\n" +
+		"Call-ID: no-vq-notify@example.com\r\n" +
+		"CSeq: 2 NOTIFY\r\n" +
+		"Content-Type: application/dialog-info+xml\r\n" +
+		"\r\n" +
+		"some body")
+
+	err := e.handleMessage("carrier-a", notify)
+	require.NoError(t, err)
+	require.Equal(t, 0, mm.systemErrors)
+	require.Empty(t, mm.vqReports, "VQ handler should not be called for non-vq content type")
+}
+
+func TestHandleRequest_PUBLISH_VQEmptyBody(t *testing.T) {
+	mm := newCarrierTrackingMetricser()
+	md := &mockDialoger{}
+	e := newTestExporter(mm, md)
+
+	publish := []byte("PUBLISH sip:collector@example.com SIP/2.0\r\n" +
+		"From: <sip:user1@example.com>;tag=abc123\r\n" +
+		"To: <sip:collector@example.com>;tag=xyz789\r\n" +
+		"Call-ID: empty-vq@example.com\r\n" +
+		"CSeq: 1 PUBLISH\r\n" +
+		"Content-Type: application/vq-rtcpxr\r\n" +
+		"\r\n")
+
+	err := e.handleMessage("carrier-a", publish)
+	require.NoError(t, err)
+	require.Equal(t, 1, mm.systemErrors, "empty VQ body should trigger system error")
+	require.Empty(t, mm.vqReports, "VQ handler should not report metrics for empty body")
+}
+
+func TestHandleRequest_NOTIFY_VQInvalidBody(t *testing.T) {
+	mm := newCarrierTrackingMetricser()
+	md := &mockDialoger{}
+	e := newTestExporter(mm, md)
+
+	notify := []byte("NOTIFY sip:user@example.com SIP/2.0\r\n" +
+		"From: <sip:server@example.com>;tag=abc123\r\n" +
+		"To: <sip:user@example.com>;tag=xyz789\r\n" +
+		"Call-ID: invalid-vq@example.com\r\n" +
+		"CSeq: 2 NOTIFY\r\n" +
+		"Content-Type: application/vq-rtcpxr\r\n" +
+		"\r\n" +
+		"this is not a valid vq report")
+
+	err := e.handleMessage("carrier-a", notify)
+	require.NoError(t, err)
+	require.Equal(t, 1, mm.systemErrors, "invalid VQ body should trigger system error")
+	require.Empty(t, mm.vqReports, "VQ handler should not report metrics for invalid body")
 }
