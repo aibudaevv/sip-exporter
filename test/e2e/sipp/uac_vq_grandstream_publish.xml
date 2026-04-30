@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<scenario name="Grandstream VQ PUBLISH">
+    <send retrans="500">
+        <![CDATA[
+        PUBLISH sip:collector@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/[transport][local_ip_type] [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+        To: collector <sip:collector@[remote_ip]:[remote_port]>
+        Call-ID: [call_id]
+        CSeq: 1 PUBLISH
+        Contact: sip:sipp@[local_ip]:[local_port]
+        Max-Forwards: 70
+        Event: vq-rtcpxr
+        Content-Type: application/vq-rtcpxr
+        User-Agent: Grandstream GXP2160 1.0.9.50
+        Content-Length: [len]
+
+        VQSessionReport: CallTerm
+        CallID: [call_id]@[local_ip]
+        LocalID: sip:user1@[local_ip]
+        RemoteID: sip:user2@[remote_ip]
+        NLR=0.30 JDR=0.80 BLD=0.10 GLD=0.05
+        RTD=22.1 ESD=11.5 IAJ=2.3 MAJ=1.1
+        MOSLQ=4.3 MOSCQ=4.0 RLQ=90.0 RCQ=85.0
+        RERL=50.0
+
+        ]]>
+    </send>
+    <recv response="200" crlf="true"/>
+</scenario>

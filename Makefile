@@ -1,7 +1,7 @@
 version := $(shell cat VERSION)
 .DEFAULT_GOAL := docker_build
 
-.PHONY: build docker_build ebpf_compile go_build clean ebpf_log lint vet imports test test-e2e test-e2e-run test-load test-load-run test-load-update-baseline vulncheck trivy-fs trivy-image security
+.PHONY: build docker_build ebpf_compile go_build clean ebpf_log lint vet imports test test-e2e test-e2e-run test-load test-load-run test-load-update-baseline test-all vulncheck trivy-fs trivy-image security
 
 build: ebpf_compile go_build
 docker_build:
@@ -16,6 +16,17 @@ ebpf_log:
 	sudo cat /sys/kernel/debug/tracing/trace_pipe
 test:
 	go test -v ./...
+
+test-all: docker_build
+	@echo "=== Unit tests ==="
+	go test -v ./internal/... ./pkg/...
+	@echo "=== E2E tests ==="
+	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 2 -failfast -timeout 10m ./test/e2e/
+	@echo "=== Load tests ==="
+	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -timeout 30m ./test/e2e/load/...
+	@echo "=== All tests passed ==="
 
 test-e2e: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \

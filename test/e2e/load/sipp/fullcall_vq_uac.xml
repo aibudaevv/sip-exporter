@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<scenario name="Full Call + VQ Report UAC">
+    <send retrans="500">
+        <![CDATA[
+        INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/UDP [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]>;tag=[call_number]
+        To: sut <sip:[service]@[remote_ip]:[remote_port]>
+        Call-ID: [call_id]
+        CSeq: 1 INVITE
+        Contact: sip:sipp@[local_ip]:[local_port]
+        Max-Forwards: 70
+        Content-Type: application/sdp
+        Content-Length: [len]
+
+        v=0
+        o=- 1 1 IN IP[local_ip_type] [local_ip]
+        s=-
+        c=IN IP[local_ip_type] [local_ip]
+        t=0 0
+        m=audio 10000 RTP/AVP 0
+        a=rtpmap:0 PCMU/8000
+
+        ]]>
+    </send>
+    <recv response="100" optional="true" crlf="true"/>
+    <recv response="180" optional="true" crlf="true"/>
+    <recv response="200" crlf="true"/>
+    <send>
+        <![CDATA[
+        ACK sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/UDP [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]>;tag=[call_number]
+        To: sut <sip:[service]@[remote_ip]:[remote_port]>[last_To_tag]
+        Call-ID: [call_id]
+        CSeq: 2 ACK
+        Content-Length: 0
+
+        ]]>
+    </send>
+    <pause milliseconds="10"/>
+    <send retrans="500">
+        <![CDATA[
+        BYE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/UDP [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]>;tag=[call_number]
+        To: sut <sip:[service]@[remote_ip]:[remote_port]>[last_To_tag]
+        Call-ID: [call_id]
+        CSeq: 3 BYE
+        Content-Length: 0
+
+        ]]>
+    </send>
+    <recv response="200" crlf="true"/>
+    <send retrans="500">
+        <![CDATA[
+        PUBLISH sip:collector@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/UDP [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]>;tag=[call_number]
+        To: collector <sip:collector@[remote_ip]:[remote_port]>
+        Call-ID: [call_id]
+        CSeq: 4 PUBLISH
+        Contact: sip:sipp@[local_ip]:[local_port]
+        Max-Forwards: 70
+        Event: vq-rtcpxr
+        Content-Type: application/vq-rtcpxr
+        User-Agent: Yealink SIP-T46S 66.15.0.10
+        Content-Length: [len]
+
+        VQSessionReport: CallTerm
+        CallID: [call_id]@[local_ip]
+        LocalID: sip:user1@[local_ip]
+        RemoteID: sip:user2@[remote_ip]
+        NLR=1.20 JDR=2.50 BLD=0.80 GLD=0.15
+        RTD=85.3 ESD=42.7 IAJ=8.1 MAJ=4.2
+        MOSLQ=3.8 MOSCQ=3.5 RLQ=78.0 RCQ=72.0
+        RERL=45.0
+
+        ]]>
+    </send>
+    <recv response="200" crlf="true"/>
+</scenario>

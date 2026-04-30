@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<scenario name="Cisco VQ NOTIFY (Partial Report)">
+    <send retrans="500">
+        <![CDATA[
+        NOTIFY sip:user@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/[transport][local_ip_type] [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+        To: user <sip:user@[remote_ip]:[remote_port]>
+        Call-ID: [call_id]
+        CSeq: 1 NOTIFY
+        Contact: sip:sipp@[local_ip]:[local_port]
+        Max-Forwards: 70
+        Event: vq-rtcpxr
+        Subscription-State: terminated
+        Content-Type: application/vq-rtcpxr
+        User-Agent: Cisco-CP-8845/12.0.1
+        Content-Length: [len]
+
+        VQSessionReport: CallTerm
+        CallID: [call_id]@[local_ip]
+        LocalID: sip:user1@[local_ip]
+        RemoteID: sip:user2@[remote_ip]
+        MOSLQ=4.1 RLQ=85.0
+
+        ]]>
+    </send>
+    <recv response="200" crlf="true"/>
+</scenario>

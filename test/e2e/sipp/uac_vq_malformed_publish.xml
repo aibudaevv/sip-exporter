@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<scenario name="Malformed VQ PUBLISH">
+    <send retrans="500">
+        <![CDATA[
+        PUBLISH sip:collector@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/[transport][local_ip_type] [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+        To: collector <sip:collector@[remote_ip]:[remote_port]>
+        Call-ID: [call_id]
+        CSeq: 1 PUBLISH
+        Contact: sip:sipp@[local_ip]:[local_port]
+        Max-Forwards: 70
+        Event: vq-rtcpxr
+        Content-Type: application/vq-rtcpxr
+        Content-Length: [len]
+
+        THIS IS NOT A VALID VQ REPORT
+        garbage data here
+        NLR=broken
+
+        ]]>
+    </send>
+    <recv response="200" crlf="true"/>
+</scenario>
