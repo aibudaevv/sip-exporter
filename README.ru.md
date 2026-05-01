@@ -48,6 +48,9 @@ services:
     network_mode: host
     environment:
       - SIP_EXPORTER_INTERFACE=eth0
+      - SIP_EXPORTER_HTTP_PORT=2112
+      - SIP_EXPORTER_SIP_PORT=5060
+      - SIP_EXPORTER_SIPS_PORT=5061
       # Опционально: метки carrier для мониторинга по операторам
       # - SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml
       # Опционально: метки ua_type для мониторинга по типам устройств
