@@ -283,8 +283,8 @@ Full config reference with examples: [`examples/user_agents.yaml`](examples/user
 
 Test suite:
 - **Unit tests** — MC/DC standard, all business logic covered
-- **55 E2E tests** — real SIP traffic via SIPp + testcontainers-go, validates all RFC 6076 metrics
-- **8 load tests** — PPS throughput, concurrent sessions, memory stability, GC pauses, scrape latency
+- **94 E2E tests** — real SIP traffic via SIPp + testcontainers-go, validates all RFC 6076 and RFC 6035 metrics
+- **11 load tests** — PPS throughput, VQ reports, concurrent sessions, memory stability, GC pauses, scrape latency
 
 ## Benchmark
 

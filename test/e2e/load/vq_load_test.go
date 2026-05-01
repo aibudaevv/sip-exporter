@@ -49,12 +49,12 @@ func TestLoad_VQReportFlood(t *testing.T) {
 			require.Equal(t, expectedReports, moslqCount)
 
 			recordResult(t.Name(), map[string]MetricEntry{
-				"actual_pps":  {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
-				"loss_rate":   {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
-				"cpu_peak":    {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},
-				"cpu_avg":     {Value: result.CPUAvg, Unit: "%", Direction: dirLowerIsBetter},
-				"mem_mb":      {Value: result.MemMaxMB, Unit: "MB", Direction: dirLowerIsBetter},
-				"vq_reports":  {Value: vqReports, Unit: "count", Direction: dirHigherIsBetter},
+				"actual_pps": {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
+				"loss_rate":  {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
+				"cpu_peak":   {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},
+				"cpu_avg":    {Value: result.CPUAvg, Unit: "%", Direction: dirLowerIsBetter},
+				"mem_mb":     {Value: result.MemMaxMB, Unit: "MB", Direction: dirLowerIsBetter},
+				"vq_reports": {Value: vqReports, Unit: "count", Direction: dirHigherIsBetter},
 			})
 		})
 	}
@@ -94,12 +94,12 @@ func TestLoad_VQHighRateWithResponse(t *testing.T) {
 			require.Equal(t, expectedReports, publishTotal)
 
 			recordResult(t.Name(), map[string]MetricEntry{
-				"actual_pps":  {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
-				"loss_rate":   {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
-				"cpu_peak":    {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},
-				"cpu_avg":     {Value: result.CPUAvg, Unit: "%", Direction: dirLowerIsBetter},
-				"mem_mb":      {Value: result.MemMaxMB, Unit: "MB", Direction: dirLowerIsBetter},
-				"vq_reports":  {Value: vqReports, Unit: "count", Direction: dirHigherIsBetter},
+				"actual_pps": {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
+				"loss_rate":  {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
+				"cpu_peak":   {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},
+				"cpu_avg":    {Value: result.CPUAvg, Unit: "%", Direction: dirLowerIsBetter},
+				"mem_mb":     {Value: result.MemMaxMB, Unit: "MB", Direction: dirLowerIsBetter},
+				"vq_reports": {Value: vqReports, Unit: "count", Direction: dirHigherIsBetter},
 			})
 		})
 	}
@@ -150,13 +150,13 @@ func TestLoad_FullCallWithVQReport(t *testing.T) {
 			}, 5*time.Second, 300*time.Millisecond, "sessions should reach 0")
 
 			recordResult(t.Name(), map[string]MetricEntry{
-				"actual_pps":  {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
-				"loss_rate":   {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
-				"ser":         {Value: ser, Unit: "%", Direction: dirHigherIsBetter},
-				"cpu_peak":    {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},
-				"cpu_avg":     {Value: result.CPUAvg, Unit: "%", Direction: dirLowerIsBetter},
-				"mem_mb":      {Value: result.MemMaxMB, Unit: "MB", Direction: dirLowerIsBetter},
-				"vq_reports":  {Value: vqReports, Unit: "count", Direction: dirHigherIsBetter},
+				"actual_pps": {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
+				"loss_rate":  {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
+				"ser":        {Value: ser, Unit: "%", Direction: dirHigherIsBetter},
+				"cpu_peak":   {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},
+				"cpu_avg":    {Value: result.CPUAvg, Unit: "%", Direction: dirLowerIsBetter},
+				"mem_mb":     {Value: result.MemMaxMB, Unit: "MB", Direction: dirLowerIsBetter},
+				"vq_reports": {Value: vqReports, Unit: "count", Direction: dirHigherIsBetter},
 			})
 		})
 	}
