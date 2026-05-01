@@ -201,3 +201,82 @@ func TestParseReport_RERL(t *testing.T) {
 	require.Equal(t, 60.0, report.RERL)
 	require.True(t, report.Present["RERL"])
 }
+
+func TestParseReport_RFCFormat_CategoryHeaders(t *testing.T) {
+	body := []byte("VQSessionReport: CallTerm\r\n" +
+		"CallID: 12345@atlanta.example.com\r\n" +
+		"LocalMetrics:\r\n" +
+		"PacketLoss:NLR=5.0 JDR=2.0\r\n" +
+		"BurstGapLoss:BLD=0 BD=0 GLD=2.0 GD=500 GMIN=16\r\n" +
+		"Delay:RTD=200 ESD=140 IAJ=2 MAJ=10\r\n" +
+		"Signal:SL=-18 NL=-50 RERL=55\r\n" +
+		"QualityEst:RLQ=88 RCQ=85 MOSLQ=4.1 MOSCQ=4.0\r\n")
+	report, err := ParseReport(body)
+	require.NoError(t, err)
+	require.NotNil(t, report)
+
+	require.Equal(t, 5.0, report.NLR)
+	require.Equal(t, 2.0, report.JDR)
+	require.Equal(t, 0.0, report.BLD)
+	require.Equal(t, 2.0, report.GLD)
+	require.Equal(t, 200.0, report.RTD)
+	require.Equal(t, 140.0, report.ESD)
+	require.Equal(t, 2.0, report.IAJ)
+	require.Equal(t, 10.0, report.MAJ)
+	require.Equal(t, 55.0, report.RERL)
+	require.Equal(t, 88.0, report.RLQ)
+	require.Equal(t, 85.0, report.RCQ)
+	require.Equal(t, 4.1, report.MOSLQ)
+	require.Equal(t, 4.0, report.MOSCQ)
+
+	expectedPresent := map[string]bool{
+		"NLR": true, "JDR": true, "BLD": true, "GLD": true,
+		"RTD": true, "ESD": true, "IAJ": true, "MAJ": true,
+		"MOSLQ": true, "MOSCQ": true, "RLQ": true, "RCQ": true, "RERL": true,
+	}
+	require.Equal(t, expectedPresent, report.Present)
+}
+
+func TestParseReport_RemoteMetricsSkipped(t *testing.T) {
+	body := []byte("VQSessionReport: CallTerm\r\n" +
+		"LocalMetrics:\r\n" +
+		"NLR=5.0 MOSLQ=4.1\r\n" +
+		"RemoteMetrics:\r\n" +
+		"NLR=3.0 MOSLQ=4.5\r\n")
+	report, err := ParseReport(body)
+	require.NoError(t, err)
+	require.NotNil(t, report)
+
+	require.Equal(t, 5.0, report.NLR)
+	require.Equal(t, 4.1, report.MOSLQ)
+	require.Equal(t, 2, len(report.Present))
+	require.True(t, report.Present["NLR"])
+	require.True(t, report.Present["MOSLQ"])
+}
+
+func TestParseReport_RemoteMetricsNoLocal(t *testing.T) {
+	body := []byte("VQSessionReport: CallTerm\r\n" +
+		"RemoteMetrics:\r\n" +
+		"NLR=3.0 MOSLQ=4.5\r\n")
+	report, err := ParseReport(body)
+	require.NoError(t, err)
+	require.NotNil(t, report)
+	require.Equal(t, 0, len(report.Present))
+}
+
+func TestParseReport_InvalidPrefix(t *testing.T) {
+	_, err := ParseReport([]byte("XVQSessionReport: CallTerm\nNLR=1.0\n"))
+	require.ErrorIs(t, err, ErrInvalidReport)
+}
+
+func TestParseReport_FlatFormatNoRemoteMetrics(t *testing.T) {
+	body := []byte("VQSessionReport: CallTerm\n" +
+		"NLR=0.50 JDR=1.20\n" +
+		"MOSLQ=4.5\n")
+	report, err := ParseReport(body)
+	require.NoError(t, err)
+	require.Equal(t, 0.50, report.NLR)
+	require.Equal(t, 1.20, report.JDR)
+	require.Equal(t, 4.5, report.MOSLQ)
+	require.Equal(t, 3, len(report.Present))
+}

@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## 0.14.0
+### Added
+- Voice Quality metrics via RFC 6035 VQ-RTCPXR SIP Package (`internal/vq` package)
+- 13 Prometheus histograms for VQ session report metrics: `vq_nlr_percent`, `vq_jdr_percent`, `vq_bld_percent`, `vq_gld_percent`, `vq_rtd_ms`, `vq_esd_ms`, `vq_iaj_ms`, `vq_maj_ms`, `vq_mos_lq`, `vq_mos_cq`, `vq_rlq`, `vq_rcq`, `vq_rerl_db`
+- `sip_exporter_vq_reports_total` counter for total VQ reports processed
+- VQ report detection: SIP PUBLISH/NOTIFY with `Content-Type: application/vq-rtcpxr` → `VQSessionReport: CallTerm` parsing
+- RFC-compliant category header parsing (`PacketLoss:NLR=5.0` format) alongside flat format (`NLR=5.0`)
+- `RemoteMetrics` section skipping to avoid double-counting (only `LocalMetrics` parsed)
+- `carrier` and `ua_type` labels on all VQ metrics (resolved from PUBLISH/NOTIFY source IP and User-Agent)
+- Partial report support: absent metric fields silently skipped, `vq_reports_total` incremented for all valid reports
+- Malformed report handling: `system_error_total` incremented, report not recorded
+- Unit tests: 28 parser tests (flat format, RFC category headers, RemoteMetrics skip, edge cases), 7 handler tests, 15 metrics tests, 6 exporter integration tests
+- E2E tests: 6 scenarios — PUBLISH session report, NOTIFY session report, multi-vendor (Yealink+Cisco+Grandstream), partial report (Cisco), malformed report, carrier config
+- SIPp scenarios: 8 e2e XML files (PUBLISH/NOTIFY UAS+UAC, Yealink, Cisco, Grandstream, malformed)
+- Load tests: 3 VQ scenarios — VQReportFlood, VQHighRateWithResponse, FullCallWithVQReport
+- SIPp scenarios: 5 load test XML files (vq_flood, vq_highrate, fullcall_vq)
+- `make test-all` Makefile target: unit + e2e + load tests in one command
+- `docs/METRICS.md`: full VQ metrics reference (~225 lines), PromQL examples, label resolution docs
+- `docs/ALERTING.md`: 5 VQ alerting rules (MOS low/critical, packet loss warning/critical, jitter high)
+- Grafana dashboard: "Voice Quality (RFC 6035)" row with 12 panels (MOS, NLR, JDR, RTD, RLQ/RCQ gauges and timeseries)
+- `examples/carriers.yaml` and `examples/user_agents.yaml` — referenced from VQ label resolution docs
+
+### Fixed
+- VQ parser: RFC category header prefix (`PacketLoss:NLR=5.0`) now correctly stripped before key matching
+- VQ parser: `RemoteMetrics` section now skipped to prevent double-counting local+remote metrics
+- VQ parser: `strings.Contains` → `strings.HasPrefix` for stricter `VQSessionReport` detection
+- MOS help text: range corrected from `1.0-4.9` to `0.0-4.9` per RFC 6035 ABNF
+
 ## 0.13.0
 ### Added
 - Per-device-type SIP metrics with User-Agent header classification (`SIP_EXPORTER_USER_AGENTS_CONFIG`)

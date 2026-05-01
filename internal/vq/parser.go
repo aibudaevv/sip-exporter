@@ -21,7 +21,7 @@ func ParseReport(body []byte) (*SessionReport, error) {
 	}
 
 	first := strings.TrimSpace(lines[0])
-	if !strings.Contains(first, "VQSessionReport") {
+	if !strings.HasPrefix(first, "VQSessionReport") {
 		return nil, ErrInvalidReport
 	}
 
@@ -29,9 +29,20 @@ func ParseReport(body []byte) (*SessionReport, error) {
 		Present: make(map[string]bool),
 	}
 
+	inRemoteMetrics := false
+
 	for _, line := range lines[1:] {
 		line = strings.TrimSpace(line)
 		if line == "" {
+			continue
+		}
+
+		if strings.HasPrefix(line, "RemoteMetrics") {
+			inRemoteMetrics = true
+			continue
+		}
+
+		if inRemoteMetrics {
 			continue
 		}
 
@@ -49,9 +60,21 @@ func ParseReport(body []byte) (*SessionReport, error) {
 	return report, nil
 }
 
+func stripCategoryPrefix(token string) string {
+	idx := strings.LastIndex(token, ":")
+	if idx < 0 {
+		return token
+	}
+	if eqIdx := strings.Index(token, "="); eqIdx >= 0 && idx > eqIdx {
+		return token
+	}
+	return token[idx+1:]
+}
+
 func (r *SessionReport) parseKVLine(line string) {
 	tokens := strings.Fields(line)
 	for _, token := range tokens {
+		token = stripCategoryPrefix(token)
 		parts := strings.SplitN(token, "=", kvParts)
 		if len(parts) != kvParts {
 			continue

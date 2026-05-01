@@ -323,12 +323,12 @@ func (m *metrics) initHistograms(reg *prometheus.Registry) {
 	}, cl, reg)
 	m.vqMOSLQ = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_vq_mos_lq",
-		Help:    "Voice Quality MOS Listening Quality score 1.0-4.9 (RFC 6035)",
+		Help:    "Voice Quality MOS Listening Quality score 0.0-4.9 (RFC 6035)",
 		Buckets: []float64{1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0},
 	}, cl, reg)
 	m.vqMOSCQ = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_vq_mos_cq",
-		Help:    "Voice Quality MOS Conversational Quality score 1.0-4.9 (RFC 6035)",
+		Help:    "Voice Quality MOS Conversational Quality score 0.0-4.9 (RFC 6035)",
 		Buckets: []float64{1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0},
 	}, cl, reg)
 	m.vqRLQ = newHistogramVecWithRegistry(prometheus.HistogramOpts{

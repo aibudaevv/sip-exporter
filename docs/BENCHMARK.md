@@ -60,6 +60,37 @@ Many simultaneous SIP dialogs with low call rate. Tests dialog map scalability a
 | 1,000 | 2,000 | ~71s | 0.4% | 1.2-1.6% | 11.2-13.8 MB | 0.00% |
 | 2,000 | 4,000 | ~81s | 0.6-0.8% | 1.2-2.2% | 12.2-13.7 MB | 0.00% |
 
+## Results: VQ Report Flood
+
+VQ PUBLISH flood without responses. Tests VQ report parsing throughput (2 packets per report on loopback).
+
+| Rate (CPS) | PPS (actual) | CPU avg | CPU peak | RAM | Loss |
+|------------|-------------|---------|----------|-----|------|
+| 100 | ~190 | 0.52% | 0.68% | 14.4 MB | 0.00% |
+| 500 | ~960 | 1.03% | 1.32% | 13.5 MB | 0.00% |
+| 1,000 | ~1,930 | 2.16% | 2.92% | 16.0 MB | 0.00% |
+| 2,000 | ~3,840 | 3.28% | 3.54% | 13.0 MB | 0.00% |
+
+## Results: VQ High Rate with Response
+
+VQ PUBLISH with 200 OK responses. Tests VQ report parsing under bidirectional traffic (4 packets per call on loopback).
+
+| Rate (CPS) | PPS (actual) | CPU avg | CPU peak | RAM | Loss |
+|------------|-------------|---------|----------|-----|------|
+| 100 | ~340 | 0.60% | 0.80% | 15.0 MB | 0.00% |
+| 500 | ~1,710 | 1.56% | 2.36% | 15.4 MB | 0.00% |
+| 1,000 | ~3,420 | 2.99% | 4.22% | 14.1 MB | 0.00% |
+
+## Results: Full Call with VQ Report
+
+Complete SIP dialog lifecycle + VQ PUBLISH after BYE: INVITE → 100 → 180 → 200 → ACK → BYE → 200 → PUBLISH → 200 (18 packets per call on loopback).
+
+| Rate (CPS) | PPS (actual) | CPU avg | CPU peak | RAM | Loss | SER |
+|------------|-------------|---------|----------|-----|------|-----|
+| 100 | ~1,530 | 1.49% | 2.04% | 12.7 MB | 0.00% | 100% |
+| 500 | ~7,590 | 3.98% | 6.57% | 15.3 MB | 0.00% | 100% |
+| 1,000 | ~15,270 | 6.11% | 8.45% | 15.6 MB | 0.00% | 100% |
+
 ## GOMAXPROCS Comparison: 1 Core vs 8 Cores
 
 Full Call Flow benchmark comparing single-core vs multi-core execution. 3 runs per configuration.
