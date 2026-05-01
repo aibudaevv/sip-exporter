@@ -148,6 +148,22 @@ func (m *metrics) getTTRFromHistogram(carrier string, uaType string) (sum float6
 	return h.GetSampleSum(), h.GetSampleCount()
 }
 
+func (m *metrics) getPDDFromHistogram(carrier string, uaType string) (sum float64, count uint64) {
+	if m.pdd == nil {
+		return 0, 0
+	}
+	hist, ok := m.pdd.WithLabelValues(carrier, uaType).(prometheus.Histogram)
+	if !ok {
+		return 0, 0
+	}
+	var dtoMetric dto.Metric
+	if err := hist.Write(&dtoMetric); err != nil {
+		return 0, 0
+	}
+	h := dtoMetric.GetHistogram()
+	return h.GetSampleSum(), h.GetSampleCount()
+}
+
 func (m *metrics) getORDFromHistogram(carrier string, uaType string) (sum float64, count uint64) {
 	if m.ord == nil {
 		return 0, 0
@@ -1916,4 +1932,56 @@ func TestVQ_AbsentFieldNotObserved(t *testing.T) {
 	sum, count := m.getVQHistogram(m.vqMOSLQ, "carrier-a", "yealink")
 	require.InDelta(t, 4.5, sum, 0.01)
 	require.Equal(t, uint64(1), count)
+}
+
+func TestMetrics_PDD_Histogram(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	sum, count := m.getPDDFromHistogram("", "")
+	require.Equal(t, 0.0, sum)
+	require.Equal(t, uint64(0), count)
+
+	m.UpdatePDD("", "", 50.0)
+
+	sum, count = m.getPDDFromHistogram("", "")
+	require.InDelta(t, 50.0, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+
+	m.UpdatePDD("", "", 150.0)
+
+	sum, count = m.getPDDFromHistogram("", "")
+	require.InDelta(t, 200.0, sum, 0.01)
+	require.Equal(t, uint64(2), count)
+}
+
+func TestMetrics_PDD_Histogram_ZeroValue(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdatePDD("", "", 0.0)
+
+	sum, count := m.getPDDFromHistogram("", "")
+	require.InDelta(t, 0.0, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestMetrics_PDD_Histogram_LargeValue(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdatePDD("", "", 5000.0)
+
+	sum, count := m.getPDDFromHistogram("", "")
+	require.InDelta(t, 5000.0, sum, 0.01)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestMetrics_PDD_Histogram_MultipleObservations(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	for i := range 100 {
+		m.UpdatePDD("", "", float64(i)*10.0)
+	}
+
+	sum, count := m.getPDDFromHistogram("", "")
+	require.Equal(t, uint64(100), count)
+	require.InDelta(t, 49500.0, sum, 1.0)
 }

@@ -55,6 +55,7 @@ type (
 		rrd *prometheus.HistogramVec
 		spd *prometheus.HistogramVec
 		ttr *prometheus.HistogramVec
+		pdd *prometheus.HistogramVec
 		ord *prometheus.HistogramVec
 		lrd *prometheus.HistogramVec
 
@@ -85,6 +86,7 @@ type (
 		UpdateRRD(carrier string, uaType string, delayMs float64)
 		UpdateSPD(carrier string, uaType string, duration time.Duration)
 		UpdateTTR(carrier string, uaType string, delayMs float64)
+		UpdatePDD(carrier string, uaType string, delayMs float64)
 		UpdateORD(carrier string, uaType string, delayMs float64)
 		UpdateLRD(carrier string, uaType string, delayMs float64)
 		UpdateSession(carrier string, uaType string, size int)
@@ -269,6 +271,11 @@ func (m *metrics) initHistograms(reg *prometheus.Registry) {
 	m.ttr = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_ttr",
 		Help:    "Time to First Response in milliseconds (time from INVITE to first provisional 1xx response)",
+		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
+	}, cl, reg)
+	m.pdd = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_pdd",
+		Help:    "Post Dial Delay in milliseconds (time from INVITE to 180 Ringing response)",
 		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
 	}, cl, reg)
 	m.ord = newHistogramVecWithRegistry(prometheus.HistogramOpts{
@@ -595,6 +602,10 @@ func (m *metrics) UpdateRRD(carrier string, uaType string, delayMs float64) {
 
 func (m *metrics) UpdateTTR(carrier string, uaType string, delayMs float64) {
 	m.ttr.WithLabelValues(carrier, uaType).Observe(delayMs)
+}
+
+func (m *metrics) UpdatePDD(carrier string, uaType string, delayMs float64) {
+	m.pdd.WithLabelValues(carrier, uaType).Observe(delayMs)
 }
 
 func (m *metrics) UpdateORD(carrier string, uaType string, delayMs float64) {

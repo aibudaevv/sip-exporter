@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 0.15.0
+### Added
+- Post Dial Delay (PDD) metric: `sip_exporter_pdd{carrier="...",ua_type="..."}` histogram
+- PDD measures the time from INVITE request to 180 Ringing response in milliseconds
+- Only 180 Ringing triggers PDD (100 Trying, 181, 182, 183 Session Progress are excluded)
+- Same `inviteTracker` used as TTR — PDD measured alongside TTR when 180 is received
+- Unit tests: 4 metrics histogram tests + 5 exporter integration tests (180 direct, 100→180, 183 no PDD, no 180, non-INVITE ignored)
+- E2E tests: 11 MC/DC scenarios (180 measured, 100-only no PDD, 181/182 no PDD, busy no PDD, REGISTER no PDD, timeout no PDD, no INVITE, concurrent, mixed, carrier labels)
+- SIPp scenarios: `uas_100only.xml` / `uac_100only.xml` — 100 Trying + 200 OK without 180 Ringing
+- `docs/METRICS.md`: PDD section with formula, PromQL examples, and value guidelines
+- Grafana dashboard: PDD p95 stat panel + PDD p50/p95/p99 timeseries panel in Latency Histograms row
+- README.md / README.ru.md: PDD added to metrics lists and dashboard description
+
 ## 0.14.0
 ### Added
 - Voice Quality metrics via RFC 6035 VQ-RTCPXR SIP Package (`internal/vq` package)

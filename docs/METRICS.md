@@ -112,6 +112,7 @@ Carrier is determined at **request time** and inherited by all responses in the 
 | SER, SEER, ISA, SCR, ASR, NER | INVITE tracker | Quality of calls initiated by this carrier |
 | RRD | Register tracker | Registration delay for this carrier |
 | TTR | Invite tracker | Time to first response for this carrier's INVITEs |
+| PDD | Invite tracker | Post dial delay (INVITE → 180 Ringing) for this carrier's INVITEs |
 | SPD | Dialog (INVITE carrier) | Duration of sessions initiated by this carrier |
 | ORD | Options tracker | OPTIONS response delay for this carrier |
 | LRD | Register tracker | Registration redirect delay for this carrier |
@@ -244,6 +245,7 @@ UA type is determined at **request time** and inherited by all responses in the 
 | SER, SEER, ISA, SCR, ASR, NER | INVITE tracker | Quality of calls from this device type |
 | RRD | Register tracker | Registration delay for this device type |
 | TTR | Invite tracker | Time to first response for this device type |
+| PDD | Invite tracker | Post dial delay for this device type |
 | SPD | Dialog (INVITE ua_type) | Duration of sessions from this device type |
 | ORD | Options tracker | OPTIONS response delay for this device type |
 | LRD | Register tracker | Registration redirect delay for this device type |
@@ -419,6 +421,7 @@ Dialogs are tracked with Session-Expires (RFC 4028). If no BYE is received befor
 | RRD | §4.1 | Registration Request Delay |
 | SPD | §4.5 | Session Process Duration |
 | TTR | — | Time to First Response |
+| PDD | — | Post Dial Delay |
 | ASR | — | Answer Seizure Ratio (ITU-T E.411) |
 | SDC | — | Session Duration Counter |
 | NER | — | Network Effectiveness Ratio (GSMA IR.42) |
@@ -655,6 +658,40 @@ rate(sip_exporter_ttr_sum[5m]) / rate(sip_exporter_ttr_count[5m])
 - `< 50 ms` — excellent server responsiveness
 - `100-500 ms` — acceptable (typical for loaded servers)
 - `> 1000 ms` — potential issues (server overload, network latency)
+
+---
+
+### Post Dial Delay (PDD)
+
+`sip_exporter_pdd{carrier="...",ua_type="..."}`: histogram of delays in milliseconds between an INVITE request and the 180 Ringing response.
+
+**Formula:**
+```
+PDD = Time of 180 Ringing response - Time of INVITE request
+```
+
+- Measures the time from INVITE to the **180 Ringing** response specifically (not other 1xx responses)
+- 100 Trying and 183 Session Progress do **not** trigger PDD measurement
+- If no 180 Ringing is received (e.g., INVITE → 200 OK directly, or only 100 Trying), PDD is not measured
+- Exposed as a Prometheus Histogram with buckets: `[1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000]` ms
+- Use `histogram_quantile()` for percentile-based alerting
+
+**PromQL examples:**
+```promql
+# 95th percentile post dial delay (all carriers)
+histogram_quantile(0.95, sum(rate(sip_exporter_pdd_bucket[5m])) by (le))
+
+# 95th percentile post dial delay (specific carrier and device type)
+histogram_quantile(0.95, sum(rate(sip_exporter_pdd_bucket{carrier="carrier-a",ua_type="yealink"}[5m])) by (le))
+
+# Average post dial delay
+rate(sip_exporter_pdd_sum[5m]) / rate(sip_exporter_pdd_count[5m])
+```
+
+**Example values:**
+- `< 100 ms` — excellent (fast call setup)
+- `100-500 ms` — acceptable (typical for inter-carrier calls)
+- `> 3000 ms` — potential issues (routing delays, server overload)
 
 ---
 

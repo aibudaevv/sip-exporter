@@ -29,6 +29,8 @@ type mockMetricser struct {
 	spdDuration               time.Duration
 	ttrUpdated                bool
 	ttrDelay                  float64
+	pddUpdated                bool
+	pddDelay                  float64
 	ordUpdated                bool
 	ordDelay                  float64
 	lrdUpdated                bool
@@ -87,6 +89,11 @@ func (m *mockMetricser) UpdateSession(carrier string, uaType string, size int) {
 func (m *mockMetricser) UpdateTTR(carrier string, uaType string, delayMs float64) {
 	m.ttrUpdated = true
 	m.ttrDelay = delayMs
+}
+
+func (m *mockMetricser) UpdatePDD(carrier string, uaType string, delayMs float64) {
+	m.pddUpdated = true
+	m.pddDelay = delayMs
 }
 
 func (m *mockMetricser) UpdateORD(carrier string, uaType string, delayMs float64) {
@@ -2166,6 +2173,215 @@ func TestHandleMessage_TTR_FullCallFlow(t *testing.T) {
 	require.True(t, mm.sessionCompletedFlag, "session should be completed")
 }
 
+// ==================== PDD integration tests ====================
+
+func TestHandleMessage_PDD_180Ringing(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	inviteReq := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: pdd-test-180\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage("other", inviteReq)
+	require.Eventually(t, func() bool {
+		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	time.Sleep(10 * time.Millisecond)
+
+	ringingResp := []byte("SIP/2.0 180 Ringing\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: pdd-test-180\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage("other", ringingResp)
+	require.Eventually(t, func() bool {
+		return mm.pddUpdated
+	}, 100*time.Millisecond, 10*time.Millisecond)
+	require.True(t, mm.ttrUpdated, "TTR should also be measured on 180")
+	require.Greater(t, mm.pddDelay, 0.0)
+	require.Equal(t, mm.ttrDelay, mm.pddDelay, "PDD and TTR delay should be equal for direct 180")
+}
+
+func TestHandleMessage_PDD_100TryingThen180Ringing(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	inviteReq := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: pdd-test-100-180\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage("other", inviteReq)
+	require.Eventually(t, func() bool {
+		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	time.Sleep(5 * time.Millisecond)
+
+	tryingResp := []byte("SIP/2.0 100 Trying\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: pdd-test-100-180\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage("other", tryingResp)
+	require.Eventually(t, func() bool {
+		return mm.ttrUpdated
+	}, 100*time.Millisecond, 10*time.Millisecond)
+	require.False(t, mm.pddUpdated, "PDD should NOT be measured on 100 Trying")
+
+	time.Sleep(10 * time.Millisecond)
+
+	ringingResp := []byte("SIP/2.0 180 Ringing\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: pdd-test-100-180\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage("other", ringingResp)
+	require.Eventually(t, func() bool {
+		return mm.pddUpdated
+	}, 100*time.Millisecond, 10*time.Millisecond)
+	require.Greater(t, mm.pddDelay, 0.0)
+}
+
+func TestHandleMessage_PDD_183NoPDD(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	inviteReq := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: pdd-test-183\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage("other", inviteReq)
+	require.Eventually(t, func() bool {
+		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	time.Sleep(10 * time.Millisecond)
+
+	progressResp := []byte("SIP/2.0 183 Session Progress\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: pdd-test-183\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage("other", progressResp)
+	require.Eventually(t, func() bool {
+		return mm.ttrUpdated
+	}, 100*time.Millisecond, 10*time.Millisecond)
+	require.False(t, mm.pddUpdated, "PDD should NOT be measured on 183 Session Progress")
+}
+
+func TestHandleMessage_PDD_No180NoPDD(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	inviteReq := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: pdd-test-no180\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage("other", inviteReq)
+	require.Eventually(t, func() bool {
+		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	time.Sleep(10 * time.Millisecond)
+
+	okResp := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: pdd-test-no180\r\n" +
+		"CSeq: 1 INVITE\r\n" +
+		"Session-Expires: 3600\r\n")
+
+	e.handleMessage("other", okResp)
+	time.Sleep(10 * time.Millisecond)
+
+	require.False(t, mm.pddUpdated, "PDD should NOT be measured when no 180 received")
+	require.False(t, mm.ttrUpdated, "TTR should NOT be measured when no 1xx received")
+}
+
+func TestHandleMessage_PDD_NonInviteResponse_Ignored(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	regReq := []byte("REGISTER sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:user@domain>\r\n" +
+		"Call-ID: pdd-non-invite\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	e.handleMessage("other", regReq)
+	time.Sleep(10 * time.Millisecond)
+
+	tryingResp := []byte("SIP/2.0 180 Ringing\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:user@domain>;tag=xyz\r\n" +
+		"Call-ID: pdd-non-invite\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	e.handleMessage("other", tryingResp)
+	time.Sleep(10 * time.Millisecond)
+
+	require.False(t, mm.pddUpdated, "PDD should NOT be measured for REGISTER 180 Ringing")
+}
+
 func TestHandleMessage_CarrierPropagation_FullDialog(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
@@ -2313,6 +2529,7 @@ type carrierTrackingMetricser struct {
 	requests               []carrierCall
 	responseWithMetrics    []carrierCall
 	ttrCalls               []carrierCall
+	pddCalls               []carrierCall
 	rrdCalls               []carrierCall
 	lrdCalls               []carrierCall
 	ordCalls               []carrierCall
@@ -2366,6 +2583,10 @@ func (m *carrierTrackingMetricser) UpdateSPD(carrier string, uaType string, dura
 
 func (m *carrierTrackingMetricser) UpdateTTR(carrier string, uaType string, delayMs float64) {
 	m.ttrCalls = append(m.ttrCalls, carrierCall{carrier: carrier, value: delayMs})
+}
+
+func (m *carrierTrackingMetricser) UpdatePDD(carrier string, uaType string, delayMs float64) {
+	m.pddCalls = append(m.pddCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
 func (m *carrierTrackingMetricser) UpdateORD(carrier string, uaType string, delayMs float64) {

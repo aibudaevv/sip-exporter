@@ -596,12 +596,19 @@ func (e *exporter) handleInviteResponse(
 		if packet.ResponseStatus[0] == '1' {
 			if delayMs, inviteCarrier, inviteUAType, ok := e.readInviteEntry(string(packet.CallID)); ok {
 				e.services.metricser.UpdateTTR(inviteCarrier, inviteUAType, delayMs)
+				e.measurePDD(inviteCarrier, inviteUAType, delayMs, packet.ResponseStatus)
 			}
 		} else {
 			e.removeInviteTime(string(packet.CallID))
 		}
 	}
 	return carrier, uaType
+}
+
+func (e *exporter) measurePDD(carrier string, uaType string, delayMs float64, status []byte) {
+	if len(status) >= 3 && status[1] == '8' && status[2] == '0' {
+		e.services.metricser.UpdatePDD(carrier, uaType, delayMs)
+	}
 }
 
 func (e *exporter) handleRegisterNon200Response(carrier string, uaType string, packet dto.Packet) {
