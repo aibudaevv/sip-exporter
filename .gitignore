@@ -7,6 +7,9 @@ QWEN.md
 AGENTS.md
 .posts/
 
+# Build artifacts
+bin/
+
 # Test binaries
 e2e.test
 exporter.test

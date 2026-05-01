@@ -11,6 +11,8 @@ type (
 		CSeq           CSeq
 		SessionExpires int // seconds
 		UserAgent      []byte
+		ContentType    []byte
+		Body           []byte
 	}
 	From struct {
 		Addr []byte

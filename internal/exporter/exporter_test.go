@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"gitlab.com/sip-exporter/internal/service"
+	"gitlab.com/sip-exporter/internal/vq"
 )
 
 // Mock services for testing
@@ -28,10 +29,16 @@ type mockMetricser struct {
 	spdDuration               time.Duration
 	ttrUpdated                bool
 	ttrDelay                  float64
+	pddUpdated                bool
+	pddDelay                  float64
 	ordUpdated                bool
 	ordDelay                  float64
 	lrdUpdated                bool
 	lrdDelay                  float64
+	vqReportCalled            bool
+	vqCarrier                 string
+	vqUAType                  string
+	vqReport                  *vq.SessionReport
 }
 
 func (m *mockMetricser) UpdateSessionsByCarrierAndUA(counts map[string]map[string]int) {}
@@ -84,6 +91,11 @@ func (m *mockMetricser) UpdateTTR(carrier string, uaType string, delayMs float64
 	m.ttrDelay = delayMs
 }
 
+func (m *mockMetricser) UpdatePDD(carrier string, uaType string, delayMs float64) {
+	m.pddUpdated = true
+	m.pddDelay = delayMs
+}
+
 func (m *mockMetricser) UpdateORD(carrier string, uaType string, delayMs float64) {
 	m.ordUpdated = true
 	m.ordDelay = delayMs
@@ -96,6 +108,13 @@ func (m *mockMetricser) UpdateLRD(carrier string, uaType string, delayMs float64
 
 func (m *mockMetricser) SystemError() {
 	m.systemErrorCalled = true
+}
+
+func (m *mockMetricser) UpdateVQReport(carrier string, uaType string, report *vq.SessionReport) {
+	m.vqReportCalled = true
+	m.vqCarrier = carrier
+	m.vqUAType = uaType
+	m.vqReport = report
 }
 
 type dialogCreateArgs struct {
@@ -2154,6 +2173,215 @@ func TestHandleMessage_TTR_FullCallFlow(t *testing.T) {
 	require.True(t, mm.sessionCompletedFlag, "session should be completed")
 }
 
+// ==================== PDD integration tests ====================
+
+func TestHandleMessage_PDD_180Ringing(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	inviteReq := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: pdd-test-180\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage("other", inviteReq)
+	require.Eventually(t, func() bool {
+		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	time.Sleep(10 * time.Millisecond)
+
+	ringingResp := []byte("SIP/2.0 180 Ringing\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: pdd-test-180\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage("other", ringingResp)
+	require.Eventually(t, func() bool {
+		return mm.pddUpdated
+	}, 100*time.Millisecond, 10*time.Millisecond)
+	require.True(t, mm.ttrUpdated, "TTR should also be measured on 180")
+	require.Greater(t, mm.pddDelay, 0.0)
+	require.Equal(t, mm.ttrDelay, mm.pddDelay, "PDD and TTR delay should be equal for direct 180")
+}
+
+func TestHandleMessage_PDD_100TryingThen180Ringing(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	inviteReq := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: pdd-test-100-180\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage("other", inviteReq)
+	require.Eventually(t, func() bool {
+		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	time.Sleep(5 * time.Millisecond)
+
+	tryingResp := []byte("SIP/2.0 100 Trying\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: pdd-test-100-180\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage("other", tryingResp)
+	require.Eventually(t, func() bool {
+		return mm.ttrUpdated
+	}, 100*time.Millisecond, 10*time.Millisecond)
+	require.False(t, mm.pddUpdated, "PDD should NOT be measured on 100 Trying")
+
+	time.Sleep(10 * time.Millisecond)
+
+	ringingResp := []byte("SIP/2.0 180 Ringing\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: pdd-test-100-180\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage("other", ringingResp)
+	require.Eventually(t, func() bool {
+		return mm.pddUpdated
+	}, 100*time.Millisecond, 10*time.Millisecond)
+	require.Greater(t, mm.pddDelay, 0.0)
+}
+
+func TestHandleMessage_PDD_183NoPDD(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	inviteReq := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: pdd-test-183\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage("other", inviteReq)
+	require.Eventually(t, func() bool {
+		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	time.Sleep(10 * time.Millisecond)
+
+	progressResp := []byte("SIP/2.0 183 Session Progress\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: pdd-test-183\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage("other", progressResp)
+	require.Eventually(t, func() bool {
+		return mm.ttrUpdated
+	}, 100*time.Millisecond, 10*time.Millisecond)
+	require.False(t, mm.pddUpdated, "PDD should NOT be measured on 183 Session Progress")
+}
+
+func TestHandleMessage_PDD_No180NoPDD(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	inviteReq := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: pdd-test-no180\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage("other", inviteReq)
+	require.Eventually(t, func() bool {
+		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	time.Sleep(10 * time.Millisecond)
+
+	okResp := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: pdd-test-no180\r\n" +
+		"CSeq: 1 INVITE\r\n" +
+		"Session-Expires: 3600\r\n")
+
+	e.handleMessage("other", okResp)
+	time.Sleep(10 * time.Millisecond)
+
+	require.False(t, mm.pddUpdated, "PDD should NOT be measured when no 180 received")
+	require.False(t, mm.ttrUpdated, "TTR should NOT be measured when no 1xx received")
+}
+
+func TestHandleMessage_PDD_NonInviteResponse_Ignored(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+	}
+
+	regReq := []byte("REGISTER sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:user@domain>\r\n" +
+		"Call-ID: pdd-non-invite\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	e.handleMessage("other", regReq)
+	time.Sleep(10 * time.Millisecond)
+
+	tryingResp := []byte("SIP/2.0 180 Ringing\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:user@domain>;tag=xyz\r\n" +
+		"Call-ID: pdd-non-invite\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	e.handleMessage("other", tryingResp)
+	time.Sleep(10 * time.Millisecond)
+
+	require.False(t, mm.pddUpdated, "PDD should NOT be measured for REGISTER 180 Ringing")
+}
+
 func TestHandleMessage_CarrierPropagation_FullDialog(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
@@ -2294,18 +2522,21 @@ type carrierCall struct {
 	carrier string
 	method  string
 	value   float64
+	uaType  string
 }
 
 type carrierTrackingMetricser struct {
 	requests               []carrierCall
 	responseWithMetrics    []carrierCall
 	ttrCalls               []carrierCall
+	pddCalls               []carrierCall
 	rrdCalls               []carrierCall
 	lrdCalls               []carrierCall
 	ordCalls               []carrierCall
 	spdCalls               []carrierCall
 	sessionCompleted       []carrierCall
 	invite200OK            []carrierCall
+	vqReports              []carrierCall
 	packetsTotal           int
 	systemErrors           int
 	sessionsByCarrierAndUA map[string]map[string]int
@@ -2354,6 +2585,10 @@ func (m *carrierTrackingMetricser) UpdateTTR(carrier string, uaType string, dela
 	m.ttrCalls = append(m.ttrCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
+func (m *carrierTrackingMetricser) UpdatePDD(carrier string, uaType string, delayMs float64) {
+	m.pddCalls = append(m.pddCalls, carrierCall{carrier: carrier, value: delayMs})
+}
+
 func (m *carrierTrackingMetricser) UpdateORD(carrier string, uaType string, delayMs float64) {
 	m.ordCalls = append(m.ordCalls, carrierCall{carrier: carrier, value: delayMs})
 }
@@ -2375,6 +2610,10 @@ func (m *carrierTrackingMetricser) UpdateSessionsByCarrierAndUA(counts map[strin
 
 func (m *carrierTrackingMetricser) SystemError() {
 	m.systemErrors++
+}
+
+func (m *carrierTrackingMetricser) UpdateVQReport(carrier string, uaType string, report *vq.SessionReport) {
+	m.vqReports = append(m.vqReports, carrierCall{carrier: carrier, uaType: uaType})
 }
 
 // ==================== SIP message builders for MC/DC tests ====================
@@ -2458,6 +2697,7 @@ func newTestExporter(mm *carrierTrackingMetricser, md *mockDialoger) *exporter {
 			metricser: mm,
 			dialoger:  md,
 		},
+		vqHandler:       vq.NewHandler(mm),
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
 		optionsTracker:  make(map[string]optionsEntry),
@@ -2468,6 +2708,16 @@ func countCarrier(calls []carrierCall, carrier string) int {
 	n := 0
 	for _, c := range calls {
 		if c.carrier == carrier {
+			n++
+		}
+	}
+	return n
+}
+
+func countCarrierMethod(calls []carrierCall, carrier, method string) int {
+	n := 0
+	for _, c := range calls {
+		if c.carrier == carrier && c.method == method {
 			n++
 		}
 	}
@@ -2920,4 +3170,133 @@ func TestHandleMessage_CANCEL_ThenProvisional_NoTTR(t *testing.T) {
 	require.NoError(t, err)
 
 	require.False(t, mm.ttrUpdated, "TTR should not be measured after CANCEL removed tracker entry")
+}
+
+func TestHandleRequest_PUBLISH_VQReport(t *testing.T) {
+	mm := newCarrierTrackingMetricser()
+	md := &mockDialoger{}
+	e := newTestExporter(mm, md)
+
+	vqBody := "VQSessionReport: CallTerm\r\nMOSLQ=4.5 NLR=0.50\r\n"
+	publish := []byte("PUBLISH sip:collector@example.com SIP/2.0\r\n" +
+		"Via: SIP/2.0/UDP 10.0.1.5:5060\r\n" +
+		"From: <sip:user1@example.com>;tag=abc123\r\n" +
+		"To: <sip:collector@example.com>;tag=xyz789\r\n" +
+		"Call-ID: vq-test-publish@example.com\r\n" +
+		"CSeq: 1 PUBLISH\r\n" +
+		"Content-Type: application/vq-rtcpxr\r\n" +
+		"\r\n" +
+		vqBody)
+
+	err := e.handleMessage("carrier-a", publish)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, countCarrierMethod(mm.requests, "carrier-a", "PUBLISH"), "PUBLISH request should be counted")
+	require.Equal(t, 0, mm.systemErrors, "VQ report should not trigger system error")
+	require.Len(t, mm.vqReports, 1, "VQ handler should be called once")
+	require.Equal(t, "carrier-a", mm.vqReports[0].carrier)
+}
+
+func TestHandleRequest_NOTIFY_VQReport(t *testing.T) {
+	mm := newCarrierTrackingMetricser()
+	md := &mockDialoger{}
+	e := newTestExporter(mm, md)
+
+	vqBody := "VQSessionReport: CallTerm\r\nMOSLQ=4.2 IAJ=5.2\r\n"
+	notify := []byte("NOTIFY sip:user@example.com SIP/2.0\r\n" +
+		"Via: SIP/2.0/UDP 10.0.1.5:5060\r\n" +
+		"From: <sip:server@example.com>;tag=abc123\r\n" +
+		"To: <sip:user@example.com>;tag=xyz789\r\n" +
+		"Call-ID: vq-test-notify@example.com\r\n" +
+		"CSeq: 2 NOTIFY\r\n" +
+		"Content-Type: application/vq-rtcpxr\r\n" +
+		"\r\n" +
+		vqBody)
+
+	err := e.handleMessage("carrier-b", notify)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, countCarrierMethod(mm.requests, "carrier-b", "NOTIFY"), "NOTIFY request should be counted")
+	require.Equal(t, 0, mm.systemErrors, "VQ report should not trigger system error")
+	require.Len(t, mm.vqReports, 1, "VQ handler should be called once")
+	require.Equal(t, "carrier-b", mm.vqReports[0].carrier)
+}
+
+func TestHandleRequest_PUBLISH_NoVQContentType(t *testing.T) {
+	mm := newCarrierTrackingMetricser()
+	md := &mockDialoger{}
+	e := newTestExporter(mm, md)
+
+	publish := []byte("PUBLISH sip:collector@example.com SIP/2.0\r\n" +
+		"From: <sip:user1@example.com>;tag=abc123\r\n" +
+		"To: <sip:collector@example.com>;tag=xyz789\r\n" +
+		"Call-ID: no-vq-test@example.com\r\n" +
+		"CSeq: 1 PUBLISH\r\n" +
+		"Content-Type: application/sdp\r\n" +
+		"\r\n" +
+		"some sdp body")
+
+	err := e.handleMessage("carrier-a", publish)
+	require.NoError(t, err)
+	require.Equal(t, 0, mm.systemErrors)
+	require.Empty(t, mm.vqReports, "VQ handler should not be called for non-vq content type")
+}
+
+func TestHandleRequest_NOTIFY_NoVQContentType(t *testing.T) {
+	mm := newCarrierTrackingMetricser()
+	md := &mockDialoger{}
+	e := newTestExporter(mm, md)
+
+	notify := []byte("NOTIFY sip:user@example.com SIP/2.0\r\n" +
+		"From: <sip:server@example.com>;tag=abc123\r\n" +
+		"To: <sip:user@example.com>;tag=xyz789\r\n" +
+		"Call-ID: no-vq-notify@example.com\r\n" +
+		"CSeq: 2 NOTIFY\r\n" +
+		"Content-Type: application/dialog-info+xml\r\n" +
+		"\r\n" +
+		"some body")
+
+	err := e.handleMessage("carrier-a", notify)
+	require.NoError(t, err)
+	require.Equal(t, 0, mm.systemErrors)
+	require.Empty(t, mm.vqReports, "VQ handler should not be called for non-vq content type")
+}
+
+func TestHandleRequest_PUBLISH_VQEmptyBody(t *testing.T) {
+	mm := newCarrierTrackingMetricser()
+	md := &mockDialoger{}
+	e := newTestExporter(mm, md)
+
+	publish := []byte("PUBLISH sip:collector@example.com SIP/2.0\r\n" +
+		"From: <sip:user1@example.com>;tag=abc123\r\n" +
+		"To: <sip:collector@example.com>;tag=xyz789\r\n" +
+		"Call-ID: empty-vq@example.com\r\n" +
+		"CSeq: 1 PUBLISH\r\n" +
+		"Content-Type: application/vq-rtcpxr\r\n" +
+		"\r\n")
+
+	err := e.handleMessage("carrier-a", publish)
+	require.NoError(t, err)
+	require.Equal(t, 1, mm.systemErrors, "empty VQ body should trigger system error")
+	require.Empty(t, mm.vqReports, "VQ handler should not report metrics for empty body")
+}
+
+func TestHandleRequest_NOTIFY_VQInvalidBody(t *testing.T) {
+	mm := newCarrierTrackingMetricser()
+	md := &mockDialoger{}
+	e := newTestExporter(mm, md)
+
+	notify := []byte("NOTIFY sip:user@example.com SIP/2.0\r\n" +
+		"From: <sip:server@example.com>;tag=abc123\r\n" +
+		"To: <sip:user@example.com>;tag=xyz789\r\n" +
+		"Call-ID: invalid-vq@example.com\r\n" +
+		"CSeq: 2 NOTIFY\r\n" +
+		"Content-Type: application/vq-rtcpxr\r\n" +
+		"\r\n" +
+		"this is not a valid vq report")
+
+	err := e.handleMessage("carrier-a", notify)
+	require.NoError(t, err)
+	require.Equal(t, 1, mm.systemErrors, "invalid VQ body should trigger system error")
+	require.Empty(t, mm.vqReports, "VQ handler should not report metrics for invalid body")
 }

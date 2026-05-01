@@ -794,6 +794,16 @@ func getTTR(t *testing.T, endpoint string) float64 {
 	return sum / count
 }
 
+func getPDD(t *testing.T, endpoint string) float64 {
+	t.Helper()
+	sum := getMetric(t, endpoint, "sip_exporter_pdd_sum")
+	count := getMetric(t, endpoint, "sip_exporter_pdd_count")
+	if count == 0 {
+		return 0
+	}
+	return sum / count
+}
+
 func (e *testEnv) getSERByCarrier(t *testing.T) float64 {
 	t.Helper()
 	return getMetricWithCarrier(t, e.endpoint, "sip_exporter_ser", e.carrier)
@@ -858,6 +868,16 @@ func (e *testEnv) getTTRByCarrier(t *testing.T) float64 {
 	t.Helper()
 	sum := getMetricWithCarrier(t, e.endpoint, "sip_exporter_ttr_sum", e.carrier)
 	count := getMetricWithCarrier(t, e.endpoint, "sip_exporter_ttr_count", e.carrier)
+	if count == 0 {
+		return 0
+	}
+	return sum / count
+}
+
+func (e *testEnv) getPDDByCarrier(t *testing.T) float64 {
+	t.Helper()
+	sum := getMetricWithCarrier(t, e.endpoint, "sip_exporter_pdd_sum", e.carrier)
+	count := getMetricWithCarrier(t, e.endpoint, "sip_exporter_pdd_count", e.carrier)
 	if count == 0 {
 		return 0
 	}

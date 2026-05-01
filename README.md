@@ -36,6 +36,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - 📈 **Prometheus native** — standard `/metrics` endpoint for scraping
 - 🏷️ **Per-carrier metrics** — CIDR-based carrier resolution for all SIP metrics
 - 🏷️ **Per-device-type metrics** — User-Agent classification for all SIP metrics
+- 📞 **Voice quality (RFC 6035)** — MOS scores, jitter, packet loss from SIP PUBLISH/NOTIFY
 
 ## Quick Start
 
@@ -48,6 +49,9 @@ services:
     network_mode: host
     environment:
       - SIP_EXPORTER_INTERFACE=eth0
+      - SIP_EXPORTER_HTTP_PORT=2112
+      - SIP_EXPORTER_SIP_PORT=5060
+      - SIP_EXPORTER_SIPS_PORT=5061
       # Optional: carrier labels for per-provider metrics
       # - SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml
       # Optional: user-agent labels for per-device-type metrics
@@ -114,7 +118,8 @@ All metrics are exposed at `/metrics` in Prometheus exposition format. All SIP m
 
 - **Traffic counters** — SIP request types (INVITE, BYE, REGISTER, etc.) and response status codes (100–606)
 - **Active sessions** — real-time count of active SIP dialogs
-- **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR
+- **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, PDD
+- **RFC 6035 voice quality metrics** — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
 - **Extended metrics** — ISS, SDC, ORD, LRD
 
 Full reference with formulas, examples, and RFC section mapping: [docs/METRICS.md](docs/METRICS.md)
@@ -281,8 +286,8 @@ Full config reference with examples: [`examples/user_agents.yaml`](examples/user
 
 Test suite:
 - **Unit tests** — MC/DC standard, all business logic covered
-- **55 E2E tests** — real SIP traffic via SIPp + testcontainers-go, validates all RFC 6076 metrics
-- **8 load tests** — PPS throughput, concurrent sessions, memory stability, GC pauses, scrape latency
+- **105 E2E tests** — real SIP traffic via SIPp + testcontainers-go, validates all RFC 6076 and RFC 6035 metrics
+- **11 load tests** — PPS throughput, VQ reports, concurrent sessions, memory stability, GC pauses, scrape latency
 
 ## Benchmark
 
@@ -308,7 +313,7 @@ Import the pre-built dashboard into your Grafana instance:
 2. Upload `examples/grafana-dashboard.json` or copy the JSON content
 3. Select your Prometheus or VictoriaMetrics datasource
 
-The dashboard includes all available metrics: traffic counters, SIP request/response breakdowns, active sessions, RFC 6076 performance metrics (SER, SEER, ISA, SCR, NER), delay histograms (RRD, TTR, SPD, ORD, LRD), session quality metrics (ISS, ASR, SDC), and system errors.
+The dashboard includes all available metrics: traffic counters, SIP request/response breakdowns, active sessions, RFC 6076 performance metrics (SER, SEER, ISA, SCR, NER), voice quality metrics (RFC 6035: MOS, jitter, packet loss), delay histograms (RRD, TTR, PDD, SPD, ORD, LRD), session quality metrics (ISS, ASR, SDC), and system errors.
 
 Dashboard file: [`examples/grafana-dashboard.json`](examples/grafana-dashboard.json)
 

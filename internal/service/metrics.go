@@ -10,6 +10,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
+
+	"gitlab.com/sip-exporter/internal/vq"
 )
 
 const compositeKeyParts = 2
@@ -53,8 +55,24 @@ type (
 		rrd *prometheus.HistogramVec
 		spd *prometheus.HistogramVec
 		ttr *prometheus.HistogramVec
+		pdd *prometheus.HistogramVec
 		ord *prometheus.HistogramVec
 		lrd *prometheus.HistogramVec
+
+		vqNLR     *prometheus.HistogramVec
+		vqJDR     *prometheus.HistogramVec
+		vqBLD     *prometheus.HistogramVec
+		vqGLD     *prometheus.HistogramVec
+		vqRTD     *prometheus.HistogramVec
+		vqESD     *prometheus.HistogramVec
+		vqIAJ     *prometheus.HistogramVec
+		vqMAJ     *prometheus.HistogramVec
+		vqMOSLQ   *prometheus.HistogramVec
+		vqMOSCQ   *prometheus.HistogramVec
+		vqRLQ     *prometheus.HistogramVec
+		vqRCQ     *prometheus.HistogramVec
+		vqRERL    *prometheus.HistogramVec
+		vqReports *prometheus.CounterVec
 
 		carrierCounters sync.Map
 	}
@@ -68,10 +86,12 @@ type (
 		UpdateRRD(carrier string, uaType string, delayMs float64)
 		UpdateSPD(carrier string, uaType string, duration time.Duration)
 		UpdateTTR(carrier string, uaType string, delayMs float64)
+		UpdatePDD(carrier string, uaType string, delayMs float64)
 		UpdateORD(carrier string, uaType string, delayMs float64)
 		UpdateLRD(carrier string, uaType string, delayMs float64)
 		UpdateSession(carrier string, uaType string, size int)
 		UpdateSessionsByCarrierAndUA(counts map[string]map[string]int)
+		UpdateVQReport(carrier string, uaType string, report *vq.SessionReport)
 		SystemError()
 	}
 
@@ -253,6 +273,11 @@ func (m *metrics) initHistograms(reg *prometheus.Registry) {
 		Help:    "Time to First Response in milliseconds (time from INVITE to first provisional 1xx response)",
 		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
 	}, cl, reg)
+	m.pdd = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_pdd",
+		Help:    "Post Dial Delay in milliseconds (time from INVITE to 180 Ringing response)",
+		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
+	}, cl, reg)
 	m.ord = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_ord",
 		Help:    "OPTIONS Response Delay in milliseconds (RFC 3261 §11.1)",
@@ -263,6 +288,75 @@ func (m *metrics) initHistograms(reg *prometheus.Registry) {
 		Help:    "Location Registration Delay in milliseconds: delay between REGISTER and 3xx redirect response",
 		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
 	}, cl, reg)
+	m.vqNLR = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_vq_nlr_percent",
+		Help:    "Voice Quality Network Packet Loss Rate percentage (RFC 6035)",
+		Buckets: []float64{0, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100},
+	}, cl, reg)
+	m.vqJDR = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_vq_jdr_percent",
+		Help:    "Voice Quality Jitter Buffer Discard Rate percentage (RFC 6035)",
+		Buckets: []float64{0, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100},
+	}, cl, reg)
+	m.vqBLD = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_vq_bld_percent",
+		Help:    "Voice Quality Burst Loss Density percentage (RFC 6035)",
+		Buckets: []float64{0, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100},
+	}, cl, reg)
+	m.vqGLD = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_vq_gld_percent",
+		Help:    "Voice Quality Gap Loss Density percentage (RFC 6035)",
+		Buckets: []float64{0, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100},
+	}, cl, reg)
+	m.vqRTD = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_vq_rtd_ms",
+		Help:    "Voice Quality Round Trip Delay in milliseconds (RFC 6035)",
+		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
+	}, cl, reg)
+	m.vqESD = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_vq_esd_ms",
+		Help:    "Voice Quality End System Delay in milliseconds (RFC 6035)",
+		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
+	}, cl, reg)
+	m.vqIAJ = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_vq_iaj_ms",
+		Help:    "Voice Quality Interarrival Jitter in milliseconds (RFC 6035)",
+		Buckets: []float64{0.1, 0.5, 1, 5, 10, 20, 50, 100, 200, 500},
+	}, cl, reg)
+	m.vqMAJ = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_vq_maj_ms",
+		Help:    "Voice Quality Mean Absolute Jitter in milliseconds (RFC 6035)",
+		Buckets: []float64{0.1, 0.5, 1, 5, 10, 20, 50, 100, 200, 500},
+	}, cl, reg)
+	m.vqMOSLQ = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_vq_mos_lq",
+		Help:    "Voice Quality MOS Listening Quality score 0.0-4.9 (RFC 6035)",
+		Buckets: []float64{1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0},
+	}, cl, reg)
+	m.vqMOSCQ = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_vq_mos_cq",
+		Help:    "Voice Quality MOS Conversational Quality score 0.0-4.9 (RFC 6035)",
+		Buckets: []float64{1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0},
+	}, cl, reg)
+	m.vqRLQ = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_vq_rlq",
+		Help:    "Voice Quality R-factor Listening Quality 0-120 (RFC 6035)",
+		Buckets: []float64{0, 10, 20, 30, 50, 60, 70, 80, 90, 100, 120},
+	}, cl, reg)
+	m.vqRCQ = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_vq_rcq",
+		Help:    "Voice Quality R-factor Conversational Quality 0-120 (RFC 6035)",
+		Buckets: []float64{0, 10, 20, 30, 50, 60, 70, 80, 90, 100, 120},
+	}, cl, reg)
+	m.vqRERL = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_vq_rerl_db",
+		Help:    "Voice Quality Residual Echo Return Loss in dB (RFC 6035)",
+		Buckets: []float64{0, 5, 10, 15, 20, 30, 40, 50, 60, 80, 100},
+	}, cl, reg)
+	m.vqReports = newCounterVecWithRegistry(
+		"sip_exporter_vq_reports_total",
+		"Total number of Voice Quality session reports processed (RFC 6035)",
+		cl, reg)
 }
 
 func registerRatioCollectors(m *metrics, reg *prometheus.Registry) {
@@ -510,6 +604,10 @@ func (m *metrics) UpdateTTR(carrier string, uaType string, delayMs float64) {
 	m.ttr.WithLabelValues(carrier, uaType).Observe(delayMs)
 }
 
+func (m *metrics) UpdatePDD(carrier string, uaType string, delayMs float64) {
+	m.pdd.WithLabelValues(carrier, uaType).Observe(delayMs)
+}
+
 func (m *metrics) UpdateORD(carrier string, uaType string, delayMs float64) {
 	m.ord.WithLabelValues(carrier, uaType).Observe(delayMs)
 }
@@ -533,6 +631,49 @@ func (m *metrics) UpdateSessionsByCarrierAndUA(counts map[string]map[string]int)
 
 func (m *metrics) SystemError() {
 	m.systemErrorTotal.Inc()
+}
+
+func (m *metrics) UpdateVQReport(carrier string, uaType string, report *vq.SessionReport) {
+	if report.Present["NLR"] {
+		m.vqNLR.WithLabelValues(carrier, uaType).Observe(report.NLR)
+	}
+	if report.Present["JDR"] {
+		m.vqJDR.WithLabelValues(carrier, uaType).Observe(report.JDR)
+	}
+	if report.Present["BLD"] {
+		m.vqBLD.WithLabelValues(carrier, uaType).Observe(report.BLD)
+	}
+	if report.Present["GLD"] {
+		m.vqGLD.WithLabelValues(carrier, uaType).Observe(report.GLD)
+	}
+	if report.Present["RTD"] {
+		m.vqRTD.WithLabelValues(carrier, uaType).Observe(report.RTD)
+	}
+	if report.Present["ESD"] {
+		m.vqESD.WithLabelValues(carrier, uaType).Observe(report.ESD)
+	}
+	if report.Present["IAJ"] {
+		m.vqIAJ.WithLabelValues(carrier, uaType).Observe(report.IAJ)
+	}
+	if report.Present["MAJ"] {
+		m.vqMAJ.WithLabelValues(carrier, uaType).Observe(report.MAJ)
+	}
+	if report.Present["MOSLQ"] {
+		m.vqMOSLQ.WithLabelValues(carrier, uaType).Observe(report.MOSLQ)
+	}
+	if report.Present["MOSCQ"] {
+		m.vqMOSCQ.WithLabelValues(carrier, uaType).Observe(report.MOSCQ)
+	}
+	if report.Present["RLQ"] {
+		m.vqRLQ.WithLabelValues(carrier, uaType).Observe(report.RLQ)
+	}
+	if report.Present["RCQ"] {
+		m.vqRCQ.WithLabelValues(carrier, uaType).Observe(report.RCQ)
+	}
+	if report.Present["RERL"] {
+		m.vqRERL.WithLabelValues(carrier, uaType).Observe(report.RERL)
+	}
+	m.vqReports.WithLabelValues(carrier, uaType).Inc()
 }
 
 func isEffectiveResponse(code []byte) bool {

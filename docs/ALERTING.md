@@ -4,7 +4,7 @@ This guide provides pre-configured alerting examples for monitoring SIP infrastr
 
 ## Overview
 
-The SIP Exporter exposes metrics based on RFC 6076 (SIP Performance Metrics). Key metrics to alert on:
+The SIP Exporter exposes metrics based on RFC 6076 (SIP Performance Metrics) and RFC 6035 (Voice Quality Reporting). Key metrics to alert on:
 
 | Metric | Description | Alert When |
 |--------|-------------|------------|
@@ -14,6 +14,8 @@ The SIP Exporter exposes metrics based on RFC 6076 (SIP Performance Metrics). Ke
 | `sip_exporter_rrd` | Registration Request Delay | p95 > 500ms indicates network/registrar issues |
 | `sip_exporter_401_total` | Authentication failures | High rate indicates brute-force attacks |
 | `sip_exporter_403_total` | Forbidden responses | High rate indicates authorization issues |
+| `sip_exporter_vq_mos_lq` | MOS Listening Quality (RFC 6035) | avg < 3.5 (warning), < 3.0 (critical) |
+| `sip_exporter_vq_nlr_percent` | Network Packet Loss Rate (RFC 6035) | avg > 2% (warning), > 5% (critical) |
 
 ## Quick Start
 
@@ -108,7 +110,63 @@ groups:
         annotations:
           summary: "High server error rate"
           description: "500 Server Error rate is {{ $value | printf \"%.2f\" }}/s. SIP server may be overloaded or misconfigured."
-```
+      ```
+
+### Voice Quality Alerts (RFC 6035)
+
+These alerts monitor voice quality metrics extracted from SIP PUBLISH/NOTIFY with `Content-Type: application/vq-rtcpxr` (RFC 6035).
+
+```yaml
+      - alert: SIPVoiceQualityMOSLow
+        expr: |
+          rate(sip_exporter_vq_mos_lq_sum[5m]) / rate(sip_exporter_vq_mos_lq_count[5m]) < 3.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low voice quality (MOS)"
+          description: "Average MOS Listening Quality is {{ $value | printf \"%.1f\" }}. Voice quality is degraded — check network, codec, or endpoint issues."
+
+      - alert: SIPVoiceQualityMOSCritical
+        expr: |
+          rate(sip_exporter_vq_mos_lq_sum[5m]) / rate(sip_exporter_vq_mos_lq_count[5m]) < 3.0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical voice quality (MOS below 3.0)"
+          description: "Average MOS Listening Quality is {{ $value | printf \"%.1f\" }}. Users are experiencing poor call quality. Investigate network packet loss, jitter, or codec mismatch immediately."
+
+      - alert: SIPVoiceQualityPacketLossHigh
+        expr: |
+          rate(sip_exporter_vq_nlr_percent_sum[5m]) / rate(sip_exporter_vq_nlr_percent_count[5m]) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High network packet loss"
+          description: "Average network packet loss rate is {{ $value | printf \"%.1f\" }}%. Packet loss above 2% degrades voice quality. Check network congestion and QoS configuration."
+
+      - alert: SIPVoiceQualityPacketLossCritical
+        expr: |
+          rate(sip_exporter_vq_nlr_percent_sum[5m]) / rate(sip_exporter_vq_nlr_percent_count[5m]) > 5
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical network packet loss"
+          description: "Average network packet loss rate is {{ $value | printf \"%.1f\" }}%. Severe packet loss is causing unacceptable voice quality. Immediate network investigation required."
+
+      - alert: SIPVoiceQualityJitterHigh
+        expr: |
+          histogram_quantile(0.95, sum(rate(sip_exporter_vq_iaj_ms_bucket[5m])) by (le)) > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High interarrival jitter"
+          description: "95th percentile interarrival jitter is {{ $value | printf \"%.1f\" }}ms. High jitter causes audio artifacts. Check network queueing and jitter buffer configuration."
+      ```
 
 ### Info Alerts
 
@@ -164,6 +222,7 @@ The dashboard includes a `$carrier` variable for per-operator filtering, with pa
 - **Overview** — Active sessions, packet rate, INVITE rate, completed sessions
 - **RFC 6076 Ratios** — SER, SEER, ISA, SCR, ASR, NER gauges + trend graph
 - **Latency Histograms** — RRD, TTR, SPD, ORD, LRD (p50/p95/p99 per carrier)
+- **Voice Quality (RFC 6035)** — MOS Listening/Conversational Quality, packet loss (NLR), jitter (IAJ), round trip delay (RTD), R-factor (RLQ/RCQ)
 - **SIP Traffic** — Request/response rate breakdown by method and status code
 - **System Health** — Error rate, ISS rate
 
@@ -316,7 +375,7 @@ scrape_configs:
 
 ### Metric Cardinality
 
-The SIP Exporter exposes ~50 metrics with a `carrier` label. Cardinality equals the number of configured carriers (typically 5-20). Without a carriers config, all metrics use `carrier="other"` (cardinality = 1).
+The SIP Exporter exposes ~65 metrics with a `carrier` label. Cardinality equals the number of configured carriers (typically 5-20). Without a carriers config, all metrics use `carrier="other"` (cardinality = 1).
 
 ### Dashboard Organization
 
@@ -325,3 +384,4 @@ Organize dashboards by:
 - **Traffic**: Request/response rates
 - **Errors**: Error code breakdown
 - **Performance**: RRD, latency metrics
+- **Voice Quality**: MOS, packet loss, jitter, R-factor (RFC 6035)
