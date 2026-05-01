@@ -25,28 +25,28 @@ func TestSER_AllScenarios(t *testing.T) {
 			name:        "100_percent",
 			uasScenario: "uas_100.xml",
 			uacScenario: "uac_100.xml",
-			callCount:   50,
+			callCount:   100,
 			wantSER:     100.0,
 		},
 		{
 			name:        "0_percent",
 			uasScenario: "uas_0.xml",
 			uacScenario: "uac_0.xml",
-			callCount:   50,
+			callCount:   100,
 			wantSER:     0.0,
 		},
 		{
 			name:        "redirect",
 			uasScenario: "uas_redirect.xml",
 			uacScenario: "uac_redirect.xml",
-			callCount:   50,
+			callCount:   100,
 			wantSER:     0.0,
 		},
 		{
 			name:        "no_invite",
 			uasScenario: "uas_no_invite.xml",
 			uacScenario: "uac_no_invite.xml",
-			callCount:   50,
+			callCount:   100,
 			wantSER:     0.0,
 		},
 	}
@@ -71,8 +71,8 @@ func TestSER_Mixed(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 35, env)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 15, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 140, env)
+	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 60, env)
 
 	ser := getSER(t, env.endpoint)
 	t.Logf("SER = %.2f (want %.2f)", ser, 70.0)
@@ -82,14 +82,14 @@ func TestSER_Mixed(t *testing.T) {
 }
 
 // TestSER_Mixed3xx tests that 3xx responses are correctly excluded from denominator.
-// 50 redirect (3xx) + 50 successful (200 OK) → SER = 100% (all non-3xx successful).
+// 100 redirect (3xx) + 100 successful (200 OK) → SER = 100% (all non-3xx successful).
 func TestSER_Mixed3xx(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 25, env)
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25, env)
+	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 100, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 100, env)
 
 	ser := getSER(t, env.endpoint)
 	t.Logf("SER = %.2f (want %.2f)", ser, 100.0)
@@ -116,14 +116,14 @@ func TestSER_WithCarrierConfig(t *testing.T) {
 			name:        "100_percent",
 			uasScenario: "uas_100.xml",
 			uacScenario: "uac_100.xml",
-			callCount:   50,
+			callCount:   100,
 			wantSER:     100.0,
 		},
 		{
 			name:        "0_percent",
 			uasScenario: "uas_0.xml",
 			uacScenario: "uac_0.xml",
-			callCount:   50,
+			callCount:   100,
 			wantSER:     0.0,
 		},
 	}
@@ -148,8 +148,8 @@ func TestSER_MixedWithCarrierConfig(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnvWithCarriers(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 35, env)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 15, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 140, env)
+	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 60, env)
 
 	ser := env.getSERByCarrier(t)
 	t.Logf("SER{carrier=%q} = %.2f (want %.2f)", env.carrier, ser, 70.0)
@@ -164,9 +164,9 @@ func TestSER_ConcurrentRequests(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 30, env)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 10, env)
-	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 10, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 120, env)
+	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 40, env)
+	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 40, env)
 
 	ser := getSER(t, env.endpoint)
 	t.Logf("SER = %.2f%%", ser)

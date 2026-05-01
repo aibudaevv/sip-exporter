@@ -382,6 +382,94 @@ sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
 
 `sip_exporter_system_error_total`: total number internal SIP exporter errors. **No `carrier` or `ua_type` label.**
 
+## Self-Monitoring Metrics
+
+Self-monitoring metrics provide visibility into the exporter's internal health. All self-monitoring metrics have **no `carrier` or `ua_type` label** — they measure the exporter itself, not SIP traffic.
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `sip_exporter_socket_packets_received_total` | Counter | Total packets received from kernel AF_PACKET socket |
+| `sip_exporter_socket_packets_dropped_total` | Counter | Total packets dropped by kernel due to socket receive buffer overflow |
+| `sip_exporter_channel_length` | Gauge | Current number of packets in the internal messages channel buffer |
+| `sip_exporter_channel_capacity` | Gauge | Capacity of the internal messages channel buffer (constant: 10000) |
+| `sip_exporter_parse_errors_total{type="..."}` | CounterVec | Total packet parse errors by type |
+| `sip_exporter_active_trackers{type="..."}` | GaugeVec | Current number of entries in tracker maps |
+| `sip_exporter_active_dialogs` | Gauge | Current number of active SIP dialogs |
+
+### AF_PACKET Socket Statistics
+
+`sip_exporter_socket_packets_received_total` and `sip_exporter_socket_packets_dropped_total` are read from the kernel's `PACKET_STATISTICS` via `getsockopt()` every second. The kernel resets counters after each read, so values are accumulated in the exporter.
+
+**PromQL examples:**
+```promql
+# Packet drop rate (packets/sec)
+rate(sip_exporter_socket_packets_dropped_total[5m])
+
+# Drop ratio (percentage of received packets dropped)
+rate(sip_exporter_socket_packets_dropped_total[5m])
+  / rate(sip_exporter_socket_packets_received_total[5m]) * 100
+```
+
+### Parse Errors
+
+`sip_exporter_parse_errors_total{type="..."}` counts parse failures by protocol layer:
+
+| Type | Layer | Description |
+|------|-------|-------------|
+| `l2` | Ethernet | Packet too short for Ethernet/VLAN header |
+| `l3` | IPv4 | Not IPv4 packet or IP header too short |
+| `l4` | UDP | Not UDP packet or UDP header too short |
+| `sip` | SIP | No SIP payload, packet too small, or unrecognized method |
+| `vq` | Voice Quality | Failed to parse RFC 6035 VQ report body |
+
+**PromQL examples:**
+```promql
+# Parse error rate by type
+sum by (type) (rate(sip_exporter_parse_errors_total[5m]))
+
+# Total parse errors
+sum(rate(sip_exporter_parse_errors_total[5m]))
+```
+
+### Channel Buffer
+
+`sip_exporter_channel_length` shows how many packets are buffered in the internal channel between the socket reader and the SIP parser. If this approaches `channel_capacity` (10000), the exporter cannot keep up with packet arrival rate and may lose packets at the kernel level.
+
+**PromQL examples:**
+```promql
+# Channel utilization (percentage)
+sip_exporter_channel_length / sip_exporter_channel_capacity * 100
+
+# Alert if channel is filling up
+sip_exporter_channel_length / sip_exporter_channel_capacity > 0.8
+```
+
+### Active Trackers
+
+`sip_exporter_active_trackers{type="register|invite|options"}` shows the number of entries in each tracker map. Trackers store timestamps for measuring round-trip delays (RRD, TTR, ORD, LRD). Entries are cleaned up after 60 seconds.
+
+**PromQL examples:**
+```promql
+# Active trackers by type
+sip_exporter_active_trackers
+
+# High INVITE tracker count indicates many pending calls
+sip_exporter_active_trackers{type="invite"}
+```
+
+### Active Dialogs
+
+`sip_exporter_active_dialogs` shows the total number of active SIP dialogs (same value as `sum(sip_exporter_sessions)` but without label cardinality). Useful for quick health checks.
+
+**PromQL examples:**
+```promql
+# Current active dialogs
+sip_exporter_active_dialogs
+
+# Alert: too many active dialogs
+sip_exporter_active_dialogs > 10000
+```
+
 ## RFC 6076 Performance Metrics
 
 All RFC 6076 metrics are **scoped per carrier and ua_type** — each ratio/histogram is computed independently for each `carrier` and `ua_type` label combination. This allows comparing SER, SEER, ISA, SCR, ASR, NER across carriers and device types in a single Prometheus query.

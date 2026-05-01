@@ -27,42 +27,42 @@ func TestSEER_AllScenarios(t *testing.T) {
 			name:        "all_200",
 			uasScenario: "uas_100.xml",
 			uacScenario: "uac_100.xml",
-			callCount:   50,
+			callCount:   100,
 			wantSEER:    100.0,
 		},
 		{
 			name:        "all_486",
 			uasScenario: "uas_0.xml",
 			uacScenario: "uac_0.xml",
-			callCount:   50,
+			callCount:   100,
 			wantSEER:    100.0,
 		},
 		{
 			name:        "all_480",
 			uasScenario: "uas_busy.xml",
 			uacScenario: "uac_busy.xml",
-			callCount:   50,
+			callCount:   100,
 			wantSEER:    100.0,
 		},
 		{
 			name:        "all_603",
 			uasScenario: "uas_decline.xml",
 			uacScenario: "uac_decline.xml",
-			callCount:   50,
+			callCount:   100,
 			wantSEER:    100.0,
 		},
 		{
 			name:        "all_500",
 			uasScenario: "uas_server_error.xml",
 			uacScenario: "uac_server_error.xml",
-			callCount:   50,
+			callCount:   100,
 			wantSEER:    0.0,
 		},
 		{
 			name:        "redirect_only",
 			uasScenario: "uas_redirect.xml",
 			uacScenario: "uac_redirect.xml",
-			callCount:   50,
+			callCount:   100,
 			wantSEER:    0.0,
 		},
 	}
@@ -88,8 +88,8 @@ func TestSEER_MixedEffective(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25, env)
-	runSippScenario(ctx, t, "uas_busy.xml", "uac_busy.xml", 25, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 100, env)
+	runSippScenario(ctx, t, "uas_busy.xml", "uac_busy.xml", 100, env)
 
 	seer := getSEER(t, env.endpoint)
 	t.Logf("SEER = %.2f (want %.2f)", seer, 100.0)
@@ -105,8 +105,8 @@ func TestSEER_MixedWithErrors(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25, env)
-	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 25, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 100, env)
+	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 100, env)
 
 	seer := getSEER(t, env.endpoint)
 	t.Logf("SEER = %.2f (want %.2f)", seer, 50.0)
@@ -122,8 +122,8 @@ func TestSEER_Mixed3xx(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 25, env)
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25, env)
+	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 100, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 100, env)
 
 	seer := getSEER(t, env.endpoint)
 	t.Logf("SEER = %.2f (want %.2f)", seer, 100.0)
@@ -133,15 +133,15 @@ func TestSEER_Mixed3xx(t *testing.T) {
 }
 
 // TestSEER_Complex tests mixed effective and non-effective codes.
-// 20×200 OK + 15×480 Busy + 15×500 Error → SEER = (20+15)/(50-0) = 70%.
+// 80×200 OK + 60×480 Busy + 60×500 Error → SEER = (80+60)/(200-0) = 70%.
 func TestSEER_Complex(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 20, env)
-	runSippScenario(ctx, t, "uas_busy.xml", "uac_busy.xml", 15, env)
-	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 15, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 80, env)
+	runSippScenario(ctx, t, "uas_busy.xml", "uac_busy.xml", 60, env)
+	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 60, env)
 
 	seer := getSEER(t, env.endpoint)
 	t.Logf("SEER = %.2f (want %.2f)", seer, 70.0)
@@ -156,8 +156,8 @@ func TestSEER_WithCarrierConfig(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnvWithCarriers(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25, env)
-	runSippScenario(ctx, t, "uas_busy.xml", "uac_busy.xml", 25, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 100, env)
+	runSippScenario(ctx, t, "uas_busy.xml", "uac_busy.xml", 100, env)
 
 	seer := env.getSEERByCarrier(t)
 	t.Logf("SEER{carrier=%q} = %.2f (want %.2f)", env.carrier, seer, 100.0)

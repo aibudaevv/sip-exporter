@@ -20,7 +20,7 @@ import (
 // First 200 OK uses tracker carrier-A, second 200 OK (echo) tracker is gone → resolves from IP → carrier-B.
 // Result: invite200OKTotal{carrier-A}=N, inviteTotal{carrier-A}=2N → SER{carrier-A}=50%.
 // SER{carrier-B}=0 because carrier-B has no INVITEs (only second-echo responses with dead tracker).
-// sessionCompletedTotal{carrier-A}=50 (dialog created with carrier-A), sessionCompletedTotal{carrier-B}=0.
+// sessionCompletedTotal{carrier-A}=200 (dialog created with carrier-A), sessionCompletedTotal{carrier-B}=0.
 func TestCarrierDirection_InviteResponseMismatch(t *testing.T) {
 	ctx := context.Background()
 	setupSecondaryIPs(t)
@@ -28,7 +28,7 @@ func TestCarrierDirection_InviteResponseMismatch(t *testing.T) {
 	carriersYAML := loadCarriersYAML(t, "carriers_direction.yaml")
 	env := newTestEnvWithCarriersYAML(ctx, t, carriersYAML, "carrier-A")
 
-	runSippScenarioWithIPs(ctx, t, "uas_100.xml", "uac_100.xml", 50, env, "10.2.0.1", "10.1.0.1")
+	runSippScenarioWithIPs(ctx, t, "uas_100.xml", "uac_100.xml", 200, env, "10.2.0.1", "10.1.0.1")
 
 	inviteA := getMetricWithCarrier(t, env.endpoint, "sip_exporter_invite_total", "carrier-A")
 	t.Logf("invite_total{carrier-A}=%.0f", inviteA)
@@ -45,19 +45,20 @@ func TestCarrierDirection_InviteResponseMismatch(t *testing.T) {
 	sdcA := getMetricWithCarrier(t, env.endpoint, "sip_exporter_sdc_total", "carrier-A")
 	sdcB := getMetricWithCarrier(t, env.endpoint, "sip_exporter_sdc_total", "carrier-B")
 	t.Logf("sdc_total{carrier-A}=%.0f, sdc_total{carrier-B}=%.0f", sdcA, sdcB)
-	require.Equal(t, 50.0, sdcA, "carrier-A should have 50 completed sessions (dialog created with carrier-A)")
+	require.Equal(t, 200.0, sdcA, "carrier-A should have 200 completed sessions (dialog created with carrier-A)")
 	require.Equal(t, 0.0, sdcB, "carrier-B should have 0 completed sessions")
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
 // TestCarrierDirection_MultipleCarriers verifies that two carriers sending traffic
 // through the same exporter get separate, non-mixed metrics.
 //
-// Session 1: UAC=10.1.0.1 (carrier-A) → UAS=10.2.0.1 (carrier-B), 50 INVITE→200 OK.
-//   - inviteTotal{carrier-A}=100 (loopback doubled), invite200OKTotal{carrier-A}=50 (tracker alive),
-//     invite200OKTotal{carrier-B}=50 (echo with dead tracker, fallback to response srcIP→carrier-B).
+// Session 1: UAC=10.1.0.1 (carrier-A) → UAS=10.2.0.1 (carrier-B), 200 INVITE→200 OK.
+//   - inviteTotal{carrier-A}=200 (loopback doubled), invite200OKTotal{carrier-A}=100 (tracker alive),
+//     invite200OKTotal{carrier-B}=200 (echo with dead tracker, fallback to response srcIP→carrier-B).
 //
-// Session 2: UAC=10.2.0.1 (carrier-B) → UAS=10.1.0.1 (carrier-A), 50 INVITE→480 Busy.
-//   - inviteTotal{carrier-B}=100, inviteEffectiveTotal split between carriers via tracker/fallback.
+// Session 2: UAC=10.2.0.1 (carrier-B) → UAS=10.1.0.1 (carrier-A), 200 INVITE→480 Busy.
+//   - inviteTotal{carrier-B}=200, inviteEffectiveTotal split between carriers via tracker/fallback.
 //
 // Both carriers have SER > 0 due to their own INVITEs and tracker/fallback carrier resolution.
 func TestCarrierDirection_MultipleCarriers(t *testing.T) {
@@ -67,8 +68,8 @@ func TestCarrierDirection_MultipleCarriers(t *testing.T) {
 	carriersYAML := loadCarriersYAML(t, "carriers_direction.yaml")
 	env := newTestEnvWithCarriersYAML(ctx, t, carriersYAML, "carrier-A")
 
-	runSippScenarioWithIPs(ctx, t, "uas_100.xml", "uac_100.xml", 50, env, "10.2.0.1", "10.1.0.1")
-	runSippScenarioWithIPs(ctx, t, "uas_busy.xml", "uac_busy.xml", 50, env, "10.1.0.1", "10.2.0.1")
+	runSippScenarioWithIPs(ctx, t, "uas_100.xml", "uac_100.xml", 200, env, "10.2.0.1", "10.1.0.1")
+	runSippScenarioWithIPs(ctx, t, "uas_busy.xml", "uac_busy.xml", 200, env, "10.1.0.1", "10.2.0.1")
 
 	serA := getMetricWithCarrier(t, env.endpoint, "sip_exporter_ser", "carrier-A")
 	serB := getMetricWithCarrier(t, env.endpoint, "sip_exporter_ser", "carrier-B")
@@ -81,6 +82,7 @@ func TestCarrierDirection_MultipleCarriers(t *testing.T) {
 	t.Logf("invite_total{carrier-A}=%.0f, invite_total{carrier-B}=%.0f", inviteA, inviteB)
 	require.Greater(t, inviteA, 0.0, "carrier-A should have INVITEs")
 	require.Greater(t, inviteB, 0.0, "carrier-B should have INVITEs")
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
 // TestCarrierDirection_UnknownIPOther verifies that when carriers.yaml is configured,
@@ -96,7 +98,7 @@ func TestCarrierDirection_UnknownIPOther(t *testing.T) {
 	env := newTestEnvWithCarriersYAML(ctx, t, carriersYAML, "other")
 
 	// Both UAS and UAC use IPs outside any carrier CIDR
-	runSippScenarioWithIPs(ctx, t, "uas_100.xml", "uac_100.xml", 50, env, "172.16.0.2", "172.16.0.1")
+	runSippScenarioWithIPs(ctx, t, "uas_100.xml", "uac_100.xml", 200, env, "172.16.0.2", "172.16.0.1")
 
 	inviteOther := getMetricWithCarrier(t, env.endpoint, "sip_exporter_invite_total", "other")
 	t.Logf("invite_total{other}=%.0f", inviteOther)
@@ -106,6 +108,7 @@ func TestCarrierDirection_UnknownIPOther(t *testing.T) {
 	inviteB := getMetricWithCarrier(t, env.endpoint, "sip_exporter_invite_total", "carrier-B")
 	require.Equal(t, 0.0, inviteA, "carrier-A should have no INVITEs")
 	require.Equal(t, 0.0, inviteB, "carrier-B should have no INVITEs")
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
 // TestCarrierDirection_OverlappingCIDRs verifies that when two carriers have
@@ -123,7 +126,7 @@ func TestCarrierDirection_OverlappingCIDRs(t *testing.T) {
 	carriersYAML := loadCarriersYAML(t, "carriers_direction_overlap.yaml")
 	env := newTestEnvWithCarriersYAML(ctx, t, carriersYAML, "carrier-specific")
 
-	runSippScenarioWithIPs(ctx, t, "uas_100.xml", "uac_100.xml", 50, env, "10.1.0.1", "10.1.1.5")
+	runSippScenarioWithIPs(ctx, t, "uas_100.xml", "uac_100.xml", 200, env, "10.1.0.1", "10.1.1.5")
 
 	inviteSpecific := getMetricWithCarrier(t, env.endpoint, "sip_exporter_invite_total", "carrier-specific")
 	t.Logf("invite_total{carrier-specific}=%.0f", inviteSpecific)
@@ -132,4 +135,5 @@ func TestCarrierDirection_OverlappingCIDRs(t *testing.T) {
 	inviteBroad := getMetricWithCarrier(t, env.endpoint, "sip_exporter_invite_total", "carrier-broad")
 	t.Logf("invite_total{carrier-broad}=%.0f", inviteBroad)
 	require.Equal(t, 0.0, inviteBroad, "carrier-broad should not match when carrier-specific is listed first")
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }

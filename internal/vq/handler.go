@@ -5,6 +5,7 @@ import "go.uber.org/zap"
 type Metricser interface {
 	UpdateVQReport(carrier, uaType string, report *SessionReport)
 	SystemError()
+	ParseError(errorType string)
 }
 
 type Handler struct {
@@ -20,6 +21,7 @@ func (h *Handler) HandleVQReport(body []byte, carrier, uaType string) {
 	if err != nil {
 		zap.L().Warn("failed to parse vq-rtcpxr report", zap.Error(err))
 		h.metricser.SystemError()
+		h.metricser.ParseError("vq")
 		return
 	}
 	h.metricser.UpdateVQReport(carrier, uaType, report)

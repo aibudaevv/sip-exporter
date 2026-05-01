@@ -22,7 +22,7 @@ test-all: docker_build
 	go test -v ./internal/... ./pkg/...
 	@echo "=== E2E tests ==="
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
-		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 2 -failfast -timeout 10m ./test/e2e/
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -timeout 10m ./test/e2e/
 	@echo "=== Load tests ==="
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
 		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -timeout 30m ./test/e2e/load/...
@@ -30,7 +30,7 @@ test-all: docker_build
 
 test-e2e: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
-		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 2 -failfast -timeout 10m ./test/e2e/
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -timeout 10m ./test/e2e/
 
 #example: make test-e2e-run TEST=TestSER_AllScenarios/100_percent
 test-e2e-run: docker_build

@@ -27,6 +27,7 @@ func TestRRD_RegistrationSuccess(t *testing.T) {
 	rrd := getRRD(t, env.endpoint)
 	t.Logf("RRD = %.2f ms", rrd)
 	require.Greater(t, rrd, 0.0, "RRD should be greater than 0 after successful registrations")
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
 func TestRRD_Register401(t *testing.T) {
@@ -49,6 +50,7 @@ func TestRRD_Register401(t *testing.T) {
 	rrdAfter := getRRD(t, env.endpoint)
 	t.Logf("RRD before = %.2f ms, after = %.2f ms", rrdBefore, rrdAfter)
 	require.Equal(t, rrdBefore, rrdAfter, "RRD should not change for 401 responses")
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
 func TestRRD_Register403(t *testing.T) {
@@ -68,6 +70,7 @@ func TestRRD_Register403(t *testing.T) {
 
 	rrdAfter := getRRD(t, env.endpoint)
 	require.Equal(t, rrdBefore, rrdAfter, "RRD should not change for 403 responses")
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
 func TestRRD_Register500(t *testing.T) {
@@ -87,6 +90,7 @@ func TestRRD_Register500(t *testing.T) {
 
 	rrdAfter := getRRD(t, env.endpoint)
 	require.Equal(t, rrdBefore, rrdAfter, "RRD should not change for 500 responses")
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
 func TestRRD_RegisterTimeout(t *testing.T) {
@@ -104,6 +108,7 @@ func TestRRD_RegisterTimeout(t *testing.T) {
 
 	rrdAfter := getRRD(t, env.endpoint)
 	require.Equal(t, rrdBefore, rrdAfter, "RRD should not change for timeout (no response)")
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
 func TestRRD_ConcurrentRegistrations(t *testing.T) {
@@ -120,6 +125,7 @@ func TestRRD_ConcurrentRegistrations(t *testing.T) {
 	rrd := getRRD(t, env.endpoint)
 	t.Logf("RRD = %.2f ms", rrd)
 	require.Greater(t, rrd, 0.0, "RRD should be measured for all concurrent registrations")
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
 // TestRRD_WithCarrierConfig verifies RRD per-carrier.
@@ -133,4 +139,5 @@ func TestRRD_WithCarrierConfig(t *testing.T) {
 	rrd := env.getRRDByCarrier(t)
 	t.Logf("RRD{carrier=%q} = %.2f ms", env.carrier, rrd)
 	require.Greater(t, rrd, 0.0, "RRD should be greater than 0 after successful registrations")
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
