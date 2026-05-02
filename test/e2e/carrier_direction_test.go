@@ -53,14 +53,14 @@ func TestCarrierDirection_InviteResponseMismatch(t *testing.T) {
 // TestCarrierDirection_MultipleCarriers verifies that two carriers sending traffic
 // through the same exporter get separate, non-mixed metrics.
 //
-// Session 1: UAC=10.1.0.1 (carrier-A) → UAS=10.2.0.1 (carrier-B), 200 INVITE→200 OK.
-//   - inviteTotal{carrier-A}=200 (loopback doubled), invite200OKTotal{carrier-A}=100 (tracker alive),
-//     invite200OKTotal{carrier-B}=200 (echo with dead tracker, fallback to response srcIP→carrier-B).
+// Session 1: UAC=10.1.0.1 (carrier-A) → UAS=10.2.0.1 (carrier-B), INVITE→200 OK.
+//   - inviteTotal{carrier-A}=200, invite200OKTotal{carrier-A}=200 (tracker resolves to carrier-A).
 //
-// Session 2: UAC=10.2.0.1 (carrier-B) → UAS=10.1.0.1 (carrier-A), 200 INVITE→480 Busy.
-//   - inviteTotal{carrier-B}=200, inviteEffectiveTotal split between carriers via tracker/fallback.
+// Session 2: UAC=10.2.0.1 (carrier-B) → UAS=10.1.0.1 (carrier-A), INVITE→480 Busy.
+//   - inviteTotal{carrier-B}=200, no 200 OK → SER{carrier-B}=0.
 //
-// Both carriers have SER > 0 due to their own INVITEs and tracker/fallback carrier resolution.
+// carrier-A has SER > 0 (its INVITEs get 200 OK).
+// carrier-B has SER = 0 (its INVITEs get 480, not 200 OK).
 func TestCarrierDirection_MultipleCarriers(t *testing.T) {
 	ctx := context.Background()
 	setupSecondaryIPs(t)
@@ -75,7 +75,7 @@ func TestCarrierDirection_MultipleCarriers(t *testing.T) {
 	serB := getMetricWithCarrier(t, env.endpoint, "sip_exporter_ser", "carrier-B")
 	t.Logf("ser{carrier-A}=%.2f, ser{carrier-B}=%.2f", serA, serB)
 	require.Greater(t, serA, 0.0, "carrier-A should have SER > 0 (200 OK responses)")
-	require.Greater(t, serB, 0.0, "carrier-B should have SER > 0 (echo loopback doubling)")
+	require.Equal(t, 0.0, serB, "carrier-B should have SER = 0 (INVITEs only get 480, not 200 OK)")
 
 	inviteA := getMetricWithCarrier(t, env.endpoint, "sip_exporter_invite_total", "carrier-A")
 	inviteB := getMetricWithCarrier(t, env.endpoint, "sip_exporter_invite_total", "carrier-B")

@@ -105,7 +105,7 @@ type (
 		dialoger  service.Dialoger
 	}
 	Exporter interface {
-		Initialize(interfaceName string, path string, sipPort, sipsPort int) error
+		Initialize(interfaceName string, path string, sipPort, sipsPort int, ignoreOutgoing bool) error
 		IsAlive() bool
 		Close()
 	}
@@ -132,7 +132,7 @@ func NewExporter(
 	}
 }
 
-func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPort int) error {
+func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPort int, ignoreOutgoing bool) error {
 	if syscall.Geteuid() != 0 {
 		return ErrUserNotRoot
 	}
@@ -172,8 +172,11 @@ func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPo
 	e.sock = sock
 
 	socketRecvBufSize := socketRecvBufMB * miB
-	if setErr := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUF, socketRecvBufSize); setErr != nil {
-		return fmt.Errorf("failed to set SO_RCVBUF: %w", setErr)
+	if setErr := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUFFORCE, socketRecvBufSize); setErr != nil {
+		if setErrFallback := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUF, socketRecvBufSize); setErrFallback != nil {
+			return fmt.Errorf("failed to set SO_RCVBUF: %w", setErrFallback)
+		}
+		zap.L().Warn("SO_RCVBUFFORCE failed, using SO_RCVBUF (buffer capped by rmem_max)", zap.Error(setErr))
 	}
 
 	var actualBufSize int
@@ -199,6 +202,13 @@ func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPo
 	err = unix.Bind(sock, sa)
 	if err != nil {
 		return fmt.Errorf("failed to bind AF_PACKET socket to %s: %w", ifaceName, err)
+	}
+
+	if ignoreOutgoing {
+		if setErr := unix.SetsockoptInt(sock, unix.SOL_PACKET, unix.PACKET_IGNORE_OUTGOING, 1); setErr != nil {
+			return fmt.Errorf("failed to set PACKET_IGNORE_OUTGOING: %w", setErr)
+		}
+		zap.L().Info("PACKET_IGNORE_OUTGOING enabled", zap.String("interface", ifaceName))
 	}
 
 	// Attach eBPF filter

@@ -16,6 +16,7 @@ type (
 		SIPSPort             int    `env:"SIP_EXPORTER_SIPS_PORT" env-default:"5061"`
 		CarriersConfigPath   string `env:"SIP_EXPORTER_CARRIERS_CONFIG"`
 		UserAgentsConfigPath string `env:"SIP_EXPORTER_USER_AGENTS_CONFIG"`
+		IgnoreOutgoing       bool   `env:"SIP_EXPORTER_IGNORE_OUTGOING" env-default:"false"`
 	}
 )
 

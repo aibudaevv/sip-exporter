@@ -99,9 +99,9 @@ func TestStatusCodes_AllCodes(t *testing.T) {
 			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
 
 			value := getMetric(t, env.endpoint, tt.metricName)
-			want := float64(tt.callCount * 2)
-			t.Logf("%s = %.0f (want %.0f, loopback doubling)", tt.metricName, value, want)
-			require.Equal(t, want, value, "metric %s should equal callCount*2 due to loopback", tt.metricName)
+			want := float64(tt.callCount)
+			t.Logf("%s = %.0f (want %.0f)", tt.metricName, value, want)
+			require.Equal(t, want, value, "metric %s should equal callCount", tt.metricName)
 
 			waitForSessionsZero(t, env.endpoint)
 		})
@@ -156,7 +156,7 @@ func TestStatusCodes_WithCarrierConfig(t *testing.T) {
 			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
 
 			value := getMetricWithCarrier(t, env.endpoint, tt.metricName, env.carrier)
-			want := float64(tt.callCount * 2)
+			want := float64(tt.callCount)
 			t.Logf("%s{carrier=%q} = %.0f (want %.0f)", tt.metricName, env.carrier, value, want)
 			require.Equal(t, want, value)
 

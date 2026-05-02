@@ -12,7 +12,6 @@ import (
 
 // TestSDC_AllScenarios tests SDC metric with various scenarios.
 // SDC counts completed sessions (BYE→200 OK + expired dialogs).
-// On loopback SDC is NOT doubled (dialog map deduplicates).
 func TestSDC_AllScenarios(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -30,7 +29,7 @@ func TestSDC_AllScenarios(t *testing.T) {
 			uasScenario: "uas_100.xml",
 			uacScenario: "uac_100.xml",
 			callCount:   100,
-			wantSDC:     200.0,
+			wantSDC:     100.0,
 		},
 		{
 			name:        "rejected_486",

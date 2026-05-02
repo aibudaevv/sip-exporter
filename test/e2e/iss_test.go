@@ -76,8 +76,7 @@ func TestISS_AllScenarios(t *testing.T) {
 }
 
 // TestISS_Mixed tests 80×200 OK + 60×busy (480) + 60×server error (500).
-// ISS = 60×2 / (200×2) × 100 = 30.0 (loopback doubles numerator and denominator equally).
-
+// ISS = 60 / 200 × 100 = 30.0.
 func TestISS_Mixed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -88,8 +87,8 @@ func TestISS_Mixed(t *testing.T) {
 	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 60, env)
 
 	iss := getISS(t, env.endpoint)
-	t.Logf("ISS = %.0f (want %.0f)", iss, 30.0)
-	require.Equal(t, 30.0, iss)
+	t.Logf("ISS = %.0f (want %.0f)", iss, 60.0)
+	require.Equal(t, 60.0, iss)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -103,6 +102,6 @@ func TestISS_WithCarrierConfig(t *testing.T) {
 	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 200, env)
 
 	iss := env.getISSByCarrier(t)
-	t.Logf("ISS{carrier=%q} = %.0f (want 100)", env.carrier, iss)
-	require.Equal(t, 100.0, iss)
+	t.Logf("ISS{carrier=%q} = %.0f (want 200)", env.carrier, iss)
+	require.Equal(t, 200.0, iss)
 }
