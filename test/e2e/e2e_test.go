@@ -3,7 +3,6 @@
 package e2e
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -232,22 +231,28 @@ func setupSecondaryIPs(t *testing.T) {
 		"172.16.0.2/32",
 		"10.1.1.5/32",
 	}
+
+	script := "set -e"
 	for _, addr := range addrs {
-		out, err := exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
-			"--entrypoint", "", "alpine",
-			"ip", "addr", "add", addr, "dev", "lo",
-		).CombinedOutput()
-		if err != nil && !bytes.Contains(out, []byte("File exists")) {
-			require.NoError(t, err, "failed to add %s to lo: %s", addr, string(out))
-		}
+		script += " && ip addr add " + addr + " dev lo || true"
 	}
+
+	out, err := exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
+		"--entrypoint", "", "alpine",
+		"sh", "-c", script,
+	).CombinedOutput()
+	require.NoError(t, err, "failed to add secondary IPs: %s", string(out))
+
 	t.Cleanup(func() {
+		cleanScript := "set -e"
 		for _, addr := range addrs {
-			_ = exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
-				"--entrypoint", "", "alpine",
-				"ip", "addr", "del", addr, "dev", "lo",
-			).Run()
+			addrNoMask := strings.SplitN(addr, "/", 2)[0]
+			cleanScript += " && ip addr del " + addrNoMask + " dev lo 2>/dev/null || true"
 		}
+		_ = exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
+			"--entrypoint", "", "alpine",
+			"sh", "-c", cleanScript,
+		).Run()
 	})
 }
 
@@ -644,7 +649,18 @@ func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacS
 		}
 	}
 
-	time.Sleep(1 * time.Second)
+	require.Eventually(t, func() bool {
+		addr, err := net.ResolveUDPAddr("udp", uasIP+":"+env.sippPort)
+		if err != nil {
+			return false
+		}
+		conn, err := net.ListenUDP("udp", addr)
+		if err != nil {
+			return true
+		}
+		conn.Close()
+		return false
+	}, 5*time.Second, 50*time.Millisecond, "UAS should start listening on %s:%s", uasIP, env.sippPort)
 
 	uacReq := testcontainers.ContainerRequest{
 		Image:       sippImage,
