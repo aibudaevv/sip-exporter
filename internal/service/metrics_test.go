@@ -8,7 +8,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 
-	"gitlab.com/sip-exporter/internal/vq"
+	"github.com/aibudaevv/sip-exporter/internal/vq"
 )
 
 func NewTestMetricser() Metricser {

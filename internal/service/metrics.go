@@ -11,8 +11,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
 
-	"gitlab.com/sip-exporter/internal/version"
-	"gitlab.com/sip-exporter/internal/vq"
+	"github.com/aibudaevv/sip-exporter/internal/version"
+	"github.com/aibudaevv/sip-exporter/internal/vq"
 )
 
 const compositeKeyParts = 2

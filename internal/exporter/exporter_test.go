@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aibudaevv/sip-exporter/internal/service"
+	"github.com/aibudaevv/sip-exporter/internal/vq"
 	"github.com/stretchr/testify/require"
-	"gitlab.com/sip-exporter/internal/service"
-	"gitlab.com/sip-exporter/internal/vq"
 )
 
 // Mock services for testing

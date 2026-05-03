@@ -14,11 +14,11 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
 
-	"gitlab.com/sip-exporter/internal/carriers"
-	"gitlab.com/sip-exporter/internal/dto"
-	"gitlab.com/sip-exporter/internal/service"
-	"gitlab.com/sip-exporter/internal/ua"
-	"gitlab.com/sip-exporter/internal/vq"
+	"github.com/aibudaevv/sip-exporter/internal/carriers"
+	"github.com/aibudaevv/sip-exporter/internal/dto"
+	"github.com/aibudaevv/sip-exporter/internal/service"
+	"github.com/aibudaevv/sip-exporter/internal/ua"
+	"github.com/aibudaevv/sip-exporter/internal/vq"
 )
 
 var (

@@ -9,7 +9,7 @@ docker_build:
 ebpf_compile:
 	clang -O2 -target bpf -c internal/bpf/sip.c -o bin/sip.o -g -fno-stack-protector
 go_build:
-	go build -ldflags "-X gitlab.com/sip-exporter/internal/version.Version=$(version)" -o bin/main cmd/main.go
+	go build -ldflags "-X github.com/aibudaevv/sip-exporter/internal/version.Version=$(version)" -o bin/main cmd/main.go
 clean:
 	rm bin/sip.o && rm bin/main
 ebpf_log:
