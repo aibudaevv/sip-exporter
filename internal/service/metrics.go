@@ -11,6 +11,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
 
+	"gitlab.com/sip-exporter/internal/version"
 	"gitlab.com/sip-exporter/internal/vq"
 )
 
@@ -155,6 +156,7 @@ func newMetricserWithRegistry(reg *prometheus.Registry) Metricser {
 			"sip_exporter_packets_total",
 			"Total number of SIP packets processed", reg),
 	}
+	m.registerBuildInfo(reg)
 	m.initRequestCounters(reg)
 	m.initStatusCounters(reg)
 	m.initSessionMetrics(reg)
@@ -230,7 +232,6 @@ func (m *metrics) initStatusCounters(reg *prometheus.Registry) {
 		{"403", "Total number of 403 Forbidden responses"},
 		{"404", "Total number of 404 Not Found responses"},
 		{"405", "Total number of 405 Method Not Allowed responses"},
-		{"407", "Total number of 407 Proxy Authentication Required responses"},
 		{"408", "Total number of 408 Request Timeout responses"},
 		{"480", "Total number of 480 Temporarily Unavailable responses"},
 		{"481", "Total number of 481 Dialog/Transaction Does Not Exist responses"},
@@ -704,6 +705,23 @@ func isIneffectiveResponse(code []byte) bool {
 		bytes.Equal(code, []byte("500")) ||
 		bytes.Equal(code, []byte("503")) ||
 		bytes.Equal(code, []byte("504"))
+}
+
+func (m *metrics) registerBuildInfo(reg *prometheus.Registry) {
+	buildInfo := prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name:        "sip_exporter_build_info",
+		Help:        "Build information",
+		ConstLabels: prometheus.Labels{"version": version.Version},
+	}, func() float64 { return 1 })
+	if reg != nil {
+		reg.MustRegister(buildInfo)
+	} else {
+		promauto.NewGaugeFunc(prometheus.GaugeOpts{
+			Name:        "sip_exporter_build_info",
+			Help:        "Build information",
+			ConstLabels: prometheus.Labels{"version": version.Version},
+		}, func() float64 { return 1 })
+	}
 }
 
 func (m *metrics) getOrCreateCarrierCounters(carrier string, uaType string) *carrierAtomicCounters {

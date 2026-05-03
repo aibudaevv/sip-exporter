@@ -11,7 +11,7 @@
 | RRD | §4.1 | Registration Request Delay (histogram) | 0.8.0 |
 | SPD | §4.5 | Session Process Duration (histogram) | 0.9.0 |
 | TTR | — | Time to First Response (histogram) | 0.10.0 |
-| PDD | — | Post-Dial Delay (histogram) | TBD |
+| PDD | — | Post-Dial Delay (histogram) | 0.15.0 |
 | NER | — | Network Effectiveness Ratio (GSMA IR.42) | 0.10.0 |
 | ISS | — | Ineffective Session Severity (counter) | 0.10.0 |
 | ORD | — | OPTIONS Response Delay (histogram) | 0.10.0 |
@@ -21,7 +21,7 @@
 
 ## Предлагаемые метрики RFC 6076
 
-### P0: PDD — Post-Dial Delay
+### ~~P0: PDD — Post-Dial Delay~~ ✅ Реализовано (v0.15.0)
 
 **Описание:** время от INVITE до первого 180 Ringing / 183 Session Progress (исключая 100 Trying). Не определена в RFC 6076, но является стандартной индустриальной метрикой (ITU-T E.411, GSMA IR.42).
 
@@ -195,43 +195,6 @@ readinessProbe:
 **Проблема:** SIP trunk-провайдеры используют OPTIONS ping для проверки alive-статуса. Мониторинг ответов на OPTIONS — критичная фича для NOC-команд.
 
 **Реализация:** `sip_exporter_ord` histogram — задержка от OPTIONS до любого ответа. `optionsTracker` map по Call-ID с TTL cleanup (60s). Аналогична RRD, но для OPTIONS. E2e тесты + unit-тесты.
-
----
-
-### P2: OpenTelemetry Export
-
-**Проблема:** мир движется к OTel. Ограничение только Prometheus exposition format сужает рынок интеграции.
-
-**Решение:**
-- Добавить `SIP_EXPORTER_OTEL_ENDPOINT` env var
-- Экспортировать те же метрики через OTLP protocol
-- Поддержка: Datadog, New Relic, Splunk, Honeycomb, Grafana Tempo
-- Библиотека `go.opentelemetry.io/otel` уже в зависимостях (indirect)
-
-**Конфигурация:**
-```yaml
-SIP_EXPORTER_OTEL_ENDPOINT=otel-collector:4317
-SIP_EXPORTER_OTEL_PROTOCOL=grpc  # grpc | http
-```
-
-**Сложность:** средняя.
-
----
-
-### P3: Multi-interface мониторинг
-
-**Проблема:** `SIP_EXPORTER_INTERFACE` принимает один интерфейс. На border-серверах обычно 2+ NIC (internal + external).
-
-**Решение:**
-```yaml
-SIP_EXPORTER_INTERFACES=eth0,eth1
-```
-
-Отдельный eBPF socket на каждый интерфейс.
-
-**Workaround:** запустить несколько инстансов экспортера.
-
-**Сложность:** средняя.
 
 ---
 
@@ -452,25 +415,7 @@ sip_exporter_vq_gld_percent{carrier="...",ua_type="..."}         # Gap Loss Dens
 
 ---
 
-#### P2: OpenTelemetry Export
 
-**Проблема:** мир движется к OTel. Ограничение только Prometheus exposition format сужает рынок интеграции.
-
-**Решение:**
-- Добавить `SIP_EXPORTER_OTEL_ENDPOINT` env var
-- Экспортировать те же метрики через OTLP protocol
-- Поддержка: Datadog, New Relic, Splunk, Honeycomb, Grafana Tempo
-- Библиотека `go.opentelemetry.io/otel` уже в зависимостях (indirect)
-
-**Конфигурация:**
-```yaml
-SIP_EXPORTER_OTEL_ENDPOINT=otel-collector:4317
-SIP_EXPORTER_OTEL_PROTOCOL=grpc  # grpc | http
-```
-
-**Сложность:** средняя.
-
-**Почему P2:** OTel = доступ к рынку enterprise observability (Datadog, New Relic, Splunk).
 
 ---
 

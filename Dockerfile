@@ -21,4 +21,5 @@ FROM alpine:3.22
 RUN apk add --no-cache libelf bash
 COPY --from=builder /app/bin /usr/local/bin/
 RUN ls -la /usr/local/bin
+HEALTHCHECK CMD wget -qO- http://localhost:2112/health || exit 1
 ENTRYPOINT ["/usr/local/bin/main"]
