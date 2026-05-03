@@ -312,47 +312,28 @@ sip_exporter_vq_gld_percent{carrier="...",ua_type="..."}         # Gap Loss Dens
 
 ---
 
-#### P2: Self-Monitoring Metrics
+#### ~~P2: Self-Monitoring Metrics~~ ✅ Реализовано (v0.14.0)
 
-**Проблема:** оператор не знает, работает ли экспортер корректно. Нет видимости внутренних проблем (ring buffer overflow, parse errors, channel congestion).
-
-**Решение:**
-
-```promql
-sip_exporter_uptime_seconds                              # время работы (gauge)
-sip_exporter_packets_captured_total                      # захвачено пакетов (counter)
-sip_exporter_packets_dropped_total                       # потеряно на ring buffer (counter)
-sip_exporter_parse_errors_total                          # невалидные SIP-пакеты (counter)
-sip_exporter_channel_capacity_ratio                      # заполненность messages channel (gauge, 0-1)
-sip_exporter_ebpf_events_lost_total                      # потеряно на eBPF level (counter)
-sip_exporter_active_trackers{type="register|invite|options"}  # размер tracker maps (gauge)
-sip_exporter_active_dialogs                               # alias для sessions (gauge)
-sip_exporter_config_reload_total                          # количество hot-reload (counter)
-```
-
-Go runtime metrics через стандартный `promhttp.Handler()`:
-```go
-mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
-```
-
-**Сложность:** низкая. Большинство данных уже есть в структуре `exporter`.
-
-**Почему P2:** без self-monitoring невозможно отличить «трафик упал» от «экспортер сломался».
+7 метрик: `socket_packets_received_total`, `socket_packets_dropped_total`, `parse_errors_total{type}`, `channel_length`, `channel_capacity`, `active_trackers{type}`, `active_dialogs`.
 
 ---
 
-### В разработке (v0.15)
+### Текущий статус (v0.15.0)
+
+Все основные фичи реализованы. Проект production-ready для UDP SIP мониторинга.
 
 | Приоритет | Фича | Статус |
 |-----------|------|--------|
-| ~~P2~~ | Self-Monitoring Metrics (7 метрик) | ✅ Закоммичено (`6975848`) |
+| ~~P0~~ | Self-Monitoring Metrics (7 метрик) | ✅ v0.14.0 |
+| ~~P0~~ | PDD (Post-Dial Delay) | ✅ v0.15.0 |
+| ~~P0~~ | TTR/PDD re-measurement fix | ✅ v0.15.0 |
+| ~~P0~~ | `build_info` metric | ✅ v0.15.0 |
+| ~~P0~~ | Docker HEALTHCHECK | ✅ v0.15.0 |
 
-**TODO (завтра): стабилизация e2e тестов**
-- **E2E loopback flakiness (~33% FAIL rate)** — AF_PACKET на loopback теряет ±1-2 пакета из 200 на suite из 50+ тестов
-- Root cause: kernel AF_PACKET packet delivery timing на `lo` при 30+ последовательных контейнерах
-- Проявляется: `SER=102` (2 INVITE потеряны), `SER=69.31` (1 лишний), `SEER=99.01` (1 response потерян)
-- Pre-existing — на чистом `develop` тоже падают 4 PDD теста
-- Варианты: (1) `require.InDelta ±1%` для ratio-метрик, (2) veth pairs вместо `lo`, (3) network namespace per test
+**Известные мелкие проблемы:**
+- `go.mod` module path `gitlab.com/sip-exporter` vs GitHub repo — cosmetic, не блокирует
+- CI Go 1.24 vs go.mod 1.25.8 — mismatch существует
+- Pre-existing lint: `Initialize()` funlen 53 statements (limit 50)
 
 ---
 
@@ -403,6 +384,12 @@ sip_exporter_ser{carrier="mobile-operator-a",ua_type="grandstream"}            8
 | ~~—~~ | E2E test optimization (shared exporter + container restart) | ✅ v0.12.0 |
 | ~~P2~~ | SIP User-Agent Classification (ua_type label) | ✅ v0.13.0 |
 | ~~P1~~ | RFC 6035 Voice Quality Reporting (vq-rtcpxr) | ✅ v0.14.0 |
+| ~~P2~~ | Self-Monitoring Metrics (7 метрик) | ✅ v0.14.0 |
+| ~~P0~~ | PDD (Post-Dial Delay) histogram | ✅ v0.15.0 |
+| ~~P0~~ | TTR/PDD re-measurement fix | ✅ v0.15.0 |
+| ~~P0~~ | `build_info` metric | ✅ v0.15.0 |
+| ~~P0~~ | Docker HEALTHCHECK | ✅ v0.15.0 |
+| ~~—~~ | Bug fixes: format verbs, orphaned 407, dead code, test assertions | ✅ v0.15.0 |
 
 ### Roadmap по версиям
 
@@ -412,15 +399,13 @@ sip_exporter_ser{carrier="mobile-operator-a",ua_type="grandstream"}            8
 | ~~**v0.12**~~ | ~~10 status code counters + CANCEL handler + e2e optimization~~ | ✅ Выполнено |
 | ~~**v0.13**~~ | ~~SIP User-Agent Classification~~ | ✅ Выполнено |
 | ~~**v0.14**~~ | ~~RFC 6035 Voice Quality Reporting (vq-rtcpxr)~~ | ✅ Выполнено |
-| **v0.15** | PDD (Post-Dial Delay) histogram | Индустриальный стандарт — INVITE → первый 180/183, запрошено пользователем |
+| ~~**v0.15**~~ | ~~PDD + bug fixes + build_info + HEALTHCHECK~~ | ✅ Выполнено |
 
 ### Итог
 
-Для перехода от «лучший экспортер» к «must-have инструмент №1» критичны 3 вещи:
+Все критичные фичи реализованы. Проект — production-ready UDP SIP мониторинг с полной реализацией RFC 6076.
 
-1. ~~**Per-carrier labels**~~ ✅ — оператор должен видеть каждый транк отдельно
-2. ~~**RTP/RTCP quality metrics via RFC 6035**~~ ✅ — голосовое качество из SIP signaling, без изменений eBPF
-3. ~~**PDD (Post-Dial Delay)**~~ ✅ — индустриальный стандарт, запрошено пользователем
+Следующий этап — **дистрибуция**: привлечение пользователей, контент-маркетинг, экосистемная интеграция.
 
 ---
 
@@ -430,7 +415,9 @@ sip_exporter_ser{carrier="mobile-operator-a",ua_type="grandstream"}            8
 
 - GitHub: 10 звёзд, 0 фолловеров
 - Docker Hub: `frzq/sip-exporter:latest`
-- Документация: README + docs/ (хорошее состояние)
+- Документация: README + docs/ (METRICS.md, BENCHMARK.md, ALERTING.md) — хорошее состояние
+- CI: GitHub Actions (go test, vulncheck, trivy container scan)
+- Grafana dashboard: `examples/grafana-dashboard.json`
 - Нет: блога, social media, conference talks, community presence
 - Целевая аудитория: VoIP-операторы, NOC-инженеры, DevOps/SRE в телекоме, Kamailio/OpenSIPS/Asterisk администраторы
 
@@ -452,11 +439,11 @@ sip_exporter_ser{carrier="mobile-operator-a",ua_type="grandstream"}            8
 
 #### 1.1 GitHub Profile Package
 
-- [ ] **README.md** — добавить badge: Docker Pulls, GitHub Releases, Go Reference
+- [ ] **README.md** — добавить badges: Docker Pulls, GitHub Releases, Go Reference (CI badges уже есть)
 - [ ] **Screenshots/GIF** — добавить анимацию в README: Grafana dashboard в действии (SER gauge, traffic graph)
 - [ ] **CONTRIBUTING.md** — правила контрибуции (как запускать тесты, стиль кода, PR process)
 - [ ] **GitHub Topics** — добавить: `sip`, `voip`, `ebpf`, `prometheus-exporter`, `telecom`, `monitoring`, `sip-monitoring`, `voip-monitoring`, `kamailio`, `opensips`
-- [ ] **GitHub Releases** — опубликовать v0.10.0 release с бинарниками (linux/amd64, linux/arm64) через GoReleaser + GitHub Actions
+- [ ] **GitHub Releases** — опубликовать release с бинарниками (linux/amd64, linux/arm64) через GoReleaser + GitHub Actions
 - [ ] **GitHub Discussions** — включить, создать категории: Q&A, Ideas, Show & Tell
 - [ ] **Repo description** — убедиться что SEO-friendly: «High-performance eBPF-based SIP/VoIP monitoring exporter for Prometheus»
 
@@ -464,14 +451,14 @@ sip_exporter_ser{carrier="mobile-operator-a",ua_type="grandstream"}            8
 
 - [ ] **Automated builds** — GitHub Actions → Docker Hub push на каждый tag
 - [ ] **Multi-arch** — amd64 + arm64 (телеком железо часто ARM)
-- [ ] **Tags strategy** — `latest`, `0.10.0`, `0.10`, `0` (semver ranges)
+- [ ] **Tags strategy** — `latest`, `0.15.0`, `0.15`, `0` (semver ranges)
 - [ ] **Description** — заполнить overview на Docker Hub с примером docker-compose
 
 #### 1.3 Документация
 
-- [ ] **Quick Start Guide** — 5-минутный туториал: `docker compose up` → Grafana → видеть метрики (можно как отдельный docs/QUICKSTART.md)
+- ~~[x] **Quick Start Guide** — есть в README (docker-compose пример)~~
 - [ ] **Comparison table** — docs/COMPARISON.md: sip-exporter vs HOMER vs kamailio_exporter vs KRAM-PRO/SIP_Exporter
-- [ ] **Architecture diagram** — визуальная схема (Mermaid или ASCII) в README/документации
+- ~~[x] **Architecture diagram** — ASCII в README~~ (улучшить: Mermaid/SVG)
 - [ ] **Use Cases page** — docs/USE_CASES.md: «SIP trunk monitoring», «carrier SLA», «NOC dashboard», «debugging call quality»
 
 ---
@@ -803,7 +790,7 @@ Launch — это 20% работы. 80% — это то, что происход
 | Неделя | Задачи |
 |--------|--------|
 | **1** | GoReleaser + multi-arch Docker + GitHub Topics + Discussions + badges в README |
-| **2** | Screenshots/GIF в README + CONTRIBUTING.md + Comparison table + Quick Start guide |
+| **2** | Screenshots/GIF в README + CONTRIBUTING.md + Comparison table |
 | **3** | Регистрация аккаунтов (Reddit, HN, Twitter/X, LinkedIn, Dev.to, Habr). Начать прогрев. |
 | **4** | Прогрев аккаунтов: Reddit karma, Twitter followers, LinkedIn connections, Dev.to статья #0 (образовательная). |
 | **5** | **LAUNCH**: Dev.to → HN → Reddit → Twitter/X. Каскадный запуск за 48 часов. |
