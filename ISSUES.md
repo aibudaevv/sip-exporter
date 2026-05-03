@@ -440,7 +440,7 @@ sip_exporter_ser{carrier="mobile-operator-a",ua_type="grandstream"}            8
 #### 1.1 GitHub Profile Package
 
 - [ ] **README.md** — добавить badges: Docker Pulls, GitHub Releases, Go Reference (CI badges уже есть)
-- [ ] **Screenshots/GIF** — добавить анимацию в README: Grafana dashboard в действии (SER gauge, traffic graph)
+- ~~[ ] **Screenshots/GIF** — добавить анимацию в README~~ Не требуется
 - [ ] **CONTRIBUTING.md** — правила контрибуции (как запускать тесты, стиль кода, PR process)
 - [ ] **GitHub Topics** — добавить: `sip`, `voip`, `ebpf`, `prometheus-exporter`, `telecom`, `monitoring`, `sip-monitoring`, `voip-monitoring`, `kamailio`, `opensips`
 - [ ] **GitHub Releases** — опубликовать release с бинарниками (linux/amd64, linux/arm64) через GoReleaser + GitHub Actions
