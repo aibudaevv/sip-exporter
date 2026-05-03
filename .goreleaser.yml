@@ -1,9 +1,5 @@
 version: 2
 
-before:
-  hooks:
-    - make ebpf_compile
-
 builds:
   - id: sip-exporter
     main: ./cmd/main.go
