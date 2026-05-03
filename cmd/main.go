@@ -21,11 +21,11 @@ import (
 
 	"go.uber.org/zap"
 
-	"gitlab.com/sip-exporter/internal/carriers"
-	"gitlab.com/sip-exporter/internal/config"
-	"gitlab.com/sip-exporter/internal/server"
-	"gitlab.com/sip-exporter/internal/ua"
-	pkgLog "gitlab.com/sip-exporter/pkg/log"
+	"github.com/aibudaevv/sip-exporter/internal/carriers"
+	"github.com/aibudaevv/sip-exporter/internal/config"
+	"github.com/aibudaevv/sip-exporter/internal/server"
+	"github.com/aibudaevv/sip-exporter/internal/ua"
+	pkgLog "github.com/aibudaevv/sip-exporter/pkg/log"
 )
 
 func main() {

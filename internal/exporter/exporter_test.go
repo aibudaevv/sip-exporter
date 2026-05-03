@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aibudaevv/sip-exporter/internal/service"
+	"github.com/aibudaevv/sip-exporter/internal/vq"
 	"github.com/stretchr/testify/require"
-	"gitlab.com/sip-exporter/internal/service"
-	"gitlab.com/sip-exporter/internal/vq"
 )
 
 // Mock services for testing
@@ -700,14 +700,13 @@ func TestParseRawPacket_SuccessReturnsEmptyType(t *testing.T) {
 
 // ==================== sipPacketParse tests ====================
 
-func TestSIPPacketParse_EmptyLines(t *testing.T) {
+func TestSIPPacketParse_EmptyInput(t *testing.T) {
 	e := exporter{}
 
-	// Empty string after split returns [][]{nil} not empty result
-	_, err := e.sipPacketParse([]byte(""))
-	// Test may pass or fail depending on implementation
-	// Main thing is no panic
-	require.True(t, err != nil || true) // always true to avoid false negative
+	p, err := e.sipPacketParse([]byte(""))
+	require.NoError(t, err)
+	require.False(t, p.IsResponse)
+	require.Nil(t, p.Method)
 }
 
 func TestSIPPacketParse_NoFromTag(t *testing.T) {
@@ -1067,9 +1066,7 @@ func TestHandleMessage_ParseError(t *testing.T) {
 	// handleMessage may not return error for some invalid packets
 	// Main thing is systemError metric will be incremented
 	err := e.handleMessage("other", []byte("invalid"))
-	// Error may or may not be present depending on implementation
-	// Verify code doesn't panic
-	require.True(t, err == nil || err != nil) // always true
+	require.NoError(t, err)
 }
 
 func TestHandleMessage_Response200_InvalidDialogID(t *testing.T) {
@@ -2120,7 +2117,7 @@ func TestHandleMessage_TTR_OnlyFirstProvisionalMeasured(t *testing.T) {
 	e.handleMessage("other", ringingResp)
 	time.Sleep(10 * time.Millisecond)
 
-	require.Greater(t, mm.ttrDelay, firstTTR, "TTR should increase on second 1xx (entry not removed by readInviteEntry)")
+	require.Equal(t, firstTTR, mm.ttrDelay, "TTR should NOT be measured again on second 1xx")
 }
 
 func TestHandleMessage_TTR_RetransmitOverwrites(t *testing.T) {

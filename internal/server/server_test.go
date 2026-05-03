@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aibudaevv/sip-exporter/internal/config"
+	"github.com/aibudaevv/sip-exporter/internal/exporter"
 	"github.com/stretchr/testify/require"
-	"gitlab.com/sip-exporter/internal/config"
-	"gitlab.com/sip-exporter/internal/exporter"
 	"go.uber.org/zap"
 )
 

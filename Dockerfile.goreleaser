@@ -1,0 +1,8 @@
+FROM alpine:3.22
+
+RUN apk add --no-cache libelf bash
+COPY main /usr/local/bin/main
+COPY bin/sip.o /usr/local/bin/sip.o
+RUN chmod +x /usr/local/bin/main
+HEALTHCHECK CMD wget -qO- http://localhost:2112/health || exit 1
+ENTRYPOINT ["/usr/local/bin/main"]

@@ -14,11 +14,11 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
 
-	"gitlab.com/sip-exporter/internal/carriers"
-	"gitlab.com/sip-exporter/internal/dto"
-	"gitlab.com/sip-exporter/internal/service"
-	"gitlab.com/sip-exporter/internal/ua"
-	"gitlab.com/sip-exporter/internal/vq"
+	"github.com/aibudaevv/sip-exporter/internal/carriers"
+	"github.com/aibudaevv/sip-exporter/internal/dto"
+	"github.com/aibudaevv/sip-exporter/internal/service"
+	"github.com/aibudaevv/sip-exporter/internal/ua"
+	"github.com/aibudaevv/sip-exporter/internal/vq"
 )
 
 var (
@@ -73,9 +73,11 @@ type (
 	}
 
 	inviteEntry struct {
-		timestamp time.Time
-		carrier   string
-		uaType    string
+		timestamp   time.Time
+		carrier     string
+		uaType      string
+		ttrMeasured bool
+		pddMeasured bool
 	}
 
 	optionsEntry struct {
@@ -467,7 +469,7 @@ func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
 	lines := bytes.Split(raw, []byte("\r\n"))
 	if len(lines) == 0 {
-		return dto.Packet{}, fmt.Errorf("split return empty result, raw: %b", raw)
+		return dto.Packet{}, fmt.Errorf("split return empty result, raw: %q", raw)
 	}
 
 	p := dto.Packet{}
@@ -516,7 +518,7 @@ func (e *exporter) parseHeaders(lines [][]byte, p *dto.Packet) error {
 		case bytes.Equal(header, []byte("CSeq")):
 			id, method := extractCSeq(value)
 			if id == nil || method == nil {
-				return fmt.Errorf("fail extract CSeq from '%b'", value)
+				return fmt.Errorf("fail extract CSeq from '%s'", value)
 			}
 
 			p.CSeq.Method = method
@@ -634,10 +636,7 @@ func (e *exporter) handleInviteResponse(
 	}
 	if len(packet.ResponseStatus) > 0 {
 		if packet.ResponseStatus[0] == '1' {
-			if delayMs, inviteCarrier, inviteUAType, ok := e.readInviteEntry(string(packet.CallID)); ok {
-				e.services.metricser.UpdateTTR(inviteCarrier, inviteUAType, delayMs)
-				e.measurePDD(inviteCarrier, inviteUAType, delayMs, packet.ResponseStatus)
-			}
+			e.handleProvisionalResponse(packet)
 		} else {
 			e.removeInviteTime(string(packet.CallID))
 		}
@@ -645,9 +644,25 @@ func (e *exporter) handleInviteResponse(
 	return carrier, uaType
 }
 
-func (e *exporter) measurePDD(carrier string, uaType string, delayMs float64, status []byte) {
+func (e *exporter) handleProvisionalResponse(packet dto.Packet) {
+	delayMs, inviteCarrier, inviteUAType, ok := e.readInviteEntry(string(packet.CallID))
+	if !ok {
+		return
+	}
+	callID := string(packet.CallID)
+	if !e.isTTRMeasured(callID) {
+		e.services.metricser.UpdateTTR(inviteCarrier, inviteUAType, delayMs)
+		e.markTTRMeasured(callID)
+	}
+	if !e.isPDDMeasured(callID) {
+		e.measurePDD(inviteCarrier, inviteUAType, delayMs, packet.ResponseStatus, callID)
+	}
+}
+
+func (e *exporter) measurePDD(carrier string, uaType string, delayMs float64, status []byte, callID string) {
 	if len(status) >= 3 && status[1] == '8' && status[2] == '0' {
 		e.services.metricser.UpdatePDD(carrier, uaType, delayMs)
+		e.markPDDMeasured(callID)
 	}
 }
 
@@ -844,8 +859,8 @@ func (e *exporter) storeInviteTime(callID string, carrier string, uaType string)
 }
 
 func (e *exporter) readInviteEntry(callID string) (float64, string, string, bool) {
-	e.inviteMutex.RLock()
-	defer e.inviteMutex.RUnlock()
+	e.inviteMutex.Lock()
+	defer e.inviteMutex.Unlock()
 
 	entry, ok := e.inviteTracker[callID]
 	if !ok {
@@ -859,6 +874,48 @@ func (e *exporter) readInviteEntry(callID string) (float64, string, string, bool
 		zap.Float64("delay_ms", delayMs))
 
 	return delayMs, entry.carrier, entry.uaType, true
+}
+
+func (e *exporter) markTTRMeasured(callID string) {
+	e.inviteMutex.Lock()
+	defer e.inviteMutex.Unlock()
+
+	if entry, ok := e.inviteTracker[callID]; ok {
+		entry.ttrMeasured = true
+		e.inviteTracker[callID] = entry
+	}
+}
+
+func (e *exporter) isTTRMeasured(callID string) bool {
+	e.inviteMutex.RLock()
+	defer e.inviteMutex.RUnlock()
+
+	entry, ok := e.inviteTracker[callID]
+	if !ok {
+		return false
+	}
+	return entry.ttrMeasured
+}
+
+func (e *exporter) markPDDMeasured(callID string) {
+	e.inviteMutex.Lock()
+	defer e.inviteMutex.Unlock()
+
+	if entry, ok := e.inviteTracker[callID]; ok {
+		entry.pddMeasured = true
+		e.inviteTracker[callID] = entry
+	}
+}
+
+func (e *exporter) isPDDMeasured(callID string) bool {
+	e.inviteMutex.RLock()
+	defer e.inviteMutex.RUnlock()
+
+	entry, ok := e.inviteTracker[callID]
+	if !ok {
+		return false
+	}
+	return entry.pddMeasured
 }
 
 func (e *exporter) removeInviteTime(callID string) {

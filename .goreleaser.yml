@@ -1,0 +1,75 @@
+version: 2
+
+builds:
+  - id: sip-exporter
+    main: ./cmd/main.go
+    binary: main
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/aibudaevv/sip-exporter/internal/version.Version={{.Version}}
+    env:
+      - CGO_ENABLED=0
+
+archives:
+  - id: default
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    files:
+      - bin/sip.o
+      - README.md
+      - LICENSE
+      - VERSION
+      - examples/**
+
+dockers:
+  - image_templates:
+      - "frzq/sip-exporter:{{.Version}}-amd64"
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    extra_files:
+      - bin/sip.o
+    build_flag_templates:
+      - --platform=linux/amd64
+      - --label=org.opencontainers.image.title={{.ProjectName}}
+      - --label=org.opencontainers.image.version={{.Version}}
+      - --label=org.opencontainers.image.source={{.GitURL}}
+
+  - image_templates:
+      - "frzq/sip-exporter:{{.Version}}-arm64"
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    goarch: arm64
+    extra_files:
+      - bin/sip.o
+    build_flag_templates:
+      - --platform=linux/arm64
+      - --label=org.opencontainers.image.title={{.ProjectName}}
+      - --label=org.opencontainers.image.version={{.Version}}
+      - --label=org.opencontainers.image.source={{.GitURL}}
+
+docker_manifests:
+  - name_template: "frzq/sip-exporter:{{.Version}}"
+    image_templates:
+      - "frzq/sip-exporter:{{.Version}}-amd64"
+      - "frzq/sip-exporter:{{.Version}}-arm64"
+  - name_template: "frzq/sip-exporter:latest"
+    image_templates:
+      - "frzq/sip-exporter:{{.Version}}-amd64"
+      - "frzq/sip-exporter:{{.Version}}-arm64"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^lint:"

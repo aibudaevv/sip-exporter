@@ -13,11 +13,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
-	"gitlab.com/sip-exporter/internal/carriers"
-	"gitlab.com/sip-exporter/internal/config"
-	"gitlab.com/sip-exporter/internal/exporter"
-	"gitlab.com/sip-exporter/internal/service"
-	"gitlab.com/sip-exporter/internal/ua"
+	"github.com/aibudaevv/sip-exporter/internal/carriers"
+	"github.com/aibudaevv/sip-exporter/internal/config"
+	"github.com/aibudaevv/sip-exporter/internal/exporter"
+	"github.com/aibudaevv/sip-exporter/internal/service"
+	"github.com/aibudaevv/sip-exporter/internal/ua"
 )
 
 const (

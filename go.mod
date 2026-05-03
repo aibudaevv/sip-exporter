@@ -1,4 +1,4 @@
-module gitlab.com/sip-exporter
+module github.com/aibudaevv/sip-exporter
 
 go 1.25.9
 

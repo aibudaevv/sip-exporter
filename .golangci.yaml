@@ -24,7 +24,7 @@ formatters:
       # with the given prefixes are grouped after 3rd-party packages.
       # Default: []
       local-prefixes:
-        - gitlab.com/sip-exporter
+        - github.com/aibudaevv/sip-exporter
     golines:
       # Target maximum line length.
       # Default: 100
