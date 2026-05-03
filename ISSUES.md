@@ -151,20 +151,6 @@ histogram_quantile(0.99, rate(sip_exporter_spd_bucket[5m]))
 
 ---
 
-### P1: TCP/TLS поддержка
-
-**Проблема:** eBPF-фильтр захватывает только UDP (`exporter.go:249`: `if ipHeader[9] != 17 // UDP`). В продакшене SIP-инфраструктура почти всегда использует TCP и TLS (SIPS port 5061).
-
-**Решение:**
-- Расширить eBPF-парсер для TCP-потоковой реассемблизации
-- Использовать Content-Length header для определения границ SIP-сообщения в TCP-потоке
-- Для TLS — варианты:
-  1. SSL/TLS offload (расшифровка на termination point, мониторинг plaintext после него)
-  2. SPAN-port подход (зеркалирование трафика на decryption point)
-  3. eBPF uprobe на OpenSSL/BoringSSL для перехвата decrypted данных
-
-**Сложность:** высокая. TCP реассемблизация — нетривиальная задача.
-
 ---
 
 ### ~~P1: Health endpoint + Graceful Shutdown~~ ✅ Реализовано (v0.10.0)
@@ -217,99 +203,6 @@ readinessProbe:
 #### ~~P0: Per-IP / Per-Carrier метрики~~ ✅ Реализовано (v0.11.0)
 
 **Реализация:** `carrier` label через CIDR-маппинг. Подробности выше.
-
----
-
-#### P1: TCP/TLS поддержка
-
-**Проблема:** eBPF-фильтр захватывает только UDP. В продакшене ~40-60% SIP трафика — TCP/TLS (SIPS port 5061).
-
-**Решение:**
-- Расширить eBPF-парсер для TCP-потоковой реассемблизации
-- Использовать Content-Length header для определения границ SIP-сообщения в TCP-потоке
-- Для TLS — варианты:
-  1. SSL/TLS offload (расшифровка на termination point, мониторинг plaintext после него) — самый практичный
-  2. SPAN-port подход (зеркалирование трафика на decryption point)
-  3. eBPF uprobe на OpenSSL/BoringSSL для перехвата decrypted данных
-
-**Сложность:** высокая. TCP реассемблизация — нетривиальная задача.
-
-**Почему P1:** без этого продукт отсекает 40-60% production-сценариев.
-
----
-
-#### P1: SIP-over-WebSocket (SIP-WS / SIP-WSS) мониторинг
-
-**Проблема:** всё больше SIP-инфраструктур используют WebSocket как транспорт (RFC 7118). WebRTC-клиенты, браузерные softphones (JsSIP, SIP.js), мобильные SDK, облачные PBX — все ходят через `ws://` / `wss://`. eBPF-фильтр сейчас видит только UDP, поэтому этот трафик полностью невидим.
-
-**Что такое SIP-over-WebSocket (RFC 7118):**
-- SIP-сообщения передаются внутри WebSocket-фреймов поверх HTTP/1.1 Upgrade
-- Порт: обычно 80/443 (реже 5060/5061, 8080/8443)
-- WSS (WebSocket Secure) = WebSocket поверх TLS — шифрование на уровне TCP-соединения
-- Каждый WebSocket-фрейм содержит одно или несколько SIP-сообщений целиком (нет фрагментации на уровне SIP, как в raw TCP)
-
-**Архитектура:**
-
-SIP-WS/WSS работает поверх TCP. Чтобы его захватить, нужно:
-
-1. **TCP stream reassembly** — та же задача, что и для plain SIP-over-TCP
-2. **HTTP Upgrade detection** — определить, что TCP-соединение содержит WebSocket-трафик (по заголовку `Upgrade: websocket` в HTTP-запросе)
-3. **WebSocket framing** — парсить WebSocket-фреймы (RFC 6455): opcode 0x01 (text) или 0x02 (binary), payload = SIP-сообщение
-4. **SIP parsing** — payload фрейма — это обычный SIP-сообщение, которое можно парсить существующим парсером
-
-**Ключевое преимущество перед plain TCP SIP:**
-WebSocket-фреймы уже имеют чёткие границы (length prefix в заголовке фрейма) — не нужен Content-Length парсинг для определения границ SIP-сообщения. Это упрощает реассемблизацию по сравнению с raw TCP.
-
-**Для WSS (шифрованный):**
-- Те же варианты, что и для TLS:
-  1. TLS offload — мониторинг plaintext WebSocket после termination point (наиболее практичный)
-  2. eBPF uprobe на OpenSSL/BoringSSL для перехвата decrypted данных
-  3. SPAN-port + decryption appliance
-- На практике: большинство SIP-WSS деплоев используют reverse proxy (nginx, HAProxy, Envoy) как TLS terminator → plaintext WebSocket на backend → мониторинг на этом интерфейсе
-
-**Метрики:**
-
-Никаких новых метрик не требуется — SIP-сообщения из WebSocket-фреймов парсятся тем же парсером. Однако можно добавить счётчики транспорта:
-
-```promql
-sip_exporter_packets_by_transport_total{transport="udp|tcp|ws|wss"}  # Counter по типу транспорта
-```
-
-**Конфигурация:**
-
-```yaml
-SIP_EXPORTER_SIP_WS_PORT=80      # HTTP WebSocket port
-SIP_EXPORTER_SIP_WSS_PORT=443    # HTTPS WebSocket port
-```
-
-Или через расширенный конфиг:
-```yaml
-transports:
-  - protocol: udp
-    ports: [5060, 5061]
-  - protocol: tcp
-    ports: [5060, 5061]
-  - protocol: ws
-    ports: [80, 8080]
-  - protocol: wss
-    ports: [443, 8443]
-```
-
-**Сценарии использования:**
-
-| Сценарий | Доля рынка | Транспорт |
-|----------|-----------|-----------|
-| WebRTC-клиенты (браузерные softphones) | Растёт | WS/WSS |
-| Мобильные VoIP-приложения (SDK) | Растёт | WS/WSS |
-| Cloud PBX (Microsoft Teams Direct Routing, Zoom Phone) | Растёт | WSS |
-| SBC WebSocket trunking | Средняя | WS/WSS |
-| Традиционные SIP-телефоны и PBX | Доминирует | UDP/TCP |
-
-**Почему P1:** SIP-over-WebSocket — самый быстрорастущий сегмент SIP-трафика. WebRTC и cloud PBX драйвят переход. Без WSS мониторинга продукт невидим для целого класса production-окружений. Технически — надстройка над TCP reassembly, требующая дополнительного WebSocket framing parser (~200-300 строк Go).
-
-**Сложность:** высокая (зависит от TCP reassembly). WebSocket framing parser — средняя. WSS decryption — высокая.
-
-**Зависимость:** требует реализации TCP stream reassembly (из фичи TCP/TLS выше). Рекомендуется делать вместе или сразу после TCP/TLS.
 
 ---
 
@@ -520,7 +413,6 @@ sip_exporter_ser{carrier="mobile-operator-a",ua_type="grandstream"}            8
 | ~~**v0.13**~~ | ~~SIP User-Agent Classification~~ | ✅ Выполнено |
 | ~~**v0.14**~~ | ~~RFC 6035 Voice Quality Reporting (vq-rtcpxr)~~ | ✅ Выполнено |
 | **v0.15** | PDD (Post-Dial Delay) histogram | Индустриальный стандарт — INVITE → первый 180/183, запрошено пользователем |
-| **v0.16** | TCP/TLS/WSS Support | Открытие 40-60% рынка production-сценариев (TCP, TLS, SIP over WebSocket) |
 
 ### Итог
 
@@ -528,7 +420,7 @@ sip_exporter_ser{carrier="mobile-operator-a",ua_type="grandstream"}            8
 
 1. ~~**Per-carrier labels**~~ ✅ — оператор должен видеть каждый транк отдельно
 2. ~~**RTP/RTCP quality metrics via RFC 6035**~~ ✅ — голосовое качество из SIP signaling, без изменений eBPF
-3. **TCP/TLS** — без этого продукт отсекает 40-60% production-сценариев
+3. ~~**PDD (Post-Dial Delay)**~~ ✅ — индустриальный стандарт, запрошено пользователем
 
 ---
 
@@ -1068,7 +960,6 @@ sip_exporter_build_info{version="0.10.0",security="sip-shield available at https
 |---------|-------------|------------|-------------|
 | eBPF bug fix | v0.10.1 | cherry-pick | Один код — один фикс |
 | New SIP header parsing | ~~v0.11 (UA classification)~~ v0.13 ✅ | reuse для scanner detection | sip-shield Rule 4 (Known Scanner UA) зависит от UA parsing |
-| TCP/TLS support | v0.13 | critical для sip-shield | Без TCP sip-shield не видит TLS-атаки |
 | Per-carrier labels | v0.11 | reuse для per-trunk threat visibility | «какой транк атакуют?» |
 | RTCP quality metrics | v0.14 | не нужен для sip-shield | Расходящиеся дороги — это нормально |
 
@@ -1113,11 +1004,9 @@ sip-exporter фичи приоритизируются не только по т
 | Per-carrier labels | Высокая | Высокая (per-trunk threats) | P0 — не снижать |
 | ~~UA Classification~~ | ~~Средняя~~ | ~~Критическая (scanner detection Rule 4)~~ | ✅ v0.13.0 |
 | Self-Monitoring | Средняя | Высокая (agent health для SaaS SLA) | P2 → P1 |
-| TCP/TLS | Высокая | Критическая (TLS-атаки) | P1 — не снижать |
 | RTCP Quality | Высокая | Низкая | P1 → P2 (сдвинуть ради UA) |
 | RFC 6035 vq-rtcpxr | Высокая | Низкая | P1 — не требует eBPF-изменений |
 | CDR Export | Средняя | Низкая | P2 — оставить |
-| OpenTelemetry | Средняя | Низкая | P2 → P3 (сдвинуть) |
 
 ### Что НЕ делать в sip-exporter (оставить для sip-shield)
 
