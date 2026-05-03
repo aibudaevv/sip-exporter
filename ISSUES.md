@@ -433,17 +433,17 @@ sip_exporter_ser{carrier="mobile-operator-a",ua_type="grandstream"}            8
 
 ---
 
-### Фаза 1: Фундамент (Недели 1-2)
+### ~~Фаза 1: Фундамент~~ ✅ Выполнено
 
-Цель: подготовить все точки касания к привлечению пользователей.
-
-#### 1.1 GitHub Profile Package
-
-- [ ] **README.md** — добавить badges: Docker Pulls, GitHub Releases, Go Reference (CI badges уже есть)
-- ~~[ ] **Screenshots/GIF** — добавить анимацию в README~~ Не требуется
-- ~~[ ] **CONTRIBUTING.md** — не требуется, контрибуторов нет~~
-- ~~[ ] **Comparison table** — лучше как статья на Dev.to~~
-- ~~[ ] **Use Cases page** — лучше как статья~~
+- ✅ Badges (CI + Docker Pulls + GitHub Release)
+- ✅ GoReleaser + GitHub Actions release workflow
+- ✅ Quick Start в README
+- ✅ Architecture diagram (ASCII)
+- ✅ Документация (METRICS.md, BENCHMARK.md, ALERTING.md)
+- ✅ Grafana dashboard JSON
+- ✅ GitHub Topics, Repo description
+- ✅ Module path fix (gitlab.com → github.com)
+- ✅ Version bump v1.0.0
 
 ---
 
@@ -451,54 +451,14 @@ sip_exporter_ser{carrier="mobile-operator-a",ua_type="grandstream"}            8
 
 Цель: создать и «прогреть» аккаунты на целевых площадках. Нельзя прийти с нуля и начать постить свои проекты — удалят или проигнорируют.
 
-#### 2.1 Реалии площадок — барьеры входа
-
-| Площадка | Барьер | Что нужно ДО любого поста | Время подготовки |
-|----------|--------|---------------------------|------------------|
-| **Hacker News** | Низкий. Show HN специально для своих проектов. Нужен аккаунт >1 дня. | Зарегистрироваться. 1-2 дня просто почитать/проголосовать. Понять стиль «Show HN». | 2-3 дня |
-| **Reddit** | Высокий. Karma-требования, self-promotion rules (10:1 ratio), AutoModerator. | Зарегистрировать аккаунт. Нарастить ~100-200 karma: отвечать на вопросы в r/voip, r/selfhosted, r/devops, r/kubernetes. Помогать людям. | 2-4 недели |
-| **Twitter/X** | Средний. 0 followers = 0 охват. Алгоритм не показывает новые аккаунты. | Создать профиль. 2-4 недели писать полезные треды про VoIP/eBPF/Prometheus, комментировать чужие, нарастить 200-500 followers. | 3-6 недель |
-| **LinkedIn** | Средний. Зависит от числа connections. | Расширить сеть: подключиться к VoIP/SRE/DevOps людям. Писать «insights» и «posts» (не просто ссылки). | 2-4 недели |
-| **Dev.to** | Низкий. Любой может публиковать. Доброжелательны к self-promotion. | Зарегистрироваться. Понять формат (практические туториалы, не PR-посты). | 1-2 дня |
-| **Medium** | Низкий. Любой может публиковать. | Зарегистрироваться. Писать в publications (Better Programming, Towards DevOps) для большего охвата. | 1-2 дня |
-| **Habr** | Средний. Для публикации в хабах нужна карма ≥5 или заявка в песочницу. | Зарегистрироваться. Написать 1-2 статьи в песочницу (хабы: Linux, Сетевые технологии). Комментировать чужие статьи. | 2-4 недели |
-| **Telegram группы** | Низкий. Любой может писать. | Вступить в группы (@voip_dev, @sip_ru, @telecom_ru, @ebpf_ru, @prometheus_ru). Неделю пообщаться, помочь людям, затем аккуратно упомянуть проект. | 1 неделя |
-| **Mailing lists** | Низкий. Подписался — пишешь. | Подписаться на sr-users@lists.kamailio.org и аналогичные. Понять tone и format (технический, без маркетинга). | Несколько дней |
-
-#### 2.2 План подготовки аккаунтов
-
-**Неделя 3:**
-
-| День | Действие |
-|------|----------|
-| Пн | Зарегистрировать аккаунты: Hacker News, Reddit, Dev.to, Medium, Twitter/X |
-| Вт | Reddit: подписаться на r/voip, r/selfhosted, r/devops, r/kubernetes, r/PrometheusMonitoring. Ответить на 5-10 вопросов. |
-| Ср | Twitter/X: follow 50-100 людей (VoIP, eBPF, Prometheus, Go). Ответить на 5-10 тредов содержательно. |
-| Чт | LinkedIn: подключиться к 50 людям (Kamailio, OpenSIPS, Asterisk, Prometheus, eBPF — поиск по ключевым словам). |
-| Пт | Dev.to: написать первую статью (не про sip-exporter, а образовательную — «Understanding RFC 6076 SIP Metrics»). Это прогрев + karma. |
-| Сб | Вступить в Telegram группы (@voip_dev, @sip_ru, @prometheus_ru, @ebpf_ru, @k8s_ru). Начать общаться. |
-| Вс | Подписаться на mailing lists: Kamailio (sr-users), OpenSIPS, FreeSWITCH. Прочитать последние 20 писем для понимания тона. |
-
-**Неделя 4:**
-
-| День | Действие |
-|------|----------|
-| Пн-Ср | Reddit: продолжать наращивать karma. Писать полезные комментарии (10-20 в день). Цель: ~100 karma. |
-| Чт | Habr: написать статью в песочницу («Мониторинг SIP в 2026: что доступно open-source»). |
-| Пт | Twitter/X: опубликовать образовательный тред (не про свой проект, а про RFC 6076 или eBPF). |
-| Сб | LinkedIn: опубликовать insight post (не ссылку, а мнение/наблюдение про VoIP мониторинг). |
-| Вс | Проверить все аккаунты: karma/followers/connections готовы? Если нет — ещё неделя прогрева. |
-
-#### 2.3 Критерии готовности к launch
-
-Не переходить к Фазе 3 пока:
-
-- [ ] Reddit аккаунт: karma ≥ 50, возраст ≥ 2 недели
-- [ ] Twitter/X: ≥ 100 followers, 5-10 опубликованных тредов
-- [ ] LinkedIn: ≥ 50 connections в VoIP/DevOps/SRE
-- [ ] Dev.to: ≥ 1 опубликованная статья (не про sip-exporter)
-- [ ] Habr: карма ≥ 5 (или статья прошла модерацию из песочницы)
-- [ ] Telegram: активно общаетесь в 3+ группах минимум неделю
+- [ ] **Hacker News** — зарегистрировать аккаунт, 2-3 дня почитать/проголосовать
+- [ ] **Reddit** — зарегистрировать, нарастить karma ≥ 100 (r/voip, r/selfhosted, r/devops)
+- [ ] **Twitter/X** — создать профиль, follow 50-100 VoIP/eBPF/Prometheus людей, 5-10 тредов
+- [ ] **LinkedIn** — подключиться к 50+ VoIP/SRE/DevOps людям
+- [ ] **Dev.to** — зарегистрировать, написать 1 образовательную статью (не про sip-exporter)
+- [ ] **Habr** — зарегистрировать, нарастить карму ≥ 5 для публикации в хабах
+- [ ] **Telegram** — вступить в @voip_dev, @sip_ru, @prometheus_ru, @ebpf_ru; общаться неделю
+- [ ] **Mailing lists** — подписаться на Kamailio sr-users, OpenSIPS
 
 ---
 
