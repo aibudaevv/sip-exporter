@@ -22,6 +22,7 @@ func TestLRD_RegisterRedirect(t *testing.T) {
 	lrdCount := getLRD(t, env.endpoint)
 	t.Logf("LRD count = %.0f (want 50.0)", lrdCount)
 	require.Equal(t, 50.0, lrdCount)
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
 // TestLRD_Register200OK verifies LRD = 0 for REGISTER 200 OK (RRD measured, not LRD).
@@ -35,6 +36,7 @@ func TestLRD_Register200OK(t *testing.T) {
 	lrdCount := getLRD(t, env.endpoint)
 	t.Logf("LRD count = %.0f (want 0.0)", lrdCount)
 	require.Equal(t, 0.0, lrdCount)
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
 // TestLRD_RegisterError verifies LRD = 0 for REGISTER 500 (not a redirect).
@@ -48,6 +50,7 @@ func TestLRD_RegisterError(t *testing.T) {
 	lrdCount := getLRD(t, env.endpoint)
 	t.Logf("LRD count = %.0f (want 0.0)", lrdCount)
 	require.Equal(t, 0.0, lrdCount)
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
 // TestLRD_Mixed tests 25×REGISTER 200 OK + 25×REGISTER redirect.
@@ -62,6 +65,7 @@ func TestLRD_Mixed(t *testing.T) {
 	lrdCount := getLRD(t, env.endpoint)
 	t.Logf("LRD count = %.0f (want 25.0)", lrdCount)
 	require.Equal(t, 25.0, lrdCount)
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
 // TestLRD_WithCarrierConfig verifies LRD per-carrier.
@@ -75,4 +79,5 @@ func TestLRD_WithCarrierConfig(t *testing.T) {
 	lrdCount := env.getLRDByCarrier(t)
 	t.Logf("LRD{carrier=%q} count = %.0f (want 50.0)", env.carrier, lrdCount)
 	require.Equal(t, 50.0, lrdCount)
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }

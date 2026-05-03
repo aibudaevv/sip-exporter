@@ -75,6 +75,14 @@ type (
 		vqReports *prometheus.CounterVec
 
 		carrierCounters sync.Map
+
+		socketPacketsReceived prometheus.Counter
+		socketPacketsDropped  prometheus.Counter
+		parseErrorsTotal      *prometheus.CounterVec
+		channelLength         prometheus.Gauge
+		channelCapacity       prometheus.Gauge
+		activeTrackers        *prometheus.GaugeVec
+		activeDialogs         prometheus.Gauge
 	}
 
 	Metricser interface {
@@ -93,6 +101,12 @@ type (
 		UpdateSessionsByCarrierAndUA(counts map[string]map[string]int)
 		UpdateVQReport(carrier string, uaType string, report *vq.SessionReport)
 		SystemError()
+		ParseError(errorType string)
+		SocketStats(received, dropped uint32)
+		UpdateChannelLength(length int)
+		UpdateChannelCapacity(capacity int)
+		UpdateTrackerSize(trackerType string, size int)
+		UpdateActiveDialogs(size int)
 	}
 
 	ratioCollector struct {
@@ -146,6 +160,7 @@ func newMetricserWithRegistry(reg *prometheus.Registry) Metricser {
 	m.initSessionMetrics(reg)
 	m.initHistograms(reg)
 	registerRatioCollectors(m, reg)
+	m.initSelfMetrics(reg)
 	return m
 }
 

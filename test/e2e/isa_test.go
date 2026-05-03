@@ -27,21 +27,21 @@ func TestISA_AllScenarios(t *testing.T) {
 			name:        "all_500",
 			uasScenario: "uas_server_error.xml",
 			uacScenario: "uac_server_error.xml",
-			callCount:   50,
+			callCount:   100,
 			wantISA:     100.0,
 		},
 		{
 			name:        "all_503",
 			uasScenario: "uas_unavailable.xml",
 			uacScenario: "uac_unavailable.xml",
-			callCount:   50,
+			callCount:   100,
 			wantISA:     100.0,
 		},
 		{
 			name:        "all_200",
 			uasScenario: "uas_100.xml",
 			uacScenario: "uac_100.xml",
-			callCount:   50,
+			callCount:   100,
 			wantISA:     0.0,
 		},
 	}
@@ -67,8 +67,8 @@ func TestISA_Mixed(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25, env)
-	runSippScenario(ctx, t, "uas_unavailable.xml", "uac_unavailable.xml", 25, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 100, env)
+	runSippScenario(ctx, t, "uas_unavailable.xml", "uac_unavailable.xml", 100, env)
 
 	isa := getISA(t, env.endpoint)
 	t.Logf("ISA = %.2f (want %.2f)", isa, 50.0)
@@ -79,14 +79,14 @@ func TestISA_Mixed(t *testing.T) {
 
 // TestISA_MixedWith3xx tests 50% 302 Redirect + 50% 500 Server Error → ISA = 50%.
 // Unlike SER/SEER, 3xx are NOT excluded from ISA denominator.
-// ISA = 25 / 50 × 100 = 50%
+// ISA = 100 / 200 × 100 = 50%
 func TestISA_MixedWith3xx(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 25, env)
-	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 25, env)
+	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 100, env)
+	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 100, env)
 
 	isa := getISA(t, env.endpoint)
 	t.Logf("ISA = %.2f (want %.2f)", isa, 50.0)
@@ -96,15 +96,15 @@ func TestISA_MixedWith3xx(t *testing.T) {
 }
 
 // TestISA_Complex tests mixed effective and ineffective codes.
-// 20×200 OK + 15×500 Server Error + 15×503 Service Unavailable → ISA = (15+15)/50 × 100 = 60%.
+// 80×200 OK + 60×500 Server Error + 60×503 Service Unavailable → ISA = (60+60)/200 × 100 = 60%.
 func TestISA_Complex(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 20, env)
-	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 15, env)
-	runSippScenario(ctx, t, "uas_unavailable.xml", "uac_unavailable.xml", 15, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 80, env)
+	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 60, env)
+	runSippScenario(ctx, t, "uas_unavailable.xml", "uac_unavailable.xml", 60, env)
 
 	isa := getISA(t, env.endpoint)
 	t.Logf("ISA = %.2f (want %.2f)", isa, 60.0)
@@ -119,7 +119,7 @@ func TestISA_WithCarrierConfig(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnvWithCarriers(ctx, t)
 
-	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 50, env)
+	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 200, env)
 
 	isa := env.getISAByCarrier(t)
 	t.Logf("ISA{carrier=%q} = %.2f (want %.2f)", env.carrier, isa, 100.0)
@@ -134,8 +134,8 @@ func TestISA_MixedWithCarrierConfig(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnvWithCarriers(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25, env)
-	runSippScenario(ctx, t, "uas_unavailable.xml", "uac_unavailable.xml", 25, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 100, env)
+	runSippScenario(ctx, t, "uas_unavailable.xml", "uac_unavailable.xml", 100, env)
 
 	isa := env.getISAByCarrier(t)
 	t.Logf("ISA{carrier=%q} = %.2f (want %.2f)", env.carrier, isa, 50.0)

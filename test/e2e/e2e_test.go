@@ -3,7 +3,6 @@
 package e2e
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -232,22 +231,28 @@ func setupSecondaryIPs(t *testing.T) {
 		"172.16.0.2/32",
 		"10.1.1.5/32",
 	}
+
+	script := "set -e"
 	for _, addr := range addrs {
-		out, err := exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
-			"--entrypoint", "", "alpine",
-			"ip", "addr", "add", addr, "dev", "lo",
-		).CombinedOutput()
-		if err != nil && !bytes.Contains(out, []byte("File exists")) {
-			require.NoError(t, err, "failed to add %s to lo: %s", addr, string(out))
-		}
+		script += " && ip addr add " + addr + " dev lo || true"
 	}
+
+	out, err := exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
+		"--entrypoint", "", "alpine",
+		"sh", "-c", script,
+	).CombinedOutput()
+	require.NoError(t, err, "failed to add secondary IPs: %s", string(out))
+
 	t.Cleanup(func() {
+		cleanScript := "set -e"
 		for _, addr := range addrs {
-			_ = exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
-				"--entrypoint", "", "alpine",
-				"ip", "addr", "del", addr, "dev", "lo",
-			).Run()
+			addrNoMask := strings.SplitN(addr, "/", 2)[0]
+			cleanScript += " && ip addr del " + addrNoMask + " dev lo 2>/dev/null || true"
 		}
+		_ = exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
+			"--entrypoint", "", "alpine",
+			"sh", "-c", cleanScript,
+		).Run()
 	})
 }
 
@@ -323,11 +328,12 @@ func startExporterWithConfigAndUA(ctx context.Context, t *testing.T, exporterPor
 	}
 
 	envVars := map[string]string{
-		"SIP_EXPORTER_INTERFACE":    testInterface,
-		"SIP_EXPORTER_HTTP_PORT":    exporterPort,
-		"SIP_EXPORTER_SIP_PORT":     sippPort,
-		"SIP_EXPORTER_SIPS_PORT":    sippClientPort,
-		"SIP_EXPORTER_LOGGER_LEVEL": exporterLogLevel,
+		"SIP_EXPORTER_INTERFACE":        testInterface,
+		"SIP_EXPORTER_HTTP_PORT":        exporterPort,
+		"SIP_EXPORTER_SIP_PORT":         sippPort,
+		"SIP_EXPORTER_SIPS_PORT":        sippClientPort,
+		"SIP_EXPORTER_LOGGER_LEVEL":     exporterLogLevel,
+		"SIP_EXPORTER_IGNORE_OUTGOING":  "true",
 	}
 
 	var mounts testcontainers.ContainerMounts
@@ -418,6 +424,28 @@ func waitForSessionsZero(t *testing.T, endpoint string) {
 	require.Eventually(t, func() bool {
 		return getMetric(t, endpoint, "sip_exporter_sessions") == 0
 	}, 5*time.Second, 300*time.Millisecond, "sessions should reach 0 after all calls terminated")
+
+	assertSelfMonitoringHealthy(t, endpoint)
+}
+
+func assertSelfMonitoringHealthy(t *testing.T, endpoint string) {
+	t.Helper()
+
+	received := getMetric(t, endpoint, "sip_exporter_socket_packets_received_total")
+	require.Equal(t, true, received > 0, "socket_packets_received_total should be > 0 after traffic")
+
+	dropped := getMetric(t, endpoint, "sip_exporter_socket_packets_dropped_total")
+	require.Equal(t, 0.0, dropped, "socket_packets_dropped_total should be 0 (no drops)")
+
+	require.Eventually(t, func() bool {
+		return getMetric(t, endpoint, "sip_exporter_channel_length") == 0.0
+	}, 3*time.Second, 100*time.Millisecond, "channel_length should be 0 after all packets processed")
+
+	capacity := getMetric(t, endpoint, "sip_exporter_channel_capacity")
+	require.Equal(t, 10000.0, capacity, "channel_capacity should be 10000")
+
+	dialogs := getMetric(t, endpoint, "sip_exporter_active_dialogs")
+	require.Equal(t, 0.0, dialogs, "active_dialogs should be 0 after all sessions completed")
 }
 
 // waitForMetricStable polls sip_exporter_packets_total until the value stops
@@ -519,6 +547,7 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 		"-i", "127.0.0.1",
 		"-p", env.sippPort,
 		"-m", strconv.Itoa(callCount),
+		"-nr",
 		"-nostdin",
 	)
 	uasCmd.Stdout = stdout
@@ -546,6 +575,7 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 		"-i", "127.0.0.1",
 		"-p", env.sippClientPort,
 		"-m", strconv.Itoa(callCount),
+		"-nr",
 		"127.0.0.1:"+env.sippPort,
 	)
 	uacCmd.Stdout = stdout
@@ -594,6 +624,7 @@ func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacS
 			"-i", uasIP,
 			"-p", env.sippPort,
 			"-m", strconv.Itoa(callCount),
+			"-nr",
 			"-nostdin",
 		},
 		Mounts: testcontainers.Mounts(
@@ -618,7 +649,18 @@ func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacS
 		}
 	}
 
-	time.Sleep(1 * time.Second)
+	require.Eventually(t, func() bool {
+		addr, err := net.ResolveUDPAddr("udp", uasIP+":"+env.sippPort)
+		if err != nil {
+			return false
+		}
+		conn, err := net.ListenUDP("udp", addr)
+		if err != nil {
+			return true
+		}
+		conn.Close()
+		return false
+	}, 5*time.Second, 50*time.Millisecond, "UAS should start listening on %s:%s", uasIP, env.sippPort)
 
 	uacReq := testcontainers.ContainerRequest{
 		Image:       sippImage,
@@ -628,6 +670,7 @@ func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacS
 			"-i", uacIP,
 			"-p", env.sippClientPort,
 			"-m", strconv.Itoa(callCount),
+			"-nr",
 			uasIP + ":" + env.sippPort,
 		},
 		Mounts: testcontainers.Mounts(
@@ -899,6 +942,8 @@ func (e *testEnv) waitForSessionsZeroByCarrier(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return getMetricWithCarrier(t, e.endpoint, "sip_exporter_sessions", e.carrier) == 0
 	}, 5*time.Second, 300*time.Millisecond, "sessions should reach 0 after all calls terminated")
+
+	assertSelfMonitoringHealthy(t, e.endpoint)
 }
 
 // absScenarioPath returns absolute path to SIPp scenario.

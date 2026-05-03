@@ -50,6 +50,11 @@ const (
 	minRawPacketLen  = ethHeaderLen + ipV4MinHeaderLen + udpHeaderLen
 	minVLANPacketLen = vlanHeaderLen + ipV4MinHeaderLen + udpHeaderLen
 
+	parseErrTypeL2  = "l2"
+	parseErrTypeL3  = "l3"
+	parseErrTypeL4  = "l4"
+	parseErrTypeSIP = "sip"
+
 	sipPartsCount         = 3
 	minSIPParts           = 2
 	tagPrefixLen          = 5
@@ -100,7 +105,7 @@ type (
 		dialoger  service.Dialoger
 	}
 	Exporter interface {
-		Initialize(interfaceName string, path string, sipPort, sipsPort int) error
+		Initialize(interfaceName string, path string, sipPort, sipsPort int, ignoreOutgoing bool) error
 		IsAlive() bool
 		Close()
 	}
@@ -127,7 +132,7 @@ func NewExporter(
 	}
 }
 
-func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPort int) error {
+func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPort int, ignoreOutgoing bool) error {
 	if syscall.Geteuid() != 0 {
 		return ErrUserNotRoot
 	}
@@ -167,8 +172,11 @@ func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPo
 	e.sock = sock
 
 	socketRecvBufSize := socketRecvBufMB * miB
-	if setErr := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUF, socketRecvBufSize); setErr != nil {
-		return fmt.Errorf("failed to set SO_RCVBUF: %w", setErr)
+	if setErr := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUFFORCE, socketRecvBufSize); setErr != nil {
+		if setErrFallback := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUF, socketRecvBufSize); setErrFallback != nil {
+			return fmt.Errorf("failed to set SO_RCVBUF: %w", setErrFallback)
+		}
+		zap.L().Warn("SO_RCVBUFFORCE failed, using SO_RCVBUF (buffer capped by rmem_max)", zap.Error(setErr))
 	}
 
 	var actualBufSize int
@@ -194,6 +202,13 @@ func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPo
 	err = unix.Bind(sock, sa)
 	if err != nil {
 		return fmt.Errorf("failed to bind AF_PACKET socket to %s: %w", ifaceName, err)
+	}
+
+	if ignoreOutgoing {
+		if setErr := unix.SetsockoptInt(sock, unix.SOL_PACKET, unix.PACKET_IGNORE_OUTGOING, 1); setErr != nil {
+			return fmt.Errorf("failed to set PACKET_IGNORE_OUTGOING: %w", setErr)
+		}
+		zap.L().Info("PACKET_IGNORE_OUTGOING enabled", zap.String("interface", ifaceName))
 	}
 
 	// Attach eBPF filter
@@ -240,6 +255,9 @@ func (e *exporter) resolveUA(userAgent []byte) string {
 
 func (e *exporter) sipDialogMetricsUpdate() {
 	ticker := time.NewTicker(1 * time.Second)
+
+	e.services.metricser.UpdateChannelCapacity(cap(e.messages))
+
 	for {
 		<-ticker.C
 		results := e.services.dialoger.Cleanup()
@@ -256,6 +274,14 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", len(results)))
 
 		e.services.metricser.UpdateSessionsByCarrierAndUA(e.services.dialoger.SizeByCarrierAndUA())
+
+		received, dropped := e.readSocketStats()
+		e.services.metricser.SocketStats(received, dropped)
+		e.services.metricser.UpdateChannelLength(len(e.messages))
+		e.services.metricser.UpdateTrackerSize("register", len(e.registerTracker))
+		e.services.metricser.UpdateTrackerSize("invite", len(e.inviteTracker))
+		e.services.metricser.UpdateTrackerSize("options", len(e.optionsTracker))
+		e.services.metricser.UpdateActiveDialogs(s)
 	}
 }
 
@@ -303,10 +329,24 @@ func (e *exporter) IsAlive() bool {
 	return e.initialized.Load()
 }
 
+func (e *exporter) readSocketStats() (uint32, uint32) {
+	if e.sock == 0 {
+		return 0, 0
+	}
+
+	stats, err := unix.GetsockoptTpacketStats(e.sock, unix.SOL_PACKET, unix.PACKET_STATISTICS)
+	if err != nil {
+		zap.L().Debug("failed to read AF_PACKET stats", zap.Error(err))
+		return 0, 0
+	}
+	return stats.Packets, stats.Drops
+}
+
 func (e *exporter) readPackets() {
 	for packet := range e.messages {
-		if err := e.parseRawPacket(packet); err != nil {
+		if errType, err := e.parseRawPacket(packet); err != nil {
 			e.services.metricser.SystemError()
+			e.services.metricser.ParseError(errType)
 			zap.L().Error("parse err", zap.Error(err))
 		}
 	}
@@ -339,10 +379,10 @@ func (e *exporter) readSocket() {
 	}
 }
 
-// parseRawPacket parses raw L2 packet.
-func (e *exporter) parseRawPacket(packet []byte) error {
+// parseRawPacket parses raw L2 packet. Returns error type (l2, l3, l4, sip) and error.
+func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 	if len(packet) < minRawPacketLen {
-		return fmt.Errorf("wrong len packet %d", len(packet))
+		return parseErrTypeL2, fmt.Errorf("wrong len packet %d", len(packet))
 	}
 
 	// Parse Ethernet header (14 bytes)
@@ -352,7 +392,7 @@ func (e *exporter) parseRawPacket(packet []byte) error {
 	// VLAN (802.1Q)
 	if ethType[0] == vlanEthTypeHi && ethType[1] == vlanEthTypeLo {
 		if len(packet) < minVLANPacketLen {
-			return fmt.Errorf("wrong len packet %d", len(packet))
+			return parseErrTypeL2, fmt.Errorf("wrong len packet %d", len(packet))
 		}
 		ethType = packet[16:18]
 		ipOffset = vlanHeaderLen
@@ -360,12 +400,12 @@ func (e *exporter) parseRawPacket(packet []byte) error {
 
 	// Only IPv4
 	if ethType[0] != ethTypeIPv4Hi || ethType[1] != ethTypeIPv4Lo {
-		return errors.New("not IPv4 packet")
+		return parseErrTypeL3, errors.New("not IPv4 packet")
 	}
 
 	// IP header
 	if len(packet) < ipOffset+ipV4MinHeaderLen {
-		return errors.New("ip header too short")
+		return parseErrTypeL3, errors.New("ip header too short")
 	}
 
 	ipHeader := packet[ipOffset : ipOffset+ipV4MinHeaderLen]
@@ -374,26 +414,26 @@ func (e *exporter) parseRawPacket(packet []byte) error {
 	carrier := e.resolveCarrier(ipHeader)
 
 	if ipHeader[9] != ipProtoUDP {
-		return errors.New("not UDP packet")
+		return parseErrTypeL4, errors.New("not UDP packet")
 	}
 
 	// UDP header (8 bytes)
 	udpOffset := ipOffset + ipHeaderLen
 	if len(packet) < udpOffset+udpHeaderLen {
-		return errors.New("udp header too short")
+		return parseErrTypeL4, errors.New("udp header too short")
 	}
 
 	// SIP data after UDP header
 	sipOffset := udpOffset + udpHeaderLen
 	if sipOffset >= len(packet) {
-		return errors.New("no SIP payload")
+		return parseErrTypeSIP, errors.New("no SIP payload")
 	}
 
 	sipData := packet[sipOffset:]
 
 	// Minimum SIP packet should be at least 50 bytes
 	if len(sipData) < minSIPDataLen {
-		return fmt.Errorf("packet too small for SIP: %d", len(sipData))
+		return parseErrTypeSIP, fmt.Errorf("packet too small for SIP: %d", len(sipData))
 	}
 
 	// Check if this is a SIP packet (starts with SIP method or SIP/2.0)
@@ -412,16 +452,16 @@ func (e *exporter) parseRawPacket(packet []byte) error {
 		!bytes.HasPrefix(sipData, []byte("MESSAGE")) &&
 		!bytes.HasPrefix(sipData, []byte("REFER")) &&
 		!bytes.HasPrefix(sipData, []byte("SIP/2.0")) {
-		return errors.New("not a SIP packet")
+		return parseErrTypeSIP, errors.New("not a SIP packet")
 	}
 
 	zap.L().Debug("packet raw", zap.ByteString("sip_data", sipData))
 
 	if err := e.handleMessage(carrier, sipData); err != nil {
-		return err
+		return "sip", err
 	}
 
-	return nil
+	return "", nil
 }
 
 func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {

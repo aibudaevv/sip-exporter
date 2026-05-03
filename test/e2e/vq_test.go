@@ -17,10 +17,10 @@ func TestVQ_PUBLISH_SessionReport(t *testing.T) {
 	callCount := 5
 	runSippScenario(ctx, t, "uas_vq_publish.xml", "uac_vq_publish.xml", callCount, env)
 
-	expectedTotal := float64(callCount * 2)
+	expectedTotal := float64(callCount)
 
 	reportsTotal := getMetric(t, env.endpoint, "sip_exporter_vq_reports_total")
-	t.Logf("vq_reports_total = %.0f (want %.0f, loopback x2)", reportsTotal, expectedTotal)
+	t.Logf("vq_reports_total = %.0f (want %.0f)", reportsTotal, expectedTotal)
 	require.Equal(t, expectedTotal, reportsTotal)
 
 	nlrCount := getMetric(t, env.endpoint, "sip_exporter_vq_nlr_percent_count")
@@ -52,8 +52,10 @@ func TestVQ_PUBLISH_SessionReport(t *testing.T) {
 	require.InDelta(t, expectedRERL, rerlSum, 0.01)
 
 	publishTotal := getMetric(t, env.endpoint, "sip_exporter_publish_total")
-	t.Logf("publish_total = %.0f (want %.0f, loopback x2)", publishTotal, expectedTotal)
+	t.Logf("publish_total = %.0f (want %.0f)", publishTotal, expectedTotal)
 	require.Equal(t, expectedTotal, publishTotal)
+
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
 func TestVQ_NOTIFY_SessionReport(t *testing.T) {
@@ -64,10 +66,10 @@ func TestVQ_NOTIFY_SessionReport(t *testing.T) {
 	callCount := 5
 	runSippScenario(ctx, t, "uas_vq_notify.xml", "uac_vq_notify.xml", callCount, env)
 
-	expectedTotal := float64(callCount * 2)
+	expectedTotal := float64(callCount)
 
 	reportsTotal := getMetric(t, env.endpoint, "sip_exporter_vq_reports_total")
-	t.Logf("vq_reports_total = %.0f (want %.0f, loopback x2)", reportsTotal, expectedTotal)
+	t.Logf("vq_reports_total = %.0f (want %.0f)", reportsTotal, expectedTotal)
 	require.Equal(t, expectedTotal, reportsTotal)
 
 	nlrCount := getMetric(t, env.endpoint, "sip_exporter_vq_nlr_percent_count")
@@ -82,8 +84,10 @@ func TestVQ_NOTIFY_SessionReport(t *testing.T) {
 	require.InDelta(t, expectedMOSLQ, moslqSum, 0.01)
 
 	notifyTotal := getMetric(t, env.endpoint, "sip_exporter_notify_total")
-	t.Logf("notify_total = %.0f (want %.0f, loopback x2)", notifyTotal, expectedTotal)
+	t.Logf("notify_total = %.0f (want %.0f)", notifyTotal, expectedTotal)
 	require.Equal(t, expectedTotal, notifyTotal)
+
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
 func TestVQ_PUBLISH_WithCarrierConfig(t *testing.T) {
@@ -94,14 +98,16 @@ func TestVQ_PUBLISH_WithCarrierConfig(t *testing.T) {
 	callCount := 5
 	runSippScenario(ctx, t, "uas_vq_publish.xml", "uac_vq_publish.xml", callCount, env)
 
-	expectedTotal := float64(callCount * 2)
+	expectedTotal := float64(callCount)
 
 	reportsTotal := getMetricWithCarrier(t, env.endpoint, "sip_exporter_vq_reports_total", env.carrier)
-	t.Logf("vq_reports_total{carrier=%q} = %.0f (want %.0f, loopback x2)", env.carrier, reportsTotal, expectedTotal)
+	t.Logf("vq_reports_total{carrier=%q} = %.0f (want %.0f)", env.carrier, reportsTotal, expectedTotal)
 	require.Equal(t, expectedTotal, reportsTotal)
 
 	moslqCount := getMetricWithCarrier(t, env.endpoint, "sip_exporter_vq_mos_lq_count", env.carrier)
 	require.Equal(t, expectedTotal, moslqCount)
+
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
 func TestVQ_MultipleVendors(t *testing.T) {
@@ -112,7 +118,7 @@ func TestVQ_MultipleVendors(t *testing.T) {
 	yealinkCalls := 3
 	ciscoCalls := 3
 	grandstreamCalls := 3
-	totalReports := float64((yealinkCalls + ciscoCalls + grandstreamCalls) * 2)
+	totalReports := float64(yealinkCalls + ciscoCalls + grandstreamCalls)
 
 	runSippScenario(ctx, t, "uas_vq_publish.xml", "uac_vq_yealink_publish.xml", yealinkCalls, env)
 
@@ -121,16 +127,16 @@ func TestVQ_MultipleVendors(t *testing.T) {
 	runSippScenario(ctx, t, "uas_vq_publish.xml", "uac_vq_grandstream_publish.xml", grandstreamCalls, env)
 
 	reportsTotal := getMetric(t, env.endpoint, "sip_exporter_vq_reports_total")
-	t.Logf("vq_reports_total = %.0f (want %.0f, total across all vendors, loopback x2)", reportsTotal, totalReports)
+	t.Logf("vq_reports_total = %.0f (want %.0f, total across all vendors)", reportsTotal, totalReports)
 	require.Equal(t, totalReports, reportsTotal)
 
 	moslqCount := getMetric(t, env.endpoint, "sip_exporter_vq_mos_lq_count")
 	require.Equal(t, totalReports, moslqCount)
 
 	moslqSum := getMetric(t, env.endpoint, "sip_exporter_vq_mos_lq_sum")
-	yealinkExpected := float64(yealinkCalls * 2)
-	ciscoExpected := float64(ciscoCalls * 2)
-	grandstreamExpected := float64(grandstreamCalls * 2)
+	yealinkExpected := float64(yealinkCalls)
+	ciscoExpected := float64(ciscoCalls)
+	grandstreamExpected := float64(grandstreamCalls)
 	expectedMOSLQSum := yealinkExpected*3.8 + ciscoExpected*4.1 + grandstreamExpected*4.3
 	t.Logf("vq_mos_lq_sum = %.4f (want ~%.4f)", moslqSum, expectedMOSLQSum)
 	require.InDelta(t, expectedMOSLQSum, moslqSum, 0.05)
@@ -144,6 +150,8 @@ func TestVQ_MultipleVendors(t *testing.T) {
 	expectedNLRSpecSum := yealinkExpected*1.20 + grandstreamExpected*0.30
 	t.Logf("vq_nlr_percent_sum = %.4f (want ~%.4f)", nlrSum, expectedNLRSpecSum)
 	require.InDelta(t, expectedNLRSpecSum, nlrSum, 0.05)
+
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
 func TestVQ_PartialReport(t *testing.T) {
@@ -154,7 +162,7 @@ func TestVQ_PartialReport(t *testing.T) {
 	callCount := 5
 	runSippScenario(ctx, t, "uas_vq_notify.xml", "uac_vq_cisco_notify.xml", callCount, env)
 
-	expectedTotal := float64(callCount * 2)
+	expectedTotal := float64(callCount)
 
 	reportsTotal := getMetric(t, env.endpoint, "sip_exporter_vq_reports_total")
 	t.Logf("vq_reports_total = %.0f (want %.0f)", reportsTotal, expectedTotal)
@@ -190,6 +198,8 @@ func TestVQ_PartialReport(t *testing.T) {
 		val := getMetric(t, env.endpoint, metric)
 		require.Equal(t, float64(0), val, "partial report should not have %s", metric)
 	}
+
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
 func TestVQ_MalformedReport(t *testing.T) {
@@ -208,11 +218,13 @@ func TestVQ_MalformedReport(t *testing.T) {
 
 	errorsAfter := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
 	errorCount := errorsAfter - errorsBefore
-	t.Logf("system_error_total delta = %.0f (want >= %.0f)", errorCount, float64(callCount*2))
-	require.GreaterOrEqual(t, errorCount, float64(callCount*2))
+	t.Logf("system_error_total delta = %.0f (want >= %.0f)", errorCount, float64(callCount))
+	require.GreaterOrEqual(t, errorCount, float64(callCount))
 
 	publishTotal := getMetric(t, env.endpoint, "sip_exporter_publish_total")
-	expectedPublish := float64(callCount * 2)
+	expectedPublish := float64(callCount)
 	t.Logf("publish_total = %.0f (want %.0f, PUBLISH packets still counted)", publishTotal, expectedPublish)
 	require.Equal(t, expectedPublish, publishTotal)
+
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }

@@ -12,7 +12,6 @@ import (
 
 // TestSDC_AllScenarios tests SDC metric with various scenarios.
 // SDC counts completed sessions (BYE→200 OK + expired dialogs).
-// On loopback SDC is NOT doubled (dialog map deduplicates).
 func TestSDC_AllScenarios(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -29,35 +28,35 @@ func TestSDC_AllScenarios(t *testing.T) {
 			name:        "all_completed",
 			uasScenario: "uas_100.xml",
 			uacScenario: "uac_100.xml",
-			callCount:   50,
-			wantSDC:     50.0,
+			callCount:   100,
+			wantSDC:     100.0,
 		},
 		{
 			name:        "rejected_486",
 			uasScenario: "uas_0.xml",
 			uacScenario: "uac_0.xml",
-			callCount:   50,
+			callCount:   100,
 			wantSDC:     0.0,
 		},
 		{
 			name:        "server_error",
 			uasScenario: "uas_server_error.xml",
 			uacScenario: "uac_server_error.xml",
-			callCount:   50,
+			callCount:   100,
 			wantSDC:     0.0,
 		},
 		{
 			name:        "redirect",
 			uasScenario: "uas_redirect.xml",
 			uacScenario: "uac_redirect.xml",
-			callCount:   50,
+			callCount:   100,
 			wantSDC:     0.0,
 		},
 		{
 			name:        "no_invite",
 			uasScenario: "uas_no_invite.xml",
 			uacScenario: "uac_no_invite.xml",
-			callCount:   50,
+			callCount:   100,
 			wantSDC:     0.0,
 		},
 	}
@@ -76,54 +75,54 @@ func TestSDC_AllScenarios(t *testing.T) {
 	}
 }
 
-// TestSDC_Mixed tests 35 completed + 15 rejected (486).
-// SDC = 35 (only completed sessions counted).
+// TestSDC_Mixed tests 140 completed + 60 rejected (486).
+// SDC = 140 (only completed sessions counted).
 func TestSDC_Mixed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 35, env)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 15, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 140, env)
+	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 60, env)
 
 	sdc := getSDC(t, env.endpoint)
-	t.Logf("SDC = %.0f (want %.0f)", sdc, 35.0)
-	require.Equal(t, 35.0, sdc)
+	t.Logf("SDC = %.0f (want %.0f)", sdc, 140.0)
+	require.Equal(t, 140.0, sdc)
 
 	waitForSessionsZero(t, env.endpoint)
 }
 
-// TestSDC_MixedWith3xx tests 25 redirect + 25 successful.
-// SDC = 25 (only completed sessions from successful calls).
+// TestSDC_MixedWith3xx tests 100 redirect + 100 successful.
+// SDC = 100 (only completed sessions from successful calls).
 func TestSDC_MixedWith3xx(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 25, env)
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25, env)
+	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 100, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 100, env)
 
 	sdc := getSDC(t, env.endpoint)
-	t.Logf("SDC = %.0f (want %.0f)", sdc, 25.0)
-	require.Equal(t, 25.0, sdc)
+	t.Logf("SDC = %.0f (want %.0f)", sdc, 100.0)
+	require.Equal(t, 100.0, sdc)
 
 	waitForSessionsZero(t, env.endpoint)
 }
 
-// TestSDC_Complex tests 20×completed + 15×480 + 15×500.
-// SDC = 20 (only completed sessions).
+// TestSDC_Complex tests 80×completed + 60×480 + 60×500.
+// SDC = 80 (only completed sessions).
 func TestSDC_Complex(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 20, env)
-	runSippScenario(ctx, t, "uas_busy.xml", "uac_busy.xml", 15, env)
-	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 15, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 80, env)
+	runSippScenario(ctx, t, "uas_busy.xml", "uac_busy.xml", 60, env)
+	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 60, env)
 
 	sdc := getSDC(t, env.endpoint)
-	t.Logf("SDC = %.0f (want %.0f)", sdc, 20.0)
-	require.Equal(t, 20.0, sdc)
+	t.Logf("SDC = %.0f (want %.0f)", sdc, 80.0)
+	require.Equal(t, 80.0, sdc)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -155,11 +154,11 @@ func TestSDC_WithCarrierConfig(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnvWithCarriers(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 50, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 200, env)
 
 	sdc := env.getSDCByCarrier(t)
-	t.Logf("SDC{carrier=%q} = %.0f (want 50)", env.carrier, sdc)
-	require.Equal(t, 50.0, sdc)
+	t.Logf("SDC{carrier=%q} = %.0f (want 200)", env.carrier, sdc)
+	require.Equal(t, 200.0, sdc)
 
 	env.waitForSessionsZeroByCarrier(t)
 }
@@ -170,12 +169,12 @@ func TestSDC_MixedWithCarrierConfig(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnvWithCarriers(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 35, env)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 15, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 140, env)
+	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 60, env)
 
 	sdc := env.getSDCByCarrier(t)
-	t.Logf("SDC{carrier=%q} = %.0f (want 35)", env.carrier, sdc)
-	require.Equal(t, 35.0, sdc)
+	t.Logf("SDC{carrier=%q} = %.0f (want 140)", env.carrier, sdc)
+	require.Equal(t, 140.0, sdc)
 
 	env.waitForSessionsZeroByCarrier(t)
 }

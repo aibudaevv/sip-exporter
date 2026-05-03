@@ -110,6 +110,13 @@ func (m *mockMetricser) SystemError() {
 	m.systemErrorCalled = true
 }
 
+func (m *mockMetricser) ParseError(string)             {}
+func (m *mockMetricser) SocketStats(_, _ uint32)       {}
+func (m *mockMetricser) UpdateChannelLength(int)       {}
+func (m *mockMetricser) UpdateChannelCapacity(int)     {}
+func (m *mockMetricser) UpdateTrackerSize(string, int) {}
+func (m *mockMetricser) UpdateActiveDialogs(int)       {}
+
 func (m *mockMetricser) UpdateVQReport(carrier string, uaType string, report *vq.SessionReport) {
 	m.vqReportCalled = true
 	m.vqCarrier = carrier
@@ -381,7 +388,7 @@ func TestParseRawPacket_TooShort(t *testing.T) {
 		optionsTracker: make(map[string]optionsEntry),
 	}
 
-	err := e.parseRawPacket([]byte("short"))
+	_, err := e.parseRawPacket([]byte("short"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "wrong len packet")
 }
@@ -400,7 +407,7 @@ func TestParseRawPacket_NotIPv4(t *testing.T) {
 	packet[12] = 0x08
 	packet[13] = 0x01
 
-	err := e.parseRawPacket(packet)
+	_, err := e.parseRawPacket(packet)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not IPv4 packet")
 }
@@ -421,7 +428,7 @@ func TestParseRawPacket_NotUDP(t *testing.T) {
 	packet[14] = 0x45
 	packet[23] = 6
 
-	err := e.parseRawPacket(packet)
+	_, err := e.parseRawPacket(packet)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not UDP packet")
 }
@@ -442,7 +449,7 @@ func TestParseRawPacket_NoSIPPayload(t *testing.T) {
 	packet[14] = 0x45
 	packet[23] = 17
 
-	err := e.parseRawPacket(packet)
+	_, err := e.parseRawPacket(packet)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no SIP payload")
 }
@@ -464,7 +471,7 @@ func TestParseRawPacket_NotSIPMethod(t *testing.T) {
 	packet[23] = 17
 	copy(packet[42:], []byte("NOT_A_SIP_METHOD"))
 
-	err := e.parseRawPacket(packet)
+	_, err := e.parseRawPacket(packet)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not a SIP packet")
 }
@@ -488,7 +495,7 @@ func TestParseRawPacket_VLAN_Tagged(t *testing.T) {
 	packet[27] = 17
 	copy(packet[46:], []byte("INVITE sip:test SIP/2.0\r\n"))
 
-	err := e.parseRawPacket(packet)
+	_, err := e.parseRawPacket(packet)
 	require.NoError(t, err)
 }
 
@@ -506,7 +513,7 @@ func TestParseRawPacket_IPHeaderTooShort(t *testing.T) {
 	packet[12] = 0x08
 	packet[13] = 0x00
 
-	err := e.parseRawPacket(packet)
+	_, err := e.parseRawPacket(packet)
 	require.Error(t, err)
 	// Error may be "wrong len packet" due to VLAN check
 	require.Contains(t, err.Error(), "wrong len")
@@ -528,7 +535,7 @@ func TestParseRawPacket_UDPHeaderTooShort(t *testing.T) {
 	packet[14] = 0x45
 	packet[23] = 17
 
-	err := e.parseRawPacket(packet)
+	_, err := e.parseRawPacket(packet)
 	require.Error(t, err)
 	// Error may be "wrong len packet" due to length check
 	require.Contains(t, err.Error(), "wrong len")
@@ -551,9 +558,144 @@ func TestParseRawPacket_SIPPayloadTooSmall(t *testing.T) {
 	packet[23] = 17
 	copy(packet[42:], []byte("SHORT"))
 
-	err := e.parseRawPacket(packet)
+	_, err := e.parseRawPacket(packet)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "packet too small for SIP")
+}
+
+func TestParseRawPacket_ErrorTypes(t *testing.T) {
+	e := &exporter{
+		services: services{
+			metricser: &mockMetricser{},
+			dialoger:  &mockDialoger{},
+		},
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
+	}
+
+	tests := []struct {
+		name     string
+		packet   []byte
+		wantType string
+	}{
+		{
+			name:     "too_short_is_l2",
+			packet:   make([]byte, 10),
+			wantType: "l2",
+		},
+		{
+			name: "not_ipv4_is_l3",
+			packet: func() []byte {
+				p := make([]byte, 42)
+				p[12] = 0x08
+				p[13] = 0x01
+				return p
+			}(),
+			wantType: "l3",
+		},
+		{
+			name: "ip_header_short_is_l2",
+			packet: func() []byte {
+				p := make([]byte, 30)
+				p[12] = 0x08
+				p[13] = 0x00
+				return p
+			}(),
+			wantType: "l2",
+		},
+		{
+			name: "not_udp_is_l4",
+			packet: func() []byte {
+				p := make([]byte, 54)
+				p[12] = 0x08
+				p[13] = 0x00
+				p[14] = 0x45
+				p[23] = 6
+				return p
+			}(),
+			wantType: "l4",
+		},
+		{
+			name: "udp_header_short_is_l2",
+			packet: func() []byte {
+				p := make([]byte, 40)
+				p[12] = 0x08
+				p[13] = 0x00
+				p[14] = 0x45
+				p[23] = 17
+				return p
+			}(),
+			wantType: "l2",
+		},
+		{
+			name: "no_sip_payload_is_sip",
+			packet: func() []byte {
+				p := make([]byte, 42)
+				p[12] = 0x08
+				p[13] = 0x00
+				p[14] = 0x45
+				p[23] = 17
+				return p
+			}(),
+			wantType: "sip",
+		},
+		{
+			name: "sip_too_small_is_sip",
+			packet: func() []byte {
+				p := make([]byte, 91)
+				p[12] = 0x08
+				p[13] = 0x00
+				p[14] = 0x45
+				p[23] = 17
+				copy(p[42:], []byte("SHORT"))
+				return p
+			}(),
+			wantType: "sip",
+		},
+		{
+			name: "not_sip_method_is_sip",
+			packet: func() []byte {
+				p := make([]byte, 100)
+				p[12] = 0x08
+				p[13] = 0x00
+				p[14] = 0x45
+				p[23] = 17
+				copy(p[42:], []byte("GET / HTTP/1.1\r\n"))
+				return p
+			}(),
+			wantType: "sip",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errType, err := e.parseRawPacket(tt.packet)
+			require.Error(t, err)
+			require.Equal(t, tt.wantType, errType, "error type mismatch")
+		})
+	}
+}
+
+func TestParseRawPacket_SuccessReturnsEmptyType(t *testing.T) {
+	e := &exporter{
+		services: services{
+			metricser: &mockMetricser{},
+			dialoger:  &mockDialoger{},
+		},
+		inviteTracker:  make(map[string]inviteEntry),
+		optionsTracker: make(map[string]optionsEntry),
+	}
+
+	packet := make([]byte, 100)
+	packet[12] = 0x08
+	packet[13] = 0x00
+	packet[14] = 0x45
+	packet[23] = 17
+	copy(packet[42:], []byte("INVITE sip:test SIP/2.0\r\n"))
+
+	errType, err := e.parseRawPacket(packet)
+	require.NoError(t, err)
+	require.Equal(t, "", errType, "successful parse should return empty error type")
 }
 
 // ==================== sipPacketParse tests ====================
@@ -990,7 +1132,7 @@ func TestParseRawPacket_AllSIPMethods(t *testing.T) {
 
 			copy(packet[42:], []byte(sipPacket))
 
-			err := e.parseRawPacket(packet)
+			_, err := e.parseRawPacket(packet)
 			require.NoError(t, err)
 		})
 	}
@@ -1031,7 +1173,7 @@ func TestParseRawPacket_SIPResponse(t *testing.T) {
 
 			copy(packet[42:], []byte(sipPacket))
 
-			err := e.parseRawPacket(packet)
+			_, err := e.parseRawPacket(packet)
 			require.NoError(t, err)
 		})
 	}
@@ -2611,6 +2753,13 @@ func (m *carrierTrackingMetricser) UpdateSessionsByCarrierAndUA(counts map[strin
 func (m *carrierTrackingMetricser) SystemError() {
 	m.systemErrors++
 }
+
+func (m *carrierTrackingMetricser) ParseError(string)             {}
+func (m *carrierTrackingMetricser) SocketStats(_, _ uint32)       {}
+func (m *carrierTrackingMetricser) UpdateChannelLength(int)       {}
+func (m *carrierTrackingMetricser) UpdateChannelCapacity(int)     {}
+func (m *carrierTrackingMetricser) UpdateTrackerSize(string, int) {}
+func (m *carrierTrackingMetricser) UpdateActiveDialogs(int)       {}
 
 func (m *carrierTrackingMetricser) UpdateVQReport(carrier string, uaType string, report *vq.SessionReport) {
 	m.vqReports = append(m.vqReports, carrierCall{carrier: carrier, uaType: uaType})

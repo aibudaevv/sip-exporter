@@ -28,7 +28,7 @@ func BenchmarkParseRawPacket_INVITE(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = e.parseRawPacket(packet)
+		_, _ = e.parseRawPacket(packet)
 	}
 }
 
@@ -52,7 +52,7 @@ func BenchmarkParseRawPacket_200OK(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = e.parseRawPacket(packet)
+		_, _ = e.parseRawPacket(packet)
 	}
 }
 
@@ -74,7 +74,7 @@ func BenchmarkParseRawPacket_BYE(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = e.parseRawPacket(packet)
+		_, _ = e.parseRawPacket(packet)
 	}
 }
 
@@ -98,7 +98,7 @@ func BenchmarkParseRawPacket_REGISTER(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = e.parseRawPacket(packet)
+		_, _ = e.parseRawPacket(packet)
 	}
 }
 
@@ -121,7 +121,7 @@ func BenchmarkParseRawPacket_401Unauthorized(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = e.parseRawPacket(packet)
+		_, _ = e.parseRawPacket(packet)
 	}
 }
 
