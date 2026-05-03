@@ -441,25 +441,9 @@ sip_exporter_ser{carrier="mobile-operator-a",ua_type="grandstream"}            8
 
 - [ ] **README.md** — добавить badges: Docker Pulls, GitHub Releases, Go Reference (CI badges уже есть)
 - ~~[ ] **Screenshots/GIF** — добавить анимацию в README~~ Не требуется
-- [ ] **CONTRIBUTING.md** — правила контрибуции (как запускать тесты, стиль кода, PR process)
-- [ ] **GitHub Topics** — добавить: `sip`, `voip`, `ebpf`, `prometheus-exporter`, `telecom`, `monitoring`, `sip-monitoring`, `voip-monitoring`, `kamailio`, `opensips`
-- [ ] **GitHub Releases** — опубликовать release с бинарниками (linux/amd64, linux/arm64) через GoReleaser + GitHub Actions
-- [ ] **GitHub Discussions** — включить, создать категории: Q&A, Ideas, Show & Tell
-- [ ] **Repo description** — убедиться что SEO-friendly: «High-performance eBPF-based SIP/VoIP monitoring exporter for Prometheus»
-
-#### 1.2 Docker Hub
-
-- [ ] **Automated builds** — GitHub Actions → Docker Hub push на каждый tag
-- [ ] **Multi-arch** — amd64 + arm64 (телеком железо часто ARM)
-- [ ] **Tags strategy** — `latest`, `0.15.0`, `0.15`, `0` (semver ranges)
-- [ ] **Description** — заполнить overview на Docker Hub с примером docker-compose
-
-#### 1.3 Документация
-
-- ~~[x] **Quick Start Guide** — есть в README (docker-compose пример)~~
-- [ ] **Comparison table** — docs/COMPARISON.md: sip-exporter vs HOMER vs kamailio_exporter vs KRAM-PRO/SIP_Exporter
-- ~~[x] **Architecture diagram** — ASCII в README~~ (улучшить: Mermaid/SVG)
-- [ ] **Use Cases page** — docs/USE_CASES.md: «SIP trunk monitoring», «carrier SLA», «NOC dashboard», «debugging call quality»
+- ~~[ ] **CONTRIBUTING.md** — не требуется, контрибуторов нет~~
+- ~~[ ] **Comparison table** — лучше как статья на Dev.to~~
+- ~~[ ] **Use Cases page** — лучше как статья~~
 
 ---
 
