@@ -33,8 +33,10 @@ archives:
 dockers:
   - image_templates:
       - "frzq/sip-exporter:{{.Version}}-amd64"
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.goreleaser
     use: buildx
+    extra_files:
+      - bin/sip.o
     build_flag_templates:
       - --platform=linux/amd64
       - --label=org.opencontainers.image.title={{.ProjectName}}
@@ -43,9 +45,11 @@ dockers:
 
   - image_templates:
       - "frzq/sip-exporter:{{.Version}}-arm64"
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.goreleaser
     use: buildx
     goarch: arm64
+    extra_files:
+      - bin/sip.o
     build_flag_templates:
       - --platform=linux/arm64
       - --label=org.opencontainers.image.title={{.ProjectName}}
