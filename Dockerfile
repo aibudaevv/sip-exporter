@@ -1,4 +1,4 @@
-FROM golang:1.25.9-alpine AS builder
+FROM golang:1.25.10-alpine AS builder
 LABEL maintainer="Telegram: t.me/abudaev"
 
 RUN apk add --no-cache \
