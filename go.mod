@@ -1,10 +1,9 @@
 module github.com/aibudaevv/sip-exporter
 
-go 1.25.9
+go 1.25.10
 
 require (
 	github.com/cilium/ebpf v0.21.0
-	github.com/docker/go-connections v0.6.0
 	github.com/ilyakaznacheev/cleanenv v1.5.0
 	github.com/moby/moby/api v1.54.1
 	github.com/moby/moby/client v0.4.0
@@ -32,6 +31,7 @@ require (
 	github.com/cpuguy83/dockercfg v0.3.2 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/distribution/reference v0.6.0 // indirect
+	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
