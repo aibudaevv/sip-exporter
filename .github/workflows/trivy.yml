@@ -26,13 +26,14 @@ jobs:
         run: docker build --no-cache -t sip-exporter:scan .
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.32.0
         with:
           image-ref: sip-exporter:scan
           format: sarif
           output: trivy.sarif
           severity: CRITICAL,HIGH
           exit-code: '1'
+          scanners: vuln
 
       - name: Upload SARIF
         if: always()
