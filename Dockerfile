@@ -16,7 +16,7 @@ RUN make build
 RUN ls -la /app/bin
 ENTRYPOINT ["/app/bin/main"]
 
-FROM alpine:3.22
+FROM alpine:3.22.4
 
 RUN apk add --no-cache libelf bash
 COPY --from=builder /app/bin /usr/local/bin/
