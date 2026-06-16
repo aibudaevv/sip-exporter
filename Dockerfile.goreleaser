@@ -1,6 +1,6 @@
 FROM alpine:3.22
 
-RUN apk add --no-cache libelf bash
+RUN apk add --no-cache --upgrade libelf bash libssl3 libcrypto3
 COPY main /usr/local/bin/main
 COPY bin/sip.o /usr/local/bin/sip.o
 RUN chmod +x /usr/local/bin/main
