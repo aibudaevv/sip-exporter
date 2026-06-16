@@ -18,7 +18,7 @@ ENTRYPOINT ["/app/bin/main"]
 
 FROM alpine:3.22.4
 
-RUN apk add --no-cache libelf bash
+RUN apk add --no-cache --upgrade libelf bash libssl3 libcrypto3
 COPY --from=builder /app/bin /usr/local/bin/
 RUN ls -la /usr/local/bin
 HEALTHCHECK CMD wget -qO- http://localhost:2112/health || exit 1
