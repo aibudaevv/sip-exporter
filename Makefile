@@ -1,7 +1,7 @@
 version := $(shell cat VERSION)
 .DEFAULT_GOAL := docker_build
 
-.PHONY: build docker_build ebpf_compile go_build clean ebpf_log lint vet imports test test-e2e test-e2e-run test-load test-load-run test-load-update-baseline test-all vulncheck trivy-fs trivy-image security
+.PHONY: build docker_build ebpf_compile go_build clean ebpf_log lint vet imports test test-e2e test-e2e-run test-rtp test-load test-load-run test-load-update-baseline test-all vulncheck trivy-fs trivy-image security
 
 build: ebpf_compile go_build
 docker_build:
@@ -36,6 +36,12 @@ test-e2e: docker_build
 test-e2e-run: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
 		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 2 -failfast -timeout 10m -run "$(TEST)" ./test/e2e/
+
+# RTP e2e tests run SEPARATELY from main e2e and load tests: both create AF_PACKET
+# sockets on lo, and concurrent runs cause packet loss/duplication (see AGENTS.md).
+test-rtp: docker_build
+	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -timeout 5m ./test/e2e/rtp/
 
 test-load: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
