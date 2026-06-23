@@ -47,11 +47,19 @@ type (
 		port uint16
 	}
 
-	// Tracker keeps per-SSRC RTP statistics and correlates RTP flows to SIP
+	// streamKey identifies one RTP flow: a media endpoint plus an SSRC. SSRCs are
+	// only unique within a flow, so keying by SSRC alone would collide when two
+	// dialogs reuse an SSRC within the TTL window.
+	streamKey struct {
+		endpoint endpointKey
+		ssrc     uint32
+	}
+
+	// Tracker keeps per-flow RTP statistics and correlates RTP flows to SIP
 	// dialogs via the media-endpoint map (IP:port → labels) populated from SDP.
 	Tracker struct {
 		mu      sync.Mutex
-		streams map[uint32]*streamEntry
+		streams map[streamKey]*streamEntry
 		media   map[endpointKey]MediaLabels
 		ttl     time.Duration
 		now     func() time.Time
@@ -68,7 +76,7 @@ type (
 // NewTracker creates a Tracker that expires idle streams after ttl.
 func NewTracker(ttl time.Duration) *Tracker {
 	return &Tracker{
-		streams: make(map[uint32]*streamEntry),
+		streams: make(map[streamKey]*streamEntry),
 		media:   make(map[endpointKey]MediaLabels),
 		ttl:     ttl,
 		now:     time.Now,
@@ -123,14 +131,14 @@ func (t *Tracker) Observe(ip string, port uint16, h rtp.Header, arrival time.Tim
 		clockRate = cr
 	}
 
-	entry, exists := t.streams[h.SSRC]
+	entry, exists := t.streams[streamKey{endpoint: endpointKey{ip: ip, port: port}, ssrc: h.SSRC}]
 	if !exists {
 		entry = &streamEntry{
 			state:  newStreamState(h.SSRC, codec, clockRate, arrival),
 			labels: labels,
 			codec:  codec,
 		}
-		t.streams[h.SSRC] = entry
+		t.streams[streamKey{endpoint: endpointKey{ip: ip, port: port}, ssrc: h.SSRC}] = entry
 	}
 
 	prevLost := entry.state.packetsLost
@@ -175,9 +183,9 @@ func (t *Tracker) Cleanup() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	now := t.now()
-	for ssrc, e := range t.streams {
+	for key, e := range t.streams {
 		if now.Sub(e.state.lastArrival) > t.ttl {
-			delete(t.streams, ssrc)
+			delete(t.streams, key)
 		}
 	}
 }

@@ -131,3 +131,28 @@ func TestTracker_DynamicCodecFromSDP(t *testing.T) {
 	stats := tr.Snapshot()
 	require.Equal(t, "opus", stats[0].Codec)
 }
+
+// TestTracker_SSRCReusedAcrossEndpoints verifies that the same SSRC from two
+// different media endpoints (two SIP dialogs) is tracked as separate flows,
+// not merged into one (regression for SSRC-only keying).
+func TestTracker_SSRCReusedAcrossEndpoints(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, MediaLabels{Carrier: "carrier-a", UAType: "yealink", CallID: "call-1",
+		SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000}})
+	tr.Register("10.0.0.2", 5006, MediaLabels{Carrier: "carrier-b", UAType: "cisco", CallID: "call-2",
+		SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000}})
+	t0 := time.Unix(1000, 0)
+
+	const reusedSSRC uint32 = 0xABCDEFFF
+	_, ok := tr.Observe("10.0.0.1", 5004, newHeaderSSRC(1, reusedSSRC), t0)
+	require.True(t, ok)
+	_, ok = tr.Observe("10.0.0.2", 5006, newHeaderSSRC(1, reusedSSRC), t0)
+	require.True(t, ok)
+
+	stats := tr.Snapshot()
+	require.Len(t, stats, 2, "same SSRC from different endpoints must be 2 flows")
+}
+
+func newHeaderSSRC(seq uint16, ssrc uint32) rtp.Header {
+	return rtp.Header{Version: 2, PayloadType: 0, SequenceNumber: seq, Timestamp: 160, SSRC: ssrc}
+}

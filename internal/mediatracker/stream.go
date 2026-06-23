@@ -54,9 +54,11 @@ func (s *StreamState) Observe(h rtp.Header, arrival time.Time) {
 		// out-of-order (reorder): update timing, ignore for loss
 		s.updateJitter(h, arrival)
 	case delta > maxGap:
-		// forward but huge gap → stream restart: reset jitter, count packet, no loss
+		// forward but huge gap → stream restart (e.g. SSRC reuse): reset all
+		// counters — this is a new flow instance, the previous totals are stale.
 		s.jitterTicks = 0
-		s.packetsTotal++
+		s.packetsLost = 0
+		s.packetsTotal = 1
 	case delta > 0:
 		// normal forward
 		s.updateJitter(h, arrival)

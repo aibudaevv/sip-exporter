@@ -93,6 +93,11 @@ func jitterDiscardRate(jitterMs, jbMs float64) float64 {
 func ComputeMOS(codec string, lossRate, jitterMs float64) float64 {
 	p := codecParams(codec)
 	effLoss := lossRate + jitterDiscardRate(jitterMs, jbMsDefault)
+	if effLoss > 1 {
+		effLoss = 1
+	} else if effLoss < 0 {
+		effLoss = 0
+	}
 	r := r0Factor - ieEff(p, effLoss)
 	return mosFromR(r)
 }

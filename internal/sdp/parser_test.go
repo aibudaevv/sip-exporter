@@ -73,6 +73,18 @@ func TestParse_VideoIgnored(t *testing.T) {
 	require.Equal(t, uint16(5004), media[0].Port)
 }
 
+func TestParse_VideoThenAudio(t *testing.T) {
+	// video-first SDP (common for video-capable UAs): the audio section after
+	// the video section must still be parsed (regression: off-by-one used to skip it).
+	body := []byte("c=IN IP4 10.0.0.1\r\n" +
+		"m=video 5006 RTP/AVP 31\r\n" +
+		"m=audio 5004 RTP/AVP 0\r\n" +
+		"a=rtpmap:0 PCMU/8000\r\n")
+	media := Parse(body)
+	require.Len(t, media, 1, "audio section after video must be parsed")
+	require.Equal(t, uint16(5004), media[0].Port)
+}
+
 func TestParse_MultipleAudioMedia(t *testing.T) {
 	body := []byte("c=IN IP4 10.0.0.1\r\n" +
 		"m=audio 5004 RTP/AVP 0\r\n" +

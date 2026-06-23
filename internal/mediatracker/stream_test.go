@@ -72,10 +72,10 @@ func TestStreamState_StreamRestartNoHugeLoss(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
 	s.Observe(newHeader(1, 160), t0)
-	// huge jump beyond maxGap → treated as restart, not counted as loss
+	// huge jump beyond maxGap → treated as restart: counters reset, no huge loss
 	s.Observe(newHeader(5000, 320), t0.Add(20*time.Millisecond))
 
-	require.Equal(t, uint64(2), s.packetsTotal)
+	require.Equal(t, uint64(1), s.packetsTotal, "restart resets the flow counter to this packet")
 	require.Equal(t, uint64(0), s.packetsLost, "restart must not count 4998 lost")
 }
 

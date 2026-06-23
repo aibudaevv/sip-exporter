@@ -134,7 +134,7 @@ done:
 func consumeUntilNextMedia(lines [][]byte, from int) int {
 	for j := from; j < len(lines); j++ {
 		if bytes.HasPrefix(bytes.TrimSpace(lines[j]), []byte("m=")) {
-			return j - from + 1
+			return j - from // leave the next m= line for the outer loop
 		}
 	}
 	return len(lines) - from

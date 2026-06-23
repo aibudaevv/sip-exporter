@@ -397,6 +397,13 @@ counted; RTP without a correlated dialog is dropped.
 > MOS is sampled per stream once per second; the E-model uses G.113 codec Ie/Bpl
 > factors. Unknown codecs get a conservative default (Ie=10).
 
+> **Correlation limitation:** RTP streams are correlated to SIP dialogs by matching
+> the packet's source IP:port against the media endpoints advertised in SDP
+> (`c=` IP + `m=` port). This requires symmetric RTP (source port equals the
+> advertised port). With NAT/port remapping (asymmetric RTP) the flow is not
+> matched and is dropped from RTP metrics; SIP signaling metrics are unaffected.
+> Future work: port-learning per RFC 4961 (see `backlog.md`).
+
 ## System metrics
 
 `sip_exporter_system_error_total`: total number internal SIP exporter errors. **No `carrier` or `ua_type` label.**
