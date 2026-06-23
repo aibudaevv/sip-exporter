@@ -112,16 +112,23 @@ int bpf_socket_filter(struct __sk_buff *skb) {
 
     // Offset начала payload (после UDP header 8 байт)
     int payload_off = ip_offset + ip_header_len + 8;
-    if (skb->len < payload_off + 1) {
+    if (skb->len < payload_off + 2) {
         return 0;
     }
 
-    // Pattern-детекция RTP: первый байт payload, version=2 → (byte & 0xC0) == 0x80
-    __u8 first = 0;
-    if (bpf_skb_load_bytes(skb, payload_off, &first, 1) < 0) {
+    // Pattern-детекция RTP: читаем первые 2 байта payload.
+    // Условие 1 (version=2): (byte[0] & 0xC0) == 0x80
+    // Условие 2 (payload type): PT = byte[1] & 0x7F; PT <= 34 (static audio) || PT >= 96 (dynamic).
+    // Вторая проверка отсекает ложные срабатывания (например, DNS с совпадающим старшим битом).
+    __u8 rtp_hdr[2];
+    if (bpf_skb_load_bytes(skb, payload_off, rtp_hdr, 2) < 0) {
         return 0;
     }
-    if ((first & 0xC0) != 0x80) {
+    if ((rtp_hdr[0] & 0xC0) != 0x80) {
+        return 0;
+    }
+    __u8 pt = rtp_hdr[1] & 0x7F;
+    if (pt > 34 && pt < 96) {
         return 0;
     }
 
@@ -130,7 +137,6 @@ int bpf_socket_filter(struct __sk_buff *skb) {
     if (snap > 64) {
         snap = 64;
     }
-    bpf_printk("RTP packet: %u->%u, snap=%u", src_port, dest_port, snap);
     return snap;
 }
 
