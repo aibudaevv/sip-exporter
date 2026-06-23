@@ -9,7 +9,7 @@ func BenchmarkParseHeader(b *testing.B) {
 		0x11, 0x22, 0x33, 0x44,
 	}
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = ParseHeader(data)
 	}
 }

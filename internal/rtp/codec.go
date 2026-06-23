@@ -3,17 +3,42 @@ package rtp
 // CodecUnknown is the label used when payload type cannot be resolved to a codec.
 const CodecUnknown = "other"
 
-// staticCodecs maps static RTP payload types (RFC 3551) to codec names.
-// Dynamic payload types (96-127) must be resolved via SDP a=rtpmap.
-var staticCodecs = map[uint8]string{
-	0:  "PCMU", // G.711 µ-law
-	8:  "PCMA", // G.711 A-law
-	9:  "G.722",
-	2:  "G.726-32",
-	4:  "G.723",
-	15: "G.728",
-	18: "G.729",
-	13: "CN", // Comfort Noise (RFC 3389)
+// Static RTP payload types (RFC 3551).
+const (
+	ptPCMU = 0  // G.711 µ-law
+	ptG726 = 2  // G.726-32
+	ptG723 = 4  // G.723.1
+	ptPCMA = 8  // G.711 A-law
+	ptG722 = 9  // G.722
+	ptCN   = 13 // Comfort Noise (RFC 3389)
+	ptG728 = 15 // G.728
+	ptG729 = 18 // G.729
+)
+
+// staticCodecName resolves a static RTP payload type (RFC 3551) to a codec name.
+// Returns CodecUnknown for dynamic payload types (96-127), which must be resolved
+// from SDP a=rtpmap.
+func staticCodecName(pt uint8) string {
+	switch pt {
+	case ptPCMU:
+		return "PCMU"
+	case ptPCMA:
+		return "PCMA"
+	case ptG722:
+		return "G.722"
+	case ptG726:
+		return "G.726-32"
+	case ptG723:
+		return "G.723"
+	case ptG728:
+		return "G.728"
+	case ptG729:
+		return "G.729"
+	case ptCN:
+		return "CN"
+	default:
+		return CodecUnknown
+	}
 }
 
 // CodecName resolves an RTP payload type to a codec name.
@@ -25,8 +50,5 @@ func CodecName(pt uint8, sdpMap map[uint8]string) string {
 			return name
 		}
 	}
-	if name, ok := staticCodecs[pt]; ok {
-		return name
-	}
-	return CodecUnknown
+	return staticCodecName(pt)
 }
