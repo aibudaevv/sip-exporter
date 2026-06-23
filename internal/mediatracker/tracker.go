@@ -1,0 +1,186 @@
+package mediatracker
+
+import (
+	"sync"
+	"time"
+
+	"github.com/aibudaevv/sip-exporter/internal/rtp"
+)
+
+const defaultClockRate = 8000
+
+type (
+	// MediaLabels is the SIP-dialog context attached to a media endpoint via SDP.
+	MediaLabels struct {
+		Carrier    string
+		UAType     string
+		CallID     string
+		SDPCodecs  map[uint8]string // payload type → codec name (from SDP a=rtpmap)
+		ClockRates map[uint8]uint32 // payload type → clock rate (Hz, from SDP)
+	}
+
+	// StreamStats is a point-in-time view of an RTP stream, used for metric export.
+	StreamStats struct {
+		SSRC         uint32
+		Codec        string
+		Carrier      string
+		UAType       string
+		CallID       string
+		PacketsTotal uint64
+		PacketsLost  uint64
+		JitterMs     float64
+		MOS          float64
+		LastSeen     time.Time
+	}
+
+	// ObserveResult is the per-packet outcome of an RTP observation.
+	ObserveResult struct {
+		Counted bool   // packet counted as received (not duplicate/reorder)
+		Lost    uint64 // packets newly marked lost by this observation
+		Codec   string // resolved codec name
+	}
+
+	endpointKey struct {
+		ip   string
+		port uint16
+	}
+
+	// Tracker keeps per-SSRC RTP statistics and correlates RTP flows to SIP
+	// dialogs via the media-endpoint map (IP:port → labels) populated from SDP.
+	Tracker struct {
+		mu      sync.Mutex
+		streams map[uint32]*streamEntry
+		media   map[endpointKey]MediaLabels
+		ttl     time.Duration
+		now     func() time.Time
+	}
+
+	// streamEntry bundles a stream state with its correlation labels.
+	streamEntry struct {
+		state  *StreamState
+		labels MediaLabels
+		codec  string
+	}
+)
+
+// NewTracker creates a Tracker that expires idle streams after ttl.
+func NewTracker(ttl time.Duration) *Tracker {
+	return &Tracker{
+		streams: make(map[uint32]*streamEntry),
+		media:   make(map[endpointKey]MediaLabels),
+		ttl:     ttl,
+		now:     time.Now,
+	}
+}
+
+// SetNow overrides the clock used for expiry (for testing).
+func (t *Tracker) SetNow(now func() time.Time) {
+	t.now = now
+}
+
+// Register associates a media endpoint (IP:port) with SIP-dialog labels.
+func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.media[endpointKey{ip: ip, port: port}] = labels
+}
+
+// Unregister removes all media endpoints belonging to a SIP dialog (on BYE 200 OK).
+func (t *Tracker) Unregister(callID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for k, v := range t.media {
+		if v.CallID == callID {
+			delete(t.media, k)
+		}
+	}
+}
+
+// Lookup resolves a media endpoint to its labels.
+func (t *Tracker) Lookup(ip string, port uint16) (MediaLabels, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	l, ok := t.media[endpointKey{ip: ip, port: port}]
+	return l, ok
+}
+
+// Observe ingests an RTP packet. Returns (result, false) when the source
+// endpoint is not correlated to any SIP dialog (caller must drop the packet).
+func (t *Tracker) Observe(ip string, port uint16, h rtp.Header, arrival time.Time) (ObserveResult, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	labels, ok := t.media[endpointKey{ip: ip, port: port}]
+	if !ok {
+		return ObserveResult{}, false
+	}
+
+	codec := rtp.CodecName(h.PayloadType, labels.SDPCodecs)
+	clockRate := uint32(defaultClockRate)
+	if cr, crOk := labels.ClockRates[h.PayloadType]; crOk && cr > 0 {
+		clockRate = cr
+	}
+
+	entry, exists := t.streams[h.SSRC]
+	if !exists {
+		entry = &streamEntry{
+			state:  newStreamState(h.SSRC, codec, clockRate, arrival),
+			labels: labels,
+			codec:  codec,
+		}
+		t.streams[h.SSRC] = entry
+	}
+
+	prevLost := entry.state.packetsLost
+	prevTotal := entry.state.packetsTotal
+	entry.state.Observe(h, arrival)
+
+	return ObserveResult{
+		Counted: entry.state.packetsTotal > prevTotal,
+		Lost:    entry.state.packetsLost - prevLost,
+		Codec:   codec,
+	}, true
+}
+
+// Snapshot returns the current statistics of all active RTP streams.
+func (t *Tracker) Snapshot() []StreamStats {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]StreamStats, 0, len(t.streams))
+	for _, e := range t.streams {
+		s := e.state
+		jitter := s.JitterMs()
+		out = append(out, StreamStats{
+			SSRC:         s.SSRC,
+			Codec:        e.codec,
+			Carrier:      e.labels.Carrier,
+			UAType:       e.labels.UAType,
+			CallID:       e.labels.CallID,
+			PacketsTotal: s.packetsTotal,
+			PacketsLost:  s.packetsLost,
+			JitterMs:     jitter,
+			MOS:          ComputeMOS(e.codec, s.LossRate(), jitter),
+			LastSeen:     s.lastArrival,
+		})
+	}
+	return out
+}
+
+// Cleanup removes streams idle for longer than the configured TTL.
+func (t *Tracker) Cleanup() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	now := t.now()
+	for ssrc, e := range t.streams {
+		if now.Sub(e.state.lastArrival) > t.ttl {
+			delete(t.streams, ssrc)
+		}
+	}
+}
+
+// StreamCount returns the number of active RTP streams.
+func (t *Tracker) StreamCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.streams)
+}
