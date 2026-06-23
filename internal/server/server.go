@@ -39,7 +39,7 @@ func NewServer(resolver *carriers.Resolver, classifier *ua.Classifier) Server {
 }
 
 func (s *server) Run(cfg *config.App) error {
-	if err := s.exporter.Initialize(cfg.Interface, cfg.BPFBinaryPath, cfg.SIPPort, cfg.SIPSPort, cfg.IgnoreOutgoing); err != nil {
+	if err := s.exporter.Initialize(cfg.Interface, cfg.BPFBinaryPath, cfg.SIPPort, cfg.SIPSPort, cfg.IgnoreOutgoing, cfg.RTPCapture); err != nil {
 		return fmt.Errorf("failed initialized exporter: %w", err)
 	}
 

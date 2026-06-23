@@ -17,6 +17,7 @@ type (
 		CarriersConfigPath   string `env:"SIP_EXPORTER_CARRIERS_CONFIG"`
 		UserAgentsConfigPath string `env:"SIP_EXPORTER_USER_AGENTS_CONFIG"`
 		IgnoreOutgoing       bool   `env:"SIP_EXPORTER_IGNORE_OUTGOING" env-default:"false"`
+		RTPCapture           bool   `env:"SIP_EXPORTER_RTP_CAPTURE" env-default:"true"`
 	}
 )
 

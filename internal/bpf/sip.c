@@ -14,6 +14,15 @@ struct {
 	__type(value, __u16);
 } sip_ports SEC(".maps");
 
+// Конфиг захвата RTP (настраивается из userspace)
+// value: 1 — RTP capture включён, 0 — выключен
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, __u8);
+} rtp_config SEC(".maps");
+
 SEC("socket")
 int bpf_socket_filter(struct __sk_buff *skb) {
     if (skb->len < 14) {
@@ -87,14 +96,42 @@ int bpf_socket_filter(struct __sk_buff *skb) {
     __u16 port1 = sip_port ? *sip_port : 5060;
     __u16 port2 = sips_port ? *sips_port : 5061;
 
-    if (src_port != port1 && src_port != port2 &&
-        dest_port != port1 && dest_port != port2) {
+    // SIP порт → пропускаем пакет целиком (для парсинга SIP-заголовков)
+    if (src_port == port1 || src_port == port2 ||
+        dest_port == port1 || dest_port == port2) {
+        bpf_printk("SIP packet: %u->%u, skb->len=%u", src_port, dest_port, skb->len);
+        return skb->len;
+    }
+
+    // Не SIP-порт — проверяем конфиг захвата RTP
+    __u32 cfg_key = 0;
+    __u8 *rtp_on = bpf_map_lookup_elem(&rtp_config, &cfg_key);
+    if (!rtp_on || *rtp_on != 1) {
         return 0;
     }
 
-    // Возвращаем полную длину пакета
-    bpf_printk("SIP packet: %u->%u, skb->len=%u", src_port, dest_port, skb->len);
-    return skb->len;
+    // Offset начала payload (после UDP header 8 байт)
+    int payload_off = ip_offset + ip_header_len + 8;
+    if (skb->len < payload_off + 1) {
+        return 0;
+    }
+
+    // Pattern-детекция RTP: первый байт payload, version=2 → (byte & 0xC0) == 0x80
+    __u8 first = 0;
+    if (bpf_skb_load_bytes(skb, payload_off, &first, 1) < 0) {
+        return 0;
+    }
+    if ((first & 0xC0) != 0x80) {
+        return 0;
+    }
+
+    // Пропускаем только заголовок RTP (приватность): обрезаем до 64 байт
+    __u32 snap = skb->len;
+    if (snap > 64) {
+        snap = 64;
+    }
+    bpf_printk("RTP packet: %u->%u, snap=%u", src_port, dest_port, snap);
+    return snap;
 }
 
 char _license[] SEC("license") = "GPL";

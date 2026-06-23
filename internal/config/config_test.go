@@ -187,3 +187,58 @@ func TestGetConfig_OnlySIPSPortCustom(t *testing.T) {
 	require.Equal(t, 5060, cfg.SIPPort) // default
 	require.Equal(t, 8080, cfg.SIPSPort)
 }
+
+func TestGetConfig_RTPCaptureDefault(t *testing.T) {
+	originalVars := map[string]string{
+		"SIP_EXPORTER_INTERFACE":    os.Getenv("SIP_EXPORTER_INTERFACE"),
+		"SIP_EXPORTER_RTP_CAPTURE":  os.Getenv("SIP_EXPORTER_RTP_CAPTURE"),
+	}
+	defer func() {
+		for k, v := range originalVars {
+			if v == "" {
+				_ = os.Unsetenv(k)
+			} else {
+				_ = os.Setenv(k, v)
+			}
+		}
+	}()
+
+	for k := range originalVars {
+		_ = os.Unsetenv(k)
+	}
+	_ = os.Setenv("SIP_EXPORTER_INTERFACE", "eth0")
+
+	cfg, err := GetConfig()
+
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	require.True(t, cfg.RTPCapture, "RTP capture must be enabled by default")
+}
+
+func TestGetConfig_RTPCaptureDisabled(t *testing.T) {
+	originalVars := map[string]string{
+		"SIP_EXPORTER_INTERFACE":   os.Getenv("SIP_EXPORTER_INTERFACE"),
+		"SIP_EXPORTER_RTP_CAPTURE": os.Getenv("SIP_EXPORTER_RTP_CAPTURE"),
+	}
+	defer func() {
+		for k, v := range originalVars {
+			if v == "" {
+				_ = os.Unsetenv(k)
+			} else {
+				_ = os.Setenv(k, v)
+			}
+		}
+	}()
+
+	for k := range originalVars {
+		_ = os.Unsetenv(k)
+	}
+	_ = os.Setenv("SIP_EXPORTER_INTERFACE", "eth0")
+	_ = os.Setenv("SIP_EXPORTER_RTP_CAPTURE", "false")
+
+	cfg, err := GetConfig()
+
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	require.False(t, cfg.RTPCapture, "RTP capture must be disabled when env is false")
+}

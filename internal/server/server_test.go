@@ -22,7 +22,7 @@ type mockExporter struct {
 	isAlive          bool
 }
 
-func (m *mockExporter) Initialize(interfaceName string, path string, sipPort, sipsPort int, ignoreOutgoing bool) error {
+func (m *mockExporter) Initialize(interfaceName string, path string, sipPort, sipsPort int, ignoreOutgoing, rtpCapture bool) error {
 	m.initializeCalled = true
 	m.isAlive = true
 	return m.initializeErr

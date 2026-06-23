@@ -107,7 +107,7 @@ type (
 		dialoger  service.Dialoger
 	}
 	Exporter interface {
-		Initialize(interfaceName string, path string, sipPort, sipsPort int, ignoreOutgoing bool) error
+		Initialize(interfaceName string, path string, sipPort, sipsPort int, ignoreOutgoing, rtpCapture bool) error
 		IsAlive() bool
 		Close()
 	}
@@ -134,7 +134,7 @@ func NewExporter(
 	}
 }
 
-func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPort int, ignoreOutgoing bool) error {
+func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPort int, ignoreOutgoing, rtpCapture bool) error {
 	if syscall.Geteuid() != 0 {
 		return ErrUserNotRoot
 	}
@@ -165,6 +165,20 @@ func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPo
 	if updateErr := sipPortsMap.Update(keySIPS, uint16(sipsPort), ebpf.UpdateAny); updateErr != nil { //nolint:gosec // port validated by config
 		return fmt.Errorf("failed to set SIPS port: %w", updateErr)
 	}
+
+	// Configure RTP capture flag in eBPF map (0 = off, 1 = on)
+	rtpConfigMap := collection.Maps["rtp_config"]
+	if rtpConfigMap == nil {
+		return errors.New("failed to find rtp_config map")
+	}
+	rtpValue := uint8(0)
+	if rtpCapture {
+		rtpValue = 1
+	}
+	if updateErr := rtpConfigMap.Update(uint32(0), rtpValue, ebpf.UpdateAny); updateErr != nil {
+		return fmt.Errorf("failed to set RTP capture config: %w", updateErr)
+	}
+	zap.L().Info("RTP capture configured", zap.Bool("enabled", rtpCapture))
 
 	// Create AF_PACKET socket with SOCK_RAW
 	sock, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW, int(htons(ethPAll)))
