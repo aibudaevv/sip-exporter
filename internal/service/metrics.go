@@ -75,6 +75,12 @@ type (
 		vqRERL    *prometheus.HistogramVec
 		vqReports *prometheus.CounterVec
 
+		rtpPackets       *prometheus.CounterVec
+		rtpLost          *prometheus.CounterVec
+		rtpJitter        *prometheus.HistogramVec
+		rtpMOS           *prometheus.HistogramVec
+		rtpActiveStreams *prometheus.GaugeVec
+
 		carrierCounters sync.Map
 
 		socketPacketsReceived prometheus.Counter
@@ -101,6 +107,11 @@ type (
 		UpdateSession(carrier string, uaType string, size int)
 		UpdateSessionsByCarrierAndUA(counts map[string]map[string]int)
 		UpdateVQReport(carrier string, uaType string, report *vq.SessionReport)
+		UpdateRTPPackets(carrier string, uaType string, codec string)
+		UpdateRTPLoss(carrier string, uaType string, codec string, lost uint64)
+		UpdateRTPJitter(carrier string, uaType string, codec string, jitterMs float64)
+		UpdateRTPMOS(carrier string, uaType string, codec string, mos float64)
+		UpdateRTPActiveStreams(counts map[string]map[string]map[string]int)
 		SystemError()
 		ParseError(errorType string)
 		SocketStats(received, dropped uint32)
@@ -162,6 +173,7 @@ func newMetricserWithRegistry(reg *prometheus.Registry) Metricser {
 	m.initSessionMetrics(reg)
 	m.initHistograms(reg)
 	registerRatioCollectors(m, reg)
+	m.initRTPMetrics(reg)
 	m.initSelfMetrics(reg)
 	return m
 }
@@ -373,6 +385,29 @@ func (m *metrics) initHistograms(reg *prometheus.Registry) {
 		"sip_exporter_vq_reports_total",
 		"Total number of Voice Quality session reports processed (RFC 6035)",
 		cl, reg)
+}
+
+func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
+	rl := []string{"carrier", "ua_type", "codec"}
+	m.rtpPackets = newCounterVecWithRegistry(
+		"sip_exporter_rtp_packets_total",
+		"Total number of RTP packets observed (correlated with SIP dialogs)", rl, reg)
+	m.rtpLost = newCounterVecWithRegistry(
+		"sip_exporter_rtp_packets_lost_total",
+		"Total number of RTP packets detected as lost via sequence gaps", rl, reg)
+	m.rtpJitter = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_rtp_jitter_milliseconds",
+		Help:    "RTP interarrival jitter in milliseconds (RFC 3550 A.8)",
+		Buckets: []float64{0.1, 0.5, 1, 5, 10, 20, 50, 100, 200, 500},
+	}, rl, reg)
+	m.rtpMOS = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_rtp_mos_score",
+		Help:    "RTP MOS-LQ score 1.0-4.9 estimated via ITU-T G.107 E-model",
+		Buckets: []float64{1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0},
+	}, rl, reg)
+	m.rtpActiveStreams = newGaugeVecWithRegistry(
+		"sip_exporter_rtp_active_streams",
+		"Number of active RTP streams correlated with SIP dialogs", rl, reg)
 }
 
 func registerRatioCollectors(m *metrics, reg *prometheus.Registry) {
@@ -690,6 +725,36 @@ func (m *metrics) UpdateVQReport(carrier string, uaType string, report *vq.Sessi
 		m.vqRERL.WithLabelValues(carrier, uaType).Observe(report.RERL)
 	}
 	m.vqReports.WithLabelValues(carrier, uaType).Inc()
+}
+
+func (m *metrics) UpdateRTPPackets(carrier string, uaType string, codec string) {
+	m.rtpPackets.WithLabelValues(carrier, uaType, codec).Inc()
+}
+
+func (m *metrics) UpdateRTPLoss(carrier string, uaType string, codec string, lost uint64) {
+	if lost == 0 {
+		return
+	}
+	m.rtpLost.WithLabelValues(carrier, uaType, codec).Add(float64(lost))
+}
+
+func (m *metrics) UpdateRTPJitter(carrier string, uaType string, codec string, jitterMs float64) {
+	m.rtpJitter.WithLabelValues(carrier, uaType, codec).Observe(jitterMs)
+}
+
+func (m *metrics) UpdateRTPMOS(carrier string, uaType string, codec string, mos float64) {
+	m.rtpMOS.WithLabelValues(carrier, uaType, codec).Observe(mos)
+}
+
+func (m *metrics) UpdateRTPActiveStreams(counts map[string]map[string]map[string]int) {
+	m.rtpActiveStreams.Reset()
+	for carrier, uaCounts := range counts {
+		for uaType, codecCounts := range uaCounts {
+			for codec, n := range codecCounts {
+				m.rtpActiveStreams.WithLabelValues(carrier, uaType, codec).Set(float64(n))
+			}
+		}
+	}
 }
 
 func isEffectiveResponse(code []byte) bool {

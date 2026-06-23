@@ -125,6 +125,12 @@ func (m *mockMetricser) UpdateVQReport(carrier string, uaType string, report *vq
 	m.vqReport = report
 }
 
+func (m *mockMetricser) UpdateRTPPackets(string, string, string)    {}
+func (m *mockMetricser) UpdateRTPLoss(string, string, string, uint64) {}
+func (m *mockMetricser) UpdateRTPJitter(string, string, string, float64) {}
+func (m *mockMetricser) UpdateRTPMOS(string, string, string, float64)   {}
+func (m *mockMetricser) UpdateRTPActiveStreams(map[string]map[string]map[string]int) {}
+
 type dialogCreateArgs struct {
 	expiresAt time.Time
 	createdAt time.Time
@@ -2874,6 +2880,12 @@ func (m *carrierTrackingMetricser) UpdateActiveDialogs(int)       {}
 func (m *carrierTrackingMetricser) UpdateVQReport(carrier string, uaType string, report *vq.SessionReport) {
 	m.vqReports = append(m.vqReports, carrierCall{carrier: carrier, uaType: uaType})
 }
+
+func (m *carrierTrackingMetricser) UpdateRTPPackets(string, string, string)                  {}
+func (m *carrierTrackingMetricser) UpdateRTPLoss(string, string, string, uint64)              {}
+func (m *carrierTrackingMetricser) UpdateRTPJitter(string, string, string, float64)           {}
+func (m *carrierTrackingMetricser) UpdateRTPMOS(string, string, string, float64)              {}
+func (m *carrierTrackingMetricser) UpdateRTPActiveStreams(map[string]map[string]map[string]int) {}
 
 // ==================== SIP message builders for MC/DC tests ====================
 
