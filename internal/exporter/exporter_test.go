@@ -144,7 +144,7 @@ type mockDialoger struct {
 	cleanupResults []service.CleanupResult
 }
 
-func (m *mockDialoger) Create(dialogID string, expiresAt time.Time, createdAt time.Time, carrier string, uaType string) {
+func (m *mockDialoger) Create(dialogID string, expiresAt time.Time, createdAt time.Time, carrier string, uaType string, callID string) {
 	if m.created == nil {
 		m.created = make(map[string]dialogCreateArgs)
 	}

@@ -313,6 +313,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		for _, r := range results {
 			e.services.metricser.SessionCompleted(r.Carrier, r.UAType)
 			e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.Duration)
+			e.mediaTracker.Unregister(r.CallID)
 		}
 
 		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", len(results)))
@@ -822,11 +823,11 @@ func (e *exporter) handleInvite200OK(carrier string, uaType string, packet dto.P
 	zap.L().Debug("create sip dialog",
 		zap.String("session", dialogID),
 		zap.Int("expires_sec", expires))
-	e.services.dialoger.Create(dialogID, expiresAt, time.Now(), carrier, uaType)
+	callID := string(packet.CallID)
+	e.services.dialoger.Create(dialogID, expiresAt, time.Now(), carrier, uaType, callID)
 
 	// Register RTP media endpoints for correlation: the caller side from the
 	// cached INVITE SDP offer, the callee side from this 200 OK SDP answer.
-	callID := string(packet.CallID)
 	labels := mediatracker.MediaLabels{Carrier: carrier, UAType: uaType, CallID: callID}
 	if offerSDP, ok := e.takeInviteSDP(callID); ok {
 		e.registerMediaEndpoints(offerSDP, labels)

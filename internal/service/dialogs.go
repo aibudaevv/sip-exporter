@@ -11,12 +11,14 @@ type (
 		createdAt time.Time
 		carrier   string
 		uaType    string
+		callID    string
 	}
 
 	CleanupResult struct {
 		Duration time.Duration
 		Carrier  string
 		UAType   string
+		CallID   string
 	}
 
 	dialogs struct {
@@ -24,7 +26,7 @@ type (
 		storage map[string]dialogEntry
 	}
 	Dialoger interface {
-		Create(dialogID string, expiresAt time.Time, createdAt time.Time, carrier string, uaType string)
+		Create(dialogID string, expiresAt time.Time, createdAt time.Time, carrier string, uaType string, callID string)
 		Delete(dialogID string) CleanupResult
 		Size() int
 		SizeByCarrierAndUA() map[string]map[string]int
@@ -50,12 +52,15 @@ func (c *dialogs) Delete(dialogID string) CleanupResult {
 	delete(c.storage, dialogID)
 	d := time.Since(entry.createdAt)
 	if d < 0 {
-		return CleanupResult{Carrier: entry.carrier, UAType: entry.uaType}
+		return CleanupResult{Carrier: entry.carrier, UAType: entry.uaType, CallID: entry.callID}
 	}
-	return CleanupResult{Duration: d, Carrier: entry.carrier, UAType: entry.uaType}
+	return CleanupResult{Duration: d, Carrier: entry.carrier, UAType: entry.uaType, CallID: entry.callID}
 }
 
-func (c *dialogs) Create(dialogID string, expiresAt time.Time, createdAt time.Time, carrier string, uaType string) {
+func (c *dialogs) Create(
+	dialogID string, expiresAt time.Time, createdAt time.Time,
+	carrier string, uaType string, callID string,
+) {
 	c.m.Lock()
 	defer c.m.Unlock()
 	if _, exists := c.storage[dialogID]; !exists {
@@ -64,6 +69,7 @@ func (c *dialogs) Create(dialogID string, expiresAt time.Time, createdAt time.Ti
 			createdAt: createdAt,
 			carrier:   carrier,
 			uaType:    uaType,
+			callID:    callID,
 		}
 	}
 }
@@ -96,7 +102,9 @@ func (c *dialogs) Cleanup() []CleanupResult {
 		if now.After(entry.expiresAt) {
 			d := now.Sub(entry.createdAt)
 			if d > 0 {
-				results = append(results, CleanupResult{Duration: d, Carrier: entry.carrier, UAType: entry.uaType})
+				results = append(results, CleanupResult{
+					Duration: d, Carrier: entry.carrier, UAType: entry.uaType, CallID: entry.callID,
+				})
 			}
 			delete(c.storage, id)
 		}
