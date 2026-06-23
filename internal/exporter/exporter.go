@@ -2,6 +2,7 @@ package exporter
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -16,6 +17,9 @@ import (
 
 	"github.com/aibudaevv/sip-exporter/internal/carriers"
 	"github.com/aibudaevv/sip-exporter/internal/dto"
+	"github.com/aibudaevv/sip-exporter/internal/mediatracker"
+	"github.com/aibudaevv/sip-exporter/internal/rtp"
+	"github.com/aibudaevv/sip-exporter/internal/sdp"
 	"github.com/aibudaevv/sip-exporter/internal/service"
 	"github.com/aibudaevv/sip-exporter/internal/ua"
 	"github.com/aibudaevv/sip-exporter/internal/vq"
@@ -31,6 +35,7 @@ const (
 	defaultRegisterTTL = 60 * time.Second
 	defaultInviteTTL   = 60 * time.Second
 	defaultOptionsTTL  = 60 * time.Second
+	rtpStreamTTL       = 30 * time.Second // idle RTP stream expiry
 
 	messagesChanSize = 10_000
 	socketRecvBufMB  = 4
@@ -54,6 +59,9 @@ const (
 	parseErrTypeL3  = "l3"
 	parseErrTypeL4  = "l4"
 	parseErrTypeSIP = "sip"
+
+	rtpVersionMask    = 0xC0
+	rtpVersion2Prefix = 0x80
 
 	sipPartsCount         = 3
 	minSIPParts           = 2
@@ -86,6 +94,11 @@ type (
 		uaType    string
 	}
 
+	inviteSDPEntity struct {
+		body      []byte
+		timestamp time.Time
+	}
+
 	exporter struct {
 		collection      *ebpf.Collection
 		sock            int
@@ -94,10 +107,13 @@ type (
 		carrierResolver *carriers.Resolver
 		uaClassifier    *ua.Classifier
 		vqHandler       *vq.Handler
+		mediaTracker    *mediatracker.Tracker
 		registerTracker map[string]registerEntry
 		registerMutex   sync.RWMutex
 		inviteTracker   map[string]inviteEntry
 		inviteMutex     sync.RWMutex
+		inviteSDP       map[string]inviteSDPEntity
+		inviteSDPMutex  sync.Mutex
 		optionsTracker  map[string]optionsEntry
 		optionsMutex    sync.RWMutex
 		initialized     atomic.Bool
@@ -127,14 +143,20 @@ func NewExporter(
 		carrierResolver: resolver,
 		uaClassifier:    classifier,
 		vqHandler:       vq.NewHandler(m),
+		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 		messages:        make(chan []byte, messagesChanSize),
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
+		inviteSDP:       make(map[string]inviteSDPEntity),
 		optionsTracker:  make(map[string]optionsEntry),
 	}
 }
 
-func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPort int, ignoreOutgoing, rtpCapture bool) error {
+func (e *exporter) Initialize(
+	interfaceName string, path string,
+	sipPort, sipsPort int,
+	ignoreOutgoing, rtpCapture bool,
+) error {
 	if syscall.Geteuid() != 0 {
 		return ErrUserNotRoot
 	}
@@ -151,34 +173,10 @@ func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPo
 		return errors.New("failed to find BPF program: bpf_socket_filter")
 	}
 
-	// Configure SIP ports in eBPF map
-	sipPortsMap := collection.Maps["sip_ports"]
-	if sipPortsMap == nil {
-		return errors.New("failed to find sip_ports map")
+	// Configure eBPF maps (SIP ports + RTP capture flag)
+	if err = e.configureEBPFMaps(collection, sipPort, sipsPort, rtpCapture); err != nil {
+		return err
 	}
-
-	keySIP := uint32(0)
-	keySIPS := uint32(1)
-	if updateErr := sipPortsMap.Update(keySIP, uint16(sipPort), ebpf.UpdateAny); updateErr != nil { //nolint:gosec // port validated by config
-		return fmt.Errorf("failed to set SIP port: %w", updateErr)
-	}
-	if updateErr := sipPortsMap.Update(keySIPS, uint16(sipsPort), ebpf.UpdateAny); updateErr != nil { //nolint:gosec // port validated by config
-		return fmt.Errorf("failed to set SIPS port: %w", updateErr)
-	}
-
-	// Configure RTP capture flag in eBPF map (0 = off, 1 = on)
-	rtpConfigMap := collection.Maps["rtp_config"]
-	if rtpConfigMap == nil {
-		return errors.New("failed to find rtp_config map")
-	}
-	rtpValue := uint8(0)
-	if rtpCapture {
-		rtpValue = 1
-	}
-	if updateErr := rtpConfigMap.Update(uint32(0), rtpValue, ebpf.UpdateAny); updateErr != nil {
-		return fmt.Errorf("failed to set RTP capture config: %w", updateErr)
-	}
-	zap.L().Info("RTP capture configured", zap.Bool("enabled", rtpCapture))
 
 	// Create AF_PACKET socket with SOCK_RAW
 	sock, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW, int(htons(ethPAll)))
@@ -247,6 +245,34 @@ func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPo
 	return nil
 }
 
+// configureEBPFMaps populates the eBPF SIP-ports map and the RTP-capture flag map.
+func (e *exporter) configureEBPFMaps(collection *ebpf.Collection, sipPort, sipsPort int, rtpCapture bool) error {
+	sipPortsMap := collection.Maps["sip_ports"]
+	if sipPortsMap == nil {
+		return errors.New("failed to find sip_ports map")
+	}
+	if err := sipPortsMap.Update(uint32(0), uint16(sipPort), ebpf.UpdateAny); err != nil { //nolint:gosec // port validated by config
+		return fmt.Errorf("failed to set SIP port: %w", err)
+	}
+	if err := sipPortsMap.Update(uint32(1), uint16(sipsPort), ebpf.UpdateAny); err != nil { //nolint:gosec // port validated by config
+		return fmt.Errorf("failed to set SIPS port: %w", err)
+	}
+
+	rtpConfigMap := collection.Maps["rtp_config"]
+	if rtpConfigMap == nil {
+		return errors.New("failed to find rtp_config map")
+	}
+	rtpValue := uint8(0)
+	if rtpCapture {
+		rtpValue = 1
+	}
+	if err := rtpConfigMap.Update(uint32(0), rtpValue, ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("failed to set RTP capture config: %w", err)
+	}
+	zap.L().Info("RTP capture configured", zap.Bool("enabled", rtpCapture))
+	return nil
+}
+
 func extractIPs(ipHeader []byte) (net.IP, net.IP) {
 	srcIP := net.IPv4(ipHeader[12], ipHeader[13], ipHeader[14], ipHeader[15])
 	dstIP := net.IPv4(ipHeader[16], ipHeader[17], ipHeader[18], ipHeader[19])
@@ -279,7 +305,9 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		results := e.services.dialoger.Cleanup()
 		e.cleanupRegisterTracker()
 		e.cleanupInviteTracker()
+		e.cleanupInviteSDP()
 		e.cleanupOptionsTracker()
+		e.mediaTracker.Cleanup()
 		s := e.services.dialoger.Size()
 
 		for _, r := range results {
@@ -297,6 +325,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		e.services.metricser.UpdateTrackerSize("register", len(e.registerTracker))
 		e.services.metricser.UpdateTrackerSize("invite", len(e.inviteTracker))
 		e.services.metricser.UpdateTrackerSize("options", len(e.optionsTracker))
+		e.services.metricser.UpdateTrackerSize("rtp", e.mediaTracker.StreamCount())
 		e.services.metricser.UpdateActiveDialogs(s)
 	}
 }
@@ -447,6 +476,15 @@ func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 
 	sipData := packet[sipOffset:]
 
+	// RTP packets (passed by the eBPF filter with version=2) arrive truncated to
+	// the RTP header. SIP messages start with an ASCII letter and never with the
+	// 0x80-0xBF range, so the first payload byte unambiguously distinguishes RTP.
+	if sipData[0]&rtpVersionMask == rtpVersion2Prefix {
+		srcPort := binary.BigEndian.Uint16(packet[udpOffset : udpOffset+2])
+		srcIP, _ := extractIPs(ipHeader)
+		return e.handleRTP(srcIP, srcPort, sipData)
+	}
+
 	// Minimum SIP packet should be at least 50 bytes
 	if len(sipData) < minSIPDataLen {
 		return parseErrTypeSIP, fmt.Errorf("packet too small for SIP: %d", len(sipData))
@@ -572,6 +610,23 @@ func (e *exporter) handleMessage(carrier string, rawPacket []byte) error {
 	return nil
 }
 
+// handleRTP parses an RTP header and feeds it to the media tracker. Packets with
+// no correlated SIP dialog are dropped silently (per design: RTP without an
+// established dialog is not monitored). RTP stats are accumulated in the tracker
+// and exported periodically (see sipDialogMetricsUpdate).
+func (e *exporter) handleRTP(srcIP net.IP, srcPort uint16, payload []byte) (string, error) {
+	header, err := rtp.ParseHeader(payload)
+	if err != nil {
+		zap.L().Debug("RTP header parse skipped", zap.Error(err))
+		return "", nil
+	}
+	if _, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, header, time.Now()); !ok {
+		// No correlated media endpoint for this source → drop.
+		return "", nil
+	}
+	return "", nil
+}
+
 func (e *exporter) handleRequest(carrier string, uaType string, packet dto.Packet) {
 	e.services.metricser.Request(carrier, uaType, packet.Method)
 
@@ -581,6 +636,9 @@ func (e *exporter) handleRequest(carrier string, uaType string, packet dto.Packe
 
 	if bytes.Equal(packet.Method, []byte("INVITE")) {
 		e.storeInviteTime(string(packet.CallID), carrier, uaType)
+		if bytes.Contains(packet.ContentType, []byte("application/sdp")) {
+			e.storeInviteSDP(string(packet.CallID), packet.Body)
+		}
 	}
 
 	if bytes.Equal(packet.Method, []byte("CANCEL")) {
@@ -734,6 +792,17 @@ func (e *exporter) handleInvite200OK(carrier string, uaType string, packet dto.P
 		zap.String("session", dialogID),
 		zap.Int("expires_sec", expires))
 	e.services.dialoger.Create(dialogID, expiresAt, time.Now(), carrier, uaType)
+
+	// Register RTP media endpoints for correlation: the caller side from the
+	// cached INVITE SDP offer, the callee side from this 200 OK SDP answer.
+	callID := string(packet.CallID)
+	labels := mediatracker.MediaLabels{Carrier: carrier, UAType: uaType, CallID: callID}
+	if offerSDP, ok := e.takeInviteSDP(callID); ok {
+		e.registerMediaEndpoints(offerSDP, labels)
+	}
+	if bytes.Contains(packet.ContentType, []byte("application/sdp")) {
+		e.registerMediaEndpoints(packet.Body, labels)
+	}
 	return nil
 }
 
@@ -745,6 +814,7 @@ func (e *exporter) handleBye200OK(packet dto.Packet) error {
 
 	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
 	result := e.services.dialoger.Delete(dialogID)
+	e.mediaTracker.Unregister(string(packet.CallID))
 	if result.Duration > 0 {
 		e.services.metricser.UpdateSPD(result.Carrier, result.UAType, result.Duration)
 		e.services.metricser.SessionCompleted(result.Carrier, result.UAType)
@@ -956,6 +1026,51 @@ func (e *exporter) getInviteCarrier(callID string) (string, string, bool) {
 		return "", defaultUAType, false
 	}
 	return entry.carrier, entry.uaType, true
+}
+
+// storeInviteSDP caches an INVITE SDP offer keyed by Call-ID so the media
+// endpoints can be registered when the 200 OK arrives.
+func (e *exporter) storeInviteSDP(callID string, body []byte) {
+	e.inviteSDPMutex.Lock()
+	defer e.inviteSDPMutex.Unlock()
+	e.inviteSDP[callID] = inviteSDPEntity{body: body, timestamp: time.Now()}
+}
+
+// takeInviteSDP returns and removes the cached INVITE SDP offer for a Call-ID.
+func (e *exporter) takeInviteSDP(callID string) ([]byte, bool) {
+	e.inviteSDPMutex.Lock()
+	defer e.inviteSDPMutex.Unlock()
+	entry, ok := e.inviteSDP[callID]
+	if !ok {
+		return nil, false
+	}
+	delete(e.inviteSDP, callID)
+	return entry.body, true
+}
+
+func (e *exporter) cleanupInviteSDP() {
+	e.inviteSDPMutex.Lock()
+	defer e.inviteSDPMutex.Unlock()
+	now := time.Now()
+	for callID, entry := range e.inviteSDP {
+		if now.Sub(entry.timestamp) > defaultInviteTTL {
+			delete(e.inviteSDP, callID)
+		}
+	}
+}
+
+// registerMediaEndpoints parses an SDP body and registers each audio media
+// endpoint in the media tracker under the given dialog labels.
+func (e *exporter) registerMediaEndpoints(body []byte, labels mediatracker.MediaLabels) {
+	for _, m := range sdp.Parse(body) {
+		ml := labels
+		ml.SDPCodecs = m.Codecs
+		ml.ClockRates = m.ClockRates
+		e.mediaTracker.Register(m.IP, m.Port, ml)
+		zap.L().Debug("RTP media endpoint registered",
+			zap.String("ip", m.IP), zap.Uint16("port", m.Port),
+			zap.String("call_id", labels.CallID))
+	}
 }
 
 func (e *exporter) storeOptionsTime(callID string, carrier string, uaType string) {
