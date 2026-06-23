@@ -38,6 +38,8 @@ type (
 		Counted bool   // packet counted as received (not duplicate/reorder)
 		Lost    uint64 // packets newly marked lost by this observation
 		Codec   string // resolved codec name
+		Carrier string // dialog carrier (for metric labels)
+		UAType  string // dialog UA type (for metric labels)
 	}
 
 	endpointKey struct {
@@ -139,6 +141,8 @@ func (t *Tracker) Observe(ip string, port uint16, h rtp.Header, arrival time.Tim
 		Counted: entry.state.packetsTotal > prevTotal,
 		Lost:    entry.state.packetsLost - prevLost,
 		Codec:   codec,
+		Carrier: labels.Carrier,
+		UAType:  labels.UAType,
 	}, true
 }
 

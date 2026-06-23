@@ -326,6 +326,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		e.services.metricser.UpdateTrackerSize("invite", len(e.inviteTracker))
 		e.services.metricser.UpdateTrackerSize("options", len(e.optionsTracker))
 		e.services.metricser.UpdateTrackerSize("rtp", e.mediaTracker.StreamCount())
+		e.updateRTPMetrics()
 		e.services.metricser.UpdateActiveDialogs(s)
 	}
 }
@@ -620,11 +621,41 @@ func (e *exporter) handleRTP(srcIP net.IP, srcPort uint16, payload []byte) (stri
 		zap.L().Debug("RTP header parse skipped", zap.Error(err))
 		return "", nil
 	}
-	if _, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, header, time.Now()); !ok {
+	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, header, time.Now())
+	if !ok {
 		// No correlated media endpoint for this source → drop.
 		return "", nil
 	}
+	if res.Counted {
+		e.services.metricser.UpdateRTPPackets(res.Carrier, res.UAType, res.Codec)
+	}
+	if res.Lost > 0 {
+		e.services.metricser.UpdateRTPLoss(res.Carrier, res.UAType, res.Codec, res.Lost)
+	}
 	return "", nil
+}
+
+// updateRTPMetrics emits the periodic RTP sample metrics (jitter, MOS histograms
+// and the active-streams gauge) from the media tracker snapshot.
+func (e *exporter) updateRTPMetrics() {
+	stats := e.mediaTracker.Snapshot()
+	if len(stats) == 0 {
+		e.services.metricser.UpdateRTPActiveStreams(nil)
+		return
+	}
+	counts := make(map[string]map[string]map[string]int)
+	for _, s := range stats {
+		e.services.metricser.UpdateRTPJitter(s.Carrier, s.UAType, s.Codec, s.JitterMs)
+		e.services.metricser.UpdateRTPMOS(s.Carrier, s.UAType, s.Codec, s.MOS)
+		if counts[s.Carrier] == nil {
+			counts[s.Carrier] = make(map[string]map[string]int)
+		}
+		if counts[s.Carrier][s.UAType] == nil {
+			counts[s.Carrier][s.UAType] = make(map[string]int)
+		}
+		counts[s.Carrier][s.UAType][s.Codec]++
+	}
+	e.services.metricser.UpdateRTPActiveStreams(counts)
 }
 
 func (e *exporter) handleRequest(carrier string, uaType string, packet dto.Packet) {

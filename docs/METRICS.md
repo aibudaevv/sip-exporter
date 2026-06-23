@@ -378,6 +378,25 @@ sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
 `sip_exporter_604_total{carrier="...",ua_type="..."}`: total number of SIP 604 Does Not Exist Anywhere responses.  
 `sip_exporter_606_total{carrier="...",ua_type="..."}`: total number of SIP 606 Not Acceptable responses.  
 
+## RTP media metrics
+
+RTP media metrics are derived from RTP packets captured by the eBPF filter and
+correlated with SIP dialogs via SDP (media IP:port → carrier/ua_type/call-id).
+All RTP metrics carry the `carrier`, `ua_type` and `codec` labels. Only RTP that
+belongs to an established SIP dialog (after a 200 OK to INVITE with SDP) is
+counted; RTP without a correlated dialog is dropped.
+
+`{carrier="...",ua_type="...",codec="..."}` — `codec` is the RTP payload-type name resolved from SDP `a=rtpmap` (e.g. `PCMU`, `PCMA`, `opus`) with a static fallback table (RFC 3551).
+
+`sip_exporter_rtp_packets_total{carrier,ua_type,codec}` *(counter)*: total number of RTP packets observed.
+`sip_exporter_rtp_packets_lost_total{carrier,ua_type,codec}` *(counter)*: packets detected as lost via RTP sequence-number gaps.
+`sip_exporter_rtp_jitter_milliseconds{carrier,ua_type,codec}` *(histogram, buckets 0.1..500 ms)*: smoothed interarrival jitter (RFC 3550 A.8).
+`sip_exporter_rtp_mos_score{carrier,ua_type,codec}` *(histogram, buckets 1.0..5.0)*: MOS-LQ estimated via the ITU-T G.107 E-model (codec impairment + loss + jitter-induced discard).
+`sip_exporter_rtp_active_streams{carrier,ua_type,codec}` *(gauge)*: number of active RTP streams. Sampled once per second; idle streams expire after 30 s.
+
+> MOS is sampled per stream once per second; the E-model uses G.113 codec Ie/Bpl
+> factors. Unknown codecs get a conservative default (Ie=10).
+
 ## System metrics
 
 `sip_exporter_system_error_total`: total number internal SIP exporter errors. **No `carrier` or `ua_type` label.**
@@ -446,7 +465,7 @@ sip_exporter_channel_length / sip_exporter_channel_capacity > 0.8
 
 ### Active Trackers
 
-`sip_exporter_active_trackers{type="register|invite|options"}` shows the number of entries in each tracker map. Trackers store timestamps for measuring round-trip delays (RRD, TTR, ORD, LRD). Entries are cleaned up after 60 seconds.
+`sip_exporter_active_trackers{type="register|invite|options|rtp"}` shows the number of entries in each tracker map. The `register`/`invite`/`options` trackers store timestamps for measuring round-trip delays (RRD, TTR, ORD, LRD) and are cleaned up after 60 seconds. The `rtp` tracker holds active RTP media streams (correlated with SIP dialogs) and expires idle streams after 30 seconds.
 
 **PromQL examples:**
 ```promql
