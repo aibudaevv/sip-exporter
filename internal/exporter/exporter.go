@@ -124,7 +124,13 @@ type (
 		dialoger  service.Dialoger
 	}
 	Exporter interface {
-		Initialize(interfaceName string, path string, sipPort, sipsPort int, ignoreOutgoing, rtpCapture bool, rtpStreamTTL time.Duration) error
+		Initialize(
+			interfaceName string,
+			path string,
+			sipPort, sipsPort int,
+			ignoreOutgoing, rtpCapture bool,
+			rtpStreamTTL time.Duration,
+		) error
 		IsAlive() bool
 		Close()
 	}
