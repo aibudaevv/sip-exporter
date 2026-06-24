@@ -124,7 +124,7 @@ type (
 		dialoger  service.Dialoger
 	}
 	Exporter interface {
-		Initialize(interfaceName string, path string, sipPort, sipsPort int, ignoreOutgoing, rtpCapture bool) error
+		Initialize(interfaceName string, path string, sipPort, sipsPort int, ignoreOutgoing, rtpCapture bool, rtpStreamTTL time.Duration) error
 		IsAlive() bool
 		Close()
 	}
@@ -157,10 +157,14 @@ func (e *exporter) Initialize(
 	interfaceName string, path string,
 	sipPort, sipsPort int,
 	ignoreOutgoing, rtpCapture bool,
+	rtpStreamTTL time.Duration,
 ) error {
 	if syscall.Geteuid() != 0 {
 		return ErrUserNotRoot
 	}
+
+	// Apply the config-driven RTP stream expiry (RFC 3550 §6.3.5 idle-timeout).
+	e.mediaTracker.SetTTL(rtpStreamTTL)
 
 	collection, err := ebpf.LoadCollection(path)
 	if err != nil {
