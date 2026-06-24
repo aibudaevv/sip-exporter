@@ -3,17 +3,18 @@ package exporter
 import (
 	"bytes"
 	"fmt"
-	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/aibudaevv/sip-exporter/internal/mediatracker"
 	"github.com/aibudaevv/sip-exporter/internal/service"
 	"github.com/aibudaevv/sip-exporter/internal/vq"
-	"github.com/stretchr/testify/require"
 )
 
-// Mock services for testing
+// Mock services for testing.
 type mockMetricser struct {
 	requestCalled             []byte
 	responseCalled            []byte
@@ -42,20 +43,20 @@ type mockMetricser struct {
 	vqReport                  *vq.SessionReport
 }
 
-func (m *mockMetricser) UpdateSessionsByCarrierAndUA(counts map[string]map[string]int) {}
+func (m *mockMetricser) UpdateSessionsByCarrierAndUA(_ map[string]map[string]int) {}
 
-func (m *mockMetricser) Request(carrier string, uaType string, in []byte) {
+func (m *mockMetricser) Request(_ string, _ string, in []byte) {
 	m.requestCalled = in
 	m.packetsIncremented++
 }
 
-func (m *mockMetricser) Response(carrier string, uaType string, in []byte, isInviteResponse bool) {
+func (m *mockMetricser) Response(_ string, _ string, in []byte, isInviteResponse bool) {
 	m.responseCalled = in
 	m.responseIsInvite = isInviteResponse
 	m.packetsIncremented++
 }
 
-func (m *mockMetricser) ResponseWithMetrics(carrier string, uaType string, status []byte, isInviteResponse, is200OK bool) {
+func (m *mockMetricser) ResponseWithMetrics(_ string, _ string, status []byte, isInviteResponse, is200OK bool) {
 	m.responseWithMetricsCalled = true
 	m.responseCalled = status
 	m.responseIsInvite = isInviteResponse
@@ -65,44 +66,44 @@ func (m *mockMetricser) ResponseWithMetrics(carrier string, uaType string, statu
 	}
 }
 
-func (m *mockMetricser) Invite200OK(carrier string, uaType string) {
+func (m *mockMetricser) Invite200OK(_ string, _ string) {
 	m.invite200OKCalled = true
 }
 
-func (m *mockMetricser) SessionCompleted(carrier string, uaType string) {
+func (m *mockMetricser) SessionCompleted(_ string, _ string) {
 	m.sessionCompletedFlag = true
 }
 
-func (m *mockMetricser) UpdateRRD(carrier string, uaType string, delayMs float64) {
+func (m *mockMetricser) UpdateRRD(_ string, _ string, delayMs float64) {
 	m.rrdUpdated = true
 	m.rrdDelay = delayMs
 }
 
-func (m *mockMetricser) UpdateSPD(carrier string, uaType string, duration time.Duration) {
+func (m *mockMetricser) UpdateSPD(_ string, _ string, duration time.Duration) {
 	m.spdUpdated = true
 	m.spdDuration = duration
 }
 
-func (m *mockMetricser) UpdateSession(carrier string, uaType string, size int) {
+func (m *mockMetricser) UpdateSession(_ string, _ string, size int) {
 	m.sessionUpdated = size
 }
 
-func (m *mockMetricser) UpdateTTR(carrier string, uaType string, delayMs float64) {
+func (m *mockMetricser) UpdateTTR(_ string, _ string, delayMs float64) {
 	m.ttrUpdated = true
 	m.ttrDelay = delayMs
 }
 
-func (m *mockMetricser) UpdatePDD(carrier string, uaType string, delayMs float64) {
+func (m *mockMetricser) UpdatePDD(_ string, _ string, delayMs float64) {
 	m.pddUpdated = true
 	m.pddDelay = delayMs
 }
 
-func (m *mockMetricser) UpdateORD(carrier string, uaType string, delayMs float64) {
+func (m *mockMetricser) UpdateORD(_ string, _ string, delayMs float64) {
 	m.ordUpdated = true
 	m.ordDelay = delayMs
 }
 
-func (m *mockMetricser) UpdateLRD(carrier string, uaType string, delayMs float64) {
+func (m *mockMetricser) UpdateLRD(_ string, _ string, delayMs float64) {
 	m.lrdUpdated = true
 	m.lrdDelay = delayMs
 }
@@ -125,10 +126,10 @@ func (m *mockMetricser) UpdateVQReport(carrier string, uaType string, report *vq
 	m.vqReport = report
 }
 
-func (m *mockMetricser) UpdateRTPPackets(string, string, string)    {}
-func (m *mockMetricser) UpdateRTPLoss(string, string, string, uint64) {}
-func (m *mockMetricser) UpdateRTPJitter(string, string, string, float64) {}
-func (m *mockMetricser) UpdateRTPMOS(string, string, string, float64)   {}
+func (m *mockMetricser) UpdateRTPPackets(string, string, string)                     {}
+func (m *mockMetricser) UpdateRTPLoss(string, string, string, uint64)                {}
+func (m *mockMetricser) UpdateRTPJitter(string, string, string, float64)             {}
+func (m *mockMetricser) UpdateRTPMOS(string, string, string, float64)                {}
 func (m *mockMetricser) UpdateRTPActiveStreams(map[string]map[string]map[string]int) {}
 
 type dialogCreateArgs struct {
@@ -144,7 +145,14 @@ type mockDialoger struct {
 	cleanupResults []service.CleanupResult
 }
 
-func (m *mockDialoger) Create(dialogID string, expiresAt time.Time, createdAt time.Time, carrier string, uaType string, callID string) {
+func (m *mockDialoger) Create(
+	dialogID string,
+	expiresAt time.Time,
+	createdAt time.Time,
+	carrier string,
+	uaType string,
+	_ string,
+) {
 	if m.created == nil {
 		m.created = make(map[string]dialogCreateArgs)
 	}
@@ -261,7 +269,7 @@ func TestSplitHeader_NoColon(t *testing.T) {
 func TestSplitHeader_EmptyValue(t *testing.T) {
 	header, value := splitHeader([]byte("Header:"))
 	require.Equal(t, []byte("Header"), header)
-	require.True(t, len(value) == 0)
+	require.Empty(t, value)
 }
 
 func TestSplitHeader_EmptyLine(t *testing.T) {
@@ -272,8 +280,8 @@ func TestSplitHeader_EmptyLine(t *testing.T) {
 
 func TestSplitHeader_OnlyColon(t *testing.T) {
 	header, value := splitHeader([]byte(":"))
-	require.True(t, len(header) == 0)
-	require.True(t, len(value) == 0)
+	require.Empty(t, header)
+	require.Empty(t, value)
 }
 
 func TestSplitHeader_MultipleColons(t *testing.T) {
@@ -724,7 +732,7 @@ func TestParseRawPacket_SuccessReturnsEmptyType(t *testing.T) {
 
 	errType, err := e.parseRawPacket(packet)
 	require.NoError(t, err)
-	require.Equal(t, "", errType, "successful parse should return empty error type")
+	require.Empty(t, errType, "successful parse should return empty error type")
 }
 
 // ==================== sipPacketParse tests ====================
@@ -1030,7 +1038,7 @@ func TestHandleMessage_Response302_INVITE(t *testing.T) {
 	require.True(t, mm.responseIsInvite)
 }
 
-// Integration test for SER change via handleMessage
+// Integration test for SER change via handleMessage.
 func TestHandleMessage_SER_Integration(t *testing.T) {
 	m := &mockMetricser{}
 	d := &mockDialoger{}
@@ -1047,7 +1055,7 @@ func TestHandleMessage_SER_Integration(t *testing.T) {
 	}
 
 	// 10 INVITE requests
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		input := []byte("INVITE sip:test SIP/2.0\r\n" +
 			"From: <sip:user@domain>;tag=abc\r\n" +
 			"To: <sip:other@domain>\r\n" +
@@ -1058,7 +1066,7 @@ func TestHandleMessage_SER_Integration(t *testing.T) {
 	}
 
 	// 5 200 OK responses to INVITE
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		input := []byte("SIP/2.0 200 OK\r\n" +
 			"From: <sip:user@domain>;tag=abc\r\n" +
 			"To: <sip:other@domain>;tag=xyz" + string(rune('0'+i)) + "\r\n" +
@@ -1069,7 +1077,7 @@ func TestHandleMessage_SER_Integration(t *testing.T) {
 	}
 
 	// 2 302 responses to INVITE
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		input := []byte("SIP/2.0 302 Moved Temporarily\r\n" +
 			"From: <sip:user@domain>;tag=abc\r\n" +
 			"To: <sip:other@domain>;tag=xyz" + string(rune('0'+i)) + "\r\n" +
@@ -1084,7 +1092,7 @@ func TestHandleMessage_SER_Integration(t *testing.T) {
 
 	// Verify Invite200OK was called 5 times
 	invite200OKCount := 0
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		if m.invite200OKCalled {
 			invite200OKCount++
 		}
@@ -1140,7 +1148,7 @@ func TestHandleMessage_Response200_InvalidDialogID(t *testing.T) {
 	// Should not panic and should not create dialog
 	err := e.handleMessage("other", input)
 	require.NoError(t, err)
-	require.Len(t, md.created, 0, "dialog should not be created with invalid tags")
+	require.Empty(t, md.created, "dialog should not be created with invalid tags")
 }
 
 // ==================== Tests for all SIP methods ====================
@@ -1159,12 +1167,12 @@ func TestParseRawPacket_AllSIPMethods(t *testing.T) {
 					metricser: &mockMetricser{},
 					dialoger:  &mockDialoger{},
 				},
-			registerTracker: make(map[string]registerEntry),
-			inviteTracker:   make(map[string]inviteEntry),
-			inviteSDP:       make(map[string]inviteSDPEntity),
-			optionsTracker:  make(map[string]optionsEntry),
-			mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
-		}
+				registerTracker: make(map[string]registerEntry),
+				inviteTracker:   make(map[string]inviteEntry),
+				inviteSDP:       make(map[string]inviteSDPEntity),
+				optionsTracker:  make(map[string]optionsEntry),
+				mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
+			}
 
 			packet := make([]byte, 200)
 			packet[12] = 0x08
@@ -1263,7 +1271,7 @@ func TestHtons(t *testing.T) {
 	}
 }
 
-// ==================== bytes.HasPrefix tests ====================
+// ==================== SIP method prefix tests ====================
 
 func TestParseRawPacket_SIPMethodsBytesPrefix(t *testing.T) {
 	testCases := []struct {
@@ -1291,22 +1299,21 @@ func TestParseRawPacket_SIPMethodsBytesPrefix(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.method, func(t *testing.T) {
-			result := bytes.HasPrefix([]byte(tc.method),
-				[]byte("INVITE")) ||
-				bytes.HasPrefix([]byte(tc.method), []byte("ACK")) ||
-				bytes.HasPrefix([]byte(tc.method), []byte("BYE")) ||
-				bytes.HasPrefix([]byte(tc.method), []byte("CANCEL")) ||
-				bytes.HasPrefix([]byte(tc.method), []byte("OPTIONS")) ||
-				bytes.HasPrefix([]byte(tc.method), []byte("REGISTER")) ||
-				bytes.HasPrefix([]byte(tc.method), []byte("SUBSCRIBE")) ||
-				bytes.HasPrefix([]byte(tc.method), []byte("NOTIFY")) ||
-				bytes.HasPrefix([]byte(tc.method), []byte("PUBLISH")) ||
-				bytes.HasPrefix([]byte(tc.method), []byte("INFO")) ||
-				bytes.HasPrefix([]byte(tc.method), []byte("PRACK")) ||
-				bytes.HasPrefix([]byte(tc.method), []byte("UPDATE")) ||
-				bytes.HasPrefix([]byte(tc.method), []byte("MESSAGE")) ||
-				bytes.HasPrefix([]byte(tc.method), []byte("REFER")) ||
-				bytes.HasPrefix([]byte(tc.method), []byte("SIP/2.0"))
+			result := strings.HasPrefix(tc.method, "INVITE") ||
+				strings.HasPrefix(tc.method, "ACK") ||
+				strings.HasPrefix(tc.method, "BYE") ||
+				strings.HasPrefix(tc.method, "CANCEL") ||
+				strings.HasPrefix(tc.method, "OPTIONS") ||
+				strings.HasPrefix(tc.method, "REGISTER") ||
+				strings.HasPrefix(tc.method, "SUBSCRIBE") ||
+				strings.HasPrefix(tc.method, "NOTIFY") ||
+				strings.HasPrefix(tc.method, "PUBLISH") ||
+				strings.HasPrefix(tc.method, "INFO") ||
+				strings.HasPrefix(tc.method, "PRACK") ||
+				strings.HasPrefix(tc.method, "UPDATE") ||
+				strings.HasPrefix(tc.method, "MESSAGE") ||
+				strings.HasPrefix(tc.method, "REFER") ||
+				strings.HasPrefix(tc.method, "SIP/2.0")
 
 			require.Equal(t, tc.shouldMatch, result)
 		})
@@ -1816,10 +1823,6 @@ func TestSipDialogMetricsUpdate_ExpiredIncrementsSessionCompleted(t *testing.T) 
 			metricser: mm,
 			dialoger:  md,
 		},
-		registerTracker: make(map[string]registerEntry),
-		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
-		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
 	results := e.services.dialoger.Cleanup()
@@ -1898,11 +1901,11 @@ func TestExporter_InviteTracker_MeasureNonExistent(t *testing.T) {
 
 	delayMs, carrier, _, ok := e.readInviteEntry("nonexistent")
 	require.False(t, ok, "readInviteEntry should return false for nonexistent entry")
-	require.Equal(t, 0.0, delayMs)
-	require.Equal(t, "", carrier)
+	require.InDelta(t, 0.0, delayMs, 0.01)
+	require.Empty(t, carrier)
 }
 
-func TestExporter_InviteTracker_RemoveNonExistent(t *testing.T) {
+func TestExporter_InviteTracker_RemoveNonExistent(_ *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -2214,7 +2217,7 @@ func TestHandleMessage_TTR_OnlyFirstProvisionalMeasured(t *testing.T) {
 	e.handleMessage("other", ringingResp)
 	time.Sleep(10 * time.Millisecond)
 
-	require.Equal(t, firstTTR, mm.ttrDelay, "TTR should NOT be measured again on second 1xx")
+	require.InDelta(t, firstTTR, mm.ttrDelay, 0.01, "TTR should NOT be measured again on second 1xx")
 }
 
 func TestHandleMessage_TTR_RetransmitOverwrites(t *testing.T) {
@@ -2459,7 +2462,7 @@ func TestHandleMessage_PDD_180Ringing(t *testing.T) {
 	}, 100*time.Millisecond, 10*time.Millisecond)
 	require.True(t, mm.ttrUpdated, "TTR should also be measured on 180")
 	require.Greater(t, mm.pddDelay, 0.0)
-	require.Equal(t, mm.ttrDelay, mm.pddDelay, "PDD and TTR delay should be equal for direct 180")
+	require.InDelta(t, mm.ttrDelay, mm.pddDelay, 0.01, "PDD and TTR delay should be equal for direct 180")
 }
 
 func TestHandleMessage_PDD_100TryingThen180Ringing(t *testing.T) {
@@ -2715,7 +2718,7 @@ func TestHandleMessage_CarrierPropagation_MultiCarrierDialogs(t *testing.T) {
 	carrierACount := 10
 	carrierBCount := 20
 
-	for i := 0; i < carrierACount; i++ {
+	for i := range carrierACount {
 		callID := fmt.Sprintf("call-a-%d", i)
 		invite := []byte("INVITE sip:test SIP/2.0\r\n" +
 			"From: <sip:user@domain>;tag=from-a-" + callID + "\r\n" +
@@ -2733,7 +2736,7 @@ func TestHandleMessage_CarrierPropagation_MultiCarrierDialogs(t *testing.T) {
 		e.handleMessage("carrier-C", okResp)
 	}
 
-	for i := 0; i < carrierBCount; i++ {
+	for i := range carrierBCount {
 		callID := fmt.Sprintf("call-b-%d", i)
 		invite := []byte("INVITE sip:test SIP/2.0\r\n" +
 			"From: <sip:user@domain>;tag=from-b-" + callID + "\r\n" +
@@ -2806,16 +2809,18 @@ func newCarrierTrackingMetricser() *carrierTrackingMetricser {
 	}
 }
 
-func (m *carrierTrackingMetricser) Request(carrier string, uaType string, in []byte) {
+func (m *carrierTrackingMetricser) Request(carrier string, _ string, in []byte) {
 	m.requests = append(m.requests, carrierCall{carrier: carrier, method: string(in)})
 	m.packetsTotal++
 }
 
-func (m *carrierTrackingMetricser) Response(carrier string, uaType string, in []byte, isInviteResponse bool) {
+func (m *carrierTrackingMetricser) Response(_ string, _ string, _ []byte, _ bool) {
 	m.packetsTotal++
 }
 
-func (m *carrierTrackingMetricser) ResponseWithMetrics(carrier string, uaType string, status []byte, isInviteResponse, is200OK bool) {
+func (m *carrierTrackingMetricser) ResponseWithMetrics(
+	carrier string, _ string, status []byte, isInviteResponse, is200OK bool,
+) {
 	m.responseWithMetrics = append(m.responseWithMetrics, carrierCall{carrier: carrier, method: string(status)})
 	m.packetsTotal++
 	if is200OK && isInviteResponse {
@@ -2823,35 +2828,35 @@ func (m *carrierTrackingMetricser) ResponseWithMetrics(carrier string, uaType st
 	}
 }
 
-func (m *carrierTrackingMetricser) Invite200OK(carrier string, uaType string) {
+func (m *carrierTrackingMetricser) Invite200OK(carrier string, _ string) {
 	m.invite200OK = append(m.invite200OK, carrierCall{carrier: carrier})
 }
 
-func (m *carrierTrackingMetricser) SessionCompleted(carrier string, uaType string) {
+func (m *carrierTrackingMetricser) SessionCompleted(carrier string, _ string) {
 	m.sessionCompleted = append(m.sessionCompleted, carrierCall{carrier: carrier})
 }
 
-func (m *carrierTrackingMetricser) UpdateRRD(carrier string, uaType string, delayMs float64) {
+func (m *carrierTrackingMetricser) UpdateRRD(carrier string, _ string, delayMs float64) {
 	m.rrdCalls = append(m.rrdCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
-func (m *carrierTrackingMetricser) UpdateSPD(carrier string, uaType string, duration time.Duration) {
+func (m *carrierTrackingMetricser) UpdateSPD(carrier string, _ string, duration time.Duration) {
 	m.spdCalls = append(m.spdCalls, carrierCall{carrier: carrier, value: duration.Seconds()})
 }
 
-func (m *carrierTrackingMetricser) UpdateTTR(carrier string, uaType string, delayMs float64) {
+func (m *carrierTrackingMetricser) UpdateTTR(carrier string, _ string, delayMs float64) {
 	m.ttrCalls = append(m.ttrCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
-func (m *carrierTrackingMetricser) UpdatePDD(carrier string, uaType string, delayMs float64) {
+func (m *carrierTrackingMetricser) UpdatePDD(carrier string, _ string, delayMs float64) {
 	m.pddCalls = append(m.pddCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
-func (m *carrierTrackingMetricser) UpdateORD(carrier string, uaType string, delayMs float64) {
+func (m *carrierTrackingMetricser) UpdateORD(carrier string, _ string, delayMs float64) {
 	m.ordCalls = append(m.ordCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
-func (m *carrierTrackingMetricser) UpdateLRD(carrier string, uaType string, delayMs float64) {
+func (m *carrierTrackingMetricser) UpdateLRD(carrier string, _ string, delayMs float64) {
 	m.lrdCalls = append(m.lrdCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
@@ -2877,14 +2882,14 @@ func (m *carrierTrackingMetricser) UpdateChannelCapacity(int)     {}
 func (m *carrierTrackingMetricser) UpdateTrackerSize(string, int) {}
 func (m *carrierTrackingMetricser) UpdateActiveDialogs(int)       {}
 
-func (m *carrierTrackingMetricser) UpdateVQReport(carrier string, uaType string, report *vq.SessionReport) {
+func (m *carrierTrackingMetricser) UpdateVQReport(carrier string, uaType string, _ *vq.SessionReport) {
 	m.vqReports = append(m.vqReports, carrierCall{carrier: carrier, uaType: uaType})
 }
 
-func (m *carrierTrackingMetricser) UpdateRTPPackets(string, string, string)                  {}
-func (m *carrierTrackingMetricser) UpdateRTPLoss(string, string, string, uint64)              {}
-func (m *carrierTrackingMetricser) UpdateRTPJitter(string, string, string, float64)           {}
-func (m *carrierTrackingMetricser) UpdateRTPMOS(string, string, string, float64)              {}
+func (m *carrierTrackingMetricser) UpdateRTPPackets(string, string, string)                     {}
+func (m *carrierTrackingMetricser) UpdateRTPLoss(string, string, string, uint64)                {}
+func (m *carrierTrackingMetricser) UpdateRTPJitter(string, string, string, float64)             {}
+func (m *carrierTrackingMetricser) UpdateRTPMOS(string, string, string, float64)                {}
 func (m *carrierTrackingMetricser) UpdateRTPActiveStreams(map[string]map[string]map[string]int) {}
 
 // ==================== SIP message builders for MC/DC tests ====================
@@ -2897,13 +2902,13 @@ func makeInvite(callID string, fromTag string) []byte {
 		"CSeq: 1 INVITE\r\n")
 }
 
-func makeInvite200OK(callID string, fromTag string, toTag string, expires int) []byte {
+func makeInvite200OK(callID string, fromTag string, toTag string) []byte {
 	return []byte("SIP/2.0 200 OK\r\n" +
 		"From: <sip:user@domain>;tag=" + fromTag + "\r\n" +
 		"To: <sip:other@domain>;tag=" + toTag + "\r\n" +
 		"Call-ID: " + callID + "\r\n" +
 		"CSeq: 1 INVITE\r\n" +
-		"Session-Expires: " + strconv.Itoa(expires) + "\r\n")
+		"Session-Expires: 3600\r\n")
 }
 
 func makeTrying(callID string, fromTag string, toTag string) []byte {
@@ -3005,7 +3010,7 @@ func TestMCDC_TC1_InviteResponse_CarrierFromTracker(t *testing.T) {
 	e := newTestExporter(mm, md)
 
 	e.handleMessage("carrier-A", makeInvite("tc1", "ft1"))
-	e.handleMessage("carrier-B", makeInvite200OK("tc1", "ft1", "tt1", 3600))
+	e.handleMessage("carrier-B", makeInvite200OK("tc1", "ft1", "tt1"))
 
 	require.Eventually(t, func() bool { return len(md.created) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, "carrier-A", md.created["tc1:ft1:tt1"].carrier)
@@ -3016,9 +3021,10 @@ func TestMCDC_TC2_InviteResponse_CarrierFallbackWithoutTracker(t *testing.T) {
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
 
-	e.handleMessage("carrier-B", makeInvite200OK("tc2", "ft2", "tt2", 3600))
+	e.handleMessage("carrier-B", makeInvite200OK("tc2", "ft2", "tt2"))
 
-	require.Eventually(t, func() bool { return len(mm.responseWithMetrics) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return len(mm.responseWithMetrics) > 0 },
+		100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, "carrier-B", mm.responseWithMetrics[0].carrier)
 }
 
@@ -3042,7 +3048,12 @@ func TestMCDC_TC4_RegisterResponse_CarrierFallbackWithoutTracker(t *testing.T) {
 
 	e.handleMessage("carrier-B", makeRegister200OK("tc4", "ft4", "tt4"))
 
-	require.Eventually(t, func() bool { return len(mm.responseWithMetrics) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
+	require.Eventually(
+		t,
+		func() bool { return len(mm.responseWithMetrics) > 0 },
+		100*time.Millisecond,
+		10*time.Millisecond,
+	)
 	require.Equal(t, "carrier-B", mm.responseWithMetrics[0].carrier)
 }
 
@@ -3065,7 +3076,7 @@ func TestMCDC_TC6_TTR_Non1xxResponse_NotMeasured(t *testing.T) {
 	e := newTestExporter(mm, md)
 
 	e.handleMessage("carrier-A", makeInvite("tc6", "ft6"))
-	e.handleMessage("carrier-B", makeInvite200OK("tc6", "ft6", "tt6", 3600))
+	e.handleMessage("carrier-B", makeInvite200OK("tc6", "ft6", "tt6"))
 
 	require.Eventually(t, func() bool { return len(mm.invite200OK) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.Empty(t, mm.ttrCalls)
@@ -3092,7 +3103,7 @@ func TestMCDC_TC8_DialogCreatedWithTrackerCarrier_Mismatch(t *testing.T) {
 	e := newTestExporter(mm, md)
 
 	e.handleMessage("carrier-A", makeInvite("tc8", "ft8"))
-	e.handleMessage("carrier-B", makeInvite200OK("tc8", "ft8", "tt8", 3600))
+	e.handleMessage("carrier-B", makeInvite200OK("tc8", "ft8", "tt8"))
 
 	require.Eventually(t, func() bool { return len(md.created) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, "carrier-A", md.created["tc8:ft8:tt8"].carrier,
@@ -3107,7 +3118,7 @@ func TestMCDC_TC9_DialogCreatedWithTrackerCarrier_SameCarrier(t *testing.T) {
 	e := newTestExporter(mm, md)
 
 	e.handleMessage("carrier-A", makeInvite("tc9", "ft9"))
-	e.handleMessage("carrier-A", makeInvite200OK("tc9", "ft9", "tt9", 3600))
+	e.handleMessage("carrier-A", makeInvite200OK("tc9", "ft9", "tt9"))
 
 	require.Eventually(t, func() bool { return len(md.created) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, "carrier-A", md.created["tc9:ft9:tt9"].carrier)
@@ -3119,11 +3130,16 @@ func TestMCDC_TC10_Bye200OK_CarrierFromDialog(t *testing.T) {
 	e := newTestExporter(mm, md)
 
 	e.handleMessage("carrier-A", makeInvite("tc10", "ft10"))
-	e.handleMessage("carrier-B", makeInvite200OK("tc10", "ft10", "tt10", 3600))
+	e.handleMessage("carrier-B", makeInvite200OK("tc10", "ft10", "tt10"))
 	require.Eventually(t, func() bool { return len(md.created) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 
 	e.handleMessage("carrier-C", makeBye200OK("tc10", "ft10", "tt10"))
-	require.Eventually(t, func() bool { return len(mm.sessionCompleted) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
+	require.Eventually(
+		t,
+		func() bool { return len(mm.sessionCompleted) > 0 },
+		100*time.Millisecond,
+		10*time.Millisecond,
+	)
 
 	require.Equal(t, "carrier-A", mm.sessionCompleted[0].carrier,
 		"SessionCompleted must use dialog carrier (from INVITE), not BYE packet carrier")
@@ -3138,7 +3154,12 @@ func TestMCDC_TC11_Bye200OK_NonExistingDialog_NoMetrics(t *testing.T) {
 
 	e.handleMessage("carrier-A", makeBye200OK("tc11-nonexist", "ft11", "tt11"))
 
-	require.Eventually(t, func() bool { return len(mm.responseWithMetrics) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
+	require.Eventually(
+		t,
+		func() bool { return len(mm.responseWithMetrics) > 0 },
+		100*time.Millisecond,
+		10*time.Millisecond,
+	)
 	require.Empty(t, mm.sessionCompleted)
 	require.Empty(t, mm.spdCalls)
 }
@@ -3226,16 +3247,16 @@ func TestMCDC_TC17_MultiCarrier_CorrectAttribution(t *testing.T) {
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		callID := fmt.Sprintf("tc17-a-%d", i)
 		e.handleMessage("carrier-A", makeInvite(callID, "ft-"+callID))
-		e.handleMessage("carrier-C", makeInvite200OK(callID, "ft-"+callID, "tt-"+callID, 3600))
+		e.handleMessage("carrier-C", makeInvite200OK(callID, "ft-"+callID, "tt-"+callID))
 	}
 
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		callID := fmt.Sprintf("tc17-b-%d", i)
 		e.handleMessage("carrier-B", makeInvite(callID, "ft-"+callID))
-		e.handleMessage("carrier-C", makeInvite200OK(callID, "ft-"+callID, "tt-"+callID, 3600))
+		e.handleMessage("carrier-C", makeInvite200OK(callID, "ft-"+callID, "tt-"+callID))
 	}
 
 	require.Eventually(t, func() bool { return len(md.created) == 30 }, 200*time.Millisecond, 10*time.Millisecond)
@@ -3272,9 +3293,14 @@ func TestMCDC_TC18_TrackerTTLExpired_FallbackToPacketCarrier(t *testing.T) {
 	e.inviteTracker["tc18"] = inviteEntry{timestamp: oldTime, carrier: "carrier-A"}
 	e.cleanupInviteTracker()
 
-	e.handleMessage("carrier-B", makeInvite200OK("tc18", "ft18", "tt18", 3600))
+	e.handleMessage("carrier-B", makeInvite200OK("tc18", "ft18", "tt18"))
 
-	require.Eventually(t, func() bool { return len(mm.responseWithMetrics) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
+	require.Eventually(
+		t,
+		func() bool { return len(mm.responseWithMetrics) > 0 },
+		100*time.Millisecond,
+		10*time.Millisecond,
+	)
 	require.Equal(t, "carrier-B", mm.responseWithMetrics[0].carrier,
 		"when tracker entry expired, should fall back to packet carrier")
 }
@@ -3286,7 +3312,7 @@ func TestMCDC_TC19_Retransmit_OverwritesCarrier(t *testing.T) {
 
 	e.handleMessage("carrier-A", makeInvite("tc19", "ft19"))
 	e.handleMessage("carrier-B", makeInvite("tc19", "ft19"))
-	e.handleMessage("carrier-C", makeInvite200OK("tc19", "ft19", "tt19", 3600))
+	e.handleMessage("carrier-C", makeInvite200OK("tc19", "ft19", "tt19"))
 
 	require.Eventually(t, func() bool { return len(md.created) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, "carrier-B", md.created["tc19:ft19:tt19"].carrier,
@@ -3298,16 +3324,16 @@ func TestMCDC_TC20_OtherCarrier_20Known_10Other(t *testing.T) {
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
 
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		callID := fmt.Sprintf("tc20-known-%d", i)
 		e.handleMessage("carrier-A", makeInvite(callID, "ft-"+callID))
-		e.handleMessage("carrier-B", makeInvite200OK(callID, "ft-"+callID, "tt-"+callID, 3600))
+		e.handleMessage("carrier-B", makeInvite200OK(callID, "ft-"+callID, "tt-"+callID))
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		callID := fmt.Sprintf("tc20-other-%d", i)
 		e.handleMessage("other", makeInvite(callID, "ft-"+callID))
-		e.handleMessage("carrier-B", makeInvite200OK(callID, "ft-"+callID, "tt-"+callID, 3600))
+		e.handleMessage("carrier-B", makeInvite200OK(callID, "ft-"+callID, "tt-"+callID))
 	}
 
 	require.Eventually(t, func() bool { return len(md.created) == 30 }, 200*time.Millisecond, 10*time.Millisecond)

@@ -45,13 +45,13 @@ func getSelfGaugeValue(reg *prometheus.Registry, name string, labels map[string]
 	return 0
 }
 
-func getSelfCounterVecValue(reg *prometheus.Registry, name string, labels map[string]string) float64 {
+func getParseErrorsValue(reg *prometheus.Registry, labels map[string]string) float64 {
 	mfs, err := reg.Gather()
 	if err != nil {
 		return 0
 	}
 	for _, mf := range mfs {
-		if mf.GetName() == name {
+		if mf.GetName() == "sip_exporter_parse_errors_total" {
 			for _, m := range mf.GetMetric() {
 				if selfMatchLabels(m, labels) {
 					return m.GetCounter().GetValue()
@@ -84,8 +84,8 @@ func TestSelfMetrics_ParseError_AllTypes(t *testing.T) {
 	}
 
 	for _, errType := range types {
-		val := getSelfCounterVecValue(reg, "sip_exporter_parse_errors_total", map[string]string{"type": errType})
-		require.Equal(t, 1.0, val, "parse_errors_total{type=%q}", errType)
+		val := getParseErrorsValue(reg, map[string]string{"type": errType})
+		require.InDelta(t, 1.0, val, 0.01, "parse_errors_total{type=%q}", errType)
 	}
 }
 
@@ -96,8 +96,8 @@ func TestSelfMetrics_ParseError_MultipleSameType(t *testing.T) {
 	m.ParseError("l3")
 	m.ParseError("l3")
 
-	val := getSelfCounterVecValue(reg, "sip_exporter_parse_errors_total", map[string]string{"type": "l3"})
-	require.Equal(t, 3.0, val)
+	val := getParseErrorsValue(reg, map[string]string{"type": "l3"})
+	require.InDelta(t, 3.0, val, 0.01)
 }
 
 func TestSelfMetrics_ParseError_Independence(t *testing.T) {
@@ -107,19 +107,19 @@ func TestSelfMetrics_ParseError_Independence(t *testing.T) {
 	m.ParseError("l2")
 	m.ParseError("sip")
 
-	require.Equal(t, 2.0, getSelfCounterVecValue(reg, "sip_exporter_parse_errors_total", map[string]string{"type": "l2"}))
-	require.Equal(t, 1.0, getSelfCounterVecValue(reg, "sip_exporter_parse_errors_total", map[string]string{"type": "sip"}))
-	require.Equal(t, 0.0, getSelfCounterVecValue(reg, "sip_exporter_parse_errors_total", map[string]string{"type": "l3"}))
-	require.Equal(t, 0.0, getSelfCounterVecValue(reg, "sip_exporter_parse_errors_total", map[string]string{"type": "l4"}))
-	require.Equal(t, 0.0, getSelfCounterVecValue(reg, "sip_exporter_parse_errors_total", map[string]string{"type": "vq"}))
+	require.InDelta(t, 2.0, getParseErrorsValue(reg, map[string]string{"type": "l2"}), 0.01)
+	require.InDelta(t, 1.0, getParseErrorsValue(reg, map[string]string{"type": "sip"}), 0.01)
+	require.InDelta(t, 0.0, getParseErrorsValue(reg, map[string]string{"type": "l3"}), 0.01)
+	require.InDelta(t, 0.0, getParseErrorsValue(reg, map[string]string{"type": "l4"}), 0.01)
+	require.InDelta(t, 0.0, getParseErrorsValue(reg, map[string]string{"type": "vq"}), 0.01)
 }
 
 func TestSelfMetrics_ParseError_UninitializedIsZero(t *testing.T) {
 	_, reg := newTestMetricserWithRegistry()
 
 	for _, errType := range []string{"l2", "l3", "l4", "sip", "vq"} {
-		val := getSelfCounterVecValue(reg, "sip_exporter_parse_errors_total", map[string]string{"type": errType})
-		require.Equal(t, 0.0, val, "parse_errors_total{type=%q} should be 0 initially", errType)
+		val := getParseErrorsValue(reg, map[string]string{"type": errType})
+		require.InDelta(t, 0.0, val, 0.01, "parse_errors_total{type=%q} should be 0 initially", errType)
 	}
 }
 
@@ -128,8 +128,8 @@ func TestSelfMetrics_SocketStats_ReceivedOnly(t *testing.T) {
 
 	m.SocketStats(100, 0)
 
-	require.Equal(t, 100.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_received_total"))
-	require.Equal(t, 0.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_dropped_total"))
+	require.InDelta(t, 100.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_received_total"), 0.01)
+	require.InDelta(t, 0.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_dropped_total"), 0.01)
 }
 
 func TestSelfMetrics_SocketStats_DroppedOnly(t *testing.T) {
@@ -137,8 +137,8 @@ func TestSelfMetrics_SocketStats_DroppedOnly(t *testing.T) {
 
 	m.SocketStats(0, 5)
 
-	require.Equal(t, 0.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_received_total"))
-	require.Equal(t, 5.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_dropped_total"))
+	require.InDelta(t, 0.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_received_total"), 0.01)
+	require.InDelta(t, 5.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_dropped_total"), 0.01)
 }
 
 func TestSelfMetrics_SocketStats_Accumulation(t *testing.T) {
@@ -147,8 +147,8 @@ func TestSelfMetrics_SocketStats_Accumulation(t *testing.T) {
 	m.SocketStats(100, 1)
 	m.SocketStats(50, 2)
 
-	require.Equal(t, 150.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_received_total"))
-	require.Equal(t, 3.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_dropped_total"))
+	require.InDelta(t, 150.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_received_total"), 0.01)
+	require.InDelta(t, 3.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_dropped_total"), 0.01)
 }
 
 func TestSelfMetrics_SocketStats_ZeroDelta(t *testing.T) {
@@ -156,31 +156,31 @@ func TestSelfMetrics_SocketStats_ZeroDelta(t *testing.T) {
 
 	m.SocketStats(0, 0)
 
-	require.Equal(t, 0.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_received_total"))
-	require.Equal(t, 0.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_dropped_total"))
+	require.InDelta(t, 0.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_received_total"), 0.01)
+	require.InDelta(t, 0.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_dropped_total"), 0.01)
 }
 
 func TestSelfMetrics_ChannelLength_Updates(t *testing.T) {
 	m, reg := newTestMetricserWithRegistry()
 
 	m.UpdateChannelLength(0)
-	require.Equal(t, 0.0, getSelfGaugeValue(reg, "sip_exporter_channel_length", nil))
+	require.InDelta(t, 0.0, getSelfGaugeValue(reg, "sip_exporter_channel_length", nil), 0.01)
 
 	m.UpdateChannelLength(5000)
-	require.Equal(t, 5000.0, getSelfGaugeValue(reg, "sip_exporter_channel_length", nil))
+	require.InDelta(t, 5000.0, getSelfGaugeValue(reg, "sip_exporter_channel_length", nil), 0.01)
 
 	m.UpdateChannelLength(10000)
-	require.Equal(t, 10000.0, getSelfGaugeValue(reg, "sip_exporter_channel_length", nil))
+	require.InDelta(t, 10000.0, getSelfGaugeValue(reg, "sip_exporter_channel_length", nil), 0.01)
 
 	m.UpdateChannelLength(0)
-	require.Equal(t, 0.0, getSelfGaugeValue(reg, "sip_exporter_channel_length", nil))
+	require.InDelta(t, 0.0, getSelfGaugeValue(reg, "sip_exporter_channel_length", nil), 0.01)
 }
 
 func TestSelfMetrics_ChannelCapacity(t *testing.T) {
 	m, reg := newTestMetricserWithRegistry()
 
 	m.UpdateChannelCapacity(10000)
-	require.Equal(t, 10000.0, getSelfGaugeValue(reg, "sip_exporter_channel_capacity", nil))
+	require.InDelta(t, 10000.0, getSelfGaugeValue(reg, "sip_exporter_channel_capacity", nil), 0.01)
 }
 
 func TestSelfMetrics_TrackerSize_AllTypes(t *testing.T) {
@@ -190,19 +190,24 @@ func TestSelfMetrics_TrackerSize_AllTypes(t *testing.T) {
 	m.UpdateTrackerSize("invite", 50)
 	m.UpdateTrackerSize("options", 5)
 
-	require.Equal(t, 10.0, getSelfGaugeValue(reg, "sip_exporter_active_trackers", map[string]string{"type": "register"}))
-	require.Equal(t, 50.0, getSelfGaugeValue(reg, "sip_exporter_active_trackers", map[string]string{"type": "invite"}))
-	require.Equal(t, 5.0, getSelfGaugeValue(reg, "sip_exporter_active_trackers", map[string]string{"type": "options"}))
+	trackerVal := func(typ string) float64 {
+		return getSelfGaugeValue(reg, "sip_exporter_active_trackers", map[string]string{"type": typ})
+	}
+	require.InDelta(t, 10.0, trackerVal("register"), 0.01)
+	require.InDelta(t, 50.0, trackerVal("invite"), 0.01)
+	require.InDelta(t, 5.0, trackerVal("options"), 0.01)
 }
 
 func TestSelfMetrics_TrackerSize_Updates(t *testing.T) {
 	m, reg := newTestMetricserWithRegistry()
 
 	m.UpdateTrackerSize("invite", 100)
-	require.Equal(t, 100.0, getSelfGaugeValue(reg, "sip_exporter_active_trackers", map[string]string{"type": "invite"}))
+	require.InDelta(t, 100.0, getSelfGaugeValue(reg, "sip_exporter_active_trackers",
+		map[string]string{"type": "invite"}), 0.01)
 
 	m.UpdateTrackerSize("invite", 0)
-	require.Equal(t, 0.0, getSelfGaugeValue(reg, "sip_exporter_active_trackers", map[string]string{"type": "invite"}))
+	require.InDelta(t, 0.0, getSelfGaugeValue(reg, "sip_exporter_active_trackers",
+		map[string]string{"type": "invite"}), 0.01)
 }
 
 func TestSelfMetrics_TrackerSize_Independence(t *testing.T) {
@@ -211,20 +216,27 @@ func TestSelfMetrics_TrackerSize_Independence(t *testing.T) {
 	m.UpdateTrackerSize("register", 10)
 	m.UpdateTrackerSize("invite", 50)
 
-	require.Equal(t, 10.0, getSelfGaugeValue(reg, "sip_exporter_active_trackers", map[string]string{"type": "register"}))
-	require.Equal(t, 50.0, getSelfGaugeValue(reg, "sip_exporter_active_trackers", map[string]string{"type": "invite"}))
-	require.Equal(t, 0.0, getSelfGaugeValue(reg, "sip_exporter_active_trackers", map[string]string{"type": "options"}))
+	require.InDelta(
+		t,
+		10.0,
+		getSelfGaugeValue(reg, "sip_exporter_active_trackers", map[string]string{"type": "register"}),
+		0.01,
+	)
+	require.InDelta(t, 50.0, getSelfGaugeValue(reg, "sip_exporter_active_trackers",
+		map[string]string{"type": "invite"}), 0.01)
+	require.InDelta(t, 0.0, getSelfGaugeValue(reg, "sip_exporter_active_trackers",
+		map[string]string{"type": "options"}), 0.01)
 }
 
 func TestSelfMetrics_ActiveDialogs_Updates(t *testing.T) {
 	m, reg := newTestMetricserWithRegistry()
 
 	m.UpdateActiveDialogs(0)
-	require.Equal(t, 0.0, getSelfGaugeValue(reg, "sip_exporter_active_dialogs", nil))
+	require.InDelta(t, 0.0, getSelfGaugeValue(reg, "sip_exporter_active_dialogs", nil), 0.01)
 
 	m.UpdateActiveDialogs(42)
-	require.Equal(t, 42.0, getSelfGaugeValue(reg, "sip_exporter_active_dialogs", nil))
+	require.InDelta(t, 42.0, getSelfGaugeValue(reg, "sip_exporter_active_dialogs", nil), 0.01)
 
 	m.UpdateActiveDialogs(0)
-	require.Equal(t, 0.0, getSelfGaugeValue(reg, "sip_exporter_active_dialogs", nil))
+	require.InDelta(t, 0.0, getSelfGaugeValue(reg, "sip_exporter_active_dialogs", nil), 0.01)
 }

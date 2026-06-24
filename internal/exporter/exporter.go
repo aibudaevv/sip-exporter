@@ -63,14 +63,15 @@ const (
 	rtpVersionMask    = 0xC0
 	rtpVersion2Prefix = 0x80
 
-	sipPartsCount         = 3
-	minSIPParts           = 2
-	tagPrefixLen          = 5
-	nanosPerMs    float64 = 1e6
-	htonsShift            = 8
-	htonsMask     uint16  = 0xFF00
-	miB                   = 1024 * 1024
-	defaultUAType         = "other"
+	sipPartsCount          = 3
+	minSIPParts            = 2
+	tagPrefixLen           = 5
+	nanosPerMs     float64 = 1e6
+	htonsShift             = 8
+	htonsMask      uint16  = 0xFF00
+	miB                    = 1024 * 1024
+	defaultUAType          = "other"
+	defaultCarrier         = "other"
 )
 
 type (
@@ -251,10 +252,10 @@ func (e *exporter) configureEBPFMaps(collection *ebpf.Collection, sipPort, sipsP
 	if sipPortsMap == nil {
 		return errors.New("failed to find sip_ports map")
 	}
-	if err := sipPortsMap.Update(uint32(0), uint16(sipPort), ebpf.UpdateAny); err != nil { //nolint:gosec // port validated by config
+	if err := sipPortsMap.Update(uint32(0), uint16(sipPort), ebpf.UpdateAny); err != nil {
 		return fmt.Errorf("failed to set SIP port: %w", err)
 	}
-	if err := sipPortsMap.Update(uint32(1), uint16(sipsPort), ebpf.UpdateAny); err != nil { //nolint:gosec // port validated by config
+	if err := sipPortsMap.Update(uint32(1), uint16(sipsPort), ebpf.UpdateAny); err != nil {
 		return fmt.Errorf("failed to set SIPS port: %w", err)
 	}
 
@@ -281,11 +282,11 @@ func extractIPs(ipHeader []byte) (net.IP, net.IP) {
 
 func (e *exporter) resolveCarrier(ipHeader []byte) string {
 	if e.carrierResolver == nil {
-		return "other"
+		return defaultCarrier
 	}
 	srcIP, dstIP := extractIPs(ipHeader)
 	carrier := e.carrierResolver.Lookup(srcIP)
-	if carrier == "other" {
+	if carrier == defaultCarrier {
 		carrier = e.carrierResolver.Lookup(dstIP)
 	}
 	return carrier
@@ -368,7 +369,7 @@ func (e *exporter) Close() {
 		e.collection.Close()
 	}
 	if e.sock != 0 {
-		_ = unix.Close(e.sock) // nolint:gosec // cleanup code, error can be ignored
+		_ = unix.Close(e.sock)
 	}
 }
 

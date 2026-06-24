@@ -138,7 +138,7 @@ func (rc *ratioCollector) Collect(ch chan<- prometheus.Metric) {
 		if !ok {
 			return true
 		}
-		parts := strings.SplitN(keyStr, "\x00", compositeKeyParts) //nolint:mnd // split into exactly 2 parts
+		parts := strings.SplitN(keyStr, "\x00", compositeKeyParts)
 		carrier := parts[0]
 		uaType := "other"
 		if len(parts) == compositeKeyParts {

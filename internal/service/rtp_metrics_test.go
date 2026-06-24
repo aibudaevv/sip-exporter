@@ -52,12 +52,12 @@ func TestRTP_PacketsAndLoss(t *testing.T) {
 	m.UpdateRTPPackets("carrier-a", "yealink", "PCMU")
 	m.UpdateRTPLoss("carrier-a", "yealink", "PCMU", 3)
 
-	require.Equal(t, 2.0, m.rtpCounter(m.rtpPackets, "carrier-a", "yealink", "PCMU"))
-	require.Equal(t, 3.0, m.rtpCounter(m.rtpLost, "carrier-a", "yealink", "PCMU"))
+	require.InDelta(t, 2.0, m.rtpCounter(m.rtpPackets, "carrier-a", "yealink", "PCMU"), 0.01)
+	require.InDelta(t, 3.0, m.rtpCounter(m.rtpLost, "carrier-a", "yealink", "PCMU"), 0.01)
 
 	// zero loss is a no-op (no Add(0))
 	m.UpdateRTPLoss("carrier-a", "yealink", "PCMU", 0)
-	require.Equal(t, 3.0, m.rtpCounter(m.rtpLost, "carrier-a", "yealink", "PCMU"))
+	require.InDelta(t, 3.0, m.rtpCounter(m.rtpLost, "carrier-a", "yealink", "PCMU"), 0.01)
 }
 
 func TestRTP_JitterAndMOS(t *testing.T) {
@@ -81,14 +81,15 @@ func TestRTP_ActiveStreams(t *testing.T) {
 		"carrier-a": {"yealink": {"PCMU": 2, "PCMA": 1}},
 		"carrier-b": {"cisco": {"G.729": 1}},
 	})
-	require.Equal(t, 2.0, m.rtpGauge(m.rtpActiveStreams, "carrier-a", "yealink", "PCMU"))
-	require.Equal(t, 1.0, m.rtpGauge(m.rtpActiveStreams, "carrier-a", "yealink", "PCMA"))
-	require.Equal(t, 1.0, m.rtpGauge(m.rtpActiveStreams, "carrier-b", "cisco", "G.729"))
+	require.InDelta(t, 2.0, m.rtpGauge(m.rtpActiveStreams, "carrier-a", "yealink", "PCMU"), 0.01)
+	require.InDelta(t, 1.0, m.rtpGauge(m.rtpActiveStreams, "carrier-a", "yealink", "PCMA"), 0.01)
+	require.InDelta(t, 1.0, m.rtpGauge(m.rtpActiveStreams, "carrier-b", "cisco", "G.729"), 0.01)
 
 	// a subsequent snapshot resets stale label combinations.
 	m.UpdateRTPActiveStreams(map[string]map[string]map[string]int{
 		"carrier-a": {"yealink": {"PCMU": 1}},
 	})
-	require.Equal(t, 1.0, m.rtpGauge(m.rtpActiveStreams, "carrier-a", "yealink", "PCMU"))
-	require.Equal(t, 0.0, m.rtpGauge(m.rtpActiveStreams, "carrier-a", "yealink", "PCMA"), "stale combo must reset")
+	require.InDelta(t, 1.0, m.rtpGauge(m.rtpActiveStreams, "carrier-a", "yealink", "PCMU"), 0.01)
+	require.InDelta(t, 0.0, m.rtpGauge(m.rtpActiveStreams, "carrier-a", "yealink", "PCMA"),
+		0.01, "stale combo must reset")
 }

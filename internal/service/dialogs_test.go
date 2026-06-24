@@ -147,14 +147,14 @@ func TestDialoger_Concurrent_Create(t *testing.T) {
 	d := NewDialoger()
 	done := make(chan bool, 100)
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		go func(id int) {
 			d.Create("dialog-"+strconv.Itoa(id), time.Now().Add(1*time.Hour), time.Now(), "", "", "")
 			done <- true
 		}(i)
 	}
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		<-done
 	}
 
@@ -164,20 +164,20 @@ func TestDialoger_Concurrent_Create(t *testing.T) {
 func TestDialoger_Concurrent_Delete(t *testing.T) {
 	d := NewDialoger()
 
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		d.Create("dialog-"+strconv.Itoa(i), time.Now().Add(1*time.Hour), time.Now(), "", "", "")
 	}
 
 	done := make(chan bool, 50)
 
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		go func(id int) {
 			d.Delete("dialog-" + strconv.Itoa(id))
 			done <- true
 		}(i)
 	}
 
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		<-done
 	}
 
@@ -187,7 +187,7 @@ func TestDialoger_Concurrent_Delete(t *testing.T) {
 func TestDialoger_Concurrent_Cleanup(t *testing.T) {
 	d := NewDialoger()
 
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		if i%2 == 0 {
 			d.Create("expired-"+strconv.Itoa(i), time.Now().Add(-1*time.Hour), time.Now(), "", "", "")
 		} else {
@@ -197,14 +197,14 @@ func TestDialoger_Concurrent_Cleanup(t *testing.T) {
 
 	done := make(chan bool, 10)
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			d.Cleanup()
 			done <- true
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 
@@ -253,7 +253,7 @@ func TestDialoger_Delete_NonExisting_ReturnsEmptyCarrier(t *testing.T) {
 	d := NewDialoger()
 	result := d.Delete("non-existing")
 	require.Equal(t, time.Duration(0), result.Duration)
-	require.Equal(t, "", result.Carrier)
+	require.Empty(t, result.Carrier)
 }
 
 func TestDialoger_Delete_ReturnsUAType(t *testing.T) {
@@ -284,13 +284,20 @@ func TestDialoger_Delete_NonExisting_ReturnsEmptyUAType(t *testing.T) {
 	d := NewDialoger()
 	result := d.Delete("non-existing")
 	require.Equal(t, time.Duration(0), result.Duration)
-	require.Equal(t, "", result.Carrier)
-	require.Equal(t, "", result.UAType)
+	require.Empty(t, result.Carrier)
+	require.Empty(t, result.UAType)
 }
 
 func TestDialoger_Cleanup_ReturnsCallID(t *testing.T) {
 	d := NewDialoger()
-	d.Create("dialog-1", time.Now().Add(-1*time.Hour), time.Now().Add(-2*time.Hour), "carrier-a", "yealink", "call-id-xyz")
+	d.Create(
+		"dialog-1",
+		time.Now().Add(-1*time.Hour),
+		time.Now().Add(-2*time.Hour),
+		"carrier-a",
+		"yealink",
+		"call-id-xyz",
+	)
 
 	results := d.Cleanup()
 	require.Len(t, results, 1)
