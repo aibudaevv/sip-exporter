@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## 1.1.0
+### Added
+- **RTP media analysis** — full RTP monitoring pipeline correlated with SIP dialogs, in addition to the existing SIP signaling metrics
+- eBPF socket filter extended for RTP pattern detection: version-2 packets (first payload byte `0x80`) are passed when RTP capture is enabled; payload-type check (`pt<=34 || pt>=96`) rejects non-RTP traffic
+- **Privacy: RTP packets truncated to the 12-byte header** (no voice payload crosses kernel→userspace) — only metadata needed for quality metrics is captured
+- `SIP_EXPORTER_RTP_CAPTURE` env var (default `true`) to toggle RTP capture at the eBPF layer
+- RTP header parser (RFC 3550) in `internal/rtp/`: `ParseHeader`, `ErrNotRTP`/`ErrInvalidRTP`, codec mapping (static RFC 3551 payload types + SDP `a=rtpmap` override)
+- Media tracker in `internal/mediatracker/`:
+  - Interarrival jitter per RFC 3550 A.8 (overflow-safe, smoothed)
+  - Packet loss via uint16 sequence-gap accounting (reorder, duplicate, restart, wraparound)
+  - MOS-LQ estimation via ITU-T G.107 E-model with G.113 codec impairment factors (Ie/Bpl per codec)
+  - Per-flow tracking keyed by `{media endpoint, SSRC}`; SDP correlation via `Register`/`Unregister`/`Lookup`
+  - NAT-robust dst-or-src endpoint correlation; TTL-based idle stream cleanup (30s)
+- SDP parser (RFC 4566) in `internal/sdp/`: session/per-media `c=`, `o=` fallback, hold (`0.0.0.0`/IPv6/`a=inactive`) skip, `a=rtpmap` codec + clock rate
+- Exporter RTP/SDP correlation: INVITE caches the SDP offer, 200 OK to INVITE registers caller+callee media endpoints, BYE → unregister, Session-Expires expiry → unregister (prevents media-map memory leaks)
+- RTP Prometheus metrics with `carrier,ua_type,codec` labels:
+  - `sip_exporter_rtp_packets_total` (counter) — RTP packets observed
+  - `sip_exporter_rtp_packets_lost_total` (counter) — packets lost via sequence gaps
+  - `sip_exporter_rtp_jitter_milliseconds` (histogram, buckets 0.1–500ms) — RFC 3550 interarrival jitter
+  - `sip_exporter_rtp_mos_score` (histogram, buckets 1.0–5.0) — E-model MOS-LQ
+  - `sip_exporter_rtp_active_streams` (gauge) — active RTP streams correlated with dialogs
+  - `sip_exporter_active_trackers{type="rtp"}` — self-monitoring gauge for tracked streams
+- RTP metrics emitted per-packet (counters) and via a 1s snapshot loop (jitter/MOS histograms + active_streams gauge)
+- `make test-rtp` Makefile target: runs the RTP e2e suite separately (AF_PACKET isolation from main e2e/load suites)
+- E2E tests (`test/e2e/rtp/`): RTP capture ON/OFF via `socket_packets_received_total`, metrics from a real SIPp G.711a stream (avg MOS≈4.41), bidirectional flow verification, full integration with concrete `carrier/ua_type/codec` labels + SIP regression (SER/invite_total intact with capture ON), dialog isolation (uncorrelated RTP dropped)
+- SIPp scenarios: `uac_rtp.xml`, `uas_rtp.xml` — full INVITE/200 OK+SDP/ACK/BYE dialog with `<exec rtp_stream>` G.711a in both directions
+- `docs/METRICS.md`: RTP metrics reference section with formulas, PromQL examples, and label resolution docs
+
+### Performance
+- RTP header parse: 4.6 ns/op, 0 allocs (`BenchmarkParseHeader`)
+- Media tracker: 146 ns/op Observe, 0 allocs; <5% CPU at 1000 concurrent RTP streams (`mediatracker` benchmarks)
+
 ## 0.15.0
 ### Added
 - Post Dial Delay (PDD) metric: `sip_exporter_pdd{carrier="...",ua_type="..."}` histogram
