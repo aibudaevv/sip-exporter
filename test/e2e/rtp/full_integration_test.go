@@ -18,7 +18,7 @@ import (
 func TestRTP_BothDirections(t *testing.T) {
 	ports := allocatePortsN(5)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, "0", true)
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, "0", true, "")
 
 	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 
@@ -52,7 +52,7 @@ func TestRTP_FullIntegration_MetricsVerified(t *testing.T) {
 	ports := allocatePortsN(5)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP, "0",
-		integrationCarriersYAML, integrationUserAgentsYAML)
+		integrationCarriersYAML, integrationUserAgentsYAML, "")
 
 	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 
@@ -107,4 +107,30 @@ func TestRTP_FullIntegration_MetricsVerified(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return getMetricByLabel(t, endpoint, "sip_exporter_ser", sipLabels...) >= 99.0
 	}, 10*time.Second, 500*time.Millisecond, "SER must be ~100%% (RTP capture must not break SIP metrics)")
+}
+
+// TestRTP_StreamExpiry verifies the RFC 3550 §6.3.5 idle-timeout end-to-end:
+// with a short SIP_EXPORTER_RTP_STREAM_TTL (2s) the rtp_active_streams gauge
+// rises to >=2 during the SIPp dialog, then falls back to 0 once the streams
+// have been idle past the TTL and the 1s snapshot cycle has run Cleanup().
+// A hardcoded 30s TTL previously made this path too slow to cover on e2e.
+func TestRTP_StreamExpiry(t *testing.T) {
+	ports := allocatePortsN(5)
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, "0", true, "2s")
+
+	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
+
+	// During the call both media directions are tracked.
+	require.Eventually(t, func() bool {
+		return getRTPMetric(t, endpoint, "sip_exporter_rtp_active_streams") >= 2
+	}, 15*time.Second, 500*time.Millisecond,
+		"rtp_active_streams must reflect both media directions during the call")
+
+	// After the idle TTL (2s) + the 1s snapshot cycle, streams expire and the
+	// gauge returns to 0 (the background ticker runs Cleanup() every second).
+	require.Eventually(t, func() bool {
+		return getRTPMetric(t, endpoint, "sip_exporter_rtp_active_streams") == 0
+	}, 12*time.Second, 500*time.Millisecond,
+		"rtp_active_streams must drop to 0 after SIP_EXPORTER_RTP_STREAM_TTL idle window")
 }
