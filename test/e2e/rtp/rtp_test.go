@@ -135,6 +135,102 @@ func startExporter(ctx context.Context, t *testing.T, httpPort, sipPort, sipsPor
 	return fmt.Sprintf("http://localhost:%s", httpPort)
 }
 
+// startExporterWithCarrierUA is like startExporter but additionally bind-mounts
+// optional carriers.yaml and user_agents.yaml configs so that RTP/SIP metrics
+// carry concrete carrier and ua_type labels (mirrors the main e2e suite helper).
+func startExporterWithCarrierUA(
+	ctx context.Context, t *testing.T,
+	httpPort, sipPort, sipsPort string,
+	carriersYAML, userAgentsYAML string,
+) string {
+	t.Helper()
+
+	startCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+
+	logLevel := "error"
+	if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
+		logLevel = "debug"
+	}
+
+	envVars := map[string]string{
+		"SIP_EXPORTER_INTERFACE":       testInterface,
+		"SIP_EXPORTER_HTTP_PORT":       httpPort,
+		"SIP_EXPORTER_SIP_PORT":        sipPort,
+		"SIP_EXPORTER_SIPS_PORT":       sipsPort,
+		"SIP_EXPORTER_LOGGER_LEVEL":    logLevel,
+		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
+		"SIP_EXPORTER_RTP_CAPTURE":     "true",
+	}
+
+	var mounts testcontainers.ContainerMounts
+	if carriersYAML != "" {
+		tmpFile, err := os.CreateTemp("", "carriers-*.yaml")
+		require.NoError(t, err)
+		_, err = tmpFile.WriteString(carriersYAML)
+		require.NoError(t, err)
+		require.NoError(t, tmpFile.Close())
+		t.Cleanup(func() { os.Remove(tmpFile.Name()) })
+
+		mounts = append(mounts, testcontainers.BindMount(tmpFile.Name(), "/etc/sip-exporter/carriers.yaml"))
+		envVars["SIP_EXPORTER_CARRIERS_CONFIG"] = "/etc/sip-exporter/carriers.yaml"
+	}
+	if userAgentsYAML != "" {
+		tmpFile, err := os.CreateTemp("", "user-agents-*.yaml")
+		require.NoError(t, err)
+		_, err = tmpFile.WriteString(userAgentsYAML)
+		require.NoError(t, err)
+		require.NoError(t, tmpFile.Close())
+		t.Cleanup(func() { os.Remove(tmpFile.Name()) })
+
+		mounts = append(mounts, testcontainers.BindMount(tmpFile.Name(), "/etc/sip-exporter/user_agents.yaml"))
+		envVars["SIP_EXPORTER_USER_AGENTS_CONFIG"] = "/etc/sip-exporter/user_agents.yaml"
+	}
+
+	req := testcontainers.ContainerRequest{
+		Image:       exporterImage,
+		Privileged:  true,
+		NetworkMode: "host",
+		Env:         envVars,
+		Mounts:      mounts,
+		WaitingFor: wait.ForHTTP("/metrics").
+			WithPort(httpPort + "/tcp").
+			WithStartupTimeout(60 * time.Second),
+	}
+
+	c, err := testcontainers.GenericContainer(startCtx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+		Logger:           log.New(io.Discard, "", 0),
+	})
+	if err != nil && c != nil {
+		logs, logErr := c.Logs(ctx)
+		if logErr == nil {
+			defer logs.Close()
+			logBytes, _ := io.ReadAll(logs)
+			t.Logf("Exporter logs:\n%s", strings.TrimSpace(string(logBytes)))
+		}
+	}
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
+			logs, logErr := c.Logs(context.Background())
+			if logErr == nil {
+				defer logs.Close()
+				logBytes, _ := io.ReadAll(logs)
+				t.Logf("Exporter logs:\n%s", strings.TrimSpace(string(logBytes)))
+			}
+		}
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer stopCancel()
+		_ = c.Stop(stopCtx, nil)
+		_ = c.Terminate(context.Background())
+	})
+
+	return fmt.Sprintf("http://localhost:%s", httpPort)
+}
+
 // socketPacketsMetric is the self-monitoring counter used to verify RTP delivery.
 const socketPacketsMetric = "sip_exporter_socket_packets_received_total"
 

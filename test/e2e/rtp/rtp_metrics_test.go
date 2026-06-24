@@ -50,6 +50,50 @@ func getRTPMetric(t *testing.T, endpoint, name string) float64 {
 	return 0
 }
 
+// getMetricByLabel scrapes a metric value whose label set contains ALL the given
+// label substrings (e.g. `carrier="loopback"`, `codec="PCMA"`), in any order
+// (Prometheus emits labels alphabetically, not in registration order). Returns 0
+// if no matching sample is found.
+func getMetricByLabel(t *testing.T, endpoint, name string, labels ...string) float64 {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/metrics", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	prefix := name + "{"
+	for _, line := range strings.Split(string(body), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, prefix) {
+			continue
+		}
+		matches := true
+		for _, l := range labels {
+			if !strings.Contains(trimmed, l) {
+				matches = false
+				break
+			}
+		}
+		if !matches {
+			continue
+		}
+		// Value is the token after the closing brace.
+		gtIdx := strings.LastIndexByte(trimmed, '}')
+		if gtIdx < 0 {
+			continue
+		}
+		v, parseErr := strconv.ParseFloat(strings.TrimSpace(trimmed[gtIdx+1:]), 64)
+		require.NoError(t, parseErr)
+		return v
+	}
+	return 0
+}
+
 // runSippRTP runs a UAS+UAC SIPp scenario pair that establishes a SIP dialog with
 // SDP and streams real G.711a RTP (built-in /build/pcap/g711a.pcap). The exporter
 // captures the SIP signalling (correlating media endpoints from SDP) and the RTP,
