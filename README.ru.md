@@ -36,6 +36,7 @@
 - 🏷️ **Метрики по операторам** — разрешение carrier на основе CIDR для всех SIP-метрик
 - 🏷️ **Метрики по типам устройств** — классификация User-Agent для всех SIP-метрик
 - 📞 **Качество голоса (RFC 6035)** — MOS, джиттер, потери пакетов из SIP PUBLISH/NOTIFY
+- 🎧 **Анализ RTP-медиа** — джиттер, потери и MOS (E-model G.107) из RTP-потоков, скоррелированных с SIP-диалогами, без захвата голосового payload (только заголовок)
 
 ## Быстрый старт
 
@@ -107,6 +108,7 @@ docker pull frzq/sip-exporter:latest
 * `SIP_EXPORTER_OBJECT_FILE_PATH` — путь к eBPF-объектному файлу (по умолчанию /usr/local/bin/sip.o)
 * `SIP_EXPORTER_CARRIERS_CONFIG` — путь к YAML-конфигурации carriers (опционально, см. [`examples/carriers.yaml`](examples/carriers.yaml))
 * `SIP_EXPORTER_USER_AGENTS_CONFIG` — путь к YAML-конфигурации user-agents (опционально, см. [`examples/user_agents.yaml`](examples/user_agents.yaml))
+* `SIP_EXPORTER_RTP_CAPTURE` — включить захват и анализ RTP-медиа (по умолчанию true)
 
 Контейнер должен запускаться с `--privileged` и `--network host` (eBPF требует `CAP_BPF` и доступ к сетевому интерфейсу). Подробнее о безопасности — в [Безопасность](docs/SECURITY.ru.md).
 
@@ -118,6 +120,7 @@ docker pull frzq/sip-exporter:latest
 - **Активные сессии** — количество активных SIP-диалогов в реальном времени
 - **Метрики RFC 6076** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, PDD
 - **Метрики качества голоса RFC 6035** — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
+- **Метрики RTP-медиа** — `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_active_streams` (лейблы: `carrier,ua_type,codec`)
 - **Расширенные метрики** — ISS, SDC, ORD, LRD
 
 Полный справочник с формулами, примерами и привязкой к RFC: [docs/METRICS.md](docs/METRICS.md)
@@ -264,6 +267,36 @@ sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
 ```
 
 Полный пример конфигурации: [`examples/user_agents.yaml`](examples/user_agents.yaml)
+
+### Анализ RTP-медиа
+
+Помимо сигналинга SIP, экспортер умеет захватывать и анализировать RTP-потоки, чтобы измерять реальное качество звонка (джиттер, потери, MOS). RTP-потоки **скоррелированы с SIP-диалогами**: когда `200 OK` на INVITE несёт SDP, экспортер регистрирует согласованные media-endpoint'ы и отслеживает соответствующие RTP-потоки до BYE (или истечения Session-Expires). Поэтому RTP-метрики наследуют лейблы диалога `carrier`, `ua_type` и согласованный `codec`.
+
+Производимые метрики:
+
+| Метрика | Тип | Описание |
+|--------|------|-------------|
+| `sip_exporter_rtp_packets_total` | counter | количество RTP-пакетов |
+| `sip_exporter_rtp_packets_lost_total` | counter | потерянные пакеты (по seq-gap RFC 3550) |
+| `sip_exporter_rtp_jitter_milliseconds` | histogram | межпакетный джиттер (RFC 3550 A.8) |
+| `sip_exporter_rtp_mos_score` | histogram | MOS-LQ по E-model ITU-T G.107 (1.0–5.0) |
+| `sip_exporter_rtp_active_streams` | gauge | активные RTP-потоки, скоррелированные с диалогами |
+
+**Приватность:** захватывается только 12-байтовый заголовок RTP — голосовой payload обрезается в ядре (eBPF) до попадания в userspace, поэтому никакой аудиозаписи не происходит.
+
+Захват RTP включён по умолчанию и отключается через `SIP_EXPORTER_RTP_CAPTURE=false` (тогда eBPF-фильтр отсекает RTP на уровне ядра). Важно: RTP без скоррелированного SIP-диалога (без замеченного SDP-обмена) отбрасывается, поэтому учитывается только медиа для отслеживаемых звонков.
+
+```PromQL
+# Средний MOS за 5 минут (по кодекам)
+sum by (codec) (rate(sip_exporter_rtp_mos_score_sum[5m]))
+  / sum by (codec) (rate(sip_exporter_rtp_mos_score_count[5m]))
+
+# Доля потерь по операторам
+sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
+  / sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m]))
+```
+
+Полный справочник по RTP-метрикам, формулы и разрешение лейблов — в [docs/METRICS.md](docs/METRICS.md).
 
 ## Разработка
 

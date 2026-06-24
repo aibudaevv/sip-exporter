@@ -39,6 +39,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - 🏷️ **Per-carrier metrics** — CIDR-based carrier resolution for all SIP metrics
 - 🏷️ **Per-device-type metrics** — User-Agent classification for all SIP metrics
 - 📞 **Voice quality (RFC 6035)** — MOS scores, jitter, packet loss from SIP PUBLISH/NOTIFY
+- 🎧 **RTP media analysis** — jitter, packet loss, and MOS (E-model G.107) from RTP streams correlated with SIP dialogs, with no voice payload captured (header-only)
 
 ## Quick Start
 
@@ -111,6 +112,7 @@ Environment variables:
 * `SIP_EXPORTER_OBJECT_FILE_PATH` - path to eBPF object file (default /usr/local/bin/sip.o)
 * `SIP_EXPORTER_CARRIERS_CONFIG` - path to carriers YAML config (optional, see [`examples/carriers.yaml`](examples/carriers.yaml))
 * `SIP_EXPORTER_USER_AGENTS_CONFIG` - path to user-agents YAML config (optional, see [`examples/user_agents.yaml`](examples/user_agents.yaml))
+* `SIP_EXPORTER_RTP_CAPTURE` - enable RTP media capture and analysis (default true)
 
 The container must run with `--privileged` and `--network host` (eBPF requires `CAP_BPF` and access to the network interface). See [Security](docs/SECURITY.md) for details on why this is safe.
 
@@ -122,6 +124,7 @@ All metrics are exposed at `/metrics` in Prometheus exposition format. All SIP m
 - **Active sessions** — real-time count of active SIP dialogs
 - **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, PDD
 - **RFC 6035 voice quality metrics** — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
+- **RTP media metrics** — `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_active_streams` (labels: `carrier,ua_type,codec`)
 - **Extended metrics** — ISS, SDC, ORD, LRD
 
 Full reference with formulas, examples, and RFC section mapping: [docs/METRICS.md](docs/METRICS.md)
@@ -267,6 +270,36 @@ sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
 ```
 
 Full config reference with examples: [`examples/user_agents.yaml`](examples/user_agents.yaml)
+
+### RTP Media Analysis
+
+In addition to SIP signaling, the exporter can capture and analyze RTP media streams to measure real call quality (jitter, packet loss, MOS). RTP streams are **correlated with SIP dialogs**: when a `200 OK` to INVITE carries SDP, the exporter registers the negotiated media endpoints and tracks the matching RTP flows until BYE (or Session-Expires expiry). This means RTP metrics inherit the dialog's `carrier`, `ua_type`, and the negotiated `codec` labels.
+
+Metrics produced:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `sip_exporter_rtp_packets_total` | counter | RTP packets observed |
+| `sip_exporter_rtp_packets_lost_total` | counter | packets lost (RFC 3550 sequence-gap accounting) |
+| `sip_exporter_rtp_jitter_milliseconds` | histogram | interarrival jitter (RFC 3550 A.8) |
+| `sip_exporter_rtp_mos_score` | histogram | MOS-LQ via ITU-T G.107 E-model (1.0–5.0) |
+| `sip_exporter_rtp_active_streams` | gauge | active RTP streams correlated with dialogs |
+
+**Privacy:** only the 12-byte RTP header is captured — voice payload is truncated in the kernel (eBPF) before reaching userspace, so no call audio is inspected or stored.
+
+RTP capture is on by default and can be disabled with `SIP_EXPORTER_RTP_CAPTURE=false` (the eBPF filter then drops RTP at the kernel level). Note: RTP without a correlated SIP dialog (no SDP exchange seen) is dropped, so only media for monitored calls is counted.
+
+```PromQL
+# Average MOS over the last 5m (per codec)
+sum by (codec) (rate(sip_exporter_rtp_mos_score_sum[5m]))
+  / sum by (codec) (rate(sip_exporter_rtp_mos_score_count[5m]))
+
+# Packet loss ratio by carrier
+sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
+  / sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m]))
+```
+
+See [docs/METRICS.md](docs/METRICS.md) for the full RTP reference, formulas, and label resolution.
 
 ## Development
 
