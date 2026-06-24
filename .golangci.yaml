@@ -1,10 +1,36 @@
-# golangci-lint-version: "2.5.0"
+# ==================================================================================================
+#
+#                                              NOTICE
+#
+#                     This gist is no longer maintained. It was moved to repo:
+#
+#                         https://github.com/maratori/golangci-lint-config
+#
+#                     Full history and all v2 releases are preserved in the repo.
+#
+# ==================================================================================================
+
+
+
+# This file is licensed under the terms of the MIT license https://opensource.org/license/mit
+# Copyright (c) 2021-2025 Marat Reymers
+
+## Golden config for golangci-lint v2.7.1
+#
+# This is the best config for golangci-lint based on my experience and opinion.
+# It is very strict, but not extremely strict.
+# Feel free to adapt it to suit your needs.
+# If this config helps you, please consider keeping a link to this file (see the next comment).
+
+# Based on https://gist.github.com/maratori/47a4d00457a92aa426dbd48a18776322
 
 version: "2"
+
 issues:
+  # Maximum count of issues with the same text.
+  # Set to 0 to disable.
+  # Default: 3
   max-same-issues: 50
-run:
-  tests: false
 
 formatters:
   enable:
@@ -25,10 +51,12 @@ formatters:
       # Default: []
       local-prefixes:
         - github.com/aibudaevv/sip-exporter
+
     golines:
       # Target maximum line length.
       # Default: 100
       max-len: 120
+
 linters:
   enable:
     - asasalint # checks for pass []any as any in variadic func(...any)
@@ -41,7 +69,7 @@ linters:
     - depguard # checks if package imports are in a list of acceptable packages
     - dupl # tool for code clone detection
     - durationcheck # checks for two durations multiplied together
-#    - embeddedstructfieldcheck # checks embedded types in structs
+    - embeddedstructfieldcheck # checks embedded types in structs
     - errcheck # checking for unchecked errors, these unchecked errors can be critical bugs in some cases
     - errname # checks that sentinel errors are prefixed with the Err and error types are suffixed with the Error
     - errorlint # finds code that will cause problems with the error wrapping scheme introduced in Go 1.13
@@ -59,6 +87,7 @@ linters:
     - goconst # finds repeated strings that could be replaced by a constant
     - gocritic # provides diagnostics that check for bugs, performance and style issues
     - gocyclo # computes and checks the cyclomatic complexity of functions
+    - godoclint # checks Golang's documentation practice
     - godot # checks if comments end in a period
     - gomoddirectives # manages the use of 'replace', 'retract', and 'excludes' directives in go.mod
     - goprintffuncname # checks that printf-like functions are named with f at the end
@@ -67,6 +96,7 @@ linters:
     - iface # checks the incorrect use of interfaces, helping developers avoid interface pollution
     - ineffassign # detects when assignments to existing variables are not used
     - intrange # finds places where for loops could make use of an integer range
+    - iotamixing # checks if iotas are being used in const blocks with other non-iota declarations
     - loggercheck # checks key value pairs for common logger libraries (kitlog,klog,logr,zap)
     - makezero # finds slice declarations with non-zero initial length
     - mirror # reports wrong mirror patterns of bytes/strings usage
@@ -78,6 +108,7 @@ linters:
     - nilnesserr # reports that it checks for err != nil, but it returns a different nil value error (powered by nilness and nilerr)
     - nilnil # checks that there is no simultaneous return of nil error and an invalid value
     - noctx # finds sending http request without context.Context
+    - nolintlint # reports ill-formed or insufficient nolint directives
     - nonamedreturns # reports all named returns
     - nosprintfhostport # checks for misuse of Sprintf to construct a host with port in a URL
     - perfsprint # checks that fmt.Sprintf can be replaced with a faster alternative
@@ -98,6 +129,7 @@ linters:
     - tparallel # detects inappropriate usage of t.Parallel() method in your Go test codes
     - unconvert # removes unnecessary type conversions
     - unparam # reports unused function parameters
+    - unqueryvet # detects SELECT * in SQL queries and SQL builders, encouraging explicit column selection
     - unused # checks for unused constants, variables, functions and types
     - usestdlibvars # detects the possibility to use variables/constants from the Go standard library
     - usetesting # reports uses of functions with replacement inside the testing package
@@ -142,6 +174,7 @@ linters:
     #- thelper # detects golang test helpers without t.Helper() call and checks the consistency of test helpers
     #- wsl # [too strict and mostly code is not more readable] whitespace linter forces you to use empty lines
     #- wsl_v5 # [too strict and mostly code is not more readable] add or remove empty lines
+
   # All settings can be found here https://github.com/golangci/golangci-lint/blob/HEAD/.golangci.reference.yml
   settings:
     cyclop:
@@ -152,6 +185,12 @@ linters:
       # If it's higher than 0.0 (float) the check is enabled.
       # Default: 0.0
       package-average: 10.0
+
+    gomoddirectives:
+      # Allow local replace directives (monorepo go.work).
+      # Default: false
+      replace-local: true
+
     depguard:
       # Rules to apply.
       #
@@ -199,24 +238,32 @@ linters:
           deny:
             - pkg: log$
               desc: Use log/slog instead, see https://go.dev/blog/slog
+
     embeddedstructfieldcheck:
       # Checks that sync.Mutex and sync.RWMutex are not used as embedded fields.
       # Default: false
       forbid-mutex: true
+
     errcheck:
       # Report about not checking of errors in type assertions: `a := b.(MyStruct)`.
       # Such cases aren't reported by default.
       # Default: false
       check-type-assertions: true
+
     exhaustive:
       # Program elements to check for exhaustiveness.
       # Default: [ switch ]
       check:
         - switch
         - map
+
     exhaustruct:
-      # List of regular expressions to exclude struct packages and their names from checks.
-      # Regular expressions must match complete canonical struct package/name/structname.
+      # List of regular expressions to match type names that should be excluded from processing.
+      # Anonymous structs can be matched by '<anonymous>' alias.
+      # Has precedence over `include`.
+      # Each regular expression must match the full type name, including package path.
+      # For example, to match type `net/http.Cookie` regular expression should be `.*/http\.Cookie`,
+      # but not `http\.Cookie`.
       # Default: []
       exclude:
         # std libs
@@ -242,10 +289,15 @@ linters:
         - ^golang.org/x/tools/go/analysis.Analyzer$
         - ^google.golang.org/protobuf/.+Options$
         - ^gopkg.in/yaml.v3.Node$
+      # Allows empty structures in return statements.
+      # Default: false
+      allow-empty-returns: true
+
     funcorder:
       # Checks if the exported methods of a structure are placed before the non-exported ones.
       # Default: true
       struct-method: false
+
     funlen:
       # Checks the number of lines in a function.
       # If lower than 0, disable the check.
@@ -255,14 +307,17 @@ linters:
       # If lower than 0, disable the check.
       # Default: 40
       statements: 50
+
     gochecksumtype:
       # Presence of `default` case in switch statements satisfies exhaustiveness, if all members are not listed.
       # Default: true
       default-signifies-exhaustive: false
+
     gocognit:
       # Minimal code complexity to report.
       # Default: 30 (but we recommend 10-20)
       min-complexity: 20
+
     gocritic:
       # Settings passed to gocritic.
       # The settings key is the name of a supported gocritic checker.
@@ -276,6 +331,15 @@ linters:
           # Whether to skip (*x).method() calls where x is a pointer receiver.
           # Default: true
           skipRecvDeref: false
+
+    godoclint:
+      # List of rules to enable in addition to the default set.
+      # Default: empty
+      enable:
+        # Assert no unused link in godocs.
+        # https://github.com/godoc-lint/godoc-lint?tab=readme-ov-file#no-unused-link
+        - no-unused-link
+
     govet:
       # Enable all analyzers.
       # Default: false
@@ -291,10 +355,12 @@ linters:
           # Whether to be strict about shadowing; can be noisy.
           # Default: false
           strict: true
+
     inamedparam:
       # Skips check for interface methods with only a single parameter.
       # Default: false
       skip-single-param: true
+
     mnd:
       # List of function patterns to exclude from analysis.
       # Values always ignored: `time.Date`,
@@ -303,6 +369,9 @@ linters:
       # Default: []
       ignored-functions:
         - args.Error
+        - envFloatOrDefault
+        - envIntOrDefault
+        - envOrDefault
         - flag.Arg
         - flag.Duration.*
         - flag.Float.*
@@ -314,10 +383,12 @@ linters:
         - os.WriteFile
         - prometheus.ExponentialBuckets.*
         - prometheus.LinearBuckets
+
     nakedret:
       # Make an issue if func has more lines of code than this setting, and it has naked returns.
       # Default: 30
       max-func-lines: 0
+
     nolintlint:
       # Exclude following linters from requiring an explanation.
       # Default: []
@@ -328,21 +399,25 @@ linters:
       # Enable to require nolint directives to mention the specific linter being suppressed.
       # Default: false
       require-specific: true
+
     perfsprint:
       # Optimizes into strings concatenation.
       # Default: true
       strconcat: false
+
     reassign:
       # Patterns for global variable names that are checked for reassignment.
       # See https://github.com/curioswitch/go-reassign#usage
       # Default: ["EOF", "Err.*"]
       patterns:
         - ".*"
+
     rowserrcheck:
       # database/sql is always checked.
       # Default: []
       packages:
         - github.com/jmoiron/sqlx
+
     sloglint:
       # Enforce not using global loggers.
       # Values:
@@ -360,6 +435,7 @@ linters:
       # https://github.com/go-simpler/sloglint?tab=readme-ov-file#context-only
       # Default: ""
       context: scope
+
     staticcheck:
       # SAxxxx checks in https://staticcheck.dev/docs/configuration/options/#checks
       # Example (to disable some checks): [ "all", "-SA1000", "-SA1001"]
@@ -375,10 +451,12 @@ linters:
         # Omit embedded fields from selector expression.
         # https://staticcheck.dev/docs/checks/#QF1008
         - -QF1008
+
     usetesting:
       # Enable/disable `os.TempDir()` detections.
       # Default: false
       os-temp-dir: true
+
   exclusions:
     # Log a warning if an exclusion rule is unused.
     # Default: false
@@ -402,14 +480,7 @@ linters:
       - text: 'comment on exported \S+ \S+ should be of the form ".+"'
         source: '// ?(nolint|TODO)'
         linters: [ revive, staticcheck ]
-      - path: 'tools'
-        linters: [ staticcheck, noctx, usestdlibvars, mnd, mirror, govet, gosec, gocritic, forbidigo, typecheck, unused,
-                   goimports ]
-      - path: 'config/config.go'
-        linters: [ golines ]
-      - path: 'internal/service/avayakafka'
-        linters: [ typecheck ]
-      - path: '(_test|docs)\.go'
+      - path: '_test\.go'
         linters:
           - bodyclose
           - dupl
@@ -418,11 +489,5 @@ linters:
           - goconst
           - gosec
           - noctx
-          - wrapcheck
           - testpackage
-          - musttag
-          - gochecknoglobals
-          - go-require
-          - canonicalheader
-          - godot
-          - gochecknoinits
+          - wrapcheck
