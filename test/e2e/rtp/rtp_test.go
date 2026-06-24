@@ -367,3 +367,34 @@ func TestRTP_Dropped_WhenCaptureOff(t *testing.T) {
 	require.Less(t, delta, float64(rtpPackets)*0.1,
 		"RTP packets must NOT reach the exporter when capture is disabled")
 }
+
+// TestRTP_UncorrelatedDropped verifies RTP isolation: packets that pass the
+// eBPF filter (capture ON → counted in socket_packets_received_total) but have no
+// correlated SIP dialog (no SDP-registered media endpoint) must NOT be counted as
+// RTP metrics. This is the dialog-scoping guarantee — RTP is monitored only for
+// established calls, so traffic from one port/dialog cannot pollute another.
+func TestRTP_UncorrelatedDropped(t *testing.T) {
+	ports := allocatePortsN(4)
+	httpPort, sipPort, sipsPort, rtpPort := ports[0], ports[1], ports[2], ports[3]
+	rtpPortNum, err := strconv.Atoi(rtpPort)
+	require.NoError(t, err)
+
+	endpoint := startExporter(context.Background(), t, httpPort, sipPort, sipsPort, true)
+
+	time.Sleep(1500 * time.Millisecond)
+	beforeSocket := getSocketPacketsReceived(t, endpoint)
+
+	// RTP to a media port with NO established SIP dialog (no SDP exchange).
+	sendRTP(t, rtpPortNum, rtpPackets)
+
+	time.Sleep(2500 * time.Millisecond)
+	afterSocket := getSocketPacketsReceived(t, endpoint)
+
+	// eBPF passed the RTP (capture ON) → socket counter rose.
+	require.GreaterOrEqual(t, afterSocket-beforeSocket, float64(rtpPackets)*0.5,
+		"uncorrelated RTP must still reach the socket (capture ON)")
+
+	// But with no correlated SIP dialog, no RTP packets are counted as metrics.
+	require.Equal(t, 0.0, getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total"),
+		"uncorrelated RTP must be dropped (no rtp_packets_total)")
+}
