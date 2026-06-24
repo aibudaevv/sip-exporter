@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/ilyakaznacheev/cleanenv"
 )
@@ -18,6 +19,7 @@ type (
 		UserAgentsConfigPath string `env:"SIP_EXPORTER_USER_AGENTS_CONFIG"`
 		IgnoreOutgoing       bool   `env:"SIP_EXPORTER_IGNORE_OUTGOING"    env-default:"false"`
 		RTPCapture           bool   `env:"SIP_EXPORTER_RTP_CAPTURE"        env-default:"true"`
+		RTPStreamTTL         time.Duration `env:"SIP_EXPORTER_RTP_STREAM_TTL" env-default:"30s"`
 	}
 )
 

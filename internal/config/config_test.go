@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -22,6 +23,7 @@ func unsetConfigEnv(t *testing.T) {
 		"SIP_EXPORTER_SIP_PORT",
 		"SIP_EXPORTER_SIPS_PORT",
 		"SIP_EXPORTER_RTP_CAPTURE",
+		"SIP_EXPORTER_RTP_STREAM_TTL",
 	} {
 		os.Unsetenv(k)
 	}
@@ -121,4 +123,27 @@ func TestGetConfig_RTPCaptureDisabled(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
 	require.False(t, cfg.RTPCapture, "RTP capture must be disabled when env is false")
+}
+
+func TestGetConfig_RTPStreamTTLDefault(t *testing.T) {
+	unsetConfigEnv(t)
+	t.Setenv("SIP_EXPORTER_INTERFACE", "eth0")
+
+	cfg, err := GetConfig()
+
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	require.Equal(t, 30*time.Second, cfg.RTPStreamTTL, "RTP stream TTL must default to 30s")
+}
+
+func TestGetConfig_RTPStreamTTLCustom(t *testing.T) {
+	unsetConfigEnv(t)
+	t.Setenv("SIP_EXPORTER_INTERFACE", "eth0")
+	t.Setenv("SIP_EXPORTER_RTP_STREAM_TTL", "2s")
+
+	cfg, err := GetConfig()
+
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	require.Equal(t, 2*time.Second, cfg.RTPStreamTTL, "RTP stream TTL must be parsed from env")
 }
