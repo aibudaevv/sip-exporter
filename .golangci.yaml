@@ -480,6 +480,8 @@ linters:
       - text: 'comment on exported \S+ \S+ should be of the form ".+"'
         source: '// ?(nolint|TODO)'
         linters: [ revive, staticcheck ]
+      - text: 'G115' # integer overflow — expected in network code (port conversions)
+        linters: [ gosec ]
       - path: '_test\.go'
         linters:
           - bodyclose

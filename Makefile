@@ -1,7 +1,8 @@
 version := $(shell cat VERSION)
+GOLANGCI_LINT_VERSION := v2.7.1
 .DEFAULT_GOAL := docker_build
 
-.PHONY: build docker_build ebpf_compile go_build clean ebpf_log lint vet imports test test-e2e test-e2e-run test-rtp test-load test-load-run test-load-update-baseline test-all vulncheck trivy-fs trivy-image security
+.PHONY: build docker_build ebpf_compile go_build clean ebpf_log lint lint-deps vet imports test test-e2e test-e2e-run test-rtp test-load test-load-run test-load-update-baseline test-all vulncheck trivy-fs trivy-image security
 
 build: ebpf_compile go_build
 docker_build:
@@ -56,6 +57,8 @@ test-load-update-baseline:
 
 lint: vet imports
 	golangci-lint run
+lint-deps:
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 vet:
 	go vet -unsafeptr ./...
 imports: vet
