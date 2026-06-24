@@ -114,13 +114,37 @@ func (t *Tracker) Lookup(ip string, port uint16) (MediaLabels, bool) {
 	return l, ok
 }
 
-// Observe ingests an RTP packet. Returns (result, false) when the source
-// endpoint is not correlated to any SIP dialog (caller must drop the packet).
-func (t *Tracker) Observe(ip string, port uint16, h rtp.Header, arrival time.Time) (ObserveResult, bool) {
+// lookupLabels resolves a packet's media endpoint trying destination first
+// (local receive endpoint, NAT-robust), then source. Returns the matched labels
+// and the endpoint key used for flow identity.
+func (t *Tracker) lookupLabels(
+	srcIP string, srcPort uint16,
+	dstIP string, dstPort uint16,
+) (MediaLabels, endpointKey, bool) {
+	for _, ep := range []endpointKey{
+		{ip: dstIP, port: dstPort},
+		{ip: srcIP, port: srcPort},
+	} {
+		if l, ok := t.media[ep]; ok {
+			return l, ep, true
+		}
+	}
+	return MediaLabels{}, endpointKey{}, false
+}
+
+// Observe ingests an RTP packet. Correlation tries the destination endpoint
+// first (the local media endpoint that receives the stream — robust to NAT/asymmetric
+// RTP where the source port is remapped), then falls back to the source endpoint.
+// Returns (result, false) when neither is correlated to a SIP dialog (drop).
+func (t *Tracker) Observe(
+	srcIP string, srcPort uint16,
+	dstIP string, dstPort uint16,
+	h rtp.Header, arrival time.Time,
+) (ObserveResult, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	labels, ok := t.media[endpointKey{ip: ip, port: port}]
+	labels, ep, ok := t.lookupLabels(srcIP, srcPort, dstIP, dstPort)
 	if !ok {
 		return ObserveResult{}, false
 	}
@@ -131,14 +155,15 @@ func (t *Tracker) Observe(ip string, port uint16, h rtp.Header, arrival time.Tim
 		clockRate = cr
 	}
 
-	entry, exists := t.streams[streamKey{endpoint: endpointKey{ip: ip, port: port}, ssrc: h.SSRC}]
+	key := streamKey{endpoint: ep, ssrc: h.SSRC}
+	entry, exists := t.streams[key]
 	if !exists {
 		entry = &streamEntry{
 			state:  newStreamState(h.SSRC, codec, clockRate, arrival),
 			labels: labels,
 			codec:  codec,
 		}
-		t.streams[streamKey{endpoint: endpointKey{ip: ip, port: port}, ssrc: h.SSRC}] = entry
+		t.streams[key] = entry
 	}
 
 	prevLost := entry.state.packetsLost

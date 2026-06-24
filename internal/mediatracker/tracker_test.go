@@ -51,7 +51,7 @@ func TestCorrelator_UnregisterByCallID(t *testing.T) {
 func TestTracker_ObserveNoCorrelation_Drop(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	t0 := time.Unix(1000, 0)
-	_, ok := tr.Observe("10.0.0.99", 5004, newHeader(1, 160), t0)
+	_, ok := tr.Observe("10.0.0.99", 5004, "0.0.0.0", 0, newHeader(1, 160), t0)
 	require.False(t, ok, "RTP without registered endpoint must be dropped")
 	require.Empty(t, tr.Snapshot())
 }
@@ -61,14 +61,14 @@ func TestTracker_ObserveWithCorrelation(t *testing.T) {
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
 	t0 := time.Unix(1000, 0)
 
-	res, ok := tr.Observe("10.0.0.1", 5004, newHeader(1, 160), t0)
+	res, ok := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(1, 160), t0)
 	require.True(t, ok)
 	require.True(t, res.Counted)
 	require.Equal(t, uint64(0), res.Lost)
 	require.Equal(t, "PCMU", res.Codec)
 
 	// gap of 3
-	res, ok = tr.Observe("10.0.0.1", 5004, newHeader(5, 320), t0.Add(20*time.Millisecond))
+	res, ok = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(5, 320), t0.Add(20*time.Millisecond))
 	require.True(t, ok)
 	require.True(t, res.Counted)
 	require.Equal(t, uint64(3), res.Lost)
@@ -90,9 +90,9 @@ func TestTracker_SnapshotComputesMOSAndJitter(t *testing.T) {
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
 	t0 := time.Unix(1000, 0)
 
-	_, _ = tr.Observe("10.0.0.1", 5004, newHeader(1, 160), t0)
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(1, 160), t0)
 	// late packet: jitter introduced
-	_, _ = tr.Observe("10.0.0.1", 5004, newHeader(2, 320), t0.Add(45*time.Millisecond))
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(2, 320), t0.Add(45*time.Millisecond))
 
 	stats := tr.Snapshot()
 	require.Len(t, stats, 1)
@@ -105,7 +105,7 @@ func TestTracker_CleanupExpiredStreams(t *testing.T) {
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
 	t0 := time.Unix(1000, 0)
 
-	_, _ = tr.Observe("10.0.0.1", 5004, newHeader(1, 160), t0)
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(1, 160), t0)
 	require.Len(t, tr.Snapshot(), 1)
 
 	// advance beyond TTL
@@ -124,7 +124,7 @@ func TestTracker_DynamicCodecFromSDP(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 
 	h := rtp.Header{Version: 2, PayloadType: 111, SequenceNumber: 1, Timestamp: 960, SSRC: 0x1}
-	res, ok := tr.Observe("10.0.0.1", 5004, h, t0)
+	res, ok := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, h, t0)
 	require.True(t, ok)
 	require.Equal(t, "opus", res.Codec)
 
@@ -144,9 +144,9 @@ func TestTracker_SSRCReusedAcrossEndpoints(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 
 	const reusedSSRC uint32 = 0xABCDEFFF
-	_, ok := tr.Observe("10.0.0.1", 5004, newHeaderSSRC(1, reusedSSRC), t0)
+	_, ok := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, reusedSSRC), t0)
 	require.True(t, ok)
-	_, ok = tr.Observe("10.0.0.2", 5006, newHeaderSSRC(1, reusedSSRC), t0)
+	_, ok = tr.Observe("10.0.0.2", 5006, "0.0.0.0", 0, newHeaderSSRC(1, reusedSSRC), t0)
 	require.True(t, ok)
 
 	stats := tr.Snapshot()
@@ -155,4 +155,25 @@ func TestTracker_SSRCReusedAcrossEndpoints(t *testing.T) {
 
 func newHeaderSSRC(seq uint16, ssrc uint32) rtp.Header {
 	return rtp.Header{Version: 2, PayloadType: 0, SequenceNumber: seq, Timestamp: 160, SSRC: ssrc}
+}
+
+// TestTracker_ObserveCorrelatesByDst verifies that when the source endpoint is
+// unregistered (e.g. NAT/asymmetric RTP remapped the source port) the packet is
+// still correlated via its destination endpoint (the local receive port from SDP).
+func TestTracker_ObserveCorrelatesByDst(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	// Only the destination endpoint is registered (callee receive port).
+	tr.Register("10.0.0.2", 5006, MediaLabels{
+		Carrier: "carrier-dst", UAType: "polycom", CallID: "call-via-dst",
+		SDPCodecs: map[uint8]string{8: "PCMA"}, ClockRates: map[uint8]uint32{8: 8000},
+	})
+	t0 := time.Unix(1000, 0)
+
+	// RTP from an unregistered source to the registered destination.
+	hdr := rtp.Header{Version: 2, PayloadType: 8, SequenceNumber: 1, Timestamp: 160, SSRC: 0xCAFE}
+	res, ok := tr.Observe("9.9.9.9", 1234, "10.0.0.2", 5006, hdr, t0)
+	require.True(t, ok, "must correlate via dst when src is unregistered")
+	require.Equal(t, "carrier-dst", res.Carrier, "labels must come from the dst endpoint")
+	require.Equal(t, "PCMA", res.Codec)
+	require.Len(t, tr.Snapshot(), 1)
 }

@@ -65,15 +65,15 @@ func TestRTP_CorrelationViaSDP(t *testing.T) {
 	require.Len(t, md.created, 1, "INVITE 200 OK must create a dialog")
 
 	// Caller-side RTP (matches the INVITE SDP endpoint).
-	e.handleRTP(net.IPv4(10, 0, 0, 1), 5004, makeRTPPayload(0xAABBCCDD))
+	e.handleRTP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(0, 0, 0, 0), 0, makeRTPPayload(0xAABBCCDD))
 	require.Equal(t, 1, e.mediaTracker.StreamCount(), "caller RTP must be observed")
 
 	// Callee-side RTP (matches the 200 OK SDP endpoint).
-	e.handleRTP(net.IPv4(10, 0, 0, 2), 5006, makeRTPPayload(0x11223344))
+	e.handleRTP(net.IPv4(10, 0, 0, 2), 5006, net.IPv4(0, 0, 0, 0), 0, makeRTPPayload(0x11223344))
 	require.Equal(t, 2, e.mediaTracker.StreamCount(), "callee RTP must be observed")
 
 	// RTP with no correlated endpoint is dropped.
-	e.handleRTP(net.IPv4(9, 9, 9, 9), 1234, makeRTPPayload(0xCAFEBABE))
+	e.handleRTP(net.IPv4(9, 9, 9, 9), 1234, net.IPv4(0, 0, 0, 0), 0, makeRTPPayload(0xCAFEBABE))
 	require.Equal(t, 2, e.mediaTracker.StreamCount(), "uncorrelated RTP must be dropped")
 
 	// Labels (carrier/call-id) and codec propagate to the tracked streams.

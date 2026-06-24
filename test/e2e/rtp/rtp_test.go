@@ -32,6 +32,7 @@ import (
 const (
 	testInterface = "lo"
 	rtpPackets    = 120 // RTP packets sent per test
+	sippImage     = "pbertera/sipp:latest"
 )
 
 var (

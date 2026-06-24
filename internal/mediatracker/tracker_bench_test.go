@@ -34,7 +34,7 @@ func BenchmarkTracker_Observe_1000Streams(b *testing.B) {
 			Version: 2, PayloadType: 0,
 			SequenceNumber: uint16(n), Timestamp: uint32(n) * 160, SSRC: uint32(i),
 		}
-		_, _ = tr.Observe(ips[i], 5004, h, arrival.Add(time.Duration(n)*time.Millisecond))
+		_, _ = tr.Observe(ips[i], 5004, "0.0.0.0", 0, h, arrival.Add(time.Duration(n)*time.Millisecond))
 	}
 }
 
@@ -51,7 +51,7 @@ func BenchmarkTracker_Snapshot_1000Streams(b *testing.B) {
 		ip := fmt.Sprintf("10.0.%d.%d", i/256, i%256)
 		tr.Register(ip, 5004, labels)
 		h := rtp.Header{Version: 2, PayloadType: 0, SequenceNumber: 1, Timestamp: 160, SSRC: uint32(i)}
-		_, _ = tr.Observe(ip, 5004, h, arrival)
+		_, _ = tr.Observe(ip, 5004, "0.0.0.0", 0, h, arrival)
 	}
 	b.ReportAllocs()
 	b.ResetTimer()

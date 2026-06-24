@@ -483,8 +483,9 @@ func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 	// 0x80-0xBF range, so the first payload byte unambiguously distinguishes RTP.
 	if sipData[0]&rtpVersionMask == rtpVersion2Prefix {
 		srcPort := binary.BigEndian.Uint16(packet[udpOffset : udpOffset+2])
-		srcIP, _ := extractIPs(ipHeader)
-		return e.handleRTP(srcIP, srcPort, sipData)
+		dstPort := binary.BigEndian.Uint16(packet[udpOffset+2 : udpOffset+4])
+		srcIP, dstIP := extractIPs(ipHeader)
+		return e.handleRTP(srcIP, srcPort, dstIP, dstPort, sipData)
 	}
 
 	// Minimum SIP packet should be at least 50 bytes
@@ -616,15 +617,19 @@ func (e *exporter) handleMessage(carrier string, rawPacket []byte) error {
 // no correlated SIP dialog are dropped silently (per design: RTP without an
 // established dialog is not monitored). RTP stats are accumulated in the tracker
 // and exported periodically (see sipDialogMetricsUpdate).
-func (e *exporter) handleRTP(srcIP net.IP, srcPort uint16, payload []byte) (string, error) {
+func (e *exporter) handleRTP(
+	srcIP net.IP, srcPort uint16,
+	dstIP net.IP, dstPort uint16,
+	payload []byte,
+) (string, error) {
 	header, err := rtp.ParseHeader(payload)
 	if err != nil {
 		zap.L().Debug("RTP header parse skipped", zap.Error(err))
 		return "", nil
 	}
-	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, header, time.Now())
+	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, dstIP.String(), dstPort, header, time.Now())
 	if !ok {
-		// No correlated media endpoint for this source → drop.
+		// No correlated media endpoint for this flow → drop.
 		return "", nil
 	}
 	if res.Counted {
