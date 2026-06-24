@@ -114,6 +114,26 @@ func TestTracker_CleanupExpiredStreams(t *testing.T) {
 	require.Empty(t, tr.Snapshot(), "expired stream must be removed")
 }
 
+// TestTracker_SetTTL_LowersExpiryThreshold verifies that SetTTL changes the
+// idle-expiry threshold of an existing tracker: the same elapsed idle time
+// must NOT expire a stream under a long TTL, but MUST expire it after SetTTL
+// lowers the threshold. This is the seam exercised by SIP_EXPORTER_RTP_STREAM_TTL.
+func TestTracker_SetTTL_LowersExpiryThreshold(t *testing.T) {
+	tr := NewTracker(1 * time.Hour) // long TTL
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(1, 160), t0)
+	tr.SetNow(func() time.Time { return t0.Add(5 * time.Second) })
+
+	tr.Cleanup()
+	require.Len(t, tr.Snapshot(), 1, "stream must survive under the original long TTL")
+
+	tr.SetTTL(1 * time.Second) // lower the threshold below the 5s idle time
+	tr.Cleanup()
+	require.Empty(t, tr.Snapshot(), "stream must expire after SetTTL lowers the threshold")
+}
+
 func TestTracker_DynamicCodecFromSDP(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	tr.Register("10.0.0.1", 5004, MediaLabels{

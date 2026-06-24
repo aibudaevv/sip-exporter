@@ -88,6 +88,14 @@ func (t *Tracker) SetNow(now func() time.Time) {
 	t.now = now
 }
 
+// SetTTL updates the idle-stream expiry threshold (RFC 3550 §6.3.5 timeout).
+// Used to tune expiry from config (SIP_EXPORTER_RTP_STREAM_TTL) after construction.
+func (t *Tracker) SetTTL(ttl time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.ttl = ttl
+}
+
 // Register associates a media endpoint (IP:port) with SIP-dialog labels.
 func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) {
 	t.mu.Lock()
