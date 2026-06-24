@@ -41,8 +41,8 @@ func TestLoad_VQReportFlood(t *testing.T) {
 				"exporter should have processed packets")
 
 			vqReports := getMetric(t, env.endpoint, "sip_exporter_vq_reports_total")
-			expectedReports := float64(callCount * 2)
-			t.Logf("vq_reports_total = %.0f (want %.0f, loopback x2)", vqReports, expectedReports)
+			expectedReports := float64(callCount)
+			t.Logf("vq_reports_total = %.0f (want %.0f)", vqReports, expectedReports)
 			require.Equal(t, expectedReports, vqReports)
 
 			moslqCount := getMetric(t, env.endpoint, "sip_exporter_vq_mos_lq_count")
@@ -85,8 +85,8 @@ func TestLoad_VQHighRateWithResponse(t *testing.T) {
 				"exporter should have processed packets")
 
 			vqReports := getMetric(t, env.endpoint, "sip_exporter_vq_reports_total")
-			expectedReports := float64(callCount * 2)
-			t.Logf("vq_reports_total = %.0f (want %.0f, loopback x2)", vqReports, expectedReports)
+			expectedReports := float64(callCount)
+			t.Logf("vq_reports_total = %.0f (want %.0f)", vqReports, expectedReports)
 			require.Equal(t, expectedReports, vqReports)
 
 			publishTotal := getMetric(t, env.endpoint, "sip_exporter_publish_total")
@@ -134,12 +134,12 @@ func TestLoad_FullCallWithVQReport(t *testing.T) {
 				"SER SLO: >= 99%% at rate %d (got %.2f%%)", rate, ser)
 
 			vqReports := getMetric(t, env.endpoint, "sip_exporter_vq_reports_total")
-			expectedVQReports := float64(callCount * 2)
-			t.Logf("vq_reports_total = %.0f (want %.0f, loopback x2)", vqReports, expectedVQReports)
+			expectedVQReports := float64(callCount)
+			t.Logf("vq_reports_total = %.0f (want %.0f)", vqReports, expectedVQReports)
 			require.Equal(t, expectedVQReports, vqReports)
 
 			inviteTotal := getMetric(t, env.endpoint, "sip_exporter_invite_total")
-			expectedInvites := float64(callCount * 2)
+			expectedInvites := float64(callCount)
 			t.Logf("invite_total = %.0f (want %.0f)", inviteTotal, expectedInvites)
 			require.Equal(t, expectedInvites, inviteTotal)
 
