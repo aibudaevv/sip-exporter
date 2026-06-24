@@ -6,6 +6,7 @@
 - eBPF socket filter extended for RTP pattern detection: version-2 packets (first payload byte `0x80`) are passed when RTP capture is enabled; payload-type check (`pt<=34 || pt>=96`) rejects non-RTP traffic
 - **Privacy: RTP packets truncated to the 12-byte header** (no voice payload crosses kernel→userspace) — only metadata needed for quality metrics is captured
 - `SIP_EXPORTER_RTP_CAPTURE` env var (default `true`) to toggle RTP capture at the eBPF layer
+- `SIP_EXPORTER_RTP_STREAM_TTL` env var (default `30s`) to tune idle RTP stream expiry (RFC 3550 §6.3.5 timeout)
 - RTP header parser (RFC 3550) in `internal/rtp/`: `ParseHeader`, `ErrNotRTP`/`ErrInvalidRTP`, codec mapping (static RFC 3551 payload types + SDP `a=rtpmap` override)
 - Media tracker in `internal/mediatracker/`:
   - Interarrival jitter per RFC 3550 A.8 (overflow-safe, smoothed)
