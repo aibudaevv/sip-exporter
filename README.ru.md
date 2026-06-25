@@ -347,7 +347,7 @@ sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
 2. Загрузите `examples/grafana-dashboard.json` или вставьте JSON
 3. Выберите datasource Prometheus или VictoriaMetrics
 
-Дашборд содержит: счётчики трафика, разбивку SIP-запросов/ответов, активные сессии, метрики RFC 6076 (SER, SEER, ISA, SCR, NER), метрики качества голоса RFC 6035 (MOS, jitter, потери пакетов), гистограммы задержек (RRD, TTR, PDD, SPD, ORD, LRD), метрики качества (ISS, ASR, SDC) и системные ошибки.
+Дашборд содержит: счётчики трафика, разбивку SIP-запросов/ответов, активные сессии, метрики RFC 6076 (SER, SEER, ISA, SCR, NER), анализ RTP-медиа (активные потоки, rate пакетов, loss rate, MOS, jitter по кодекам), метрики качества голоса RFC 6035 (MOS, jitter, потери пакетов), гистограммы задержек (RRD, TTR, PDD, SPD, ORD, LRD), метрики качества (ISS, ASR, SDC) и системные ошибки.
 
 Файл дашборда: [`examples/grafana-dashboard.json`](examples/grafana-dashboard.json)
 

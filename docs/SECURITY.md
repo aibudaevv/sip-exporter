@@ -23,7 +23,7 @@ The container performs **read-only packet inspection**:
 1. **Loads** an eBPF socket filter program into the kernel (once, at startup)
 2. **Creates** an `AF_PACKET` raw socket bound to the specified network interface
 3. **Reads** packets from the socket into a Go channel (10,000 buffer)
-4. **Parses** SIP headers (method, status, Call-ID, From/To tags, CSeq, Session-Expires)
+4. **Parses** SIP headers (method, status, Call-ID, From/To tags, CSeq, Session-Expires) and RTP headers (12 bytes: version, payload type, sequence, timestamp, SSRC)
 5. **Exports** metrics to Prometheus via `/metrics` HTTP endpoint
 
 That's it. No packet modification, no packet injection, no network redirection, no iptables/nftables rules, no filesystem writes (except stdout/stderr for logs).
@@ -50,7 +50,7 @@ That's it. No packet modification, no packet injection, no network redirection, 
 
 ## eBPF Code Audit
 
-The entire eBPF program is [100 lines of C](../internal/bpf/sip.c). It does one thing: filters packets to only pass through UDP traffic on the configured SIP ports (default 5060/5061).
+The entire eBPF program is [~140 lines of C](../internal/bpf/sip.c). It does two things: (1) passes through UDP traffic on the configured SIP ports (default 5060/5061), and (2) when RTP capture is enabled (default `true`, controlled by `SIP_EXPORTER_RTP_CAPTURE`), also passes through UDP packets matching the RTP version-2 pattern with a valid payload type.
 
 **What the eBPF program does:**
 1. Checks Ethernet header — skips non-Ethernet frames
@@ -59,8 +59,11 @@ The entire eBPF program is [100 lines of C](../internal/bpf/sip.c). It does one 
 4. Validates IP header length (IHL)
 5. Filters for UDP only (`protocol 17`)
 6. Reads source and destination ports
-7. Passes through **only** packets where src or dst port matches SIP/SIPS port
-8. Returns `skb->len` (pass) or `0` (drop from buffer — the packet still reaches its destination, it's just not copied to userspace)
+7. Passes through packets where src or dst port matches SIP/SIPS port
+8. If RTP capture is enabled: also checks the first payload byte for the RTP version-2 prefix (`0x80`–`0xBF`) and a valid payload type — these are non-SIP-port packets on any UDP port
+9. Returns `skb->len` (pass) or `0` (drop from buffer — the packet still reaches its destination, it's just not copied to userspace)
+
+**RTP privacy:** Only the 12-byte RTP header is read (version, PT, sequence, timestamp, SSRC). The voice payload is never accessed by the application. RTP metrics expose only `carrier`, `ua_type`, and `codec` labels — no phone numbers, IPs, or call identifiers appear in RTP metrics.
 
 **Critical point:** The eBPF filter is a *socket filter*, not a *tc/XDP filter*. It only controls which packets are copied to the application's socket buffer. Dropped packets are **not** lost — they continue through the normal network stack to their destination. The filter cannot modify or block traffic.
 

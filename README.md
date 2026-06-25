@@ -349,7 +349,7 @@ Import the pre-built dashboard into your Grafana instance:
 2. Upload `examples/grafana-dashboard.json` or copy the JSON content
 3. Select your Prometheus or VictoriaMetrics datasource
 
-The dashboard includes all available metrics: traffic counters, SIP request/response breakdowns, active sessions, RFC 6076 performance metrics (SER, SEER, ISA, SCR, NER), voice quality metrics (RFC 6035: MOS, jitter, packet loss), delay histograms (RRD, TTR, PDD, SPD, ORD, LRD), session quality metrics (ISS, ASR, SDC), and system errors.
+The dashboard includes all available metrics: traffic counters, SIP request/response breakdowns, active sessions, RFC 6076 performance metrics (SER, SEER, ISA, SCR, NER), RTP media analysis (active streams, packet rate, loss rate, MOS, jitter by codec), voice quality metrics (RFC 6035: MOS, jitter, packet loss), delay histograms (RRD, TTR, PDD, SPD, ORD, LRD), session quality metrics (ISS, ASR, SDC), and system errors.
 
 Dashboard file: [`examples/grafana-dashboard.json`](examples/grafana-dashboard.json)
 
