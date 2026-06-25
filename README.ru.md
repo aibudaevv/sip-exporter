@@ -8,6 +8,8 @@
 [![Go Vulncheck](https://github.com/aibudaevv/sip-exporter/actions/workflows/vulncheck.yml/badge.svg)](https://github.com/aibudaevv/sip-exporter/actions/workflows/vulncheck.yml)
 [![Container Scan](https://github.com/aibudaevv/sip-exporter/actions/workflows/trivy.yml/badge.svg)](https://github.com/aibudaevv/sip-exporter/actions/workflows/trivy.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/aibudaevv/sip-exporter)](https://goreportcard.com/report/github.com/aibudaevv/sip-exporter)
+[![Docker Pulls](https://img.shields.io/docker/pulls/frzq/sip-exporter)](https://hub.docker.com/r/frzq/sip-exporter)
+[![GitHub Release](https://img.shields.io/github/v/release/aibudaevv/sip-exporter)](https://github.com/aibudaevv/sip-exporter/releases)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](https://github.com/aibudaevv/sip-exporter/blob/main/LICENSE)
 [![Issues](https://img.shields.io/github/issues/aibudaevv/sip-exporter)](https://github.com/aibudaevv/sip-exporter/issues)
 
@@ -74,12 +76,12 @@ curl http://localhost:2112/metrics
 
 ## Архитектура
 ```
-SIP-трафик → NIC → eBPF socket filter → AF_PACKET socket → Go poller → SIP-парсер → Prometheus
+SIP + RTP-трафик → NIC → eBPF socket filter → AF_PACKET socket → Go poller → SIP-парсер + RTP-трекер → Prometheus
 ```
 
 ## Производительность
 
-Нулевая потеря пакетов до **2 000 CPS** (~24 000 PPS) при полном жизненном цикле SIP-диалога, **<15% CPU** и **~15 МБ RAM**. GC stop-the-world паузы менее **1 мс** — в 400 раз меньше ёмкости буфера сокета, что гарантирует отсутствие потерь пакетов из-за GC. Память стабильна при длительной нагрузке, утечек не обнаружено.
+Нулевая потеря пакетов до **2 000 CPS** (~28 000 PPS) при полном жизненном цикле SIP-диалога, **<15% CPU** и **~15 МБ RAM**. GC stop-the-world паузы менее **1 мс** — в 400 раз меньше ёмкости буфера сокета, что гарантирует отсутствие потерь пакетов из-за GC. Память стабильна при длительной нагрузке, утечек не обнаружено.
 
 Микробенчмарки Go:
 
@@ -110,6 +112,7 @@ docker pull frzq/sip-exporter:latest
 * `SIP_EXPORTER_USER_AGENTS_CONFIG` — путь к YAML-конфигурации user-agents (опционально, см. [`examples/user_agents.yaml`](examples/user_agents.yaml))
 * `SIP_EXPORTER_RTP_CAPTURE` — включить захват и анализ RTP-медиа (по умолчанию true)
 * `SIP_EXPORTER_RTP_STREAM_TTL` — время жизни простаивающего RTP-потока до удаления, таймаут RFC 3550 §6.3.5 (по умолчанию 30s)
+* `SIP_EXPORTER_IGNORE_OUTGOING` — игнорировать исходящие пакеты, считать только входящие (по умолчанию false)
 
 Контейнер должен запускаться с `--privileged` и `--network host` (eBPF требует `CAP_BPF` и доступ к сетевому интерфейсу). Подробнее о безопасности — в [Безопасность](docs/SECURITY.ru.md).
 
@@ -154,7 +157,7 @@ services:
       - SIP_EXPORTER_INTERFACE=eth0
       - SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml
     volumes:
-      - ./carriers.yaml:/etc/sip-exporter/carriers.yaml:ro
+      - ./examples/carriers.yaml:/etc/sip-exporter/carriers.yaml:ro
 ```
 
 ```yaml
@@ -280,7 +283,7 @@ sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
 | `sip_exporter_rtp_packets_total` | counter | количество RTP-пакетов |
 | `sip_exporter_rtp_packets_lost_total` | counter | потерянные пакеты (по seq-gap RFC 3550) |
 | `sip_exporter_rtp_jitter_milliseconds` | histogram | межпакетный джиттер (RFC 3550 A.8) |
-| `sip_exporter_rtp_mos_score` | histogram | MOS-LQ по E-model ITU-T G.107 (1.0–5.0) |
+| `sip_exporter_rtp_mos_score` | histogram | MOS-LQ по E-model ITU-T G.107 (1.0–4.5) |
 | `sip_exporter_rtp_active_streams` | gauge | активные RTP-потоки, скоррелированные с диалогами |
 
 **Приватность:** захватывается только 12-байтовый заголовок RTP — голосовой payload обрезается в ядре (eBPF) до попадания в userspace, поэтому никакой аудиозаписи не происходит.
@@ -319,8 +322,8 @@ sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
 
 Набор тестов:
 - **Unit-тесты** — стандарт MC/DC, покрыта вся бизнес-логика
-- **105 E2E-тестов** — реальный SIP-трафик через SIPp + testcontainers-go, валидация всех метрик RFC 6076 и RFC 6035
-- **11 нагрузочных тестов** — пропускная способность PPS, VQ-отчёты, параллельные сессии, стабильность памяти, GC-паузы, latency скрейпа
+- **120 E2E-тестов** — реальный SIP-трафик через SIPp + testcontainers-go, валидация всех метрик RFC 6076, RFC 6035 и RTP
+- **13 нагрузочных тестов** — пропускная способность PPS, VQ-отчёты, параллельные сессии, стабильность памяти, GC-паузы, latency скрейпа
 
 ## Нагрузочное тестирование
 
