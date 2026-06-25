@@ -155,3 +155,25 @@ func TestStreamState_LossRate(t *testing.T) {
 	empty := &StreamState{}
 	require.InDelta(t, 0.0, empty.LossRate(), 0.0001)
 }
+
+func TestStreamState_ZeroClockRateSkipsJitter(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	s := newStreamState(0x11223344, "unknown", 0, t0)
+	s.Observe(newHeader(1, 160), t0)
+	s.Observe(newHeader(2, 320), t0.Add(45*time.Millisecond))
+
+	require.InDelta(t, 0.0, s.JitterMs(), 0.0001, "clockRate=0 must skip jitter calculation")
+}
+
+func TestStreamState_EarlyArrivalNegativeDAbs(t *testing.T) {
+	// Packet arrives earlier than timestamp spacing predicts → d<0 → abs.
+	// ts delta = 160 ticks (20ms), but arrival after only 10ms → arrivalDelta=80
+	// d = 80 - 160 = -80 → abs = 80
+	t0 := time.Unix(1000, 0)
+	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
+	s.Observe(newHeader(1, 160), t0)
+	s.Observe(newHeader(2, 320), t0.Add(10*time.Millisecond))
+
+	// jitterTicks = (80-0)/16 = 5.0; JitterMs = 5/8 = 0.625
+	require.InDelta(t, 0.625, s.JitterMs(), 0.001, "negative d must be abs'd correctly")
+}

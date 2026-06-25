@@ -77,12 +77,12 @@ func ieEff(p CodecParams, lossRate float64) float64 {
 }
 
 // jitterDiscardRate models packets discarded by the jitter buffer as equivalent loss.
-// Jitter up to jbMs is absorbed; beyond that, a growing fraction is discarded (capped).
-func jitterDiscardRate(jitterMs, jbMs float64) float64 {
-	if jitterMs <= jbMs {
+// Jitter up to jbMsDefault is absorbed; beyond that, a growing fraction is discarded (capped).
+func jitterDiscardRate(jitterMs float64) float64 {
+	if jitterMs <= jbMsDefault {
 		return 0
 	}
-	r := (jitterMs - jbMs) / jbMs
+	r := (jitterMs - jbMsDefault) / jbMsDefault
 	if r > discardCap {
 		r = discardCap
 	}
@@ -92,7 +92,7 @@ func jitterDiscardRate(jitterMs, jbMs float64) float64 {
 // ComputeMOS estimates MOS-LQ from codec, measured loss rate (fraction) and jitter (ms).
 func ComputeMOS(codec string, lossRate, jitterMs float64) float64 {
 	p := codecParams(codec)
-	effLoss := lossRate + jitterDiscardRate(jitterMs, jbMsDefault)
+	effLoss := lossRate + jitterDiscardRate(jitterMs)
 	if effLoss > 1 {
 		effLoss = 1
 	} else if effLoss < 0 {

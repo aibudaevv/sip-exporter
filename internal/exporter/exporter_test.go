@@ -43,6 +43,9 @@ type mockMetricser struct {
 	vqCarrier                 string
 	vqUAType                  string
 	vqReport                  *vq.SessionReport
+	rtpPacketsCalls           int
+	rtpLossCalls              int
+	rtpLossValue              uint64
 }
 
 func (m *mockMetricser) UpdateSessionsByCarrierAndUA(_ map[string]map[string]int) {}
@@ -128,8 +131,13 @@ func (m *mockMetricser) UpdateVQReport(carrier string, uaType string, report *vq
 	m.vqReport = report
 }
 
-func (m *mockMetricser) UpdateRTPPackets(string, string, string)                     {}
-func (m *mockMetricser) UpdateRTPLoss(string, string, string, uint64)                {}
+func (m *mockMetricser) UpdateRTPPackets(_, _, _ string) {
+	m.rtpPacketsCalls++
+}
+func (m *mockMetricser) UpdateRTPLoss(_, _, _ string, lost uint64) {
+	m.rtpLossCalls++
+	m.rtpLossValue = lost
+}
 func (m *mockMetricser) UpdateRTPJitter(string, string, string, float64)             {}
 func (m *mockMetricser) UpdateRTPMOS(string, string, string, float64)                {}
 func (m *mockMetricser) UpdateRTPActiveStreams(map[string]map[string]map[string]int) {}
@@ -3676,6 +3684,37 @@ func buildUDPPacket(srcPort, dstPort uint16) []byte {
 	return pkt
 }
 
+func buildVLANUDPPacket(srcPort, dstPort uint16) []byte {
+	pkt := make([]byte, 46) // 14 eth + 4 vlan + 20 ip + 8 udp
+	// Ethernet with VLAN 802.1Q
+	pkt[12] = 0x81 // VLAN ethertype hi
+	pkt[13] = 0x00 // VLAN ethertype lo
+	// VLAN tag (4 bytes at 14-17)
+	pkt[16] = 0x08 // inner ethertype IPv4 hi
+	pkt[17] = 0x00 // inner ethertype lo
+	// IPv4 at offset 18
+	pkt[18] = 0x45 // version=4, IHL=5
+	pkt[20] = 0x00
+	pkt[21] = 28
+	pkt[27] = 17 // protocol = UDP
+	// UDP at offset 38
+	binary.BigEndian.PutUint16(pkt[38:40], srcPort)
+	binary.BigEndian.PutUint16(pkt[40:42], dstPort)
+	return pkt
+}
+
+func buildLargeIHLPacket(srcPort, dstPort uint16) []byte {
+	// 42-byte packet with IHL=15 (60-byte IP header) → udpOff=74 > len → too-short guard
+	pkt := make([]byte, 42)
+	pkt[12] = 0x08
+	pkt[13] = 0x00
+	pkt[14] = 0x4F // version=4, IHL=15
+	pkt[23] = 17
+	binary.BigEndian.PutUint16(pkt[34:36], srcPort)
+	binary.BigEndian.PutUint16(pkt[36:38], dstPort)
+	return pkt
+}
+
 func TestIsSIPPacket(t *testing.T) {
 	e := &exporter{sipPort: 5060, sipsPort: 5061}
 
@@ -3690,6 +3729,9 @@ func TestIsSIPPacket(t *testing.T) {
 		{"src 5061", buildUDPPacket(5061, 12345), true},
 		{"RTP port 5004", buildUDPPacket(12345, 5004), false},
 		{"RTP port 10000", buildUDPPacket(10000, 20000), false},
+		{"VLAN SIP", buildVLANUDPPacket(12345, 5060), true},
+		{"VLAN RTP", buildVLANUDPPacket(12345, 5004), false},
+		{"large IHL too short", buildLargeIHLPacket(12345, 5060), true},
 		{"too short", make([]byte, 10), true},
 		{"empty", nil, true},
 	}
@@ -3720,4 +3762,39 @@ func TestSendPacket_RTPDropWhenFull(t *testing.T) {
 	}()
 	sipPkt := buildUDPPacket(12345, 5060)
 	require.False(t, e.sendPacket(sipPkt), "SIP sendPacket should return false on done")
+}
+
+func TestSendPacket_SuccessPaths(t *testing.T) {
+	t.Run("SIP success", func(t *testing.T) {
+		e := &exporter{
+			messages: make(chan []byte, 1),
+			done:     make(chan struct{}),
+			sipPort:  5060, sipsPort: 5061,
+		}
+		sipPkt := buildUDPPacket(12345, 5060)
+		require.True(t, e.sendPacket(sipPkt))
+		require.Len(t, e.messages, 1)
+	})
+
+	t.Run("RTP success", func(t *testing.T) {
+		e := &exporter{
+			messages: make(chan []byte, 1),
+			done:     make(chan struct{}),
+			sipPort:  5060, sipsPort: 5061,
+		}
+		rtpPkt := buildUDPPacket(12345, 5004)
+		require.True(t, e.sendPacket(rtpPkt))
+		require.Len(t, e.messages, 1)
+	})
+
+	t.Run("RTP done signal", func(t *testing.T) {
+		e := &exporter{
+			messages: make(chan []byte), // zero-capacity → always full
+			done:     make(chan struct{}),
+			sipPort:  5060, sipsPort: 5061,
+		}
+		close(e.done)
+		rtpPkt := buildUDPPacket(12345, 5004)
+		require.False(t, e.sendPacket(rtpPkt), "RTP sendPacket should return false on done")
+	})
 }

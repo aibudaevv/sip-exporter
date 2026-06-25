@@ -83,3 +83,96 @@ func TestRTP_CorrelationViaSDP(t *testing.T) {
 		require.Equal(t, "PCMU", s.Codec)
 	}
 }
+
+func makeRTPPayloadSeq(ssrc uint32, seq uint16) []byte {
+	p := make([]byte, 12)
+	p[0] = 0x80
+	p[1] = 0x00
+	binary.BigEndian.PutUint16(p[2:4], seq)
+	binary.BigEndian.PutUint32(p[4:8], 160)
+	binary.BigEndian.PutUint32(p[8:12], ssrc)
+	return p
+}
+
+// TestRTP_HandleRTP_Branches exercises the four decision branches in handleRTP:
+// ParseHeader error (drop), Counted=true (UpdateRTPPackets), Counted=false (skip),
+// and Lost>0 (UpdateRTPLoss).
+func TestRTP_HandleRTP_Branches(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+	e := &exporter{
+		services:       services{metricser: mm, dialoger: md},
+		inviteTracker:  make(map[string]inviteEntry),
+		inviteSDP:      make(map[string]inviteSDPEntity),
+		optionsTracker: make(map[string]optionsEntry),
+		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
+	}
+	e.mediaTracker.Register("10.0.0.1", 5004, mediatracker.MediaLabels{
+		Carrier:    "c",
+		UAType:     "u",
+		CallID:     "call-x",
+		SDPCodecs:  map[uint8]string{0: "PCMU"},
+		ClockRates: map[uint8]uint32{0: 8000},
+	})
+
+	// 1. ParseHeader error: 5-byte payload with V=2 but too short
+	shortPayload := []byte{0x80, 0x00, 0x00, 0x01, 0x00}
+	e.handleRTP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(0, 0, 0, 0), 0, shortPayload)
+	require.Equal(t, 0, e.mediaTracker.StreamCount(), "invalid RTP header must be dropped")
+	require.Equal(t, 0, mm.rtpPacketsCalls, "ParseHeader error must not call UpdateRTPPackets")
+
+	// 2. First packet: Counted=true → UpdateRTPPackets called, Lost=0
+	e.handleRTP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(0, 0, 0, 0), 0, makeRTPPayloadSeq(0xAA, 1))
+	require.Equal(t, 1, mm.rtpPacketsCalls, "first packet must be counted")
+	require.Equal(t, 0, mm.rtpLossCalls, "first packet must not report loss")
+
+	// 3. Gap packet (seq=5): Counted=true, Lost>0 → UpdateRTPLoss called
+	e.handleRTP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(0, 0, 0, 0), 0, makeRTPPayloadSeq(0xAA, 5))
+	require.Equal(t, 2, mm.rtpPacketsCalls)
+	require.Equal(t, 1, mm.rtpLossCalls, "gap must report loss")
+	require.Equal(t, uint64(3), mm.rtpLossValue)
+
+	// 4. Duplicate (seq=5): Counted=false → UpdateRTPPackets NOT called
+	e.handleRTP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(0, 0, 0, 0), 0, makeRTPPayloadSeq(0xAA, 5))
+	require.Equal(t, 2, mm.rtpPacketsCalls, "duplicate must not be counted")
+}
+
+// TestParseRawPacket_RTPDetection verifies that parseRawPacket routes
+// packets with RTP version-2 prefix byte to handleRTP (not SIP parsing).
+func TestParseRawPacket_RTPDetection(t *testing.T) {
+	mm := &mockMetricser{}
+	e := &exporter{
+		services:       services{metricser: mm, dialoger: &mockDialoger{}},
+		inviteTracker:  make(map[string]inviteEntry),
+		inviteSDP:      make(map[string]inviteSDPEntity),
+		optionsTracker: make(map[string]optionsEntry),
+		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
+	}
+	e.mediaTracker.Register("10.0.0.1", 5004, mediatracker.MediaLabels{
+		Carrier: "c", UAType: "u", CallID: "call-r",
+		SDPCodecs:  map[uint8]string{0: "PCMU"},
+		ClockRates: map[uint8]uint32{0: 8000},
+	})
+
+	// Build raw Ethernet/IPv4/UDP/RTP packet
+	pkt := make([]byte, 54) // 14 eth + 20 ip + 8 udp + 12 rtp
+	pkt[12] = 0x08          // IPv4
+	pkt[13] = 0x00
+	pkt[14] = 0x45 // IPv4, IHL=5
+	pkt[23] = 17   // UDP
+	pkt[26] = 10   // src IP 10.0.0.9
+	pkt[30] = 10   // dst IP 10.0.0.1 (registered endpoint)
+	pkt[31] = 0
+	pkt[32] = 0
+	pkt[33] = 1
+	binary.BigEndian.PutUint16(pkt[34:36], 12345) // src port
+	binary.BigEndian.PutUint16(pkt[36:38], 5004)  // dst port (RTP endpoint)
+	// RTP header at offset 42
+	rtpHdr := makeRTPPayloadSeq(0xBB, 1)
+	copy(pkt[42:], rtpHdr)
+
+	errType, err := e.parseRawPacket(pkt)
+	require.NoError(t, err, "RTP packet must not produce parse error")
+	require.Empty(t, errType)
+	require.Equal(t, 1, e.mediaTracker.StreamCount(), "RTP must be observed via parseRawPacket")
+}

@@ -15,8 +15,10 @@ func TestCodecName_StaticPT(t *testing.T) {
 		{"PCMU G.711u", 0, "PCMU"},
 		{"PCMA G.711a", 8, "PCMA"},
 		{"G.722", 9, "G.722"},
+		{"G.728", 15, "G.728"},
 		{"G.729", 18, "G.729"},
 		{"G.723", 4, "G.723"},
+		{"CN", 13, "CN"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

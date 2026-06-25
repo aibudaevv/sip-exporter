@@ -216,3 +216,35 @@ func TestTracker_StreamRestartNoUnderflow(t *testing.T) {
 	// With fix: delta clamped to 0
 	require.Equal(t, uint64(0), res.Lost, "stream restart must not underflow ObserveResult.Lost")
 }
+
+func TestTracker_ClockRateFallback(t *testing.T) {
+	// PT absent from ClockRates → default 8000 (crOk=F)
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, MediaLabels{
+		Carrier: "c", UAType: "u", CallID: "call-1",
+		SDPCodecs:  map[uint8]string{0: "PCMU"},
+		ClockRates: map[uint8]uint32{8: 8000}, // PT 0 absent
+	})
+	t0 := time.Unix(1000, 0)
+	_, ok := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(1, 160), t0)
+	require.True(t, ok)
+	stats := tr.Snapshot()
+	require.Len(t, stats, 1)
+	// clockRate defaults to 8000 → JitterMs can be computed (not stuck at 0)
+	require.Equal(t, "PCMU", stats[0].Codec)
+}
+
+func TestTracker_ZeroClockRateFallback(t *testing.T) {
+	// PT in ClockRates but rate=0 → default 8000 (cr>0=F)
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, MediaLabels{
+		Carrier: "c", UAType: "u", CallID: "call-1",
+		SDPCodecs:  map[uint8]string{0: "PCMU"},
+		ClockRates: map[uint8]uint32{0: 0}, // rate=0
+	})
+	t0 := time.Unix(1000, 0)
+	_, ok := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(1, 160), t0)
+	require.True(t, ok)
+	stats := tr.Snapshot()
+	require.Len(t, stats, 1)
+}

@@ -64,3 +64,33 @@ func TestComputeMOS_LossClampedNegative(t *testing.T) {
 	require.False(t, math.IsNaN(mos))
 	require.InDelta(t, ComputeMOS("PCMU", 0, 0), mos, 0.0001)
 }
+
+func TestJitterDiscardRate_UncappedRegion(t *testing.T) {
+	// jitter 75ms → (75-60)/60 = 0.25 — within uncapped region (0 < r < 0.5)
+	r := jitterDiscardRate(75)
+	require.InDelta(t, 0.25, r, 0.001)
+	// jitter exactly at JB threshold → 0
+	require.InDelta(t, 0.0, jitterDiscardRate(60), 0.0001)
+	// jitter above cap → capped at 0.5
+	require.InDelta(t, 0.5, jitterDiscardRate(150), 0.0001)
+}
+
+func TestComputeMOS_G726_LowerThanPCMU(t *testing.T) {
+	pcmu := ComputeMOS("PCMU", 0, 0)
+	g726 := ComputeMOS("G.726-32", 0, 0)
+	require.Less(t, g726, pcmu, "G.726-32 (Ie=7) must score lower than G.711 (Ie=0)")
+}
+
+func TestComputeMOS_G723_LowerThanG726(t *testing.T) {
+	g726 := ComputeMOS("G.726-32", 0, 0)
+	g723 := ComputeMOS("G.723", 0, 0)
+	require.Less(t, g723, g726, "G.723 (Ie=15) must score lower than G.726 (Ie=7)")
+}
+
+func TestComputeMOS_HighLossClampsEffLoss(t *testing.T) {
+	// loss=0.6 + jitter-discard=0.5 → effLoss=1.1 → clamped to 1.0
+	// Without clamp: effLoss=1.1 would produce negative R → MOS < 1.0
+	// With clamp: effLoss=1.0 → R = 93.2 - ieEff(1.0) ≈ low but ≥ 1.0
+	mos := ComputeMOS("PCMU", 0.6, 150)
+	require.GreaterOrEqual(t, mos, 1.0, "effLoss>1 must clamp, MOS must not go below 1.0")
+}
