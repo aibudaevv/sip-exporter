@@ -58,6 +58,20 @@ func TestStreamState_ReorderNotLoss(t *testing.T) {
 	require.Equal(t, uint64(3), s.packetsLost)
 }
 
+func TestStreamState_ReorderNoDoubleCountLoss(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
+	s.Observe(newHeader(1, 160), t0)                          // first
+	s.Observe(newHeader(5, 320), t0.Add(20*time.Millisecond)) // gap: 3 lost (2,3,4)
+	s.Observe(newHeader(3, 640), t0.Add(40*time.Millisecond)) // reorder
+	s.Observe(newHeader(6, 800), t0.Add(60*time.Millisecond)) // forward from maxSeq=5
+
+	// Without fix: lastSeq=3 after reorder → delta=3 → lost+=2 → lost=5 (double-count)
+	// With fix: maxSeq=5 after reorder → delta=1 → lost stays 3
+	require.Equal(t, uint64(3), s.packetsLost, "reorder must not cause loss double-count")
+	require.Equal(t, uint64(3), s.packetsTotal)
+}
+
 func TestStreamState_DuplicateIgnored(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)

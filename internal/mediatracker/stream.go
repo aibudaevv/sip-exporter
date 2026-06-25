@@ -19,7 +19,7 @@ type StreamState struct {
 	SSRC         uint32
 	Codec        string
 	clockRate    uint32
-	lastSeq      uint16
+	maxSeq       uint16
 	lastTS       uint32
 	lastArrival  time.Time
 	jitterTicks  float64
@@ -43,11 +43,12 @@ func newStreamState(ssrc uint32, codec string, clockRate uint32, now time.Time) 
 func (s *StreamState) Observe(h rtp.Header, arrival time.Time) {
 	if !s.hasPrev {
 		s.packetsTotal++
+		s.maxSeq = h.SequenceNumber
 		s.saveBaseline(h, arrival)
 		return
 	}
 
-	delta := h.SequenceNumber - s.lastSeq // uint16, wraps around 0xFFFF→0x0000
+	delta := h.SequenceNumber - s.maxSeq // uint16, wraps around 0xFFFF→0x0000
 
 	switch {
 	case delta >= seqHalf:
@@ -59,6 +60,7 @@ func (s *StreamState) Observe(h rtp.Header, arrival time.Time) {
 		s.jitterTicks = 0
 		s.packetsLost = 0
 		s.packetsTotal = 1
+		s.maxSeq = h.SequenceNumber
 	case delta > 0:
 		// normal forward
 		s.updateJitter(h, arrival)
@@ -66,6 +68,7 @@ func (s *StreamState) Observe(h rtp.Header, arrival time.Time) {
 		if delta > 1 {
 			s.packetsLost += uint64(delta - 1)
 		}
+		s.maxSeq = h.SequenceNumber
 	default:
 		// delta == 0: duplicate/retransmit — update timing, ignore for loss
 		s.updateJitter(h, arrival)
@@ -74,10 +77,11 @@ func (s *StreamState) Observe(h rtp.Header, arrival time.Time) {
 	s.saveBaseline(h, arrival)
 }
 
-// saveBaseline records the current packet as the reference for the next one.
+// saveBaseline records timing reference for jitter (arrival, timestamp) and
+// marks the stream as initialized. maxSeq is NOT set here — it tracks the
+// highest forward sequence number and is only updated on forward progress.
 func (s *StreamState) saveBaseline(h rtp.Header, arrival time.Time) {
 	s.lastArrival = arrival
-	s.lastSeq = h.SequenceNumber
 	s.lastTS = h.Timestamp
 	s.hasPrev = true
 }
