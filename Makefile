@@ -2,7 +2,7 @@ version := $(shell cat VERSION)
 GOLANGCI_LINT_VERSION := v2.7.1
 .DEFAULT_GOAL := docker_build
 
-.PHONY: build docker_build ebpf_compile go_build clean ebpf_log lint lint-deps vet imports test test-e2e test-e2e-run test-rtp test-load test-load-run test-load-update-baseline test-all vulncheck trivy-fs trivy-image security
+.PHONY: build docker_build ebpf_compile go_build clean ebpf_log lint lint-deps vet imports test test-e2e test-e2e-run test-rtp test-load test-load-run test-load-rtp test-load-update-baseline test-all vulncheck trivy-fs trivy-image security
 
 build: ebpf_compile go_build
 docker_build:
@@ -51,6 +51,10 @@ test-load: docker_build
 test-load-run: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
 		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -timeout 30m -run "$(TEST)" ./test/e2e/load/...
+
+test-load-rtp: docker_build
+	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -timeout 10m -run 'TestLoad_FullCallWithRTP|TestBenchmark_MemoryPerRTPStream' ./test/e2e/load/...
 
 test-load-update-baseline:
 	cp test/e2e/load/load_result.json test/e2e/load/baseline.json
