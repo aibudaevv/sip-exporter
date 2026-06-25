@@ -2,6 +2,7 @@ package exporter
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"strings"
 	"testing"
@@ -3655,4 +3656,68 @@ func TestExporter_GracefulShutdown(t *testing.T) {
 
 	_, ok := <-e.messages
 	require.False(t, ok, "messages channel should be closed after Close()")
+}
+
+// buildUDPPacket constructs a minimal Ethernet/IPv4/UDP packet with the given
+// src/dst ports for testing isSIPPacket classification.
+func buildUDPPacket(srcPort, dstPort uint16) []byte {
+	pkt := make([]byte, 42) // 14 eth + 20 ip + 8 udp
+	// Ethernet
+	pkt[12] = 0x08 // IPv4
+	pkt[13] = 0x00
+	// IPv4
+	pkt[14] = 0x45 // version=4, IHL=5
+	pkt[16] = 0x00 // total length hi
+	pkt[17] = 28   // total length lo (20 ip + 8 udp)
+	pkt[23] = 17   // protocol = UDP
+	// UDP
+	binary.BigEndian.PutUint16(pkt[34:36], srcPort)
+	binary.BigEndian.PutUint16(pkt[36:38], dstPort)
+	return pkt
+}
+
+func TestIsSIPPacket(t *testing.T) {
+	e := &exporter{sipPort: 5060, sipsPort: 5061}
+
+	tests := []struct {
+		name string
+		pkt  []byte
+		want bool
+	}{
+		{"dst 5060", buildUDPPacket(12345, 5060), true},
+		{"dst 5061", buildUDPPacket(12345, 5061), true},
+		{"src 5060", buildUDPPacket(5060, 12345), true},
+		{"src 5061", buildUDPPacket(5061, 12345), true},
+		{"RTP port 5004", buildUDPPacket(12345, 5004), false},
+		{"RTP port 10000", buildUDPPacket(10000, 20000), false},
+		{"too short", make([]byte, 10), true},
+		{"empty", nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, e.isSIPPacket(tt.pkt))
+		})
+	}
+}
+
+func TestSendPacket_RTPDropWhenFull(t *testing.T) {
+	e := &exporter{
+		messages: make(chan []byte, 1),
+		done:     make(chan struct{}),
+		sipPort:  5060,
+		sipsPort: 5061,
+	}
+	e.messages <- make([]byte, 1) // fill the channel
+
+	// RTP packet (non-blocking) → dropped, sendPacket returns true
+	rtpPkt := buildUDPPacket(12345, 5004)
+	require.True(t, e.sendPacket(rtpPkt), "RTP sendPacket should not block")
+
+	// SIP packet (blocking) → would block, but we signal done to unblock
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		close(e.done)
+	}()
+	sipPkt := buildUDPPacket(12345, 5060)
+	require.False(t, e.sendPacket(sipPkt), "SIP sendPacket should return false on done")
 }

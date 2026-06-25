@@ -108,6 +108,8 @@ type (
 		done            chan struct{}
 		wg              sync.WaitGroup
 		closeOnce       sync.Once
+		sipPort         uint16
+		sipsPort        uint16
 		services        services
 		carrierResolver *carriers.Resolver
 		uaClassifier    *ua.Classifier
@@ -182,7 +184,7 @@ func (e *exporter) Initialize(
 		return fmt.Errorf("failed to load BPF collection: %w", err)
 	}
 
-	e.collection = collection
+	e.collection, e.sipPort, e.sipsPort = collection, uint16(sipPort), uint16(sipsPort)
 
 	prog := collection.Programs["bpf_socket_filter"]
 	if prog == nil {
@@ -466,12 +468,56 @@ func (e *exporter) readSocket() {
 
 		zap.L().Debug("packet from socket", zap.Int("len", n))
 
-		select {
-		case e.messages <- packet:
-		case <-e.done:
+		if !e.sendPacket(packet) {
 			return
 		}
 	}
+}
+
+// sendPacket routes a packet to the messages channel. SIP packets (port
+// 5060/5061) use a blocking send — they must not be starved by RTP flood.
+// All other packets (RTP) use a non-blocking send — dropped when the channel
+// is full. Returns false if shutdown was signaled.
+func (e *exporter) sendPacket(packet []byte) bool {
+	if e.isSIPPacket(packet) {
+		select {
+		case e.messages <- packet:
+		case <-e.done:
+			return false
+		}
+		return true
+	}
+	select {
+	case e.messages <- packet:
+	case <-e.done:
+		return false
+	default:
+	}
+	return true
+}
+
+// isSIPPacket does a quick L4 port check to classify a packet as SIP (port
+// 5060/5061) or RTP/other. SIP packets use a blocking channel send (must not
+// be starved by RTP flood); all other packets use a non-blocking send (dropped
+// if the channel is full). When headers can't be parsed, defaults to true
+// (blocking) to avoid dropping potentially critical traffic.
+func (e *exporter) isSIPPacket(packet []byte) bool {
+	if len(packet) < minRawPacketLen {
+		return true
+	}
+	offset := ethHeaderLen
+	if packet[12] == vlanEthTypeHi && packet[13] == vlanEthTypeLo {
+		offset = vlanHeaderLen
+	}
+	ihl := int(packet[offset]&ipV4HdrLenMask) * ipV4HdrLenShift
+	udpOff := offset + ihl
+	if len(packet) < udpOff+udpHeaderLen {
+		return true
+	}
+	srcPort := binary.BigEndian.Uint16(packet[udpOff : udpOff+2])
+	dstPort := binary.BigEndian.Uint16(packet[udpOff+2 : udpOff+4])
+	return srcPort == e.sipPort || srcPort == e.sipsPort ||
+		dstPort == e.sipPort || dstPort == e.sipsPort
 }
 
 // parseRawPacket parses raw L2 packet. Returns error type (l2, l3, l4, sip) and error.
