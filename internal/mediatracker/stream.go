@@ -87,10 +87,10 @@ func (s *StreamState) updateJitter(h rtp.Header, arrival time.Time) {
 		return
 	}
 	// Inter-arrival delta in RTP timestamp units (avoid overflow of absolute time).
-	// RTP timestamps are monotonic within a stream, so the wrapped uint32 subtraction
-	// already yields the correct forward delta; widening to int64 needs no cast.
+	// The uint32 subtraction wraps correctly for forward deltas; int32 reinterprets
+	// backward deltas (out-of-order arrivals) as small negatives instead of ~4 billion.
 	arrivalDeltaTicks := arrival.Sub(s.lastArrival).Nanoseconds() * int64(s.clockRate) / int64(time.Second)
-	tsDelta := int64(h.Timestamp - s.lastTS)
+	tsDelta := int64(int32(h.Timestamp - s.lastTS))
 	d := arrivalDeltaTicks - tsDelta
 	if d < 0 {
 		d = -d

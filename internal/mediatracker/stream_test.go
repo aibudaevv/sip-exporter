@@ -117,6 +117,21 @@ func TestStreamState_JitterRFC3550(t *testing.T) {
 	require.InDelta(t, 0.3125, s.JitterMs(), 0.0001)
 }
 
+func TestStreamState_ReorderJitterNoWraparound(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
+	// seq 1 → 3: forward gap (1 lost), perfect spacing (d=0, jitter stays 0)
+	s.Observe(newHeader(1, 160), t0)
+	s.Observe(newHeader(3, 480), t0.Add(40*time.Millisecond))
+	// seq 2: reorder (ts=320 < lastTS=480). uint32 subtraction 320-480 wraps.
+	s.Observe(newHeader(2, 320), t0.Add(50*time.Millisecond))
+
+	// arrivalDeltaTicks = 10ms*8 = 80; tsDelta(int32) = -160; d = |80+160| = 240
+	// jitterTicks = (240-0)/16 = 15.0; JitterMs = 15/8 = 1.875
+	require.InDelta(t, 1.875, s.JitterMs(), 0.001,
+		"reorder timestamp delta must be signed (int32), not wrapped uint32")
+}
+
 func TestStreamState_LossRate(t *testing.T) {
 	// LossRate = lost / (received + lost) = 5 / (100 + 5)
 	s := &StreamState{packetsTotal: 100, packetsLost: 5}
