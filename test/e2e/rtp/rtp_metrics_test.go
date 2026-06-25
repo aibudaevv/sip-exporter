@@ -37,7 +37,7 @@ func getRTPMetric(t *testing.T, endpoint, name string) float64 {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 
-	pattern := `^` + name + `\{[^}]*` + regexp.QuoteMeta(pcmaFilter) + `[^}]*\}\s+([0-9.]+)`
+	pattern := `^` + name + `\{[^}]*` + regexp.QuoteMeta(pcmaFilter) + `[^}]*\}\s+(\S+)`
 	re := regexp.MustCompile(pattern)
 	for _, line := range strings.Split(string(body), "\n") {
 		m := re.FindStringSubmatch(strings.TrimSpace(line))
