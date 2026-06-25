@@ -2,6 +2,7 @@ package exporter
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -16,6 +17,9 @@ import (
 
 	"github.com/aibudaevv/sip-exporter/internal/carriers"
 	"github.com/aibudaevv/sip-exporter/internal/dto"
+	"github.com/aibudaevv/sip-exporter/internal/mediatracker"
+	"github.com/aibudaevv/sip-exporter/internal/rtp"
+	"github.com/aibudaevv/sip-exporter/internal/sdp"
 	"github.com/aibudaevv/sip-exporter/internal/service"
 	"github.com/aibudaevv/sip-exporter/internal/ua"
 	"github.com/aibudaevv/sip-exporter/internal/vq"
@@ -31,9 +35,11 @@ const (
 	defaultRegisterTTL = 60 * time.Second
 	defaultInviteTTL   = 60 * time.Second
 	defaultOptionsTTL  = 60 * time.Second
+	rtpStreamTTL       = 30 * time.Second // idle RTP stream expiry
 
 	messagesChanSize = 10_000
 	socketRecvBufMB  = 4
+	socketRcvTimeo   = 1 * time.Second
 
 	ethHeaderLen     = 14
 	vlanEthTypeHi    = 0x81
@@ -55,14 +61,18 @@ const (
 	parseErrTypeL4  = "l4"
 	parseErrTypeSIP = "sip"
 
-	sipPartsCount         = 3
-	minSIPParts           = 2
-	tagPrefixLen          = 5
-	nanosPerMs    float64 = 1e6
-	htonsShift            = 8
-	htonsMask     uint16  = 0xFF00
-	miB                   = 1024 * 1024
-	defaultUAType         = "other"
+	rtpVersionMask    = 0xC0
+	rtpVersion2Prefix = 0x80
+
+	sipPartsCount          = 3
+	minSIPParts            = 2
+	tagPrefixLen           = 5
+	nanosPerMs     float64 = 1e6
+	htonsShift             = 8
+	htonsMask      uint16  = 0xFF00
+	miB                    = 1024 * 1024
+	defaultUAType          = "other"
+	defaultCarrier         = "other"
 )
 
 type (
@@ -86,18 +96,31 @@ type (
 		uaType    string
 	}
 
+	inviteSDPEntity struct {
+		body      []byte
+		timestamp time.Time
+	}
+
 	exporter struct {
 		collection      *ebpf.Collection
 		sock            int
 		messages        chan []byte
+		done            chan struct{}
+		wg              sync.WaitGroup
+		closeOnce       sync.Once
+		sipPort         uint16
+		sipsPort        uint16
 		services        services
 		carrierResolver *carriers.Resolver
 		uaClassifier    *ua.Classifier
 		vqHandler       *vq.Handler
+		mediaTracker    *mediatracker.Tracker
 		registerTracker map[string]registerEntry
 		registerMutex   sync.RWMutex
 		inviteTracker   map[string]inviteEntry
 		inviteMutex     sync.RWMutex
+		inviteSDP       map[string]inviteSDPEntity
+		inviteSDPMutex  sync.Mutex
 		optionsTracker  map[string]optionsEntry
 		optionsMutex    sync.RWMutex
 		initialized     atomic.Bool
@@ -107,7 +130,13 @@ type (
 		dialoger  service.Dialoger
 	}
 	Exporter interface {
-		Initialize(interfaceName string, path string, sipPort, sipsPort int, ignoreOutgoing bool) error
+		Initialize(
+			interfaceName string,
+			path string,
+			sipPort, sipsPort int,
+			ignoreOutgoing, rtpCapture bool,
+			rtpStreamTTL time.Duration,
+		) error
 		IsAlive() bool
 		Close()
 	}
@@ -127,43 +156,44 @@ func NewExporter(
 		carrierResolver: resolver,
 		uaClassifier:    classifier,
 		vqHandler:       vq.NewHandler(m),
+		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 		messages:        make(chan []byte, messagesChanSize),
+		done:            make(chan struct{}),
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
+		inviteSDP:       make(map[string]inviteSDPEntity),
 		optionsTracker:  make(map[string]optionsEntry),
 	}
 }
 
-func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPort int, ignoreOutgoing bool) error {
+func (e *exporter) Initialize(
+	interfaceName string, path string,
+	sipPort, sipsPort int,
+	ignoreOutgoing, rtpCapture bool,
+	rtpStreamTTL time.Duration,
+) error {
 	if syscall.Geteuid() != 0 {
 		return ErrUserNotRoot
 	}
+
+	// Apply the config-driven RTP stream expiry (RFC 3550 §6.3.5 idle-timeout).
+	e.mediaTracker.SetTTL(rtpStreamTTL)
 
 	collection, err := ebpf.LoadCollection(path)
 	if err != nil {
 		return fmt.Errorf("failed to load BPF collection: %w", err)
 	}
 
-	e.collection = collection
+	e.collection, e.sipPort, e.sipsPort = collection, uint16(sipPort), uint16(sipsPort)
 
 	prog := collection.Programs["bpf_socket_filter"]
 	if prog == nil {
 		return errors.New("failed to find BPF program: bpf_socket_filter")
 	}
 
-	// Configure SIP ports in eBPF map
-	sipPortsMap := collection.Maps["sip_ports"]
-	if sipPortsMap == nil {
-		return errors.New("failed to find sip_ports map")
-	}
-
-	keySIP := uint32(0)
-	keySIPS := uint32(1)
-	if updateErr := sipPortsMap.Update(keySIP, uint16(sipPort), ebpf.UpdateAny); updateErr != nil { //nolint:gosec // port validated by config
-		return fmt.Errorf("failed to set SIP port: %w", updateErr)
-	}
-	if updateErr := sipPortsMap.Update(keySIPS, uint16(sipsPort), ebpf.UpdateAny); updateErr != nil { //nolint:gosec // port validated by config
-		return fmt.Errorf("failed to set SIPS port: %w", updateErr)
+	// Configure eBPF maps (SIP ports + RTP capture flag)
+	if err = e.configureEBPFMaps(collection, sipPort, sipsPort, rtpCapture); err != nil {
+		return err
 	}
 
 	// Create AF_PACKET socket with SOCK_RAW
@@ -189,6 +219,11 @@ func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPo
 	zap.L().Info("socket receive buffer configured",
 		zap.Int("requested_bytes", socketRecvBufSize),
 		zap.Int("actual_bytes", actualBufSize))
+
+	if setErr := unix.SetsockoptTimeval(sock, unix.SOL_SOCKET, unix.SO_RCVTIMEO,
+		&unix.Timeval{Sec: int64(socketRcvTimeo / time.Second), Usec: int64(socketRcvTimeo % time.Second / time.Microsecond)}); setErr != nil {
+		return fmt.Errorf("failed to set SO_RCVTIMEO: %w", setErr)
+	}
 
 	ifaceName := interfaceName
 	iface, err := net.InterfaceByName(ifaceName)
@@ -225,11 +260,40 @@ func (e *exporter) Initialize(interfaceName string, path string, sipPort, sipsPo
 		zap.Int("sips_port", sipsPort))
 
 	go e.readPackets()
+	e.wg.Add(1)
 	go e.readSocket()
 	go e.sipDialogMetricsUpdate()
 
 	e.initialized.Store(true)
 
+	return nil
+}
+
+// configureEBPFMaps populates the eBPF SIP-ports map and the RTP-capture flag map.
+func (e *exporter) configureEBPFMaps(collection *ebpf.Collection, sipPort, sipsPort int, rtpCapture bool) error {
+	sipPortsMap := collection.Maps["sip_ports"]
+	if sipPortsMap == nil {
+		return errors.New("failed to find sip_ports map")
+	}
+	if err := sipPortsMap.Update(uint32(0), uint16(sipPort), ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("failed to set SIP port: %w", err)
+	}
+	if err := sipPortsMap.Update(uint32(1), uint16(sipsPort), ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("failed to set SIPS port: %w", err)
+	}
+
+	rtpConfigMap := collection.Maps["rtp_config"]
+	if rtpConfigMap == nil {
+		return errors.New("failed to find rtp_config map")
+	}
+	rtpValue := uint8(0)
+	if rtpCapture {
+		rtpValue = 1
+	}
+	if err := rtpConfigMap.Update(uint32(0), rtpValue, ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("failed to set RTP capture config: %w", err)
+	}
+	zap.L().Info("RTP capture configured", zap.Bool("enabled", rtpCapture))
 	return nil
 }
 
@@ -241,11 +305,11 @@ func extractIPs(ipHeader []byte) (net.IP, net.IP) {
 
 func (e *exporter) resolveCarrier(ipHeader []byte) string {
 	if e.carrierResolver == nil {
-		return "other"
+		return defaultCarrier
 	}
 	srcIP, dstIP := extractIPs(ipHeader)
 	carrier := e.carrierResolver.Lookup(srcIP)
-	if carrier == "other" {
+	if carrier == defaultCarrier {
 		carrier = e.carrierResolver.Lookup(dstIP)
 	}
 	return carrier
@@ -257,20 +321,28 @@ func (e *exporter) resolveUA(userAgent []byte) string {
 
 func (e *exporter) sipDialogMetricsUpdate() {
 	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
 
 	e.services.metricser.UpdateChannelCapacity(cap(e.messages))
 
 	for {
-		<-ticker.C
+		select {
+		case <-e.done:
+			return
+		case <-ticker.C:
+		}
 		results := e.services.dialoger.Cleanup()
 		e.cleanupRegisterTracker()
 		e.cleanupInviteTracker()
+		e.cleanupInviteSDP()
 		e.cleanupOptionsTracker()
+		e.mediaTracker.Cleanup()
 		s := e.services.dialoger.Size()
 
 		for _, r := range results {
 			e.services.metricser.SessionCompleted(r.Carrier, r.UAType)
 			e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.Duration)
+			e.mediaTracker.Unregister(r.CallID)
 		}
 
 		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", len(results)))
@@ -283,6 +355,8 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		e.services.metricser.UpdateTrackerSize("register", len(e.registerTracker))
 		e.services.metricser.UpdateTrackerSize("invite", len(e.inviteTracker))
 		e.services.metricser.UpdateTrackerSize("options", len(e.optionsTracker))
+		e.services.metricser.UpdateTrackerSize("rtp", e.mediaTracker.StreamCount())
+		e.updateRTPMetrics()
 		e.services.metricser.UpdateActiveDialogs(s)
 	}
 }
@@ -318,13 +392,18 @@ func (e *exporter) cleanupInviteTracker() {
 }
 
 func (e *exporter) Close() {
-	e.initialized.Store(false)
-	if e.collection != nil {
-		e.collection.Close()
-	}
-	if e.sock != 0 {
-		_ = unix.Close(e.sock) // nolint:gosec // cleanup code, error can be ignored
-	}
+	e.closeOnce.Do(func() {
+		e.initialized.Store(false)
+		close(e.done)
+		if e.collection != nil {
+			e.collection.Close()
+		}
+		if e.sock != 0 {
+			_ = unix.Close(e.sock)
+		}
+		e.wg.Wait()
+		close(e.messages)
+	})
 }
 
 func (e *exporter) IsAlive() bool {
@@ -355,6 +434,7 @@ func (e *exporter) readPackets() {
 }
 
 func (e *exporter) readSocket() {
+	defer e.wg.Done()
 	buf := make([]byte, readBufSize)
 
 	for {
@@ -363,9 +443,20 @@ func (e *exporter) readSocket() {
 			if err == unix.EINTR {
 				continue
 			}
-			zap.L().Error("socket read error", zap.Error(err))
-			e.services.metricser.SystemError()
-			continue
+			if errors.Is(err, unix.EBADF) || errors.Is(err, unix.ENOTSOCK) {
+				zap.L().Info("socket closed, shutting down readSocket")
+				return
+			}
+			if err != unix.EAGAIN {
+				zap.L().Error("socket read error", zap.Error(err))
+				e.services.metricser.SystemError()
+			}
+			select {
+			case <-e.done:
+				return
+			default:
+				continue
+			}
 		}
 
 		if n == 0 {
@@ -377,8 +468,56 @@ func (e *exporter) readSocket() {
 
 		zap.L().Debug("packet from socket", zap.Int("len", n))
 
-		e.messages <- packet
+		if !e.sendPacket(packet) {
+			return
+		}
 	}
+}
+
+// sendPacket routes a packet to the messages channel. SIP packets (port
+// 5060/5061) use a blocking send — they must not be starved by RTP flood.
+// All other packets (RTP) use a non-blocking send — dropped when the channel
+// is full. Returns false if shutdown was signaled.
+func (e *exporter) sendPacket(packet []byte) bool {
+	if e.isSIPPacket(packet) {
+		select {
+		case e.messages <- packet:
+		case <-e.done:
+			return false
+		}
+		return true
+	}
+	select {
+	case e.messages <- packet:
+	case <-e.done:
+		return false
+	default:
+	}
+	return true
+}
+
+// isSIPPacket does a quick L4 port check to classify a packet as SIP (port
+// 5060/5061) or RTP/other. SIP packets use a blocking channel send (must not
+// be starved by RTP flood); all other packets use a non-blocking send (dropped
+// if the channel is full). When headers can't be parsed, defaults to true
+// (blocking) to avoid dropping potentially critical traffic.
+func (e *exporter) isSIPPacket(packet []byte) bool {
+	if len(packet) < minRawPacketLen {
+		return true
+	}
+	offset := ethHeaderLen
+	if packet[12] == vlanEthTypeHi && packet[13] == vlanEthTypeLo {
+		offset = vlanHeaderLen
+	}
+	ihl := int(packet[offset]&ipV4HdrLenMask) * ipV4HdrLenShift
+	udpOff := offset + ihl
+	if len(packet) < udpOff+udpHeaderLen {
+		return true
+	}
+	srcPort := binary.BigEndian.Uint16(packet[udpOff : udpOff+2])
+	dstPort := binary.BigEndian.Uint16(packet[udpOff+2 : udpOff+4])
+	return srcPort == e.sipPort || srcPort == e.sipsPort ||
+		dstPort == e.sipPort || dstPort == e.sipsPort
 }
 
 // parseRawPacket parses raw L2 packet. Returns error type (l2, l3, l4, sip) and error.
@@ -432,6 +571,16 @@ func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 	}
 
 	sipData := packet[sipOffset:]
+
+	// RTP packets (passed by the eBPF filter with version=2) arrive truncated to
+	// the RTP header. SIP messages start with an ASCII letter and never with the
+	// 0x80-0xBF range, so the first payload byte unambiguously distinguishes RTP.
+	if sipData[0]&rtpVersionMask == rtpVersion2Prefix {
+		srcPort := binary.BigEndian.Uint16(packet[udpOffset : udpOffset+2])
+		dstPort := binary.BigEndian.Uint16(packet[udpOffset+2 : udpOffset+4])
+		srcIP, dstIP := extractIPs(ipHeader)
+		return e.handleRTP(srcIP, srcPort, dstIP, dstPort, sipData)
+	}
 
 	// Minimum SIP packet should be at least 50 bytes
 	if len(sipData) < minSIPDataLen {
@@ -558,6 +707,57 @@ func (e *exporter) handleMessage(carrier string, rawPacket []byte) error {
 	return nil
 }
 
+// handleRTP parses an RTP header and feeds it to the media tracker. Packets with
+// no correlated SIP dialog are dropped silently (per design: RTP without an
+// established dialog is not monitored). RTP stats are accumulated in the tracker
+// and exported periodically (see sipDialogMetricsUpdate).
+func (e *exporter) handleRTP(
+	srcIP net.IP, srcPort uint16,
+	dstIP net.IP, dstPort uint16,
+	payload []byte,
+) (string, error) {
+	header, err := rtp.ParseHeader(payload)
+	if err != nil {
+		zap.L().Debug("RTP header parse skipped", zap.Error(err))
+		return "", nil
+	}
+	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, dstIP.String(), dstPort, header, time.Now())
+	if !ok {
+		// No correlated media endpoint for this flow → drop.
+		return "", nil
+	}
+	if res.Counted {
+		e.services.metricser.UpdateRTPPackets(res.Carrier, res.UAType, res.Codec)
+	}
+	if res.Lost > 0 {
+		e.services.metricser.UpdateRTPLoss(res.Carrier, res.UAType, res.Codec, res.Lost)
+	}
+	return "", nil
+}
+
+// updateRTPMetrics emits the periodic RTP sample metrics (jitter, MOS histograms
+// and the active-streams gauge) from the media tracker snapshot.
+func (e *exporter) updateRTPMetrics() {
+	stats := e.mediaTracker.Snapshot()
+	if len(stats) == 0 {
+		e.services.metricser.UpdateRTPActiveStreams(nil)
+		return
+	}
+	counts := make(map[string]map[string]map[string]int)
+	for _, s := range stats {
+		e.services.metricser.UpdateRTPJitter(s.Carrier, s.UAType, s.Codec, s.JitterMs)
+		e.services.metricser.UpdateRTPMOS(s.Carrier, s.UAType, s.Codec, s.MOS)
+		if counts[s.Carrier] == nil {
+			counts[s.Carrier] = make(map[string]map[string]int)
+		}
+		if counts[s.Carrier][s.UAType] == nil {
+			counts[s.Carrier][s.UAType] = make(map[string]int)
+		}
+		counts[s.Carrier][s.UAType][s.Codec]++
+	}
+	e.services.metricser.UpdateRTPActiveStreams(counts)
+}
+
 func (e *exporter) handleRequest(carrier string, uaType string, packet dto.Packet) {
 	e.services.metricser.Request(carrier, uaType, packet.Method)
 
@@ -567,6 +767,9 @@ func (e *exporter) handleRequest(carrier string, uaType string, packet dto.Packe
 
 	if bytes.Equal(packet.Method, []byte("INVITE")) {
 		e.storeInviteTime(string(packet.CallID), carrier, uaType)
+		if bytes.Contains(packet.ContentType, []byte("application/sdp")) {
+			e.storeInviteSDP(string(packet.CallID), packet.Body)
+		}
 	}
 
 	if bytes.Equal(packet.Method, []byte("CANCEL")) {
@@ -719,7 +922,18 @@ func (e *exporter) handleInvite200OK(carrier string, uaType string, packet dto.P
 	zap.L().Debug("create sip dialog",
 		zap.String("session", dialogID),
 		zap.Int("expires_sec", expires))
-	e.services.dialoger.Create(dialogID, expiresAt, time.Now(), carrier, uaType)
+	callID := string(packet.CallID)
+	e.services.dialoger.Create(dialogID, expiresAt, time.Now(), carrier, uaType, callID)
+
+	// Register RTP media endpoints for correlation: the caller side from the
+	// cached INVITE SDP offer, the callee side from this 200 OK SDP answer.
+	labels := mediatracker.MediaLabels{Carrier: carrier, UAType: uaType, CallID: callID}
+	if offerSDP, ok := e.takeInviteSDP(callID); ok {
+		e.registerMediaEndpoints(offerSDP, labels)
+	}
+	if bytes.Contains(packet.ContentType, []byte("application/sdp")) {
+		e.registerMediaEndpoints(packet.Body, labels)
+	}
 	return nil
 }
 
@@ -731,6 +945,7 @@ func (e *exporter) handleBye200OK(packet dto.Packet) error {
 
 	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
 	result := e.services.dialoger.Delete(dialogID)
+	e.mediaTracker.Unregister(string(packet.CallID))
 	if result.Duration > 0 {
 		e.services.metricser.UpdateSPD(result.Carrier, result.UAType, result.Duration)
 		e.services.metricser.SessionCompleted(result.Carrier, result.UAType)
@@ -942,6 +1157,51 @@ func (e *exporter) getInviteCarrier(callID string) (string, string, bool) {
 		return "", defaultUAType, false
 	}
 	return entry.carrier, entry.uaType, true
+}
+
+// storeInviteSDP caches an INVITE SDP offer keyed by Call-ID so the media
+// endpoints can be registered when the 200 OK arrives.
+func (e *exporter) storeInviteSDP(callID string, body []byte) {
+	e.inviteSDPMutex.Lock()
+	defer e.inviteSDPMutex.Unlock()
+	e.inviteSDP[callID] = inviteSDPEntity{body: body, timestamp: time.Now()}
+}
+
+// takeInviteSDP returns and removes the cached INVITE SDP offer for a Call-ID.
+func (e *exporter) takeInviteSDP(callID string) ([]byte, bool) {
+	e.inviteSDPMutex.Lock()
+	defer e.inviteSDPMutex.Unlock()
+	entry, ok := e.inviteSDP[callID]
+	if !ok {
+		return nil, false
+	}
+	delete(e.inviteSDP, callID)
+	return entry.body, true
+}
+
+func (e *exporter) cleanupInviteSDP() {
+	e.inviteSDPMutex.Lock()
+	defer e.inviteSDPMutex.Unlock()
+	now := time.Now()
+	for callID, entry := range e.inviteSDP {
+		if now.Sub(entry.timestamp) > defaultInviteTTL {
+			delete(e.inviteSDP, callID)
+		}
+	}
+}
+
+// registerMediaEndpoints parses an SDP body and registers each audio media
+// endpoint in the media tracker under the given dialog labels.
+func (e *exporter) registerMediaEndpoints(body []byte, labels mediatracker.MediaLabels) {
+	for _, m := range sdp.Parse(body) {
+		ml := labels
+		ml.SDPCodecs = m.Codecs
+		ml.ClockRates = m.ClockRates
+		e.mediaTracker.Register(m.IP, m.Port, ml)
+		zap.L().Debug("RTP media endpoint registered",
+			zap.String("ip", m.IP), zap.Uint16("port", m.Port),
+			zap.String("call_id", labels.CallID))
+	}
 }
 
 func (e *exporter) storeOptionsTime(callID string, carrier string, uaType string) {

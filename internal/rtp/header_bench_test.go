@@ -1,0 +1,15 @@
+package rtp
+
+import "testing"
+
+func BenchmarkParseHeader(b *testing.B) {
+	data := []byte{
+		0x80, 0x88, 0x12, 0x34,
+		0x0A, 0x0B, 0x0C, 0x0D,
+		0x11, 0x22, 0x33, 0x44,
+	}
+	b.ReportAllocs()
+	for range b.N {
+		_, _ = ParseHeader(data)
+	}
+}

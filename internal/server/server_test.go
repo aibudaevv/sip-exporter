@@ -8,13 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aibudaevv/sip-exporter/internal/config"
-	"github.com/aibudaevv/sip-exporter/internal/exporter"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	"github.com/aibudaevv/sip-exporter/internal/config"
+	"github.com/aibudaevv/sip-exporter/internal/exporter"
 )
 
-// mockExporter for testing
+// mockExporter for testing.
 type mockExporter struct {
 	initializeCalled bool
 	initializeErr    error
@@ -22,7 +23,7 @@ type mockExporter struct {
 	isAlive          bool
 }
 
-func (m *mockExporter) Initialize(interfaceName string, path string, sipPort, sipsPort int, ignoreOutgoing bool) error {
+func (m *mockExporter) Initialize(_ string, _ string, _, _ int, _, _ bool, _ time.Duration) error {
 	m.initializeCalled = true
 	m.isAlive = true
 	return m.initializeErr
@@ -146,11 +147,11 @@ func TestServer_Run_ContextDeadline(t *testing.T) {
 
 func TestServer_MetricsHandler(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/metrics", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest("GET", "/metrics", nil)
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	rr := httptest.NewRecorder()
 
 	mux.ServeHTTP(rr, req)

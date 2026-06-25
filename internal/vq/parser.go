@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-var ErrInvalidReport = errors.New("invalid vq-rtcpxr report") //nolint:gochecknoglobals // sentinel error
+var ErrInvalidReport = errors.New("invalid vq-rtcpxr report")
 
 const kvParts = 2
 

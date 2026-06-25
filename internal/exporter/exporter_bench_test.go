@@ -27,7 +27,7 @@ func BenchmarkParseRawPacket_INVITE(b *testing.B) {
 		"\r\n")
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = e.parseRawPacket(packet)
 	}
 }
@@ -51,7 +51,7 @@ func BenchmarkParseRawPacket_200OK(b *testing.B) {
 		"\r\n")
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = e.parseRawPacket(packet)
 	}
 }
@@ -73,7 +73,7 @@ func BenchmarkParseRawPacket_BYE(b *testing.B) {
 		"\r\n")
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = e.parseRawPacket(packet)
 	}
 }
@@ -97,7 +97,7 @@ func BenchmarkParseRawPacket_REGISTER(b *testing.B) {
 		"\r\n")
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = e.parseRawPacket(packet)
 	}
 }
@@ -120,7 +120,7 @@ func BenchmarkParseRawPacket_401Unauthorized(b *testing.B) {
 		"\r\n")
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = e.parseRawPacket(packet)
 	}
 }
@@ -141,7 +141,7 @@ func BenchmarkSIPPacketParse_INVITE(b *testing.B) {
 		"\r\n")
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = e.sipPacketParse(input)
 	}
 }
@@ -159,7 +159,7 @@ func BenchmarkSIPPacketParse_200OK(b *testing.B) {
 		"\r\n")
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = e.sipPacketParse(input)
 	}
 }
@@ -177,7 +177,7 @@ func BenchmarkSIPPacketParse_REGISTER(b *testing.B) {
 		"\r\n")
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = e.sipPacketParse(input)
 	}
 }
@@ -190,7 +190,7 @@ func BenchmarkNormalizeDialogID(b *testing.B) {
 	toTag := []byte("8Xy7r28Ne5ZSQ")
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = normalizeDialogID(callID, fromTag, toTag)
 	}
 }
@@ -199,7 +199,7 @@ func BenchmarkExtractTag(b *testing.B) {
 	value := []byte("<sip:user@domain>;tag=abc123xyz;other=param")
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = extractTag(value)
 	}
 }
@@ -208,7 +208,7 @@ func BenchmarkExtractCSeq(b *testing.B) {
 	value := []byte("9217 INVITE")
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = extractCSeq(value)
 	}
 }
@@ -217,7 +217,7 @@ func BenchmarkSplitHeader(b *testing.B) {
 	line := []byte("Session-Expires: 1800;refresher=uac")
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = splitHeader(line)
 	}
 }
@@ -226,7 +226,7 @@ func BenchmarkExtractSessionExpires(b *testing.B) {
 	value := []byte("1800;refresher=uac")
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = extractSessionExpires(value)
 	}
 }
@@ -252,7 +252,7 @@ func BenchmarkHandleMessage_INVITE(b *testing.B) {
 		"\r\n")
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = e.handleMessage("other", input)
 	}
 }
@@ -277,14 +277,14 @@ func BenchmarkHandleMessage_200OK_INVITE(b *testing.B) {
 		"\r\n")
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = e.handleMessage("other", input)
 	}
 }
 
 // ==================== Helper functions ====================
 
-// buildTestPacket builds full Ethernet+IP+UDP+SIP packet for benchmarks
+// buildTestPacket builds full Ethernet+IP+UDP+SIP packet for benchmarks.
 func buildTestPacket(sip string) []byte {
 	packet := make([]byte, 14+20+8+len(sip))
 

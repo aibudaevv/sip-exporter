@@ -22,7 +22,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - [Architecture](#architecture)
 - [Performance](#performance)
 - [Install](#install)
-- [Metrics](docs/METRICS.md)
+- [Metrics](#metrics)
 - [Security](docs/SECURITY.md)
 - [Development](#development)
 - [Benchmark](#benchmark)
@@ -39,6 +39,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - 🏷️ **Per-carrier metrics** — CIDR-based carrier resolution for all SIP metrics
 - 🏷️ **Per-device-type metrics** — User-Agent classification for all SIP metrics
 - 📞 **Voice quality (RFC 6035)** — MOS scores, jitter, packet loss from SIP PUBLISH/NOTIFY
+- 🎧 **RTP media analysis** — jitter, packet loss, and MOS (E-model G.107) from RTP streams correlated with SIP dialogs, with no voice payload captured (header-only)
 
 ## Quick Start
 
@@ -78,12 +79,12 @@ Filtered packets are delivered to userspace via the socket for efficient Go proc
 
 ## Architecture
 ```
-SIP Traffic → NIC → eBPF socket filter → AF_PACKET socket → Go poller → SIP parser → Prometheus
+SIP + RTP Traffic → NIC → eBPF socket filter → AF_PACKET socket → Go poller → SIP parser + RTP tracker → Prometheus
 ```
 
 ## Performance
 
-Zero packet loss up to **2,000 CPS** (~24,000 PPS) with full SIP dialog lifecycle, at **<15% CPU** and **~15 MB RAM**. GC stop-the-world pauses under **1 ms** — 400× smaller than socket buffer capacity, ensuring packets are never lost due to GC. Memory is stable under sustained load with no leaks detected.
+Zero packet loss up to **2,000 CPS** (~28,000 PPS) with full SIP dialog lifecycle, at **<15% CPU** and **~15 MB RAM**. GC stop-the-world pauses under **1 ms** — 400× smaller than socket buffer capacity, ensuring packets are never lost due to GC. Memory is stable under sustained load with no leaks detected.
 
 Go micro-benchmarks:
 
@@ -111,6 +112,9 @@ Environment variables:
 * `SIP_EXPORTER_OBJECT_FILE_PATH` - path to eBPF object file (default /usr/local/bin/sip.o)
 * `SIP_EXPORTER_CARRIERS_CONFIG` - path to carriers YAML config (optional, see [`examples/carriers.yaml`](examples/carriers.yaml))
 * `SIP_EXPORTER_USER_AGENTS_CONFIG` - path to user-agents YAML config (optional, see [`examples/user_agents.yaml`](examples/user_agents.yaml))
+* `SIP_EXPORTER_RTP_CAPTURE` - enable RTP media capture and analysis (default true)
+* `SIP_EXPORTER_RTP_STREAM_TTL` - idle RTP stream expiry, RFC 3550 §6.3.5 timeout (default 30s)
+* `SIP_EXPORTER_IGNORE_OUTGOING` - ignore outgoing packets, count incoming only (default false)
 
 The container must run with `--privileged` and `--network host` (eBPF requires `CAP_BPF` and access to the network interface). See [Security](docs/SECURITY.md) for details on why this is safe.
 
@@ -122,6 +126,7 @@ All metrics are exposed at `/metrics` in Prometheus exposition format. All SIP m
 - **Active sessions** — real-time count of active SIP dialogs
 - **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, PDD
 - **RFC 6035 voice quality metrics** — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
+- **RTP media metrics** — `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_active_streams` (labels: `carrier,ua_type,codec`)
 - **Extended metrics** — ISS, SDC, ORD, LRD
 
 Full reference with formulas, examples, and RFC section mapping: [docs/METRICS.md](docs/METRICS.md)
@@ -154,7 +159,7 @@ services:
       - SIP_EXPORTER_INTERFACE=eth0
       - SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml
     volumes:
-      - ./carriers.yaml:/etc/sip-exporter/carriers.yaml:ro
+      - ./examples/carriers.yaml:/etc/sip-exporter/carriers.yaml:ro
 ```
 
 ```yaml
@@ -185,6 +190,7 @@ sip_exporter_ser{carrier="other",ua_type="other"}                     0.0
 - When CIDRs overlap, **first match wins** — list specific subnets before broad ones
 - Without the config file, all metrics get `carrier="other"` — nothing breaks
 - Each carrier can have multiple CIDRs, and multiple carriers can be defined
+- CIDR notation is required — plain IPs without `/` are rejected. Use `/32` for a single host, e.g. `"10.226.97.5/32"` instead of `"10.226.97.5"`
 
 Full config reference with examples: [`examples/carriers.yaml`](examples/carriers.yaml)
 
@@ -268,6 +274,36 @@ sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
 
 Full config reference with examples: [`examples/user_agents.yaml`](examples/user_agents.yaml)
 
+### RTP Media Analysis
+
+In addition to SIP signaling, the exporter can capture and analyze RTP media streams to measure real call quality (jitter, packet loss, MOS). RTP streams are **correlated with SIP dialogs**: when a `200 OK` to INVITE carries SDP, the exporter registers the negotiated media endpoints and tracks the matching RTP flows until BYE (or Session-Expires expiry). This means RTP metrics inherit the dialog's `carrier`, `ua_type`, and the negotiated `codec` labels.
+
+Metrics produced:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `sip_exporter_rtp_packets_total` | counter | RTP packets observed |
+| `sip_exporter_rtp_packets_lost_total` | counter | packets lost (RFC 3550 sequence-gap accounting) |
+| `sip_exporter_rtp_jitter_milliseconds` | histogram | interarrival jitter (RFC 3550 A.8) |
+| `sip_exporter_rtp_mos_score` | histogram | MOS-LQ via ITU-T G.107 E-model (1.0–4.5) |
+| `sip_exporter_rtp_active_streams` | gauge | active RTP streams correlated with dialogs |
+
+**Privacy:** only the 12-byte RTP header is captured — voice payload is truncated in the kernel (eBPF) before reaching userspace, so no call audio is inspected or stored.
+
+RTP capture is on by default and can be disabled with `SIP_EXPORTER_RTP_CAPTURE=false` (the eBPF filter then drops RTP at the kernel level). Note: RTP without a correlated SIP dialog (no SDP exchange seen) is dropped, so only media for monitored calls is counted.
+
+```PromQL
+# Average MOS over the last 5m (per codec)
+sum by (codec) (rate(sip_exporter_rtp_mos_score_sum[5m]))
+  / sum by (codec) (rate(sip_exporter_rtp_mos_score_count[5m]))
+
+# Packet loss ratio by carrier
+sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
+  / sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m]))
+```
+
+See [docs/METRICS.md](docs/METRICS.md) for the full RTP reference, formulas, and label resolution.
+
 ## Development
 
 ### Requirements
@@ -288,8 +324,8 @@ Full config reference with examples: [`examples/user_agents.yaml`](examples/user
 
 Test suite:
 - **Unit tests** — MC/DC standard, all business logic covered
-- **105 E2E tests** — real SIP traffic via SIPp + testcontainers-go, validates all RFC 6076 and RFC 6035 metrics
-- **11 load tests** — PPS throughput, VQ reports, concurrent sessions, memory stability, GC pauses, scrape latency
+- **120 E2E tests** — real SIP traffic via SIPp + testcontainers-go, validates all RFC 6076, RFC 6035, and RTP metrics
+- **13 load tests** — PPS throughput, VQ reports, concurrent sessions, memory stability, GC pauses, scrape latency
 
 ## Benchmark
 
@@ -315,7 +351,7 @@ Import the pre-built dashboard into your Grafana instance:
 2. Upload `examples/grafana-dashboard.json` or copy the JSON content
 3. Select your Prometheus or VictoriaMetrics datasource
 
-The dashboard includes all available metrics: traffic counters, SIP request/response breakdowns, active sessions, RFC 6076 performance metrics (SER, SEER, ISA, SCR, NER), voice quality metrics (RFC 6035: MOS, jitter, packet loss), delay histograms (RRD, TTR, PDD, SPD, ORD, LRD), session quality metrics (ISS, ASR, SDC), and system errors.
+The dashboard includes all available metrics: traffic counters, SIP request/response breakdowns, active sessions, RFC 6076 performance metrics (SER, SEER, ISA, SCR, NER), RTP media analysis (active streams, packet rate, loss rate, MOS, jitter by codec), voice quality metrics (RFC 6035: MOS, jitter, packet loss), delay histograms (RRD, TTR, PDD, SPD, ORD, LRD), session quality metrics (ISS, ASR, SDC), and system errors.
 
 Dashboard file: [`examples/grafana-dashboard.json`](examples/grafana-dashboard.json)
 

@@ -58,8 +58,8 @@ func TestHandler_FullReport(t *testing.T) {
 	require.Equal(t, "carrier-a", mock.lastCarrier)
 	require.Equal(t, "yealink", mock.lastUAType)
 	require.NotNil(t, mock.lastReport)
-	require.Equal(t, 4.5, mock.lastReport.MOSLQ)
-	require.Equal(t, 0.50, mock.lastReport.NLR)
+	require.InDelta(t, 4.5, mock.lastReport.MOSLQ, 0.01)
+	require.InDelta(t, 0.50, mock.lastReport.NLR, 0.01)
 	require.True(t, mock.lastReport.Present["MOSLQ"])
 	require.True(t, mock.lastReport.Present["NLR"])
 }
@@ -74,7 +74,7 @@ func TestHandler_PartialReport(t *testing.T) {
 	require.True(t, mock.vqReportCalled)
 	require.False(t, mock.systemErrorCalled)
 	require.NotNil(t, mock.lastReport)
-	require.Equal(t, 3.2, mock.lastReport.MOSLQ)
+	require.InDelta(t, 3.2, mock.lastReport.MOSLQ, 0.01)
 	require.True(t, mock.lastReport.Present["MOSLQ"])
 	require.False(t, mock.lastReport.Present["NLR"])
 }

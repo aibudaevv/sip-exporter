@@ -91,6 +91,19 @@ Complete SIP dialog lifecycle + VQ PUBLISH after BYE: INVITE → 100 → 180 →
 | 500 | ~7,590 | 3.98% | 6.57% | 15.3 MB | 0.00% | 100% |
 | 1,000 | ~15,270 | 6.11% | 8.45% | 15.6 MB | 0.00% | 100% |
 
+## Results: Full Call with RTP Media
+
+Complete SIP dialog + 4s G.711a RTP in both directions (INVITE → 100 → 200 → ACK → RTP → BYE → 200). Each call generates ~6 SIP packets + ~400 RTP packets. Rates are 10× lower than SIP-only due to RTP volume.
+
+| Rate (CPS) | SIP PPS | RTP Packets | CPU avg | CPU peak | RAM | SIP Loss | SER |
+|------------|---------|-------------|---------|----------|-----|----------|-----|
+| 10 | ~30 | ~20K | 0.86% | 1.91% | 12.4 MB | 0.00% | 100% |
+| 25 | ~76 | ~50K | 1.50% | 3.23% | 11.7 MB | 0.00% | 100% |
+| 50 | ~151 | ~100K | 2.20% | 4.92% | 13.0 MB | 0.00% | 100% |
+| 100 | ~302 | ~199K | 4.79% | 8.57% | 12.0 MB | 0.00% | 100% |
+
+RTP processing adds minimal CPU overhead. At 100 CPS with ~200K RTP packets, CPU stays under 5% avg. SIP metrics (SER, packet loss) are unaffected by RTP capture.
+
 ## GOMAXPROCS Comparison: 1 Core vs 8 Cores
 
 Full Call Flow benchmark comparing single-core vs multi-core execution. 3 runs per configuration.
@@ -195,6 +208,50 @@ Per-dialog overhead is within GC measurement noise. Even 4,000+ active dialogs a
 
 **Practical conclusion:** dialog storage is negligible. Plan for ~10 MB base + 1-2 MB per 1,000 active dialogs as a conservative estimate.
 
+## Memory Per RTP Stream
+
+Memory overhead per active RTP stream. Each stream stores a `StreamState` struct plus map entry, keyed by media endpoint IP:port + SSRC.
+
+| Active Streams | Total RAM | Delta from Baseline | Bytes/Stream |
+|---------------|-----------|--------------------:|-------------:|
+| 0 (baseline) | 7.3 MB | — | — |
+| 98 | 14.3 MB | 7.0 MB | ~75 KB |
+| 204 | 12.4 MB | 5.1 MB | ~26 KB |
+| 413 | 14.7 MB | 7.3 MB | ~19 KB |
+| 1,030 | 12.2 MB | 4.9 MB | ~5 KB |
+
+Same pattern as dialogs: container-level memory measurement includes Go runtime overhead that dominates at low counts. The theoretical per-stream cost is ~80-130 bytes (StreamState struct + map overhead). Streams expire after the configured TTL (default 30s), bounding memory under SSRC reuse.
+
+**Practical conclusion:** RTP stream storage is negligible. Even 1,000+ active streams add < 7 MB to total memory.
+
+## RTP Media Processing Micro-Benchmarks
+
+Per-packet performance of the RTP processing pipeline (header parse + media tracker observe). Measured with `go test -bench` on Intel i7-8665U, 3 runs.
+
+| Benchmark | Time | Allocs | Description |
+|-----------|------|--------|-------------|
+| `BenchmarkParseHeader` | ~5 ns/op | 0 | RTP header parse (12 bytes → struct) |
+| `BenchmarkTracker_Observe_1000Streams` | ~203 ns/op | 0 | Per-packet Observe across 1000 concurrent streams (worst case) |
+| `BenchmarkTracker_Snapshot_1000Streams` | ~66 µs/op | 1 (128 KB) | Periodic metrics export (Snapshot over 1000 streams) |
+
+### Throughput Estimate
+
+At ~210 ns/packet end-to-end (parse + observe), the theoretical capacity is ~4.7M RTP pps on a single core. In practice, the SIP/RTP shared channel (10K buffer) and the 1-second snapshot loop are the bottlenecks, not the per-packet cost.
+
+With SIP-vs-RTP channel priority (S1-9.5: non-blocking RTP send), RTP packets are dropped under extreme load without affecting SIP processing.
+
+### Memory Per RTP Stream
+
+Each active RTP stream stores a `StreamState` struct (~80 bytes) plus map overhead. The Snapshot call allocates a `[]StreamStats` slice proportional to the number of active streams (128 KB for 1000 streams — one allocation).
+
+| Active Streams | Snapshot Allocation | Per-Stream Cost |
+|---------------|--------------------:|----------------:|
+| 100 | ~13 KB | ~128 bytes |
+| 1,000 | ~128 KB | ~128 bytes |
+| 10,000 | ~1.3 MB | ~128 bytes |
+
+Streams expire after the configured TTL (default 30s, `SIP_EXPORTER_RTP_STREAM_TTL`), bounding memory under SSRC reuse.
+
 ## Minimum System Requirements
 
 Based on all benchmark results:
@@ -208,8 +265,8 @@ Based on all benchmark results:
 
 Key parameters for sizing:
 - **CPU:** ~8% of one core at 2,000 CPS on i7-8665U (multi-core)
-- **RAM:** 10-15 MB base + ~1 MB per 1,000 active dialogs
-- **Network:** eBPF socket filter adds zero latency to SIP traffic (filters in kernel)
+- **RAM:** 10-15 MB base + ~1 MB per 1,000 active dialogs + ~128 bytes per active RTP stream
+- **Network:** eBPF socket filter adds zero latency to SIP/RTP traffic (filters in kernel)
 - **Scrape interval:** 5-10 seconds recommended (scrape takes < 10 ms even at max load)
 
 ## How to Run
