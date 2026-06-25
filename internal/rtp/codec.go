@@ -3,10 +3,9 @@ package rtp
 // CodecUnknown is the label used when payload type cannot be resolved to a codec.
 const CodecUnknown = "other"
 
-// Static RTP payload types (RFC 3551).
+// Static RTP payload types (RFC 3551, Table 4).
 const (
 	ptPCMU = 0  // G.711 µ-law
-	ptG726 = 2  // G.726-32
 	ptG723 = 4  // G.723.1
 	ptPCMA = 8  // G.711 A-law
 	ptG722 = 9  // G.722
@@ -26,8 +25,6 @@ func staticCodecName(pt uint8) string {
 		return "PCMA"
 	case ptG722:
 		return "G.722"
-	case ptG726:
-		return "G.726-32"
 	case ptG723:
 		return "G.723"
 	case ptG728:

@@ -25,6 +25,13 @@ func TestCodecName_StaticPT(t *testing.T) {
 	}
 }
 
+func TestCodecName_ReservedPT2_NotG726(t *testing.T) {
+	// RFC 3551 Table 4: PT 2 is reserved (was G.721, now unused).
+	// G.726 has no static PT — it must use dynamic PT via SDP a=rtpmap.
+	require.Equal(t, CodecUnknown, CodecName(2, nil),
+		"PT 2 is reserved, not G.726-32")
+}
+
 func TestCodecName_DynamicPT_FromSDP(t *testing.T) {
 	sdp := map[uint8]string{
 		96:  "opus",
