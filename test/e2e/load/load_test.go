@@ -39,6 +39,8 @@ type (
 		sippClientPort    string
 		sippPort2         string
 		sippClientPort2   string
+		uasMediaPort      string
+		uacMediaPort      string
 		exporterContainer testcontainers.Container
 	}
 

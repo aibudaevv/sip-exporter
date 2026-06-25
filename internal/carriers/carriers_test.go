@@ -50,9 +50,8 @@ func TestNewResolver_EmptyName(t *testing.T) {
 }
 
 func TestLoadConfig_ValidYAML(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "carriers-*.yaml")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "carriers-*.yaml")
 	require.NoError(t, err)
-	defer os.Remove(tmpFile.Name())
 
 	content := []byte("carriers:\n  - name: provider-a\n    cidrs:\n      - \"10.0.1.0/24\"\n")
 	_, err = tmpFile.Write(content)

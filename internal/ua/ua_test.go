@@ -86,9 +86,8 @@ func TestClassifier_CaseInsensitive(t *testing.T) {
 }
 
 func TestLoadConfig_ValidYAML(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "user-agents-*.yaml")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "user-agents-*.yaml")
 	require.NoError(t, err)
-	defer os.Remove(tmpFile.Name())
 
 	content := []byte("user_agents:\n  - regex: '(?i)^Yealink'\n    label: yealink\n")
 	_, err = tmpFile.Write(content)
@@ -106,11 +105,10 @@ func TestLoadConfig_FileNotFound(t *testing.T) {
 }
 
 func TestLoadConfig_InvalidYAML(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "user-agents-*.yaml")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "user-agents-*.yaml")
 	require.NoError(t, err)
-	defer os.Remove(tmpFile.Name())
 
-	_, err = tmpFile.Write([]byte("not: [valid: yaml"))
+	_, err = tmpFile.WriteString("not: [valid: yaml")
 	require.NoError(t, err)
 	tmpFile.Close()
 
@@ -119,9 +117,8 @@ func TestLoadConfig_InvalidYAML(t *testing.T) {
 }
 
 func TestLoadConfig_InvalidRegexInFile(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "user-agents-*.yaml")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "user-agents-*.yaml")
 	require.NoError(t, err)
-	defer os.Remove(tmpFile.Name())
 
 	content := []byte("user_agents:\n  - regex: '[invalid'\n    label: bad\n")
 	_, err = tmpFile.Write(content)

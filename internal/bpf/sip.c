@@ -6,13 +6,22 @@
 #define ETH_P_IP     0x0800
 #define IPPROTO_UDP  17
 
-// Map для хранения SIP портов (настраивается из userspace)
+// Map for SIP ports (configured from userspace)
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
 	__uint(max_entries, 2);
 	__type(key, __u32);
 	__type(value, __u16);
 } sip_ports SEC(".maps");
+
+// RTP capture config (configured from userspace)
+// value: 1 = RTP capture enabled, 0 = disabled
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, __u8);
+} rtp_config SEC(".maps");
 
 SEC("socket")
 int bpf_socket_filter(struct __sk_buff *skb) {
@@ -78,7 +87,7 @@ int bpf_socket_filter(struct __sk_buff *skb) {
     __u16 src_port = (__u16)((udp_raw[0] << 8) | udp_raw[1]);
     __u16 dest_port = (__u16)((udp_raw[2] << 8) | udp_raw[3]);
 
-    // Читаем порты из map
+    // Read ports from map
     __u32 key_sip = 0;
     __u32 key_sips = 1;
     __u16 *sip_port = bpf_map_lookup_elem(&sip_ports, &key_sip);
@@ -87,14 +96,47 @@ int bpf_socket_filter(struct __sk_buff *skb) {
     __u16 port1 = sip_port ? *sip_port : 5060;
     __u16 port2 = sips_port ? *sips_port : 5061;
 
-    if (src_port != port1 && src_port != port2 &&
-        dest_port != port1 && dest_port != port2) {
+    // SIP port → pass the entire packet (for SIP header parsing)
+    if (src_port == port1 || src_port == port2 ||
+        dest_port == port1 || dest_port == port2) {
+        return skb->len;
+    }
+
+    // Not a SIP port — check RTP capture config
+    __u32 cfg_key = 0;
+    __u8 *rtp_on = bpf_map_lookup_elem(&rtp_config, &cfg_key);
+    if (!rtp_on || *rtp_on != 1) {
         return 0;
     }
 
-    // Возвращаем полную длину пакета
-    bpf_printk("SIP packet: %u->%u, skb->len=%u", src_port, dest_port, skb->len);
-    return skb->len;
+    // Payload offset (after 8-byte UDP header)
+    int payload_off = ip_offset + ip_header_len + 8;
+    if (skb->len < payload_off + 2) {
+        return 0;
+    }
+
+    // RTP pattern detection: read first 2 bytes of payload.
+    // Condition 1 (version=2): (byte[0] & 0xC0) == 0x80
+    // Condition 2 (payload type): PT = byte[1] & 0x7F; PT <= 34 (static audio) || PT >= 96 (dynamic).
+    // The second check eliminates false positives (e.g., DNS with matching high bit).
+    __u8 rtp_hdr[2];
+    if (bpf_skb_load_bytes(skb, payload_off, rtp_hdr, 2) < 0) {
+        return 0;
+    }
+    if ((rtp_hdr[0] & 0xC0) != 0x80) {
+        return 0;
+    }
+    __u8 pt = rtp_hdr[1] & 0x7F;
+    if (pt > 34 && pt < 96) {
+        return 0;
+    }
+
+    // Pass only the RTP header (privacy): truncate to 64 bytes
+    __u32 snap = skb->len;
+    if (snap > 64) {
+        snap = 64;
+    }
+    return snap;
 }
 
 char _license[] SEC("license") = "GPL";

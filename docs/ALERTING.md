@@ -16,6 +16,9 @@ The SIP Exporter exposes metrics based on RFC 6076 (SIP Performance Metrics) and
 | `sip_exporter_403_total` | Forbidden responses | High rate indicates authorization issues |
 | `sip_exporter_vq_mos_lq` | MOS Listening Quality (RFC 6035) | avg < 3.5 (warning), < 3.0 (critical) |
 | `sip_exporter_vq_nlr_percent` | Network Packet Loss Rate (RFC 6035) | avg > 2% (warning), > 5% (critical) |
+| `sip_exporter_rtp_mos_score` | RTP MOS (E-model G.107) | avg < 3.5 (warning), < 3.0 (critical) |
+| `sip_exporter_rtp_packets_lost_total` | RTP packet loss rate | > 5% (warning), > 10% (critical) |
+| `sip_exporter_rtp_jitter_milliseconds` | RTP interarrival jitter (RFC 3550) | p95 > 50ms (warning) |
 
 ## Quick Start
 
@@ -168,6 +171,55 @@ These alerts monitor voice quality metrics extracted from SIP PUBLISH/NOTIFY wit
           description: "95th percentile interarrival jitter is {{ $value | printf \"%.1f\" }}ms. High jitter causes audio artifacts. Check network queueing and jitter buffer configuration."
       ```
 
+### RTP Media Alerts
+
+These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) measured passively from RTP headers (RFC 3550). Metrics are labeled by `carrier`, `ua_type`, and `codec`.
+
+```yaml
+      - alert: RTPPacketLossHigh
+        expr: |
+          sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
+          / sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m])) * 100 > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RTP packet loss above 5%"
+          description: "RTP packet loss for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}%. Network congestion or QoS misconfiguration may be degrading voice quality."
+
+      - alert: RTPPacketLossCritical
+        expr: |
+          sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
+          / sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m])) * 100 > 10
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical RTP packet loss above 10%"
+          description: "RTP packet loss for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}%. Severe media degradation — users experience choppy audio or dropped calls."
+
+      - alert: RTPMOSLow
+        expr: |
+          sum by (carrier) (rate(sip_exporter_rtp_mos_score_sum[5m]))
+          / sum by (carrier) (rate(sip_exporter_rtp_mos_score_count[5m])) < 3.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low RTP MOS score"
+          description: "Average RTP MOS for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}. E-model quality estimate below 3.5 indicates noticeable degradation."
+
+      - alert: RTPJitterHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtp_jitter_milliseconds_bucket[5m]))) > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High RTP jitter"
+          description: "95th percentile RTP jitter for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}ms. Jitter above 50ms causes audio artifacts and jitter buffer overflows."
+      ```
+
 ### Info Alerts
 
 ```yaml
@@ -223,6 +275,7 @@ The dashboard includes a `$carrier` variable for per-operator filtering, with pa
 - **RFC 6076 Ratios** — SER, SEER, ISA, SCR, ASR, NER gauges + trend graph
 - **Latency Histograms** — RRD, TTR, SPD, ORD, LRD (p50/p95/p99 per carrier)
 - **Voice Quality (RFC 6035)** — MOS Listening/Conversational Quality, packet loss (NLR), jitter (IAJ), round trip delay (RTD), R-factor (RLQ/RCQ)
+- **RTP Media Analysis** — Active RTP streams, packet rate, packet loss rate, MOS (E-model), jitter p95 — all by codec
 - **SIP Traffic** — Request/response rate breakdown by method and status code
 - **System Health** — Error rate, ISS rate
 
@@ -375,7 +428,7 @@ scrape_configs:
 
 ### Metric Cardinality
 
-The SIP Exporter exposes ~65 metrics with a `carrier` label. Cardinality equals the number of configured carriers (typically 5-20). Without a carriers config, all metrics use `carrier="other"` (cardinality = 1).
+The SIP Exporter exposes ~65 metrics with `carrier` and `ua_type` labels. RTP metrics additionally carry a `codec` label (typically 3-8 codecs). Cardinality equals the number of configured carriers × UA types × (for RTP) active codecs. Without a carriers config, all metrics use `carrier="other"` (cardinality = 1).
 
 ### Dashboard Organization
 
@@ -385,3 +438,4 @@ Organize dashboards by:
 - **Errors**: Error code breakdown
 - **Performance**: RRD, latency metrics
 - **Voice Quality**: MOS, packet loss, jitter, R-factor (RFC 6035)
+- **RTP Media**: Active streams, packet rate, loss rate, MOS, jitter by codec
