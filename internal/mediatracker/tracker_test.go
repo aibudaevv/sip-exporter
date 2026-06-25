@@ -197,3 +197,22 @@ func TestTracker_ObserveCorrelatesByDst(t *testing.T) {
 	require.Equal(t, "PCMA", res.Codec)
 	require.Len(t, tr.Snapshot(), 1)
 }
+
+func TestTracker_StreamRestartNoUnderflow(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+
+	// Build up some loss: seq 1→5 = 3 lost
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(1, 160), t0)
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(5, 320), t0.Add(20*time.Millisecond))
+	// packetsLost=3 at this point
+
+	// Stream restart: huge gap → packetsLost resets to 0
+	res, ok := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(5000, 480), t0.Add(40*time.Millisecond))
+	require.True(t, ok)
+
+	// Without fix: 0 - 3 = 18446744073709551613 (uint64 underflow)
+	// With fix: delta clamped to 0
+	require.Equal(t, uint64(0), res.Lost, "stream restart must not underflow ObserveResult.Lost")
+}

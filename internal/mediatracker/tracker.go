@@ -178,9 +178,14 @@ func (t *Tracker) Observe(
 	prevTotal := entry.state.packetsTotal
 	entry.state.Observe(h, arrival)
 
+	var lostDelta uint64
+	if entry.state.packetsLost >= prevLost {
+		lostDelta = entry.state.packetsLost - prevLost
+	}
+
 	return ObserveResult{
 		Counted: entry.state.packetsTotal > prevTotal,
-		Lost:    entry.state.packetsLost - prevLost,
+		Lost:    lostDelta,
 		Codec:   codec,
 		Carrier: labels.Carrier,
 		UAType:  labels.UAType,
