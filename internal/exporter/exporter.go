@@ -39,6 +39,7 @@ const (
 
 	messagesChanSize = 10_000
 	socketRecvBufMB  = 4
+	socketRcvTimeo   = 1 * time.Second
 
 	ethHeaderLen     = 14
 	vlanEthTypeHi    = 0x81
@@ -104,6 +105,9 @@ type (
 		collection      *ebpf.Collection
 		sock            int
 		messages        chan []byte
+		done            chan struct{}
+		wg              sync.WaitGroup
+		closeOnce       sync.Once
 		services        services
 		carrierResolver *carriers.Resolver
 		uaClassifier    *ua.Classifier
@@ -152,6 +156,7 @@ func NewExporter(
 		vqHandler:       vq.NewHandler(m),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 		messages:        make(chan []byte, messagesChanSize),
+		done:            make(chan struct{}),
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
 		inviteSDP:       make(map[string]inviteSDPEntity),
@@ -213,6 +218,11 @@ func (e *exporter) Initialize(
 		zap.Int("requested_bytes", socketRecvBufSize),
 		zap.Int("actual_bytes", actualBufSize))
 
+	if setErr := unix.SetsockoptTimeval(sock, unix.SOL_SOCKET, unix.SO_RCVTIMEO,
+		&unix.Timeval{Sec: int64(socketRcvTimeo / time.Second), Usec: int64(socketRcvTimeo % time.Second / time.Microsecond)}); setErr != nil {
+		return fmt.Errorf("failed to set SO_RCVTIMEO: %w", setErr)
+	}
+
 	ifaceName := interfaceName
 	iface, err := net.InterfaceByName(ifaceName)
 	if err != nil {
@@ -248,6 +258,7 @@ func (e *exporter) Initialize(
 		zap.Int("sips_port", sipsPort))
 
 	go e.readPackets()
+	e.wg.Add(1)
 	go e.readSocket()
 	go e.sipDialogMetricsUpdate()
 
@@ -308,11 +319,16 @@ func (e *exporter) resolveUA(userAgent []byte) string {
 
 func (e *exporter) sipDialogMetricsUpdate() {
 	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
 
 	e.services.metricser.UpdateChannelCapacity(cap(e.messages))
 
 	for {
-		<-ticker.C
+		select {
+		case <-e.done:
+			return
+		case <-ticker.C:
+		}
 		results := e.services.dialoger.Cleanup()
 		e.cleanupRegisterTracker()
 		e.cleanupInviteTracker()
@@ -374,13 +390,18 @@ func (e *exporter) cleanupInviteTracker() {
 }
 
 func (e *exporter) Close() {
-	e.initialized.Store(false)
-	if e.collection != nil {
-		e.collection.Close()
-	}
-	if e.sock != 0 {
-		_ = unix.Close(e.sock)
-	}
+	e.closeOnce.Do(func() {
+		e.initialized.Store(false)
+		close(e.done)
+		if e.collection != nil {
+			e.collection.Close()
+		}
+		if e.sock != 0 {
+			_ = unix.Close(e.sock)
+		}
+		e.wg.Wait()
+		close(e.messages)
+	})
 }
 
 func (e *exporter) IsAlive() bool {
@@ -411,6 +432,7 @@ func (e *exporter) readPackets() {
 }
 
 func (e *exporter) readSocket() {
+	defer e.wg.Done()
 	buf := make([]byte, readBufSize)
 
 	for {
@@ -419,9 +441,20 @@ func (e *exporter) readSocket() {
 			if err == unix.EINTR {
 				continue
 			}
-			zap.L().Error("socket read error", zap.Error(err))
-			e.services.metricser.SystemError()
-			continue
+			if errors.Is(err, unix.EBADF) || errors.Is(err, unix.ENOTSOCK) {
+				zap.L().Info("socket closed, shutting down readSocket")
+				return
+			}
+			if err != unix.EAGAIN {
+				zap.L().Error("socket read error", zap.Error(err))
+				e.services.metricser.SystemError()
+			}
+			select {
+			case <-e.done:
+				return
+			default:
+				continue
+			}
 		}
 
 		if n == 0 {
@@ -433,7 +466,11 @@ func (e *exporter) readSocket() {
 
 		zap.L().Debug("packet from socket", zap.Int("len", n))
 
-		e.messages <- packet
+		select {
+		case e.messages <- packet:
+		case <-e.done:
+			return
+		}
 	}
 }
 

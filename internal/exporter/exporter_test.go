@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"github.com/aibudaevv/sip-exporter/internal/mediatracker"
 	"github.com/aibudaevv/sip-exporter/internal/service"
@@ -3604,4 +3605,54 @@ func TestHandleRequest_NOTIFY_VQInvalidBody(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, mm.systemErrors, "invalid VQ body should trigger system error")
 	require.Empty(t, mm.vqReports, "VQ handler should not report metrics for invalid body")
+}
+
+// TestExporter_GracefulShutdown verifies that readSocket exits cleanly when
+// Close() is called (no EBADF spin loop), and that Close() completes within a
+// reasonable timeout. readPackets and sipDialogMetricsUpdate also receive the
+// done signal and wind down asynchronously.
+func TestExporter_GracefulShutdown(t *testing.T) {
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM, 0)
+	require.NoError(t, err)
+	defer unix.Close(fds[1])
+
+	tv := &unix.Timeval{Sec: 1}
+	require.NoError(t, unix.SetsockoptTimeval(fds[0], unix.SOL_SOCKET, unix.SO_RCVTIMEO, tv))
+
+	e := &exporter{
+		sock:     fds[0],
+		messages: make(chan []byte, 10),
+		done:     make(chan struct{}),
+		services: services{
+			metricser: &mockMetricser{},
+			dialoger:  &mockDialoger{},
+		},
+		mediaTracker:    mediatracker.NewTracker(30 * time.Second),
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+		inviteSDP:       make(map[string]inviteSDPEntity),
+		optionsTracker:  make(map[string]optionsEntry),
+	}
+
+	go e.readPackets()
+	e.wg.Add(1)
+	go e.readSocket()
+	go e.sipDialogMetricsUpdate()
+
+	time.Sleep(100 * time.Millisecond)
+
+	done := make(chan struct{})
+	go func() {
+		e.Close()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close() did not complete within 5s — goroutine leak")
+	}
+
+	_, ok := <-e.messages
+	require.False(t, ok, "messages channel should be closed after Close()")
 }
