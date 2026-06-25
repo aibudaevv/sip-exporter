@@ -99,7 +99,6 @@ int bpf_socket_filter(struct __sk_buff *skb) {
     // SIP порт → пропускаем пакет целиком (для парсинга SIP-заголовков)
     if (src_port == port1 || src_port == port2 ||
         dest_port == port1 || dest_port == port2) {
-        bpf_printk("SIP packet: %u->%u, skb->len=%u", src_port, dest_port, skb->len);
         return skb->len;
     }
 
