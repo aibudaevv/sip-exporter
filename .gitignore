@@ -9,6 +9,7 @@ bin/*
 # Test binaries
 e2e.test
 exporter.test
+*.local.*
 
 # Load test results (per-run artifact, baseline.json is committed)
 test/e2e/load/load_result.json
