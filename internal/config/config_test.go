@@ -24,6 +24,9 @@ func unsetConfigEnv(t *testing.T) {
 		"SIP_EXPORTER_SIPS_PORT",
 		"SIP_EXPORTER_RTP_CAPTURE",
 		"SIP_EXPORTER_RTP_STREAM_TTL",
+		"SIP_EXPORTER_TELEMETRY",
+		"SIP_EXPORTER_TELEMETRY_URL",
+		"SIP_EXPORTER_TELEMETRY_ID_FILE",
 	} {
 		os.Unsetenv(k)
 	}
@@ -146,4 +149,53 @@ func TestGetConfig_RTPStreamTTLCustom(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
 	require.Equal(t, 2*time.Second, cfg.RTPStreamTTL, "RTP stream TTL must be parsed from env")
+}
+
+func TestGetConfig_TelemetryDefault(t *testing.T) {
+	unsetConfigEnv(t)
+	t.Setenv("SIP_EXPORTER_INTERFACE", "eth0")
+
+	cfg, err := GetConfig()
+
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	require.True(t, cfg.Telemetry, "telemetry must be enabled by default")
+	require.Equal(t, "https://telemetry.sip-exporter.com/v1/beacon", cfg.TelemetryURL)
+	require.Equal(t, "/var/lib/sip-exporter/anon_id", cfg.TelemetryIDFile)
+}
+
+func TestGetConfig_TelemetryDisabled(t *testing.T) {
+	unsetConfigEnv(t)
+	t.Setenv("SIP_EXPORTER_INTERFACE", "eth0")
+	t.Setenv("SIP_EXPORTER_TELEMETRY", "false")
+
+	cfg, err := GetConfig()
+
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	require.False(t, cfg.Telemetry, "telemetry must be disabled when env is false")
+}
+
+func TestGetConfig_TelemetryCustomURL(t *testing.T) {
+	unsetConfigEnv(t)
+	t.Setenv("SIP_EXPORTER_INTERFACE", "eth0")
+	t.Setenv("SIP_EXPORTER_TELEMETRY_URL", "https://example.com/beacon")
+
+	cfg, err := GetConfig()
+
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	require.Equal(t, "https://example.com/beacon", cfg.TelemetryURL)
+}
+
+func TestGetConfig_TelemetryCustomIDFile(t *testing.T) {
+	unsetConfigEnv(t)
+	t.Setenv("SIP_EXPORTER_INTERFACE", "eth0")
+	t.Setenv("SIP_EXPORTER_TELEMETRY_ID_FILE", "/tmp/my-id")
+
+	cfg, err := GetConfig()
+
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	require.Equal(t, "/tmp/my-id", cfg.TelemetryIDFile)
 }
