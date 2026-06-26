@@ -17,13 +17,16 @@
 package main
 
 import (
+	"context"
 	"log"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/aibudaevv/sip-exporter/internal/carriers"
 	"github.com/aibudaevv/sip-exporter/internal/config"
 	"github.com/aibudaevv/sip-exporter/internal/server"
+	"github.com/aibudaevv/sip-exporter/internal/telemetry"
 	"github.com/aibudaevv/sip-exporter/internal/ua"
 	pkgLog "github.com/aibudaevv/sip-exporter/pkg/log"
 )
@@ -57,6 +60,13 @@ func main() {
 	}
 
 	srv := server.NewServer(resolver, classifier)
+
+	go telemetry.Run(context.Background(), telemetry.Config{
+		Enabled: cfg.Telemetry,
+		URL:     cfg.TelemetryURL,
+		IDFile:  cfg.TelemetryIDFile,
+	}, time.Now())
+
 	if err = srv.Run(cfg); err != nil {
 		log.Fatal(err)
 	}
