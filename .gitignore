@@ -1,11 +1,6 @@
 .idea
-.continue
-CONTINUE.md
-QWEN.md
-.qwen/
 /.opencode/
 AGENTS.md
-.posts/
 
 # Build artifacts (keep pre-built eBPF object for out-of-the-box run)
 bin/*
@@ -20,14 +15,7 @@ test/e2e/load/load_result.json
 
 # Session notes
 session*
-SESSION_NOTES.md
-RELEASE_NOTES.md
-TODO.md
-.CLAUDE.md
-ISSUES.md
-WHATS_NEXT.md
-.claudedocs/superpowers/
 docs/superpowers/
 docs/habr-article.md
 docs/internalwiki/
-ISSUES.md
+sip-exporter-ai/
