@@ -347,7 +347,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 
 		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", len(results)))
 
-		e.services.metricser.UpdateSessionsByCarrierAndUA(e.services.dialoger.SizeByCarrierAndUA())
+		e.services.metricser.UpdateSessions(e.services.dialoger.Counts())
 
 		received, dropped := e.readSocketStats()
 		e.services.metricser.SocketStats(received, dropped)
@@ -745,17 +745,19 @@ func (e *exporter) updateRTPMetrics() {
 		e.services.metricser.UpdateRTPActiveStreams(nil)
 		return
 	}
-	counts := make(map[string]map[string]map[string]int)
+	type aggKey struct{ carrier, uaType, codec string }
+	tmp := make(map[aggKey]int)
 	for _, s := range stats {
 		e.services.metricser.UpdateRTPJitter(s.Carrier, s.UAType, s.Codec, s.JitterMs)
 		e.services.metricser.UpdateRTPMOS(s.Carrier, s.UAType, s.Codec, s.MOS)
-		if counts[s.Carrier] == nil {
-			counts[s.Carrier] = make(map[string]map[string]int)
-		}
-		if counts[s.Carrier][s.UAType] == nil {
-			counts[s.Carrier][s.UAType] = make(map[string]int)
-		}
-		counts[s.Carrier][s.UAType][s.Codec]++
+		tmp[aggKey{s.Carrier, s.UAType, s.Codec}]++
+	}
+	counts := make([]service.LabeledCount, 0, len(tmp))
+	for k, n := range tmp {
+		counts = append(counts, service.LabeledCount{
+			Labels: map[string]string{"carrier": k.carrier, "ua_type": k.uaType, "codec": k.codec},
+			Count:  n,
+		})
 	}
 	e.services.metricser.UpdateRTPActiveStreams(counts)
 }

@@ -48,7 +48,7 @@ type mockMetricser struct {
 	rtpLossValue              uint64
 }
 
-func (m *mockMetricser) UpdateSessionsByCarrierAndUA(_ map[string]map[string]int) {}
+func (m *mockMetricser) UpdateSessions(_ []service.LabeledCount) {}
 
 func (m *mockMetricser) Request(_ string, _ string, in []byte) {
 	m.requestCalled = in
@@ -138,9 +138,9 @@ func (m *mockMetricser) UpdateRTPLoss(_, _, _ string, lost uint64) {
 	m.rtpLossCalls++
 	m.rtpLossValue = lost
 }
-func (m *mockMetricser) UpdateRTPJitter(string, string, string, float64)             {}
-func (m *mockMetricser) UpdateRTPMOS(string, string, string, float64)                {}
-func (m *mockMetricser) UpdateRTPActiveStreams(map[string]map[string]map[string]int) {}
+func (m *mockMetricser) UpdateRTPJitter(string, string, string, float64) {}
+func (m *mockMetricser) UpdateRTPMOS(string, string, string, float64)    {}
+func (m *mockMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount) {}
 
 type dialogCreateArgs struct {
 	expiresAt time.Time
@@ -187,13 +187,18 @@ func (m *mockDialoger) Cleanup() []service.CleanupResult {
 	return m.cleanupResults
 }
 
-func (m *mockDialoger) SizeByCarrierAndUA() map[string]map[string]int {
-	result := make(map[string]map[string]int)
+func (m *mockDialoger) Counts() []service.LabeledCount {
+	type key struct{ carrier, uaType string }
+	counts := make(map[key]int)
 	for _, args := range m.created {
-		if result[args.carrier] == nil {
-			result[args.carrier] = make(map[string]int)
-		}
-		result[args.carrier][args.uaType]++
+		counts[key{args.carrier, args.uaType}]++
+	}
+	result := make([]service.LabeledCount, 0, len(counts))
+	for k, n := range counts {
+		result = append(result, service.LabeledCount{
+			Labels: map[string]string{"carrier": k.carrier, "ua_type": k.uaType},
+			Count:  n,
+		})
 	}
 	return result
 }
@@ -2877,9 +2882,7 @@ func (m *carrierTrackingMetricser) UpdateSession(carrier string, uaType string, 
 	m.sessionsByCarrierAndUA[carrier][uaType] = size
 }
 
-func (m *carrierTrackingMetricser) UpdateSessionsByCarrierAndUA(counts map[string]map[string]int) {
-	m.sessionsByCarrierAndUA = counts
-}
+func (m *carrierTrackingMetricser) UpdateSessions(_ []service.LabeledCount) {}
 
 func (m *carrierTrackingMetricser) SystemError() {
 	m.systemErrors++
@@ -2896,11 +2899,11 @@ func (m *carrierTrackingMetricser) UpdateVQReport(carrier string, uaType string,
 	m.vqReports = append(m.vqReports, carrierCall{carrier: carrier, uaType: uaType})
 }
 
-func (m *carrierTrackingMetricser) UpdateRTPPackets(string, string, string)                     {}
-func (m *carrierTrackingMetricser) UpdateRTPLoss(string, string, string, uint64)                {}
-func (m *carrierTrackingMetricser) UpdateRTPJitter(string, string, string, float64)             {}
-func (m *carrierTrackingMetricser) UpdateRTPMOS(string, string, string, float64)                {}
-func (m *carrierTrackingMetricser) UpdateRTPActiveStreams(map[string]map[string]map[string]int) {}
+func (m *carrierTrackingMetricser) UpdateRTPPackets(string, string, string)         {}
+func (m *carrierTrackingMetricser) UpdateRTPLoss(string, string, string, uint64)    {}
+func (m *carrierTrackingMetricser) UpdateRTPJitter(string, string, string, float64) {}
+func (m *carrierTrackingMetricser) UpdateRTPMOS(string, string, string, float64)    {}
+func (m *carrierTrackingMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount) {}
 
 // ==================== SIP message builders for MC/DC tests ====================
 

@@ -331,6 +331,33 @@ func TestMetricser_UpdateSession_VariousValues(t *testing.T) {
 	}
 }
 
+func (m *metrics) sessionsGauge(carrier, uaType string) float64 {
+	if m.sessions == nil {
+		return 0
+	}
+	var d dto.Metric
+	if err := m.sessions.WithLabelValues(carrier, uaType).Write(&d); err != nil {
+		return 0
+	}
+	return d.GetGauge().GetValue()
+}
+
+func TestMetrics_UpdateSessions(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateSessions([]LabeledCount{
+		{Labels: map[string]string{"carrier": "provider-a", "ua_type": "yealink"}, Count: 3},
+		{Labels: map[string]string{"carrier": "provider-b", "ua_type": "cisco"}, Count: 1},
+	})
+	require.InDelta(t, 3.0, m.sessionsGauge("provider-a", "yealink"), 0.01)
+	require.InDelta(t, 1.0, m.sessionsGauge("provider-b", "cisco"), 0.01)
+
+	m.UpdateSessions([]LabeledCount{
+		{Labels: map[string]string{"carrier": "provider-a", "ua_type": "yealink"}, Count: 1},
+	})
+	require.InDelta(t, 1.0, m.sessionsGauge("provider-a", "yealink"), 0.01)
+	require.InDelta(t, 0.0, m.sessionsGauge("provider-b", "cisco"), 0.01, "stale combo must reset")
+}
+
 func TestMetricser_SystemError_Multiple(t *testing.T) {
 	m := NewTestMetricser()
 	require.NotNil(t, m)

@@ -211,20 +211,29 @@ func TestDialoger_Concurrent_Cleanup(t *testing.T) {
 	require.Equal(t, 25, d.Size())
 }
 
-func TestDialogs_SizeByCarrierAndUA(t *testing.T) {
+func TestDialogs_Counts(t *testing.T) {
 	d := NewDialoger()
 	d.Create("id1", time.Now().Add(time.Hour), time.Now(), "provider-a", "yealink", "")
 	d.Create("id2", time.Now().Add(time.Hour), time.Now(), "provider-a", "yealink", "")
 	d.Create("id3", time.Now().Add(time.Hour), time.Now(), "provider-b", "grandstream", "")
-	byCarrierUA := d.SizeByCarrierAndUA()
-	require.Equal(t, 2, byCarrierUA["provider-a"]["yealink"])
-	require.Equal(t, 1, byCarrierUA["provider-b"]["grandstream"])
+	counts := d.Counts()
+	require.Len(t, counts, 2)
+	for _, lc := range counts {
+		switch lc.Labels["carrier"] {
+		case "provider-a":
+			require.Equal(t, "yealink", lc.Labels["ua_type"])
+			require.Equal(t, 2, lc.Count)
+		case "provider-b":
+			require.Equal(t, "grandstream", lc.Labels["ua_type"])
+			require.Equal(t, 1, lc.Count)
+		}
+	}
 }
 
-func TestDialogs_SizeByCarrierAndUA_Empty(t *testing.T) {
+func TestDialogs_Counts_Empty(t *testing.T) {
 	d := NewDialoger()
-	byCarrierUA := d.SizeByCarrierAndUA()
-	require.Empty(t, byCarrierUA)
+	counts := d.Counts()
+	require.Empty(t, counts)
 }
 
 func TestDialoger_Delete_ReturnsCarrier(t *testing.T) {

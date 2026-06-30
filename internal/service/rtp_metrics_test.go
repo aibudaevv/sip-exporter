@@ -77,17 +77,18 @@ func TestRTP_JitterAndMOS(t *testing.T) {
 
 func TestRTP_ActiveStreams(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
-	m.UpdateRTPActiveStreams(map[string]map[string]map[string]int{
-		"carrier-a": {"yealink": {"PCMU": 2, "PCMA": 1}},
-		"carrier-b": {"cisco": {"G.729": 1}},
+	m.UpdateRTPActiveStreams([]LabeledCount{
+		{Labels: map[string]string{"carrier": "carrier-a", "ua_type": "yealink", "codec": "PCMU"}, Count: 2},
+		{Labels: map[string]string{"carrier": "carrier-a", "ua_type": "yealink", "codec": "PCMA"}, Count: 1},
+		{Labels: map[string]string{"carrier": "carrier-b", "ua_type": "cisco", "codec": "G.729"}, Count: 1},
 	})
 	require.InDelta(t, 2.0, m.rtpGauge(m.rtpActiveStreams, "carrier-a", "yealink", "PCMU"), 0.01)
 	require.InDelta(t, 1.0, m.rtpGauge(m.rtpActiveStreams, "carrier-a", "yealink", "PCMA"), 0.01)
 	require.InDelta(t, 1.0, m.rtpGauge(m.rtpActiveStreams, "carrier-b", "cisco", "G.729"), 0.01)
 
 	// a subsequent snapshot resets stale label combinations.
-	m.UpdateRTPActiveStreams(map[string]map[string]map[string]int{
-		"carrier-a": {"yealink": {"PCMU": 1}},
+	m.UpdateRTPActiveStreams([]LabeledCount{
+		{Labels: map[string]string{"carrier": "carrier-a", "ua_type": "yealink", "codec": "PCMU"}, Count: 1},
 	})
 	require.InDelta(t, 1.0, m.rtpGauge(m.rtpActiveStreams, "carrier-a", "yealink", "PCMU"), 0.01)
 	require.InDelta(t, 0.0, m.rtpGauge(m.rtpActiveStreams, "carrier-a", "yealink", "PCMA"),

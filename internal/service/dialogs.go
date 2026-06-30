@@ -29,7 +29,7 @@ type (
 		Create(dialogID string, expiresAt time.Time, createdAt time.Time, carrier string, uaType string, callID string)
 		Delete(dialogID string) CleanupResult
 		Size() int
-		SizeByCarrierAndUA() map[string]map[string]int
+		Counts() []LabeledCount
 		Cleanup() []CleanupResult
 	}
 )
@@ -80,15 +80,20 @@ func (c *dialogs) Size() int {
 	return len(c.storage)
 }
 
-func (c *dialogs) SizeByCarrierAndUA() map[string]map[string]int {
+func (c *dialogs) Counts() []LabeledCount {
 	c.m.Lock()
 	defer c.m.Unlock()
-	result := make(map[string]map[string]int)
+	type key struct{ carrier, uaType string }
+	tmp := make(map[key]int)
 	for _, entry := range c.storage {
-		if result[entry.carrier] == nil {
-			result[entry.carrier] = make(map[string]int)
-		}
-		result[entry.carrier][entry.uaType]++
+		tmp[key{entry.carrier, entry.uaType}]++
+	}
+	result := make([]LabeledCount, 0, len(tmp))
+	for k, n := range tmp {
+		result = append(result, LabeledCount{
+			Labels: map[string]string{"carrier": k.carrier, "ua_type": k.uaType},
+			Count:  n,
+		})
 	}
 	return result
 }

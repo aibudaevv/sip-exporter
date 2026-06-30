@@ -29,6 +29,11 @@ type (
 		UAType  string
 	}
 
+	LabeledCount struct {
+		Labels map[string]string
+		Count  int
+	}
+
 	metrics struct {
 		systemErrorTotal prometheus.Counter
 		sipPacketsTotal  prometheus.Counter
@@ -107,13 +112,13 @@ type (
 		UpdateORD(carrier string, uaType string, delayMs float64)
 		UpdateLRD(carrier string, uaType string, delayMs float64)
 		UpdateSession(carrier string, uaType string, size int)
-		UpdateSessionsByCarrierAndUA(counts map[string]map[string]int)
+		UpdateSessions(counts []LabeledCount)
 		UpdateVQReport(carrier string, uaType string, report *vq.SessionReport)
 		UpdateRTPPackets(carrier string, uaType string, codec string)
 		UpdateRTPLoss(carrier string, uaType string, codec string, lost uint64)
 		UpdateRTPJitter(carrier string, uaType string, codec string, jitterMs float64)
 		UpdateRTPMOS(carrier string, uaType string, codec string, mos float64)
-		UpdateRTPActiveStreams(counts map[string]map[string]map[string]int)
+		UpdateRTPActiveStreams(counts []LabeledCount)
 		SystemError()
 		ParseError(errorType string)
 		SocketStats(received, dropped uint32)
@@ -675,12 +680,10 @@ func (m *metrics) UpdateSession(carrier string, uaType string, size int) {
 	m.sessions.WithLabelValues(carrier, uaType).Set(float64(size))
 }
 
-func (m *metrics) UpdateSessionsByCarrierAndUA(counts map[string]map[string]int) {
+func (m *metrics) UpdateSessions(counts []LabeledCount) {
 	m.sessions.Reset()
-	for carrier, uaCounts := range counts {
-		for uaType, count := range uaCounts {
-			m.sessions.WithLabelValues(carrier, uaType).Set(float64(count))
-		}
+	for _, lc := range counts {
+		m.sessions.WithLabelValues(lc.Labels["carrier"], lc.Labels["ua_type"]).Set(float64(lc.Count))
 	}
 }
 
@@ -750,14 +753,12 @@ func (m *metrics) UpdateRTPMOS(carrier string, uaType string, codec string, mos 
 	m.rtpMOS.WithLabelValues(carrier, uaType, codec).Observe(mos)
 }
 
-func (m *metrics) UpdateRTPActiveStreams(counts map[string]map[string]map[string]int) {
+func (m *metrics) UpdateRTPActiveStreams(counts []LabeledCount) {
 	m.rtpActiveStreams.Reset()
-	for carrier, uaCounts := range counts {
-		for uaType, codecCounts := range uaCounts {
-			for codec, n := range codecCounts {
-				m.rtpActiveStreams.WithLabelValues(carrier, uaType, codec).Set(float64(n))
-			}
-		}
+	for _, lc := range counts {
+		m.rtpActiveStreams.WithLabelValues(
+			lc.Labels["carrier"], lc.Labels["ua_type"], lc.Labels["codec"],
+		).Set(float64(lc.Count))
 	}
 }
 
