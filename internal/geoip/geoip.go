@@ -1,0 +1,97 @@
+package geoip
+
+import (
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"sync"
+
+	"github.com/oschwald/geoip2-golang"
+	"go.uber.org/zap"
+)
+
+const unknownCountry = "unknown"
+
+type Reader struct {
+	db   *geoip2.Reader
+	path string
+	mu   sync.RWMutex
+}
+
+func New(path string) (*Reader, error) {
+	if path == "" {
+		zap.L().
+			Warn(`GeoIP country DB not configured; source_country will be "unknown" for traffic without carrier.country`)
+		return &Reader{}, nil
+	}
+
+	db, err := geoip2.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			zap.L().
+				Warn(`GeoIP country DB file not found; source_country will be "unknown" for traffic without carrier.country`,
+					zap.String("path", path))
+			return &Reader{path: path}, nil
+		}
+		return nil, fmt.Errorf("open geoip db %q: %w", path, err)
+	}
+
+	zap.L().Info("GeoIP country DB loaded", zap.String("path", path))
+	return &Reader{db: db, path: path}, nil
+}
+
+func (r *Reader) Lookup(ip net.IP) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.db == nil {
+		return unknownCountry, false
+	}
+
+	country, err := r.db.Country(ip)
+	if err != nil {
+		return unknownCountry, false
+	}
+
+	if country.Country.IsoCode == "" {
+		return unknownCountry, false
+	}
+
+	return country.Country.IsoCode, true
+}
+
+func (r *Reader) Reload() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.path == "" {
+		return nil
+	}
+
+	db, err := geoip2.Open(r.path)
+	if err != nil {
+		return fmt.Errorf("reload geoip db %q: %w", r.path, err)
+	}
+
+	if r.db != nil {
+		_ = r.db.Close()
+	}
+	r.db = db
+
+	zap.L().Info("GeoIP country DB reloaded", zap.String("path", r.path))
+	return nil
+}
+
+func (r *Reader) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.db == nil {
+		return nil
+	}
+
+	err := r.db.Close()
+	r.db = nil
+	return err
+}
