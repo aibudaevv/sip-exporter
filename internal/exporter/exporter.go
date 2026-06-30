@@ -660,8 +660,10 @@ func (e *exporter) parseHeaders(lines [][]byte, p *dto.Packet) error {
 			}
 
 			p.From.Tag = tag
+			p.From.User, p.From.Addr = ParseURI(value)
 		case bytes.Equal(header, []byte("To")):
 			p.To.Tag = extractTag(value)
+			p.To.User, p.To.Addr = ParseURI(value)
 		case bytes.Equal(header, []byte("Call-ID")):
 			p.CallID = value
 		case bytes.Equal(header, []byte("CSeq")):
