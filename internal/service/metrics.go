@@ -2,7 +2,6 @@ package service
 
 import (
 	"bytes"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,8 +14,6 @@ import (
 	"github.com/aibudaevv/sip-exporter/internal/vq"
 )
 
-const compositeKeyParts = 2
-
 type (
 	carrierAtomicCounters struct {
 		inviteTotal            atomic.Int64
@@ -25,6 +22,11 @@ type (
 		inviteEffectiveTotal   atomic.Int64
 		inviteIneffectiveTotal atomic.Int64
 		sessionCompletedTotal  atomic.Int64
+	}
+
+	counterKey struct {
+		Carrier string
+		UAType  string
 	}
 
 	metrics struct {
@@ -128,28 +130,30 @@ type (
 	}
 )
 
+func (counterKey) labelNames() []string {
+	return []string{"carrier", "ua_type"}
+}
+
+func (k counterKey) labelValues() []string {
+	return []string{k.Carrier, k.UAType}
+}
+
 func (rc *ratioCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- rc.desc
 }
 
 func (rc *ratioCollector) Collect(ch chan<- prometheus.Metric) {
 	rc.m.carrierCounters.Range(func(key, value any) bool {
-		keyStr, ok := key.(string)
+		k, ok := key.(counterKey)
 		if !ok {
 			return true
-		}
-		parts := strings.SplitN(keyStr, "\x00", compositeKeyParts)
-		carrier := parts[0]
-		uaType := "other"
-		if len(parts) == compositeKeyParts {
-			uaType = parts[1]
 		}
 		counters, ok := value.(*carrierAtomicCounters)
 		if !ok {
 			return true
 		}
 		val := rc.calcFn(counters)
-		ch <- prometheus.MustNewConstMetric(rc.desc, prometheus.GaugeValue, val, carrier, uaType)
+		ch <- prometheus.MustNewConstMetric(rc.desc, prometheus.GaugeValue, val, k.labelValues()...)
 		return true
 	})
 }
@@ -546,7 +550,7 @@ func registerRatioCollector(
 	calcFn func(c *carrierAtomicCounters) float64,
 ) {
 	rc := &ratioCollector{
-		desc:   prometheus.NewDesc(name, help, []string{"carrier", "ua_type"}, nil),
+		desc:   prometheus.NewDesc(name, help, counterKey{}.labelNames(), nil),
 		m:      m,
 		calcFn: calcFn,
 	}
@@ -790,7 +794,7 @@ func (m *metrics) registerBuildInfo(reg *prometheus.Registry) {
 }
 
 func (m *metrics) getOrCreateCarrierCounters(carrier string, uaType string) *carrierAtomicCounters {
-	key := carrier + "\x00" + uaType
+	key := counterKey{Carrier: carrier, UAType: uaType}
 	if v, ok := m.carrierCounters.Load(key); ok {
 		c, _ := v.(*carrierAtomicCounters)
 		return c

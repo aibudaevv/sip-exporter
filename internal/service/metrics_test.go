@@ -17,7 +17,7 @@ func NewTestMetricser() Metricser {
 }
 
 func (m *metrics) getSER() float64 {
-	val, ok := m.carrierCounters.Load("\x00")
+	val, ok := m.carrierCounters.Load(counterKey{})
 	if !ok {
 		return 0
 	}
@@ -36,7 +36,7 @@ func (m *metrics) getSER() float64 {
 }
 
 func (m *metrics) getSEER() float64 {
-	val, ok := m.carrierCounters.Load("\x00")
+	val, ok := m.carrierCounters.Load(counterKey{})
 	if !ok {
 		return 0
 	}
@@ -55,7 +55,7 @@ func (m *metrics) getSEER() float64 {
 }
 
 func (m *metrics) getISA() float64 {
-	val, ok := m.carrierCounters.Load("\x00")
+	val, ok := m.carrierCounters.Load(counterKey{})
 	if !ok {
 		return 0
 	}
@@ -69,7 +69,7 @@ func (m *metrics) getISA() float64 {
 }
 
 func (m *metrics) getASR() float64 {
-	val, ok := m.carrierCounters.Load("\x00")
+	val, ok := m.carrierCounters.Load(counterKey{})
 	if !ok {
 		return 0
 	}
@@ -83,7 +83,7 @@ func (m *metrics) getASR() float64 {
 }
 
 func (m *metrics) getNER() float64 {
-	val, ok := m.carrierCounters.Load("\x00")
+	val, ok := m.carrierCounters.Load(counterKey{})
 	if !ok {
 		return 0
 	}
@@ -97,7 +97,7 @@ func (m *metrics) getNER() float64 {
 }
 
 func (m *metrics) getSCR() float64 {
-	val, ok := m.carrierCounters.Load("\x00")
+	val, ok := m.carrierCounters.Load(counterKey{})
 	if !ok {
 		return 0
 	}
@@ -1995,4 +1995,46 @@ func TestMetrics_PDD_Histogram_MultipleObservations(t *testing.T) {
 	sum, count := m.getPDDFromHistogram()
 	require.Equal(t, uint64(100), count)
 	require.InDelta(t, 49500.0, sum, 1.0)
+}
+
+func TestRatioCollector_StructKeyLabelEmission(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newMetricserWithRegistry(reg).(*metrics)
+
+	m.Request("carrier-a", "sip", []byte("INVITE"))
+	m.Invite200OK("carrier-a", "sip")
+
+	m.Request("carrier-b", "yealink", []byte("INVITE"))
+
+	gathered, err := reg.Gather()
+	require.NoError(t, err)
+
+	var serFam *dto.MetricFamily
+	for _, fam := range gathered {
+		if fam.GetName() == "sip_exporter_ser" {
+			serFam = fam
+			break
+		}
+	}
+	require.NotNil(t, serFam, "SER metric not found")
+	require.Len(t, serFam.GetMetric(), 2, "expected 2 carrier×ua_type series")
+
+	found := make(map[string]bool)
+	for _, metric := range serFam.GetMetric() {
+		labels := make(map[string]string, len(metric.GetLabel()))
+		for _, l := range metric.GetLabel() {
+			labels[l.GetName()] = l.GetValue()
+		}
+		key := labels["carrier"] + "/" + labels["ua_type"]
+		found[key] = true
+
+		switch key {
+		case "carrier-a/sip":
+			require.InDelta(t, 100.0, metric.GetGauge().GetValue(), 0.01)
+		case "carrier-b/yealink":
+			require.InDelta(t, 0.0, metric.GetGauge().GetValue(), 0.01)
+		}
+	}
+	require.True(t, found["carrier-a/sip"], "missing carrier-a/sip series")
+	require.True(t, found["carrier-b/yealink"], "missing carrier-b/yealink series")
 }
