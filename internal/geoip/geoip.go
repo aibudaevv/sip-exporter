@@ -7,14 +7,20 @@ import (
 	"os"
 	"sync"
 
-	"github.com/oschwald/geoip2-golang"
+	"github.com/oschwald/maxminddb-golang"
 	"go.uber.org/zap"
 )
 
 const unknownCountry = "unknown"
 
+type countryRecord struct {
+	Country struct {
+		ISOCode string `maxminddb:"iso_code"`
+	} `maxminddb:"country"`
+}
+
 type Reader struct {
-	db   *geoip2.Reader
+	db   *maxminddb.Reader
 	path string
 	mu   sync.RWMutex
 }
@@ -26,7 +32,7 @@ func New(path string) (*Reader, error) {
 		return &Reader{}, nil
 	}
 
-	db, err := geoip2.Open(path)
+	db, err := maxminddb.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			zap.L().
@@ -49,16 +55,16 @@ func (r *Reader) Lookup(ip net.IP) (string, bool) {
 		return unknownCountry, false
 	}
 
-	country, err := r.db.Country(ip)
-	if err != nil {
+	var rec countryRecord
+	if err := r.db.Lookup(ip, &rec); err != nil {
 		return unknownCountry, false
 	}
 
-	if country.Country.IsoCode == "" {
+	if rec.Country.ISOCode == "" {
 		return unknownCountry, false
 	}
 
-	return country.Country.IsoCode, true
+	return rec.Country.ISOCode, true
 }
 
 func (r *Reader) Reload() error {
@@ -69,7 +75,7 @@ func (r *Reader) Reload() error {
 		return nil
 	}
 
-	db, err := geoip2.Open(r.path)
+	db, err := maxminddb.Open(r.path)
 	if err != nil {
 		return fmt.Errorf("reload geoip db %q: %w", r.path, err)
 	}
