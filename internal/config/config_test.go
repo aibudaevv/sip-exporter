@@ -27,6 +27,7 @@ func unsetConfigEnv(t *testing.T) {
 		"SIP_EXPORTER_TELEMETRY",
 		"SIP_EXPORTER_TELEMETRY_URL",
 		"SIP_EXPORTER_TELEMETRY_ID_FILE",
+		"SIP_EXPORTER_GEOIP_COUNTRY_DB",
 	} {
 		os.Unsetenv(k)
 	}
@@ -198,4 +199,27 @@ func TestGetConfig_TelemetryCustomIDFile(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
 	require.Equal(t, "/tmp/my-id", cfg.TelemetryIDFile)
+}
+
+func TestGetConfig_GeoIPCountryDBDefault(t *testing.T) {
+	unsetConfigEnv(t)
+	t.Setenv("SIP_EXPORTER_INTERFACE", "eth0")
+
+	cfg, err := GetConfig()
+
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	require.Equal(t, "", cfg.GeoIPCountryDB, "GeoIP country DB path must default to empty (disabled)")
+}
+
+func TestGetConfig_GeoIPCountryDBCustom(t *testing.T) {
+	unsetConfigEnv(t)
+	t.Setenv("SIP_EXPORTER_INTERFACE", "eth0")
+	t.Setenv("SIP_EXPORTER_GEOIP_COUNTRY_DB", "/data/geoip.mmdb")
+
+	cfg, err := GetConfig()
+
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	require.Equal(t, "/data/geoip.mmdb", cfg.GeoIPCountryDB)
 }
