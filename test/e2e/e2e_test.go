@@ -164,7 +164,7 @@ func newSharedTestEnvWithUAConfig(ctx context.Context, t *testing.T, uaYAMLFile 
 		},
 		exporterPort: exporterHTTPPort,
 	}
-	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, "", uaYAML)
+	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, "", uaYAML, nil)
 	env.endpoint = endpoint
 	env.container = container
 	registerExporterCleanup(t, container, exporterHTTPPort)
@@ -184,7 +184,7 @@ func newSharedTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carrier
 		},
 		exporterPort: exporterHTTPPort,
 	}
-	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML, uaYAML)
+	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML, uaYAML, nil)
 	env.endpoint = endpoint
 	env.container = container
 	registerExporterCleanup(t, container, exporterHTTPPort)
@@ -271,6 +271,22 @@ func newTestEnvWithConfig(ctx context.Context, t *testing.T, carriersYAML string
 	return env
 }
 
+// newTestEnvWithExtraEnv starts an exporter with extra environment variables
+// (e.g. SIP_EXPORTER_LOCAL_COUNTRY_CODE for destination_country fallback tests).
+func newTestEnvWithExtraEnv(ctx context.Context, t *testing.T, carriersYAML string, extraEnv map[string]string) *testEnv {
+	t.Helper()
+	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
+
+	env := &testEnv{
+		sippPort:       sippPort,
+		sippClientPort: sippClientPort,
+	}
+	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML, "", extraEnv)
+	env.endpoint = endpoint
+	registerExporterCleanup(t, container, exporterHTTPPort)
+	return env
+}
+
 var projectRoot string
 var interfaceIP string
 var exporterImage string
@@ -313,10 +329,10 @@ type sippResult struct {
 
 func startExporterWithConfig(ctx context.Context, t *testing.T, exporterPort, sippPort, sippClientPort string, carriersYAML string) (string, testcontainers.Container) {
 	t.Helper()
-	return startExporterWithConfigAndUA(ctx, t, exporterPort, sippPort, sippClientPort, carriersYAML, "")
+	return startExporterWithConfigAndUA(ctx, t, exporterPort, sippPort, sippClientPort, carriersYAML, "", nil)
 }
 
-func startExporterWithConfigAndUA(ctx context.Context, t *testing.T, exporterPort, sippPort, sippClientPort string, carriersYAML string, userAgentsYAML string) (string, testcontainers.Container) {
+func startExporterWithConfigAndUA(ctx context.Context, t *testing.T, exporterPort, sippPort, sippClientPort string, carriersYAML string, userAgentsYAML string, extraEnv map[string]string) (string, testcontainers.Container) {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -334,6 +350,9 @@ func startExporterWithConfigAndUA(ctx context.Context, t *testing.T, exporterPor
 		"SIP_EXPORTER_SIPS_PORT":       sippClientPort,
 		"SIP_EXPORTER_LOGGER_LEVEL":    exporterLogLevel,
 		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
+	}
+	for k, v := range extraEnv {
+		envVars[k] = v
 	}
 
 	var mounts testcontainers.ContainerMounts
