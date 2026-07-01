@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -104,6 +105,37 @@ func TestSourceCountry_PerCarrier(t *testing.T) {
 	require.Equal(t, 100.0, inviteRU, "carrier-A (RU) should have exactly 100 INVITEs")
 	require.Equal(t, 100.0, inviteUS, "carrier-B (US) should have exactly 100 INVITEs")
 	require.Equal(t, 0.0, inviteUnknown, "no traffic should have source_country=unknown when carriers have country fields")
+
+	assertSelfMonitoringHealthy(t, env.endpoint)
+}
+
+// TestSourceCountry_GeoIP verifies that source_country is resolved from a
+// GeoIP country database when the source IP is not covered by carrier.country.
+//
+// Uses the open-source MaxMind test database (GeoIP2-Country-Test.mmdb) which
+// maps 81.2.69.142 → GB. No carrier config — carrier resolves to "other",
+// so source_country comes solely from GeoIP.
+//
+// Expected: invite_total{source_country="GB"}=100, {source_country="unknown"}=0.
+func TestSourceCountry_GeoIP(t *testing.T) {
+	ctx := context.Background()
+	setupSecondaryIPs(t)
+	addLoopbackIP(t, "81.2.69.142/32")
+
+	geoipDBPath := filepath.Join(projectRoot, "test", "e2e", "data", "GeoIP2-Country-Test.mmdb")
+	env := newTestEnvWithGeoIP(ctx, t, geoipDBPath)
+
+	runSippScenarioWithIPs(ctx, t, "uas_100.xml", "uac_100.xml", 100, env, "127.0.0.1", "81.2.69.142")
+
+	inviteGB := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", `source_country="GB"`)
+	inviteUnknown := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", `source_country="unknown"`)
+	t.Logf("invite_total{GB}=%.0f, invite_total{unknown}=%.0f", inviteGB, inviteUnknown)
+	require.Equal(t, 100.0, inviteGB, "GeoIP should resolve 81.2.69.142 to GB")
+	require.Equal(t, 0.0, inviteUnknown, "no traffic should have source_country=unknown when GeoIP resolves")
+
+	serGB := getMetricWithLabel(t, env.endpoint, "sip_exporter_ser", `source_country="GB"`)
+	t.Logf("ser{GB}=%.2f", serGB)
+	require.Equal(t, 100.0, serGB, "SER should carry source_country=GB")
 
 	assertSelfMonitoringHealthy(t, env.endpoint)
 }

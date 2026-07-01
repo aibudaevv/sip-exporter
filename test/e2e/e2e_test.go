@@ -164,7 +164,7 @@ func newSharedTestEnvWithUAConfig(ctx context.Context, t *testing.T, uaYAMLFile 
 		},
 		exporterPort: exporterHTTPPort,
 	}
-	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, "", uaYAML, nil)
+	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, "", uaYAML, nil, "")
 	env.endpoint = endpoint
 	env.container = container
 	registerExporterCleanup(t, container, exporterHTTPPort)
@@ -184,7 +184,7 @@ func newSharedTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carrier
 		},
 		exporterPort: exporterHTTPPort,
 	}
-	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML, uaYAML, nil)
+	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML, uaYAML, nil, "")
 	env.endpoint = endpoint
 	env.container = container
 	registerExporterCleanup(t, container, exporterHTTPPort)
@@ -256,6 +256,24 @@ func setupSecondaryIPs(t *testing.T) {
 	})
 }
 
+// addLoopbackIP adds a single IP address to the loopback interface.
+func addLoopbackIP(t *testing.T, addr string) {
+	t.Helper()
+	out, err := exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
+		"--entrypoint", "", "alpine",
+		"sh", "-c", "ip addr add "+addr+" dev lo || true",
+	).CombinedOutput()
+	require.NoError(t, err, "failed to add %s to lo: %s", addr, string(out))
+
+	t.Cleanup(func() {
+		ip := strings.SplitN(addr, "/", 2)[0]
+		_ = exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
+			"--entrypoint", "", "alpine",
+			"sh", "-c", "ip addr del "+ip+" dev lo 2>/dev/null || true",
+		).Run()
+	})
+}
+
 // newTestEnvWithConfig starts exporter, optionally with carriers config.
 func newTestEnvWithConfig(ctx context.Context, t *testing.T, carriersYAML string) *testEnv {
 	t.Helper()
@@ -281,7 +299,23 @@ func newTestEnvWithExtraEnv(ctx context.Context, t *testing.T, carriersYAML stri
 		sippPort:       sippPort,
 		sippClientPort: sippClientPort,
 	}
-	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML, "", extraEnv)
+	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML, "", extraEnv, "")
+	env.endpoint = endpoint
+	registerExporterCleanup(t, container, exporterHTTPPort)
+	return env
+}
+
+// newTestEnvWithGeoIP starts an exporter with a GeoIP country DB mounted.
+// geoipDBPath is the host path to the .mmdb file.
+func newTestEnvWithGeoIP(ctx context.Context, t *testing.T, geoipDBPath string) *testEnv {
+	t.Helper()
+	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
+
+	env := &testEnv{
+		sippPort:       sippPort,
+		sippClientPort: sippClientPort,
+	}
+	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, "", "", nil, geoipDBPath)
 	env.endpoint = endpoint
 	registerExporterCleanup(t, container, exporterHTTPPort)
 	return env
@@ -329,10 +363,10 @@ type sippResult struct {
 
 func startExporterWithConfig(ctx context.Context, t *testing.T, exporterPort, sippPort, sippClientPort string, carriersYAML string) (string, testcontainers.Container) {
 	t.Helper()
-	return startExporterWithConfigAndUA(ctx, t, exporterPort, sippPort, sippClientPort, carriersYAML, "", nil)
+	return startExporterWithConfigAndUA(ctx, t, exporterPort, sippPort, sippClientPort, carriersYAML, "", nil, "")
 }
 
-func startExporterWithConfigAndUA(ctx context.Context, t *testing.T, exporterPort, sippPort, sippClientPort string, carriersYAML string, userAgentsYAML string, extraEnv map[string]string) (string, testcontainers.Container) {
+func startExporterWithConfigAndUA(ctx context.Context, t *testing.T, exporterPort, sippPort, sippClientPort string, carriersYAML string, userAgentsYAML string, extraEnv map[string]string, geoipDBPath string) (string, testcontainers.Container) {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -378,6 +412,11 @@ func startExporterWithConfigAndUA(ctx context.Context, t *testing.T, exporterPor
 
 		mounts = append(mounts, testcontainers.BindMount(tmpFile.Name(), "/etc/sip-exporter/user_agents.yaml"))
 		envVars["SIP_EXPORTER_USER_AGENTS_CONFIG"] = "/etc/sip-exporter/user_agents.yaml"
+	}
+
+	if geoipDBPath != "" {
+		mounts = append(mounts, testcontainers.BindMount(geoipDBPath, "/data/geoip.mmdb"))
+		envVars["SIP_EXPORTER_GEOIP_COUNTRY_DB"] = "/data/geoip.mmdb"
 	}
 
 	req := testcontainers.ContainerRequest{
