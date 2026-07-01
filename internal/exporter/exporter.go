@@ -799,11 +799,16 @@ func (e *exporter) updateRTPMetrics() {
 }
 
 func (e *exporter) handleRequest(carrier string, uaType string, sourceCountry string, packet dto.Packet) {
-	var destinationCountry string
+	var destinationCountry, callerHost, calledHost string
 	if bytes.Equal(packet.Method, []byte("INVITE")) {
 		destinationCountry = e.resolveDestinationCountry(packet.To.User)
+		callerHost = string(packet.From.Addr)
+		calledHost = string(packet.To.Addr)
 	}
-	e.services.metricser.Request(carrier, uaType, sourceCountry, destinationCountry, packet.Method)
+	e.services.metricser.Request(
+		carrier, uaType, sourceCountry, destinationCountry,
+		callerHost, calledHost, packet.Method,
+	)
 
 	if bytes.Equal(packet.Method, []byte("REGISTER")) {
 		e.storeRegisterTime(string(packet.CallID), carrier, uaType, sourceCountry)
@@ -953,7 +958,9 @@ func (e *exporter) handle200OKResponse(
 
 	if bytes.Equal(packet.CSeq.Method, []byte("INVITE")) {
 		destinationCountry := e.resolveDestinationCountry(packet.To.User)
-		e.services.metricser.Invite200OK(carrier, uaType, sourceCountry, destinationCountry)
+		callerHost := string(packet.From.Addr)
+		calledHost := string(packet.To.Addr)
+		e.services.metricser.Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost)
 		if err := e.handleInvite200OK(carrier, uaType, sourceCountry, packet); err != nil {
 			zap.L().Error("handle INVITE 200 OK", zap.Error(err))
 		}
