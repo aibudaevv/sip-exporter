@@ -35,11 +35,16 @@ type (
 	}
 )
 
-func NewServer(resolver *carriers.Resolver, classifier *ua.Classifier, gr *geoip.Reader) Server {
+func NewServer(
+	resolver *carriers.Resolver,
+	classifier *ua.Classifier,
+	gr *geoip.Reader,
+	localCountryCode string,
+) Server {
 	return &server{
 		exporter: exporter.NewExporter(
 			service.NewMetricser(), service.NewDialoger(),
-			resolver, classifier, gr,
+			resolver, classifier, gr, localCountryCode,
 		),
 	}
 }

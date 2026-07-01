@@ -24,6 +24,7 @@ type (
 		TelemetryURL         string        `env:"SIP_EXPORTER_TELEMETRY_URL"      env-default:"https://telemetry.sip-exporter.com/v1/beacon"`
 		TelemetryIDFile      string        `env:"SIP_EXPORTER_TELEMETRY_ID_FILE"  env-default:"/var/lib/sip-exporter/anon_id"`
 		GeoIPCountryDB       string        `env:"SIP_EXPORTER_GEOIP_COUNTRY_DB"`
+		LocalCountryCode     string        `env:"SIP_EXPORTER_LOCAL_COUNTRY_CODE"`
 	}
 )
 

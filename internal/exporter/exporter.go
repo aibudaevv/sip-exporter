@@ -107,29 +107,30 @@ type (
 	}
 
 	exporter struct {
-		collection      *ebpf.Collection
-		sock            int
-		messages        chan []byte
-		done            chan struct{}
-		wg              sync.WaitGroup
-		closeOnce       sync.Once
-		sipPort         uint16
-		sipsPort        uint16
-		services        services
-		carrierResolver *carriers.Resolver
-		uaClassifier    *ua.Classifier
-		geoip           *geoip.Reader
-		vqHandler       *vq.Handler
-		mediaTracker    *mediatracker.Tracker
-		registerTracker map[string]registerEntry
-		registerMutex   sync.RWMutex
-		inviteTracker   map[string]inviteEntry
-		inviteMutex     sync.RWMutex
-		inviteSDP       map[string]inviteSDPEntity
-		inviteSDPMutex  sync.Mutex
-		optionsTracker  map[string]optionsEntry
-		optionsMutex    sync.RWMutex
-		initialized     atomic.Bool
+		collection       *ebpf.Collection
+		sock             int
+		messages         chan []byte
+		done             chan struct{}
+		wg               sync.WaitGroup
+		closeOnce        sync.Once
+		sipPort          uint16
+		sipsPort         uint16
+		services         services
+		carrierResolver  *carriers.Resolver
+		uaClassifier     *ua.Classifier
+		geoip            *geoip.Reader
+		localCountryCode string
+		vqHandler        *vq.Handler
+		mediaTracker     *mediatracker.Tracker
+		registerTracker  map[string]registerEntry
+		registerMutex    sync.RWMutex
+		inviteTracker    map[string]inviteEntry
+		inviteMutex      sync.RWMutex
+		inviteSDP        map[string]inviteSDPEntity
+		inviteSDPMutex   sync.Mutex
+		optionsTracker   map[string]optionsEntry
+		optionsMutex     sync.RWMutex
+		initialized      atomic.Bool
 	}
 	services struct {
 		metricser service.Metricser
@@ -154,23 +155,25 @@ func NewExporter(
 	resolver *carriers.Resolver,
 	classifier *ua.Classifier,
 	gr *geoip.Reader,
+	localCountryCode string,
 ) Exporter {
 	return &exporter{
 		services: services{
 			metricser: m,
 			dialoger:  d,
 		},
-		carrierResolver: resolver,
-		uaClassifier:    classifier,
-		geoip:           gr,
-		vqHandler:       vq.NewHandler(m),
-		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
-		messages:        make(chan []byte, messagesChanSize),
-		done:            make(chan struct{}),
-		registerTracker: make(map[string]registerEntry),
-		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
-		optionsTracker:  make(map[string]optionsEntry),
+		carrierResolver:  resolver,
+		uaClassifier:     classifier,
+		geoip:            gr,
+		localCountryCode: localCountryCode,
+		vqHandler:        vq.NewHandler(m),
+		mediaTracker:     mediatracker.NewTracker(rtpStreamTTL),
+		messages:         make(chan []byte, messagesChanSize),
+		done:             make(chan struct{}),
+		registerTracker:  make(map[string]registerEntry),
+		inviteTracker:    make(map[string]inviteEntry),
+		inviteSDP:        make(map[string]inviteSDPEntity),
+		optionsTracker:   make(map[string]optionsEntry),
 	}
 }
 
@@ -336,6 +339,10 @@ func (e *exporter) resolveSourceCountry(carrierCountry string, ipHeader []byte) 
 		return defaultCountry
 	}
 	return country
+}
+
+func (e *exporter) resolveDestinationCountry(toUser []byte) string {
+	return geoip.LookupDestination(string(toUser), e.localCountryCode)
 }
 
 func (e *exporter) resolveUA(userAgent []byte) string {
@@ -792,7 +799,11 @@ func (e *exporter) updateRTPMetrics() {
 }
 
 func (e *exporter) handleRequest(carrier string, uaType string, sourceCountry string, packet dto.Packet) {
-	e.services.metricser.Request(carrier, uaType, sourceCountry, packet.Method)
+	var destinationCountry string
+	if bytes.Equal(packet.Method, []byte("INVITE")) {
+		destinationCountry = e.resolveDestinationCountry(packet.To.User)
+	}
+	e.services.metricser.Request(carrier, uaType, sourceCountry, destinationCountry, packet.Method)
 
 	if bytes.Equal(packet.Method, []byte("REGISTER")) {
 		e.storeRegisterTime(string(packet.CallID), carrier, uaType, sourceCountry)
@@ -941,6 +952,8 @@ func (e *exporter) handle200OKResponse(
 	zap.L().Debug("handle message", zap.ByteString("200 OK cseq method", packet.CSeq.Method))
 
 	if bytes.Equal(packet.CSeq.Method, []byte("INVITE")) {
+		destinationCountry := e.resolveDestinationCountry(packet.To.User)
+		e.services.metricser.Invite200OK(carrier, uaType, sourceCountry, destinationCountry)
 		if err := e.handleInvite200OK(carrier, uaType, sourceCountry, packet); err != nil {
 			zap.L().Error("handle INVITE 200 OK", zap.Error(err))
 		}

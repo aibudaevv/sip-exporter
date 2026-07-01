@@ -2,7 +2,6 @@ package vq
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -26,25 +25,7 @@ func (m *mockMetricser) SystemError() {
 	m.systemErrorCalled = true
 }
 
-func (m *mockMetricser) ParseError(string)                                      {}
-func (m *mockMetricser) SocketStats(_, _ uint32)                                {}
-func (m *mockMetricser) UpdateChannelLength(int)                                {}
-func (m *mockMetricser) UpdateChannelCapacity(int)                              {}
-func (m *mockMetricser) UpdateTrackerSize(string, int)                          {}
-func (m *mockMetricser) UpdateActiveDialogs(int)                                {}
-func (m *mockMetricser) Request(string, string, []byte)                         {}
-func (m *mockMetricser) Response(string, string, []byte, bool)                  {}
-func (m *mockMetricser) ResponseWithMetrics(string, string, []byte, bool, bool) {}
-func (m *mockMetricser) Invite200OK(string, string)                             {}
-func (m *mockMetricser) SessionCompleted(string, string)                        {}
-func (m *mockMetricser) UpdateRRD(string, string, float64)                      {}
-func (m *mockMetricser) UpdateSPD(string, string, time.Duration)                {}
-func (m *mockMetricser) UpdateTTR(string, string, float64)                      {}
-func (m *mockMetricser) UpdatePDD(string, string, float64)                      {}
-func (m *mockMetricser) UpdateORD(string, string, float64)                      {}
-func (m *mockMetricser) UpdateLRD(string, string, float64)                      {}
-func (m *mockMetricser) UpdateSession(string, string, int)                      {}
-func (m *mockMetricser) UpdateSessionsByCarrierAndUA(map[string]map[string]int) {}
+func (m *mockMetricser) ParseError(string) {}
 
 func TestHandler_FullReport(t *testing.T) {
 	mock := &mockMetricser{}

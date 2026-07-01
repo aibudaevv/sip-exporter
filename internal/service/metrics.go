@@ -39,20 +39,21 @@ type (
 		systemErrorTotal prometheus.Counter
 		sipPacketsTotal  prometheus.Counter
 
-		requestInviteTotal    *prometheus.CounterVec
-		requestACKTotal       *prometheus.CounterVec
-		requestByeTotal       *prometheus.CounterVec
-		requestCancelTotal    *prometheus.CounterVec
-		requestOptionsTotal   *prometheus.CounterVec
-		requestRegisterTotal  *prometheus.CounterVec
-		requestUpdateTotal    *prometheus.CounterVec
-		requestInfoTotal      *prometheus.CounterVec
-		requestReferTotal     *prometheus.CounterVec
-		requestSubscribeTotal *prometheus.CounterVec
-		requestNotifyTotal    *prometheus.CounterVec
-		requestPrackTotal     *prometheus.CounterVec
-		requestPublishTotal   *prometheus.CounterVec
-		requestMessageTotal   *prometheus.CounterVec
+		requestInviteTotal      *prometheus.CounterVec
+		requestInvite200OKTotal *prometheus.CounterVec
+		requestACKTotal         *prometheus.CounterVec
+		requestByeTotal         *prometheus.CounterVec
+		requestCancelTotal      *prometheus.CounterVec
+		requestOptionsTotal     *prometheus.CounterVec
+		requestRegisterTotal    *prometheus.CounterVec
+		requestUpdateTotal      *prometheus.CounterVec
+		requestInfoTotal        *prometheus.CounterVec
+		requestReferTotal       *prometheus.CounterVec
+		requestSubscribeTotal   *prometheus.CounterVec
+		requestNotifyTotal      *prometheus.CounterVec
+		requestPrackTotal       *prometheus.CounterVec
+		requestPublishTotal     *prometheus.CounterVec
+		requestMessageTotal     *prometheus.CounterVec
 
 		statusCounters map[string]*prometheus.CounterVec
 
@@ -101,10 +102,10 @@ type (
 	}
 
 	Metricser interface {
-		Request(carrier, uaType, sourceCountry string, in []byte)
+		Request(carrier, uaType, sourceCountry, destinationCountry string, in []byte)
 		Response(carrier, uaType, sourceCountry string, in []byte, isInviteResponse bool)
 		ResponseWithMetrics(carrier, uaType, sourceCountry string, status []byte, isInviteResponse, is200OK bool)
-		Invite200OK(carrier, uaType, sourceCountry string)
+		Invite200OK(carrier, uaType, sourceCountry, destinationCountry string)
 		SessionCompleted(carrier, uaType, sourceCountry string)
 		UpdateRRD(carrier, uaType, sourceCountry string, delayMs float64)
 		UpdateSPD(carrier, uaType, sourceCountry string, duration time.Duration)
@@ -190,9 +191,13 @@ func newMetricserWithRegistry(reg *prometheus.Registry) Metricser {
 
 func (m *metrics) initRequestCounters(reg *prometheus.Registry) {
 	cl := []string{"carrier", "ua_type", "source_country"}
+	clInvite := []string{"carrier", "ua_type", "source_country", "destination_country"}
 	m.requestInviteTotal = newCounterVecWithRegistry(
 		"sip_exporter_invite_total",
-		"Total number of INVITE requests", cl, reg)
+		"Total number of INVITE requests", clInvite, reg)
+	m.requestInvite200OKTotal = newCounterVecWithRegistry(
+		"sip_exporter_invite_200_total",
+		"Total number of 200 OK responses to INVITE", clInvite, reg)
 	m.requestACKTotal = newCounterVecWithRegistry(
 		"sip_exporter_ack_total",
 		"Total number of ACK requests", cl, reg)
@@ -567,7 +572,7 @@ func registerRatioCollector(
 	}
 }
 
-func (m *metrics) Request(carrier, uaType, sourceCountry string, in []byte) {
+func (m *metrics) Request(carrier, uaType, sourceCountry, destinationCountry string, in []byte) {
 	defer m.sipPacketsTotal.Inc()
 
 	switch {
@@ -596,7 +601,7 @@ func (m *metrics) Request(carrier, uaType, sourceCountry string, in []byte) {
 	case bytes.Equal(in, []byte("ACK")):
 		m.requestACKTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 	case bytes.Equal(in, []byte("INVITE")):
-		m.requestInviteTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+		m.requestInviteTotal.WithLabelValues(carrier, uaType, sourceCountry, destinationCountry).Inc()
 		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).inviteTotal.Add(1)
 	case bytes.Equal(in, []byte("MESSAGE")):
 		m.requestMessageTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
@@ -644,8 +649,8 @@ func (m *metrics) ResponseWithMetrics(
 	}
 }
 
-func (m *metrics) Invite200OK(carrier, uaType, sourceCountry string) {
-	m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).invite200OKTotal.Add(1)
+func (m *metrics) Invite200OK(carrier, uaType, sourceCountry, destinationCountry string) {
+	m.requestInvite200OKTotal.WithLabelValues(carrier, uaType, sourceCountry, destinationCountry).Inc()
 }
 
 func (m *metrics) SessionCompleted(carrier, uaType, sourceCountry string) {

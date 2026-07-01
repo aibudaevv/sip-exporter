@@ -256,7 +256,7 @@ func TestMetricser_Request_AllMethodsSingleRun(t *testing.T) {
 
 	for _, method := range methods {
 		t.Run(method.name, func(_ *testing.T) {
-			m.Request("", "", "", method.data)
+			m.Request("", "", "", "", method.data)
 		})
 	}
 }
@@ -265,9 +265,9 @@ func TestMetrics_Request_SourceCountryLabel(t *testing.T) {
 	m := NewTestMetricser()
 	mm := m.(*metrics)
 
-	mm.Request("carrier-a", "sip", "US", []byte("INVITE"))
+	mm.Request("carrier-a", "sip", "US", "", []byte("INVITE"))
 
-	counter, err := mm.requestInviteTotal.GetMetricWithLabelValues("carrier-a", "sip", "US")
+	counter, err := mm.requestInviteTotal.GetMetricWithLabelValues("carrier-a", "sip", "US", "")
 	require.NoError(t, err)
 
 	var dtoMetric dto.Metric
@@ -387,7 +387,7 @@ func TestMetricser_Combined(t *testing.T) {
 	m := NewTestMetricser()
 	require.NotNil(t, m)
 
-	m.Request("", "", "", []byte("INVITE"))
+	m.Request("", "", "", "", []byte("INVITE"))
 	m.Response("", "", "", []byte("200"), false)
 	m.UpdateSession("", "", "", 10)
 	m.SystemError()
@@ -439,15 +439,17 @@ func TestMetrics_UpdateSER_DenominatorZero(t *testing.T) {
 }
 
 func TestMetrics_Invite200OK(t *testing.T) {
-	m := &metrics{}
-	counters := m.getOrCreateCarrierCounters("", "", "")
-	counters.inviteTotal.Store(10)
-	counters.invite200OKTotal.Store(0)
-	counters.invite3xxTotal.Store(0)
+	reg := prometheus.NewRegistry()
+	m := newMetricserWithRegistry(reg).(*metrics)
 
-	m.Invite200OK("", "", "")
+	m.Invite200OK("carrier-a", "sip", "US", "RU")
 
-	require.Equal(t, int64(1), counters.invite200OKTotal.Load())
+	counter, err := m.requestInvite200OKTotal.GetMetricWithLabelValues("carrier-a", "sip", "US", "RU")
+	require.NoError(t, err)
+
+	var d dto.Metric
+	require.NoError(t, counter.Write(&d))
+	require.InDelta(t, 1.0, d.GetCounter().GetValue(), 0.01)
 }
 
 func TestMetrics_Integration_SER(t *testing.T) {
@@ -2042,10 +2044,11 @@ func TestRatioCollector_StructKeyLabelEmission(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := newMetricserWithRegistry(reg).(*metrics)
 
-	m.Request("carrier-a", "sip", "US", []byte("INVITE"))
-	m.Invite200OK("carrier-a", "sip", "US")
+	m.Request("carrier-a", "sip", "US", "", []byte("INVITE"))
+	m.ResponseWithMetrics("carrier-a", "sip", "US", []byte("200"), true, true)
+	m.Invite200OK("carrier-a", "sip", "US", "")
 
-	m.Request("carrier-b", "yealink", "DE", []byte("INVITE"))
+	m.Request("carrier-b", "yealink", "DE", "", []byte("INVITE"))
 
 	gathered, err := reg.Gather()
 	require.NoError(t, err)
