@@ -253,7 +253,7 @@ func BenchmarkHandleMessage_INVITE(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		_ = e.handleMessage("other", input)
+		_ = e.handleMessage("other", "", input)
 	}
 }
 
@@ -278,7 +278,7 @@ func BenchmarkHandleMessage_200OK_INVITE(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		_ = e.handleMessage("other", input)
+		_ = e.handleMessage("other", "", input)
 	}
 }
 

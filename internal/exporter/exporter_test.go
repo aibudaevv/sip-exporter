@@ -50,18 +50,18 @@ type mockMetricser struct {
 
 func (m *mockMetricser) UpdateSessions(_ []service.LabeledCount) {}
 
-func (m *mockMetricser) Request(_ string, _ string, in []byte) {
+func (m *mockMetricser) Request(_, _, _ string, in []byte) {
 	m.requestCalled = in
 	m.packetsIncremented++
 }
 
-func (m *mockMetricser) Response(_ string, _ string, in []byte, isInviteResponse bool) {
+func (m *mockMetricser) Response(_, _, _ string, in []byte, isInviteResponse bool) {
 	m.responseCalled = in
 	m.responseIsInvite = isInviteResponse
 	m.packetsIncremented++
 }
 
-func (m *mockMetricser) ResponseWithMetrics(_ string, _ string, status []byte, isInviteResponse, is200OK bool) {
+func (m *mockMetricser) ResponseWithMetrics(_, _, _ string, status []byte, isInviteResponse, is200OK bool) {
 	m.responseWithMetricsCalled = true
 	m.responseCalled = status
 	m.responseIsInvite = isInviteResponse
@@ -71,44 +71,44 @@ func (m *mockMetricser) ResponseWithMetrics(_ string, _ string, status []byte, i
 	}
 }
 
-func (m *mockMetricser) Invite200OK(_ string, _ string) {
+func (m *mockMetricser) Invite200OK(_, _, _ string) {
 	m.invite200OKCalled = true
 }
 
-func (m *mockMetricser) SessionCompleted(_ string, _ string) {
+func (m *mockMetricser) SessionCompleted(_, _, _ string) {
 	m.sessionCompletedFlag = true
 }
 
-func (m *mockMetricser) UpdateRRD(_ string, _ string, delayMs float64) {
+func (m *mockMetricser) UpdateRRD(_, _, _ string, delayMs float64) {
 	m.rrdUpdated = true
 	m.rrdDelay = delayMs
 }
 
-func (m *mockMetricser) UpdateSPD(_ string, _ string, duration time.Duration) {
+func (m *mockMetricser) UpdateSPD(_, _, _ string, duration time.Duration) {
 	m.spdUpdated = true
 	m.spdDuration = duration
 }
 
-func (m *mockMetricser) UpdateSession(_ string, _ string, size int) {
+func (m *mockMetricser) UpdateSession(_, _, _ string, size int) {
 	m.sessionUpdated = size
 }
 
-func (m *mockMetricser) UpdateTTR(_ string, _ string, delayMs float64) {
+func (m *mockMetricser) UpdateTTR(_, _, _ string, delayMs float64) {
 	m.ttrUpdated = true
 	m.ttrDelay = delayMs
 }
 
-func (m *mockMetricser) UpdatePDD(_ string, _ string, delayMs float64) {
+func (m *mockMetricser) UpdatePDD(_, _, _ string, delayMs float64) {
 	m.pddUpdated = true
 	m.pddDelay = delayMs
 }
 
-func (m *mockMetricser) UpdateORD(_ string, _ string, delayMs float64) {
+func (m *mockMetricser) UpdateORD(_, _, _ string, delayMs float64) {
 	m.ordUpdated = true
 	m.ordDelay = delayMs
 }
 
-func (m *mockMetricser) UpdateLRD(_ string, _ string, delayMs float64) {
+func (m *mockMetricser) UpdateLRD(_, _, _ string, delayMs float64) {
 	m.lrdUpdated = true
 	m.lrdDelay = delayMs
 }
@@ -124,23 +124,23 @@ func (m *mockMetricser) UpdateChannelCapacity(int)     {}
 func (m *mockMetricser) UpdateTrackerSize(string, int) {}
 func (m *mockMetricser) UpdateActiveDialogs(int)       {}
 
-func (m *mockMetricser) UpdateVQReport(carrier string, uaType string, report *vq.SessionReport) {
+func (m *mockMetricser) UpdateVQReport(carrier string, uaType string, _ string, report *vq.SessionReport) {
 	m.vqReportCalled = true
 	m.vqCarrier = carrier
 	m.vqUAType = uaType
 	m.vqReport = report
 }
 
-func (m *mockMetricser) UpdateRTPPackets(_, _, _ string) {
+func (m *mockMetricser) UpdateRTPPackets(_, _, _, _ string) {
 	m.rtpPacketsCalls++
 }
-func (m *mockMetricser) UpdateRTPLoss(_, _, _ string, lost uint64) {
+func (m *mockMetricser) UpdateRTPLoss(_, _, _, _ string, lost uint64) {
 	m.rtpLossCalls++
 	m.rtpLossValue = lost
 }
-func (m *mockMetricser) UpdateRTPJitter(string, string, string, float64) {}
-func (m *mockMetricser) UpdateRTPMOS(string, string, string, float64)    {}
-func (m *mockMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount) {}
+func (m *mockMetricser) UpdateRTPJitter(string, string, string, string, float64) {}
+func (m *mockMetricser) UpdateRTPMOS(string, string, string, string, float64)    {}
+func (m *mockMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount)         {}
 
 type dialogCreateArgs struct {
 	expiresAt time.Time
@@ -161,6 +161,7 @@ func (m *mockDialoger) Create(
 	createdAt time.Time,
 	carrier string,
 	uaType string,
+	_ string,
 	_ string,
 ) {
 	if m.created == nil {
@@ -842,7 +843,7 @@ func TestHandleMessage_Request(t *testing.T) {
 		"Call-ID: test\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	err := e.handleMessage("other", input)
+	err := e.handleMessage("other", "", input)
 	require.NoError(t, err)
 	// Request is called in goroutine, so we need to wait
 	require.Eventually(t, func() bool {
@@ -873,7 +874,7 @@ func TestHandleMessage_Response200_INVITE(t *testing.T) {
 		"CSeq: 1 INVITE\r\n" +
 		"Session-Expires: 3600\r\n")
 
-	err := e.handleMessage("other", input)
+	err := e.handleMessage("other", "", input)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		return len(mm.responseCalled) > 0
@@ -905,7 +906,7 @@ func TestHandleMessage_Response200_BYE(t *testing.T) {
 		"Call-ID: test-call\r\n" +
 		"CSeq: 2 BYE\r\n")
 
-	err := e.handleMessage("other", input)
+	err := e.handleMessage("other", "", input)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		return len(mm.responseCalled) > 0
@@ -937,7 +938,7 @@ func TestHandleMessage_Response200_REGISTER(t *testing.T) {
 		"Call-ID: test-call\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	err := e.handleMessage("other", input)
+	err := e.handleMessage("other", "", input)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		return len(mm.responseCalled) > 0
@@ -968,7 +969,7 @@ func TestHandleMessage_RRD_FullCycle(t *testing.T) {
 		"Call-ID: reg-test-123\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	err := e.handleMessage("other", registerReq)
+	err := e.handleMessage("other", "", registerReq)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("REGISTER"))
@@ -982,7 +983,7 @@ func TestHandleMessage_RRD_FullCycle(t *testing.T) {
 		"Call-ID: reg-test-123\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	err = e.handleMessage("other", registerResp)
+	err = e.handleMessage("other", "", registerResp)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		return mm.rrdUpdated
@@ -1012,7 +1013,7 @@ func TestHandleMessage_Response401(t *testing.T) {
 		"Call-ID: test\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	err := e.handleMessage("other", input)
+	err := e.handleMessage("other", "", input)
 	require.NoError(t, err)
 
 	// Response is called in goroutine, wait for completion
@@ -1043,7 +1044,7 @@ func TestHandleMessage_Response302_INVITE(t *testing.T) {
 		"Call-ID: test-call\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	err := e.handleMessage("other", input)
+	err := e.handleMessage("other", "", input)
 	require.NoError(t, err)
 
 	// Response is called in goroutine, wait for completion
@@ -1076,7 +1077,7 @@ func TestHandleMessage_SER_Integration(t *testing.T) {
 			"To: <sip:other@domain>\r\n" +
 			"Call-ID: test-" + string(rune('0'+i)) + "\r\n" +
 			"CSeq: 1 INVITE\r\n")
-		err := e.handleMessage("other", input)
+		err := e.handleMessage("other", "", input)
 		require.NoError(t, err)
 	}
 
@@ -1087,7 +1088,7 @@ func TestHandleMessage_SER_Integration(t *testing.T) {
 			"To: <sip:other@domain>;tag=xyz" + string(rune('0'+i)) + "\r\n" +
 			"Call-ID: test-" + string(rune('0'+i)) + "\r\n" +
 			"CSeq: 1 INVITE\r\n")
-		err := e.handleMessage("other", input)
+		err := e.handleMessage("other", "", input)
 		require.NoError(t, err)
 	}
 
@@ -1098,7 +1099,7 @@ func TestHandleMessage_SER_Integration(t *testing.T) {
 			"To: <sip:other@domain>;tag=xyz" + string(rune('0'+i)) + "\r\n" +
 			"Call-ID: test-302-" + string(rune('0'+i)) + "\r\n" +
 			"CSeq: 1 INVITE\r\n")
-		err := e.handleMessage("other", input)
+		err := e.handleMessage("other", "", input)
 		require.NoError(t, err)
 	}
 
@@ -1135,7 +1136,7 @@ func TestHandleMessage_ParseError(t *testing.T) {
 	// Invalid SIP packet - "invalid" is too short and won't be recognized
 	// handleMessage may not return error for some invalid packets
 	// Main thing is systemError metric will be incremented
-	err := e.handleMessage("other", []byte("invalid"))
+	err := e.handleMessage("other", "", []byte("invalid"))
 	require.NoError(t, err)
 }
 
@@ -1161,7 +1162,7 @@ func TestHandleMessage_Response200_InvalidDialogID(t *testing.T) {
 		"CSeq: 1 INVITE\r\n")
 
 	// Should not panic and should not create dialog
-	err := e.handleMessage("other", input)
+	err := e.handleMessage("other", "", input)
 	require.NoError(t, err)
 	require.Empty(t, md.created, "dialog should not be created with invalid tags")
 }
@@ -1258,7 +1259,7 @@ func TestNewExporter(t *testing.T) {
 	m := service.NewMetricser()
 	d := service.NewDialoger()
 
-	exp := NewExporter(m, d, nil, nil)
+	exp := NewExporter(m, d, nil, nil, nil)
 	require.NotNil(t, exp)
 }
 
@@ -1454,7 +1455,7 @@ func TestExporter_RegisterTracker_StoreAndRemove(t *testing.T) {
 	callID := "test-call-id-123"
 
 	// Store
-	e.storeRegisterTime(callID, "other", "other")
+	e.storeRegisterTime(callID, "other", "other", "")
 
 	// Verify stored
 	_, exists := e.getRegisterTime(callID)
@@ -1490,7 +1491,7 @@ func TestExporter_RegisterTracker_401Removes(t *testing.T) {
 		"Call-ID: reg-401-test\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	err := e.handleMessage("other", registerReq)
+	err := e.handleMessage("other", "", registerReq)
 	require.NoError(t, err)
 
 	// Verify stored
@@ -1505,7 +1506,7 @@ func TestExporter_RegisterTracker_401Removes(t *testing.T) {
 		"CSeq: 1 REGISTER\r\n" +
 		"WWW-Authenticate: Digest realm=\"test\"\r\n")
 
-	err = e.handleMessage("other", registerResp)
+	err = e.handleMessage("other", "", registerResp)
 	require.NoError(t, err)
 
 	// Verify removed
@@ -1536,7 +1537,7 @@ func TestExporter_RegisterTracker_403Removes(t *testing.T) {
 		"Call-ID: reg-403-test\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	e.handleMessage("other", registerReq)
+	e.handleMessage("other", "", registerReq)
 
 	// 403 Forbidden response
 	registerResp := []byte("SIP/2.0 403 Forbidden\r\n" +
@@ -1545,7 +1546,7 @@ func TestExporter_RegisterTracker_403Removes(t *testing.T) {
 		"Call-ID: reg-403-test\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	err := e.handleMessage("other", registerResp)
+	err := e.handleMessage("other", "", registerResp)
 	require.NoError(t, err)
 
 	_, exists := e.getRegisterTime("reg-403-test")
@@ -1575,7 +1576,7 @@ func TestExporter_RegisterTracker_500Removes(t *testing.T) {
 		"Call-ID: reg-500-test\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	e.handleMessage("other", registerReq)
+	e.handleMessage("other", "", registerReq)
 
 	// 500 Server Error response
 	registerResp := []byte("SIP/2.0 500 Server Internal Error\r\n" +
@@ -1584,7 +1585,7 @@ func TestExporter_RegisterTracker_500Removes(t *testing.T) {
 		"Call-ID: reg-500-test\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	err := e.handleMessage("other", registerResp)
+	err := e.handleMessage("other", "", registerResp)
 	require.NoError(t, err)
 
 	_, exists := e.getRegisterTime("reg-500-test")
@@ -1674,13 +1675,13 @@ func TestExporter_RegisterTracker_Retransmit200OK(t *testing.T) {
 		"Call-ID: same-call-id\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	e.handleMessage("other", registerReq)
+	e.handleMessage("other", "", registerReq)
 
 	// Wait a bit
 	time.Sleep(20 * time.Millisecond)
 
 	// Retransmit REGISTER (same Call-ID)
-	e.handleMessage("other", registerReq)
+	e.handleMessage("other", "", registerReq)
 
 	// Wait a bit more
 	time.Sleep(10 * time.Millisecond)
@@ -1692,7 +1693,7 @@ func TestExporter_RegisterTracker_Retransmit200OK(t *testing.T) {
 		"Call-ID: same-call-id\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	e.handleMessage("other", registerResp)
+	e.handleMessage("other", "", registerResp)
 
 	// RRD should be measured
 	require.Eventually(t, func() bool {
@@ -1730,11 +1731,11 @@ func TestExporter_RegisterTracker_Retransmit401(t *testing.T) {
 		"Call-ID: same-call-id-401\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	e.handleMessage("other", registerReq)
+	e.handleMessage("other", "", registerReq)
 	time.Sleep(20 * time.Millisecond)
 
 	// Retransmit REGISTER (same Call-ID)
-	e.handleMessage("other", registerReq)
+	e.handleMessage("other", "", registerReq)
 
 	// 401 arrives
 	registerResp := []byte("SIP/2.0 401 Unauthorized\r\n" +
@@ -1743,7 +1744,7 @@ func TestExporter_RegisterTracker_Retransmit401(t *testing.T) {
 		"Call-ID: same-call-id-401\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	e.handleMessage("other", registerResp)
+	e.handleMessage("other", "", registerResp)
 
 	// RRD should NOT be updated
 	require.False(t, mm.rrdUpdated, "RRD should not be updated for 401")
@@ -1775,7 +1776,7 @@ func TestExporter_RegisterTracker_DifferentCallID(t *testing.T) {
 		"Call-ID: call-id-1\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	e.handleMessage("other", registerReq1)
+	e.handleMessage("other", "", registerReq1)
 
 	// REGISTER with Call-ID 2
 	registerReq2 := []byte("REGISTER sip:test SIP/2.0\r\n" +
@@ -1784,7 +1785,7 @@ func TestExporter_RegisterTracker_DifferentCallID(t *testing.T) {
 		"Call-ID: call-id-2\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	e.handleMessage("other", registerReq2)
+	e.handleMessage("other", "", registerReq2)
 
 	// Both should be tracked
 	_, exists1 := e.getRegisterTime("call-id-1")
@@ -1799,7 +1800,7 @@ func TestExporter_RegisterTracker_DifferentCallID(t *testing.T) {
 		"Call-ID: call-id-1\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	e.handleMessage("other", registerResp1)
+	e.handleMessage("other", "", registerResp1)
 
 	// Only call-id-1 should be removed
 	_, exists1 = e.getRegisterTime("call-id-1")
@@ -1814,7 +1815,7 @@ func TestExporter_RegisterTracker_DifferentCallID(t *testing.T) {
 		"Call-ID: call-id-2\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	e.handleMessage("other", registerResp2)
+	e.handleMessage("other", "", registerResp2)
 
 	// Both removed
 	_, exists1 = e.getRegisterTime("call-id-1")
@@ -1842,8 +1843,8 @@ func TestSipDialogMetricsUpdate_ExpiredIncrementsSessionCompleted(t *testing.T) 
 
 	results := e.services.dialoger.Cleanup()
 	for _, r := range results {
-		e.services.metricser.SessionCompleted(r.Carrier, r.UAType)
-		e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.Duration)
+		e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry)
+		e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
 	}
 
 	require.True(t, mm.sessionCompletedFlag)
@@ -1867,17 +1868,17 @@ func TestExporter_InviteTracker_StoreAndMeasure(t *testing.T) {
 
 	callID := "test-call-id-123"
 
-	e.storeInviteTime(callID, "other", "other")
+	e.storeInviteTime(callID, "other", "other", "")
 
 	time.Sleep(10 * time.Millisecond)
 
-	delayMs, carrier, _, ok := e.readInviteEntry(callID)
+	delayMs, carrier, _, _, ok := e.readInviteEntry(callID)
 	require.True(t, ok, "readInviteEntry should return true for existing entry")
 	require.Greater(t, delayMs, 0.0, "delay should be positive")
 	require.Equal(t, "other", carrier)
 
 	e.removeInviteTime(callID)
-	_, _, _, ok = e.readInviteEntry(callID)
+	_, _, _, _, ok = e.readInviteEntry(callID)
 	require.False(t, ok, "entry should not exist after remove")
 }
 
@@ -1895,10 +1896,10 @@ func TestExporter_InviteTracker_StoreAndRemove(t *testing.T) {
 
 	callID := "test-call-id-remove"
 
-	e.storeInviteTime(callID, "other", "other")
+	e.storeInviteTime(callID, "other", "other", "")
 	e.removeInviteTime(callID)
 
-	_, _, _, ok := e.readInviteEntry(callID)
+	_, _, _, _, ok := e.readInviteEntry(callID)
 	require.False(t, ok, "entry should not exist after remove")
 }
 
@@ -1914,7 +1915,7 @@ func TestExporter_InviteTracker_MeasureNonExistent(t *testing.T) {
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
-	delayMs, carrier, _, ok := e.readInviteEntry("nonexistent")
+	delayMs, carrier, _, _, ok := e.readInviteEntry("nonexistent")
 	require.False(t, ok, "readInviteEntry should return false for nonexistent entry")
 	require.InDelta(t, 0.0, delayMs, 0.01)
 	require.Empty(t, carrier)
@@ -1957,9 +1958,9 @@ func TestExporter_InviteTracker_TTLExpired(t *testing.T) {
 
 	e.cleanupInviteTracker()
 
-	_, _, _, expiredExists := e.readInviteEntry("expired-call-id")
-	_, _, _, borderExists := e.readInviteEntry("border-call-id")
-	_, _, _, freshExists := e.readInviteEntry("fresh-call-id")
+	_, _, _, _, expiredExists := e.readInviteEntry("expired-call-id")
+	_, _, _, _, borderExists := e.readInviteEntry("border-call-id")
+	_, _, _, _, freshExists := e.readInviteEntry("fresh-call-id")
 
 	require.False(t, expiredExists, "expired entry (61s) should be removed")
 	require.True(t, borderExists, "entry at 59s should remain (TTL=60s)")
@@ -1983,7 +1984,7 @@ func TestExporter_InviteTracker_TTLNotExpired(t *testing.T) {
 
 	e.cleanupInviteTracker()
 
-	_, _, _, exists := e.readInviteEntry("recent-call-id")
+	_, _, _, _, exists := e.readInviteEntry("recent-call-id")
 	require.True(t, exists, "entry at 30s should remain (TTL=60s)")
 }
 
@@ -1999,16 +2000,16 @@ func TestExporter_InviteTracker_DifferentCallIDs(t *testing.T) {
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
-	e.storeInviteTime("call-id-1", "other", "other")
-	e.storeInviteTime("call-id-2", "other", "other")
+	e.storeInviteTime("call-id-1", "other", "other", "")
+	e.storeInviteTime("call-id-2", "other", "other", "")
 
-	_, _, _, ok1 := e.readInviteEntry("call-id-1")
-	_, _, _, ok2 := e.readInviteEntry("call-id-2")
+	_, _, _, _, ok1 := e.readInviteEntry("call-id-1")
+	_, _, _, _, ok2 := e.readInviteEntry("call-id-2")
 	require.True(t, ok1)
 	require.True(t, ok2)
 
 	e.removeInviteTime("call-id-1")
-	_, _, _, ok1 = e.readInviteEntry("call-id-1")
+	_, _, _, _, ok1 = e.readInviteEntry("call-id-1")
 	require.False(t, ok1, "call-id-1 should be removed")
 }
 
@@ -2035,7 +2036,7 @@ func TestHandleMessage_TTR_100Trying(t *testing.T) {
 		"Call-ID: ttr-test-100\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	err := e.handleMessage("other", inviteReq)
+	err := e.handleMessage("other", "", inviteReq)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
@@ -2049,7 +2050,7 @@ func TestHandleMessage_TTR_100Trying(t *testing.T) {
 		"Call-ID: ttr-test-100\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	err = e.handleMessage("other", tryingResp)
+	err = e.handleMessage("other", "", tryingResp)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		return mm.ttrUpdated
@@ -2079,7 +2080,7 @@ func TestHandleMessage_TTR_180Ringing(t *testing.T) {
 		"Call-ID: ttr-test-180\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", inviteReq)
+	e.handleMessage("other", "", inviteReq)
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2092,7 +2093,7 @@ func TestHandleMessage_TTR_180Ringing(t *testing.T) {
 		"Call-ID: ttr-test-180\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", ringingResp)
+	e.handleMessage("other", "", ringingResp)
 	require.Eventually(t, func() bool {
 		return mm.ttrUpdated
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2120,7 +2121,7 @@ func TestHandleMessage_TTR_183SessionProgress(t *testing.T) {
 		"Call-ID: ttr-test-183\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", inviteReq)
+	e.handleMessage("other", "", inviteReq)
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2133,7 +2134,7 @@ func TestHandleMessage_TTR_183SessionProgress(t *testing.T) {
 		"Call-ID: ttr-test-183\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", progressResp)
+	e.handleMessage("other", "", progressResp)
 	require.Eventually(t, func() bool {
 		return mm.ttrUpdated
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2161,7 +2162,7 @@ func TestHandleMessage_TTR_NoProvisionalResponse(t *testing.T) {
 		"Call-ID: ttr-no-prov\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", inviteReq)
+	e.handleMessage("other", "", inviteReq)
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2173,7 +2174,7 @@ func TestHandleMessage_TTR_NoProvisionalResponse(t *testing.T) {
 		"CSeq: 1 INVITE\r\n" +
 		"Session-Expires: 3600\r\n")
 
-	e.handleMessage("other", okResp)
+	e.handleMessage("other", "", okResp)
 	time.Sleep(20 * time.Millisecond)
 
 	require.False(t, mm.ttrUpdated, "TTR should NOT be measured when no 1xx received")
@@ -2200,7 +2201,7 @@ func TestHandleMessage_TTR_OnlyFirstProvisionalMeasured(t *testing.T) {
 		"Call-ID: ttr-first-only\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", inviteReq)
+	e.handleMessage("other", "", inviteReq)
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2213,7 +2214,7 @@ func TestHandleMessage_TTR_OnlyFirstProvisionalMeasured(t *testing.T) {
 		"Call-ID: ttr-first-only\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", tryingResp)
+	e.handleMessage("other", "", tryingResp)
 	require.Eventually(t, func() bool {
 		return mm.ttrUpdated
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2229,7 +2230,7 @@ func TestHandleMessage_TTR_OnlyFirstProvisionalMeasured(t *testing.T) {
 		"Call-ID: ttr-first-only\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", ringingResp)
+	e.handleMessage("other", "", ringingResp)
 	time.Sleep(10 * time.Millisecond)
 
 	require.InDelta(t, firstTTR, mm.ttrDelay, 0.01, "TTR should NOT be measured again on second 1xx")
@@ -2256,14 +2257,14 @@ func TestHandleMessage_TTR_RetransmitOverwrites(t *testing.T) {
 		"Call-ID: ttr-retransmit\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", inviteReq)
+	e.handleMessage("other", "", inviteReq)
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
 
 	time.Sleep(20 * time.Millisecond)
 
-	e.handleMessage("other", inviteReq)
+	e.handleMessage("other", "", inviteReq)
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -2273,7 +2274,7 @@ func TestHandleMessage_TTR_RetransmitOverwrites(t *testing.T) {
 		"Call-ID: ttr-retransmit\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", tryingResp)
+	e.handleMessage("other", "", tryingResp)
 	require.Eventually(t, func() bool {
 		return mm.ttrUpdated
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2303,7 +2304,7 @@ func TestHandleMessage_TTR_FinalResponseRemovesTracker(t *testing.T) {
 		"Call-ID: ttr-final-remove\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", inviteReq)
+	e.handleMessage("other", "", inviteReq)
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2314,12 +2315,12 @@ func TestHandleMessage_TTR_FinalResponseRemovesTracker(t *testing.T) {
 		"Call-ID: ttr-final-remove\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", busyResp)
+	e.handleMessage("other", "", busyResp)
 	time.Sleep(10 * time.Millisecond)
 
 	require.False(t, mm.ttrUpdated, "TTR should NOT be measured for non-1xx response")
 
-	_, _, _, ok := e.readInviteEntry("ttr-final-remove")
+	_, _, _, _, ok := e.readInviteEntry("ttr-final-remove")
 	require.False(t, ok, "tracker entry should be removed after final response")
 }
 
@@ -2344,7 +2345,7 @@ func TestHandleMessage_TTR_NonInviteResponse_Ignored(t *testing.T) {
 		"Call-ID: ttr-non-invite\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	e.handleMessage("other", registerReq)
+	e.handleMessage("other", "", registerReq)
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("REGISTER"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2355,7 +2356,7 @@ func TestHandleMessage_TTR_NonInviteResponse_Ignored(t *testing.T) {
 		"Call-ID: ttr-non-invite\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	e.handleMessage("other", tryingResp)
+	e.handleMessage("other", "", tryingResp)
 	time.Sleep(10 * time.Millisecond)
 
 	require.False(t, mm.ttrUpdated, "TTR should NOT be measured for REGISTER 100 Trying")
@@ -2382,7 +2383,7 @@ func TestHandleMessage_TTR_FullCallFlow(t *testing.T) {
 		"Call-ID: ttr-full-flow\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", inviteReq)
+	e.handleMessage("other", "", inviteReq)
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2395,7 +2396,7 @@ func TestHandleMessage_TTR_FullCallFlow(t *testing.T) {
 		"Call-ID: ttr-full-flow\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", tryingResp)
+	e.handleMessage("other", "", tryingResp)
 	require.Eventually(t, func() bool {
 		return mm.ttrUpdated
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2408,7 +2409,7 @@ func TestHandleMessage_TTR_FullCallFlow(t *testing.T) {
 		"CSeq: 1 INVITE\r\n" +
 		"Session-Expires: 3600\r\n")
 
-	e.handleMessage("other", okResp)
+	e.handleMessage("other", "", okResp)
 	require.Eventually(t, func() bool {
 		return mm.invite200OKCalled
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2419,7 +2420,7 @@ func TestHandleMessage_TTR_FullCallFlow(t *testing.T) {
 		"Call-ID: ttr-full-flow\r\n" +
 		"CSeq: 2 BYE\r\n")
 
-	e.handleMessage("other", byeReq)
+	e.handleMessage("other", "", byeReq)
 	time.Sleep(10 * time.Millisecond)
 
 	byeOkResp := []byte("SIP/2.0 200 OK\r\n" +
@@ -2428,7 +2429,7 @@ func TestHandleMessage_TTR_FullCallFlow(t *testing.T) {
 		"Call-ID: ttr-full-flow\r\n" +
 		"CSeq: 2 BYE\r\n")
 
-	e.handleMessage("other", byeOkResp)
+	e.handleMessage("other", "", byeOkResp)
 	time.Sleep(10 * time.Millisecond)
 
 	require.True(t, mm.ttrUpdated, "TTR should be measured during full call flow")
@@ -2458,7 +2459,7 @@ func TestHandleMessage_PDD_180Ringing(t *testing.T) {
 		"Call-ID: pdd-test-180\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", inviteReq)
+	e.handleMessage("other", "", inviteReq)
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2471,7 +2472,7 @@ func TestHandleMessage_PDD_180Ringing(t *testing.T) {
 		"Call-ID: pdd-test-180\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", ringingResp)
+	e.handleMessage("other", "", ringingResp)
 	require.Eventually(t, func() bool {
 		return mm.pddUpdated
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2501,7 +2502,7 @@ func TestHandleMessage_PDD_100TryingThen180Ringing(t *testing.T) {
 		"Call-ID: pdd-test-100-180\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", inviteReq)
+	e.handleMessage("other", "", inviteReq)
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2514,7 +2515,7 @@ func TestHandleMessage_PDD_100TryingThen180Ringing(t *testing.T) {
 		"Call-ID: pdd-test-100-180\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", tryingResp)
+	e.handleMessage("other", "", tryingResp)
 	require.Eventually(t, func() bool {
 		return mm.ttrUpdated
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2528,7 +2529,7 @@ func TestHandleMessage_PDD_100TryingThen180Ringing(t *testing.T) {
 		"Call-ID: pdd-test-100-180\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", ringingResp)
+	e.handleMessage("other", "", ringingResp)
 	require.Eventually(t, func() bool {
 		return mm.pddUpdated
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2556,7 +2557,7 @@ func TestHandleMessage_PDD_183NoPDD(t *testing.T) {
 		"Call-ID: pdd-test-183\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", inviteReq)
+	e.handleMessage("other", "", inviteReq)
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2569,7 +2570,7 @@ func TestHandleMessage_PDD_183NoPDD(t *testing.T) {
 		"Call-ID: pdd-test-183\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", progressResp)
+	e.handleMessage("other", "", progressResp)
 	require.Eventually(t, func() bool {
 		return mm.ttrUpdated
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2597,7 +2598,7 @@ func TestHandleMessage_PDD_No180NoPDD(t *testing.T) {
 		"Call-ID: pdd-test-no180\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	e.handleMessage("other", inviteReq)
+	e.handleMessage("other", "", inviteReq)
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
@@ -2611,7 +2612,7 @@ func TestHandleMessage_PDD_No180NoPDD(t *testing.T) {
 		"CSeq: 1 INVITE\r\n" +
 		"Session-Expires: 3600\r\n")
 
-	e.handleMessage("other", okResp)
+	e.handleMessage("other", "", okResp)
 	time.Sleep(10 * time.Millisecond)
 
 	require.False(t, mm.pddUpdated, "PDD should NOT be measured when no 180 received")
@@ -2639,7 +2640,7 @@ func TestHandleMessage_PDD_NonInviteResponse_Ignored(t *testing.T) {
 		"Call-ID: pdd-non-invite\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	e.handleMessage("other", regReq)
+	e.handleMessage("other", "", regReq)
 	time.Sleep(10 * time.Millisecond)
 
 	tryingResp := []byte("SIP/2.0 180 Ringing\r\n" +
@@ -2648,7 +2649,7 @@ func TestHandleMessage_PDD_NonInviteResponse_Ignored(t *testing.T) {
 		"Call-ID: pdd-non-invite\r\n" +
 		"CSeq: 1 REGISTER\r\n")
 
-	e.handleMessage("other", tryingResp)
+	e.handleMessage("other", "", tryingResp)
 	time.Sleep(10 * time.Millisecond)
 
 	require.False(t, mm.pddUpdated, "PDD should NOT be measured for REGISTER 180 Ringing")
@@ -2676,7 +2677,7 @@ func TestHandleMessage_CarrierPropagation_FullDialog(t *testing.T) {
 		"Call-ID: carrier-dialog-test\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	err := e.handleMessage("carrier-A", inviteReq)
+	err := e.handleMessage("carrier-A", "", inviteReq)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
@@ -2691,7 +2692,7 @@ func TestHandleMessage_CarrierPropagation_FullDialog(t *testing.T) {
 		"CSeq: 1 INVITE\r\n" +
 		"Session-Expires: 3600\r\n")
 
-	err = e.handleMessage("carrier-B", okResp)
+	err = e.handleMessage("carrier-B", "", okResp)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		return len(md.created) > 0
@@ -2706,7 +2707,7 @@ func TestHandleMessage_CarrierPropagation_FullDialog(t *testing.T) {
 		"Call-ID: carrier-dialog-test\r\n" +
 		"CSeq: 2 BYE\r\n")
 
-	err = e.handleMessage("carrier-B", byeResp)
+	err = e.handleMessage("carrier-B", "", byeResp)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		return len(md.deleted) > 0
@@ -2740,7 +2741,7 @@ func TestHandleMessage_CarrierPropagation_MultiCarrierDialogs(t *testing.T) {
 			"To: <sip:other@domain>\r\n" +
 			"Call-ID: " + callID + "\r\n" +
 			"CSeq: 1 INVITE\r\n")
-		e.handleMessage("carrier-A", invite)
+		e.handleMessage("carrier-A", "", invite)
 
 		okResp := []byte("SIP/2.0 200 OK\r\n" +
 			"From: <sip:user@domain>;tag=from-a-" + callID + "\r\n" +
@@ -2748,7 +2749,7 @@ func TestHandleMessage_CarrierPropagation_MultiCarrierDialogs(t *testing.T) {
 			"Call-ID: " + callID + "\r\n" +
 			"CSeq: 1 INVITE\r\n" +
 			"Session-Expires: 3600\r\n")
-		e.handleMessage("carrier-C", okResp)
+		e.handleMessage("carrier-C", "", okResp)
 	}
 
 	for i := range carrierBCount {
@@ -2758,7 +2759,7 @@ func TestHandleMessage_CarrierPropagation_MultiCarrierDialogs(t *testing.T) {
 			"To: <sip:other@domain>\r\n" +
 			"Call-ID: " + callID + "\r\n" +
 			"CSeq: 1 INVITE\r\n")
-		e.handleMessage("carrier-B", invite)
+		e.handleMessage("carrier-B", "", invite)
 
 		okResp := []byte("SIP/2.0 200 OK\r\n" +
 			"From: <sip:user@domain>;tag=from-b-" + callID + "\r\n" +
@@ -2766,7 +2767,7 @@ func TestHandleMessage_CarrierPropagation_MultiCarrierDialogs(t *testing.T) {
 			"Call-ID: " + callID + "\r\n" +
 			"CSeq: 1 INVITE\r\n" +
 			"Session-Expires: 3600\r\n")
-		e.handleMessage("carrier-C", okResp)
+		e.handleMessage("carrier-C", "", okResp)
 	}
 
 	require.Eventually(t, func() bool {
@@ -2824,17 +2825,17 @@ func newCarrierTrackingMetricser() *carrierTrackingMetricser {
 	}
 }
 
-func (m *carrierTrackingMetricser) Request(carrier string, _ string, in []byte) {
+func (m *carrierTrackingMetricser) Request(carrier, _, _ string, in []byte) {
 	m.requests = append(m.requests, carrierCall{carrier: carrier, method: string(in)})
 	m.packetsTotal++
 }
 
-func (m *carrierTrackingMetricser) Response(_ string, _ string, _ []byte, _ bool) {
+func (m *carrierTrackingMetricser) Response(_, _, _ string, _ []byte, _ bool) {
 	m.packetsTotal++
 }
 
 func (m *carrierTrackingMetricser) ResponseWithMetrics(
-	carrier string, _ string, status []byte, isInviteResponse, is200OK bool,
+	carrier, _, _ string, status []byte, isInviteResponse, is200OK bool,
 ) {
 	m.responseWithMetrics = append(m.responseWithMetrics, carrierCall{carrier: carrier, method: string(status)})
 	m.packetsTotal++
@@ -2843,39 +2844,39 @@ func (m *carrierTrackingMetricser) ResponseWithMetrics(
 	}
 }
 
-func (m *carrierTrackingMetricser) Invite200OK(carrier string, _ string) {
+func (m *carrierTrackingMetricser) Invite200OK(carrier, _, _ string) {
 	m.invite200OK = append(m.invite200OK, carrierCall{carrier: carrier})
 }
 
-func (m *carrierTrackingMetricser) SessionCompleted(carrier string, _ string) {
+func (m *carrierTrackingMetricser) SessionCompleted(carrier, _, _ string) {
 	m.sessionCompleted = append(m.sessionCompleted, carrierCall{carrier: carrier})
 }
 
-func (m *carrierTrackingMetricser) UpdateRRD(carrier string, _ string, delayMs float64) {
+func (m *carrierTrackingMetricser) UpdateRRD(carrier, _, _ string, delayMs float64) {
 	m.rrdCalls = append(m.rrdCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
-func (m *carrierTrackingMetricser) UpdateSPD(carrier string, _ string, duration time.Duration) {
+func (m *carrierTrackingMetricser) UpdateSPD(carrier, _, _ string, duration time.Duration) {
 	m.spdCalls = append(m.spdCalls, carrierCall{carrier: carrier, value: duration.Seconds()})
 }
 
-func (m *carrierTrackingMetricser) UpdateTTR(carrier string, _ string, delayMs float64) {
+func (m *carrierTrackingMetricser) UpdateTTR(carrier, _, _ string, delayMs float64) {
 	m.ttrCalls = append(m.ttrCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
-func (m *carrierTrackingMetricser) UpdatePDD(carrier string, _ string, delayMs float64) {
+func (m *carrierTrackingMetricser) UpdatePDD(carrier, _, _ string, delayMs float64) {
 	m.pddCalls = append(m.pddCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
-func (m *carrierTrackingMetricser) UpdateORD(carrier string, _ string, delayMs float64) {
+func (m *carrierTrackingMetricser) UpdateORD(carrier, _, _ string, delayMs float64) {
 	m.ordCalls = append(m.ordCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
-func (m *carrierTrackingMetricser) UpdateLRD(carrier string, _ string, delayMs float64) {
+func (m *carrierTrackingMetricser) UpdateLRD(carrier, _, _ string, delayMs float64) {
 	m.lrdCalls = append(m.lrdCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
-func (m *carrierTrackingMetricser) UpdateSession(carrier string, uaType string, size int) {
+func (m *carrierTrackingMetricser) UpdateSession(carrier, uaType, _ string, size int) {
 	if m.sessionsByCarrierAndUA[carrier] == nil {
 		m.sessionsByCarrierAndUA[carrier] = make(map[string]int)
 	}
@@ -2895,15 +2896,15 @@ func (m *carrierTrackingMetricser) UpdateChannelCapacity(int)     {}
 func (m *carrierTrackingMetricser) UpdateTrackerSize(string, int) {}
 func (m *carrierTrackingMetricser) UpdateActiveDialogs(int)       {}
 
-func (m *carrierTrackingMetricser) UpdateVQReport(carrier string, uaType string, _ *vq.SessionReport) {
+func (m *carrierTrackingMetricser) UpdateVQReport(carrier, uaType, _ string, _ *vq.SessionReport) {
 	m.vqReports = append(m.vqReports, carrierCall{carrier: carrier, uaType: uaType})
 }
 
-func (m *carrierTrackingMetricser) UpdateRTPPackets(string, string, string)         {}
-func (m *carrierTrackingMetricser) UpdateRTPLoss(string, string, string, uint64)    {}
-func (m *carrierTrackingMetricser) UpdateRTPJitter(string, string, string, float64) {}
-func (m *carrierTrackingMetricser) UpdateRTPMOS(string, string, string, float64)    {}
-func (m *carrierTrackingMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount) {}
+func (m *carrierTrackingMetricser) UpdateRTPPackets(string, string, string, string)         {}
+func (m *carrierTrackingMetricser) UpdateRTPLoss(string, string, string, string, uint64)    {}
+func (m *carrierTrackingMetricser) UpdateRTPJitter(string, string, string, string, float64) {}
+func (m *carrierTrackingMetricser) UpdateRTPMOS(string, string, string, string, float64)    {}
+func (m *carrierTrackingMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount)         {}
 
 // ==================== SIP message builders for MC/DC tests ====================
 
@@ -3022,8 +3023,8 @@ func TestMCDC_TC1_InviteResponse_CarrierFromTracker(t *testing.T) {
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
 
-	e.handleMessage("carrier-A", makeInvite("tc1", "ft1"))
-	e.handleMessage("carrier-B", makeInvite200OK("tc1", "ft1", "tt1"))
+	e.handleMessage("carrier-A", "", makeInvite("tc1", "ft1"))
+	e.handleMessage("carrier-B", "", makeInvite200OK("tc1", "ft1", "tt1"))
 
 	require.Eventually(t, func() bool { return len(md.created) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, "carrier-A", md.created["tc1:ft1:tt1"].carrier)
@@ -3034,7 +3035,7 @@ func TestMCDC_TC2_InviteResponse_CarrierFallbackWithoutTracker(t *testing.T) {
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
 
-	e.handleMessage("carrier-B", makeInvite200OK("tc2", "ft2", "tt2"))
+	e.handleMessage("carrier-B", "", makeInvite200OK("tc2", "ft2", "tt2"))
 
 	require.Eventually(t, func() bool { return len(mm.responseWithMetrics) > 0 },
 		100*time.Millisecond, 10*time.Millisecond)
@@ -3046,9 +3047,9 @@ func TestMCDC_TC3_RegisterResponse_CarrierFromTracker(t *testing.T) {
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
 
-	e.handleMessage("carrier-A", makeRegister("tc3", "ft3"))
+	e.handleMessage("carrier-A", "", makeRegister("tc3", "ft3"))
 	time.Sleep(5 * time.Millisecond)
-	e.handleMessage("carrier-B", makeRegister200OK("tc3", "ft3", "tt3"))
+	e.handleMessage("carrier-B", "", makeRegister200OK("tc3", "ft3", "tt3"))
 
 	require.Eventually(t, func() bool { return len(mm.rrdCalls) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, "carrier-A", mm.rrdCalls[0].carrier)
@@ -3059,7 +3060,7 @@ func TestMCDC_TC4_RegisterResponse_CarrierFallbackWithoutTracker(t *testing.T) {
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
 
-	e.handleMessage("carrier-B", makeRegister200OK("tc4", "ft4", "tt4"))
+	e.handleMessage("carrier-B", "", makeRegister200OK("tc4", "ft4", "tt4"))
 
 	require.Eventually(
 		t,
@@ -3075,9 +3076,9 @@ func TestMCDC_TC5_TTR_1xxResponse_CarrierFromTracker(t *testing.T) {
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
 
-	e.handleMessage("carrier-A", makeInvite("tc5", "ft5"))
+	e.handleMessage("carrier-A", "", makeInvite("tc5", "ft5"))
 	time.Sleep(5 * time.Millisecond)
-	e.handleMessage("carrier-B", makeTrying("tc5", "ft5", "tt5"))
+	e.handleMessage("carrier-B", "", makeTrying("tc5", "ft5", "tt5"))
 
 	require.Eventually(t, func() bool { return len(mm.ttrCalls) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, "carrier-A", mm.ttrCalls[0].carrier)
@@ -3088,12 +3089,12 @@ func TestMCDC_TC6_TTR_Non1xxResponse_NotMeasured(t *testing.T) {
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
 
-	e.handleMessage("carrier-A", makeInvite("tc6", "ft6"))
-	e.handleMessage("carrier-B", makeInvite200OK("tc6", "ft6", "tt6"))
+	e.handleMessage("carrier-A", "", makeInvite("tc6", "ft6"))
+	e.handleMessage("carrier-B", "", makeInvite200OK("tc6", "ft6", "tt6"))
 
 	require.Eventually(t, func() bool { return len(mm.invite200OK) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.Empty(t, mm.ttrCalls)
-	_, _, _, ok := e.readInviteEntry("tc6")
+	_, _, _, _, ok := e.readInviteEntry("tc6")
 	require.False(t, ok)
 }
 
@@ -3102,9 +3103,9 @@ func TestMCDC_TC7_TTR_NonInviteResponse_Ignored(t *testing.T) {
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
 
-	e.handleMessage("carrier-A", makeRegister("tc7", "ft7"))
+	e.handleMessage("carrier-A", "", makeRegister("tc7", "ft7"))
 	time.Sleep(5 * time.Millisecond)
-	e.handleMessage("carrier-B", makeRegister200OK("tc7", "ft7", "tt7"))
+	e.handleMessage("carrier-B", "", makeRegister200OK("tc7", "ft7", "tt7"))
 
 	require.Eventually(t, func() bool { return len(mm.rrdCalls) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.Empty(t, mm.ttrCalls)
@@ -3115,8 +3116,8 @@ func TestMCDC_TC8_DialogCreatedWithTrackerCarrier_Mismatch(t *testing.T) {
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
 
-	e.handleMessage("carrier-A", makeInvite("tc8", "ft8"))
-	e.handleMessage("carrier-B", makeInvite200OK("tc8", "ft8", "tt8"))
+	e.handleMessage("carrier-A", "", makeInvite("tc8", "ft8"))
+	e.handleMessage("carrier-B", "", makeInvite200OK("tc8", "ft8", "tt8"))
 
 	require.Eventually(t, func() bool { return len(md.created) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, "carrier-A", md.created["tc8:ft8:tt8"].carrier,
@@ -3130,8 +3131,8 @@ func TestMCDC_TC9_DialogCreatedWithTrackerCarrier_SameCarrier(t *testing.T) {
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
 
-	e.handleMessage("carrier-A", makeInvite("tc9", "ft9"))
-	e.handleMessage("carrier-A", makeInvite200OK("tc9", "ft9", "tt9"))
+	e.handleMessage("carrier-A", "", makeInvite("tc9", "ft9"))
+	e.handleMessage("carrier-A", "", makeInvite200OK("tc9", "ft9", "tt9"))
 
 	require.Eventually(t, func() bool { return len(md.created) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, "carrier-A", md.created["tc9:ft9:tt9"].carrier)
@@ -3142,11 +3143,11 @@ func TestMCDC_TC10_Bye200OK_CarrierFromDialog(t *testing.T) {
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
 
-	e.handleMessage("carrier-A", makeInvite("tc10", "ft10"))
-	e.handleMessage("carrier-B", makeInvite200OK("tc10", "ft10", "tt10"))
+	e.handleMessage("carrier-A", "", makeInvite("tc10", "ft10"))
+	e.handleMessage("carrier-B", "", makeInvite200OK("tc10", "ft10", "tt10"))
 	require.Eventually(t, func() bool { return len(md.created) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 
-	e.handleMessage("carrier-C", makeBye200OK("tc10", "ft10", "tt10"))
+	e.handleMessage("carrier-C", "", makeBye200OK("tc10", "ft10", "tt10"))
 	require.Eventually(
 		t,
 		func() bool { return len(mm.sessionCompleted) > 0 },
@@ -3165,7 +3166,7 @@ func TestMCDC_TC11_Bye200OK_NonExistingDialog_NoMetrics(t *testing.T) {
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
 
-	e.handleMessage("carrier-A", makeBye200OK("tc11-nonexist", "ft11", "tt11"))
+	e.handleMessage("carrier-A", "", makeBye200OK("tc11-nonexist", "ft11", "tt11"))
 
 	require.Eventually(
 		t,
@@ -3188,8 +3189,8 @@ func TestMCDC_TC12_DialogExpiry_CarrierFromDialog(t *testing.T) {
 
 	results := e.services.dialoger.Cleanup()
 	for _, r := range results {
-		e.services.metricser.SessionCompleted(r.Carrier, r.UAType)
-		e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.Duration)
+		e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry)
+		e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
 	}
 
 	require.Len(t, mm.sessionCompleted, 1)
@@ -3208,8 +3209,8 @@ func TestMCDC_TC13_DialogExpiry_DifferentCarrier(t *testing.T) {
 
 	results := e.services.dialoger.Cleanup()
 	for _, r := range results {
-		e.services.metricser.SessionCompleted(r.Carrier, r.UAType)
-		e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.Duration)
+		e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry)
+		e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
 	}
 
 	require.Equal(t, "carrier-B", mm.sessionCompleted[0].carrier)
@@ -3220,9 +3221,9 @@ func TestMCDC_TC14_Register200OK_RRDCarrierFromTracker(t *testing.T) {
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
 
-	e.handleMessage("carrier-A", makeRegister("tc14", "ft14"))
+	e.handleMessage("carrier-A", "", makeRegister("tc14", "ft14"))
 	time.Sleep(5 * time.Millisecond)
-	e.handleMessage("carrier-B", makeRegister200OK("tc14", "ft14", "tt14"))
+	e.handleMessage("carrier-B", "", makeRegister200OK("tc14", "ft14", "tt14"))
 
 	require.Eventually(t, func() bool { return len(mm.rrdCalls) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, "carrier-A", mm.rrdCalls[0].carrier)
@@ -3234,9 +3235,9 @@ func TestMCDC_TC15_Register3xx_LRDCarrierFromTracker(t *testing.T) {
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
 
-	e.handleMessage("carrier-A", makeRegister("tc15", "ft15"))
+	e.handleMessage("carrier-A", "", makeRegister("tc15", "ft15"))
 	time.Sleep(5 * time.Millisecond)
-	e.handleMessage("carrier-B", makeRegister3xx("tc15", "ft15", "tt15"))
+	e.handleMessage("carrier-B", "", makeRegister3xx("tc15", "ft15", "tt15"))
 
 	require.Eventually(t, func() bool { return len(mm.lrdCalls) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, "carrier-A", mm.lrdCalls[0].carrier)
@@ -3247,9 +3248,9 @@ func TestMCDC_TC16_OptionsResponse_ORDCarrierFromTracker(t *testing.T) {
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
 
-	e.handleMessage("carrier-A", makeOptions("tc16", "ft16"))
+	e.handleMessage("carrier-A", "", makeOptions("tc16", "ft16"))
 	time.Sleep(5 * time.Millisecond)
-	e.handleMessage("carrier-B", makeOptions200OK("tc16", "ft16", "tt16"))
+	e.handleMessage("carrier-B", "", makeOptions200OK("tc16", "ft16", "tt16"))
 
 	require.Eventually(t, func() bool { return len(mm.ordCalls) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, "carrier-A", mm.ordCalls[0].carrier)
@@ -3262,14 +3263,14 @@ func TestMCDC_TC17_MultiCarrier_CorrectAttribution(t *testing.T) {
 
 	for i := range 10 {
 		callID := fmt.Sprintf("tc17-a-%d", i)
-		e.handleMessage("carrier-A", makeInvite(callID, "ft-"+callID))
-		e.handleMessage("carrier-C", makeInvite200OK(callID, "ft-"+callID, "tt-"+callID))
+		e.handleMessage("carrier-A", "", makeInvite(callID, "ft-"+callID))
+		e.handleMessage("carrier-C", "", makeInvite200OK(callID, "ft-"+callID, "tt-"+callID))
 	}
 
 	for i := range 20 {
 		callID := fmt.Sprintf("tc17-b-%d", i)
-		e.handleMessage("carrier-B", makeInvite(callID, "ft-"+callID))
-		e.handleMessage("carrier-C", makeInvite200OK(callID, "ft-"+callID, "tt-"+callID))
+		e.handleMessage("carrier-B", "", makeInvite(callID, "ft-"+callID))
+		e.handleMessage("carrier-C", "", makeInvite200OK(callID, "ft-"+callID, "tt-"+callID))
 	}
 
 	require.Eventually(t, func() bool { return len(md.created) == 30 }, 200*time.Millisecond, 10*time.Millisecond)
@@ -3306,7 +3307,7 @@ func TestMCDC_TC18_TrackerTTLExpired_FallbackToPacketCarrier(t *testing.T) {
 	e.inviteTracker["tc18"] = inviteEntry{timestamp: oldTime, carrier: "carrier-A"}
 	e.cleanupInviteTracker()
 
-	e.handleMessage("carrier-B", makeInvite200OK("tc18", "ft18", "tt18"))
+	e.handleMessage("carrier-B", "", makeInvite200OK("tc18", "ft18", "tt18"))
 
 	require.Eventually(
 		t,
@@ -3323,9 +3324,9 @@ func TestMCDC_TC19_Retransmit_OverwritesCarrier(t *testing.T) {
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
 
-	e.handleMessage("carrier-A", makeInvite("tc19", "ft19"))
-	e.handleMessage("carrier-B", makeInvite("tc19", "ft19"))
-	e.handleMessage("carrier-C", makeInvite200OK("tc19", "ft19", "tt19"))
+	e.handleMessage("carrier-A", "", makeInvite("tc19", "ft19"))
+	e.handleMessage("carrier-B", "", makeInvite("tc19", "ft19"))
+	e.handleMessage("carrier-C", "", makeInvite200OK("tc19", "ft19", "tt19"))
 
 	require.Eventually(t, func() bool { return len(md.created) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, "carrier-B", md.created["tc19:ft19:tt19"].carrier,
@@ -3339,14 +3340,14 @@ func TestMCDC_TC20_OtherCarrier_20Known_10Other(t *testing.T) {
 
 	for i := range 20 {
 		callID := fmt.Sprintf("tc20-known-%d", i)
-		e.handleMessage("carrier-A", makeInvite(callID, "ft-"+callID))
-		e.handleMessage("carrier-B", makeInvite200OK(callID, "ft-"+callID, "tt-"+callID))
+		e.handleMessage("carrier-A", "", makeInvite(callID, "ft-"+callID))
+		e.handleMessage("carrier-B", "", makeInvite200OK(callID, "ft-"+callID, "tt-"+callID))
 	}
 
 	for i := range 10 {
 		callID := fmt.Sprintf("tc20-other-%d", i)
-		e.handleMessage("other", makeInvite(callID, "ft-"+callID))
-		e.handleMessage("carrier-B", makeInvite200OK(callID, "ft-"+callID, "tt-"+callID))
+		e.handleMessage("other", "", makeInvite(callID, "ft-"+callID))
+		e.handleMessage("carrier-B", "", makeInvite200OK(callID, "ft-"+callID, "tt-"+callID))
 	}
 
 	require.Eventually(t, func() bool { return len(md.created) == 30 }, 200*time.Millisecond, 10*time.Millisecond)
@@ -3392,11 +3393,11 @@ func TestHandleMessage_CANCEL_RemovesInviteTracker(t *testing.T) {
 		"Call-ID: cancel-test-1\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	err := e.handleMessage("other", invitePkt)
+	err := e.handleMessage("other", "", invitePkt)
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		_, _, _, ok := e.readInviteEntry("cancel-test-1")
+		_, _, _, _, ok := e.readInviteEntry("cancel-test-1")
 		return ok
 	}, 100*time.Millisecond, 10*time.Millisecond, "inviteTracker should have entry after INVITE")
 
@@ -3406,10 +3407,10 @@ func TestHandleMessage_CANCEL_RemovesInviteTracker(t *testing.T) {
 		"Call-ID: cancel-test-1\r\n" +
 		"CSeq: 2 CANCEL\r\n")
 
-	err = e.handleMessage("other", cancelPkt)
+	err = e.handleMessage("other", "", cancelPkt)
 	require.NoError(t, err)
 
-	_, _, _, ok := e.readInviteEntry("cancel-test-1")
+	_, _, _, _, ok := e.readInviteEntry("cancel-test-1")
 	require.False(t, ok, "inviteTracker entry should be removed after CANCEL")
 }
 
@@ -3435,7 +3436,7 @@ func TestHandleMessage_CANCEL_NoEntry_NoOp(t *testing.T) {
 		"Call-ID: nonexistent-call\r\n" +
 		"CSeq: 2 CANCEL\r\n")
 
-	err := e.handleMessage("other", cancelPkt)
+	err := e.handleMessage("other", "", cancelPkt)
 	require.NoError(t, err)
 }
 
@@ -3461,11 +3462,11 @@ func TestHandleMessage_CANCEL_ThenProvisional_NoTTR(t *testing.T) {
 		"Call-ID: cancel-ttr-test\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	err := e.handleMessage("other", invitePkt)
+	err := e.handleMessage("other", "", invitePkt)
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		_, _, _, ok := e.readInviteEntry("cancel-ttr-test")
+		_, _, _, _, ok := e.readInviteEntry("cancel-ttr-test")
 		return ok
 	}, 100*time.Millisecond, 10*time.Millisecond)
 
@@ -3475,7 +3476,7 @@ func TestHandleMessage_CANCEL_ThenProvisional_NoTTR(t *testing.T) {
 		"Call-ID: cancel-ttr-test\r\n" +
 		"CSeq: 2 CANCEL\r\n")
 
-	err = e.handleMessage("other", cancelPkt)
+	err = e.handleMessage("other", "", cancelPkt)
 	require.NoError(t, err)
 
 	provisionalPkt := []byte("SIP/2.0 100 Trying\r\n" +
@@ -3484,7 +3485,7 @@ func TestHandleMessage_CANCEL_ThenProvisional_NoTTR(t *testing.T) {
 		"Call-ID: cancel-ttr-test\r\n" +
 		"CSeq: 1 INVITE\r\n")
 
-	err = e.handleMessage("other", provisionalPkt)
+	err = e.handleMessage("other", "", provisionalPkt)
 	require.NoError(t, err)
 
 	require.False(t, mm.ttrUpdated, "TTR should not be measured after CANCEL removed tracker entry")
@@ -3506,7 +3507,7 @@ func TestHandleRequest_PUBLISH_VQReport(t *testing.T) {
 		"\r\n" +
 		vqBody)
 
-	err := e.handleMessage("carrier-a", publish)
+	err := e.handleMessage("carrier-a", "", publish)
 	require.NoError(t, err)
 
 	require.Equal(t, 1, countCarrierMethod(mm.requests, "carrier-a", "PUBLISH"), "PUBLISH request should be counted")
@@ -3531,7 +3532,7 @@ func TestHandleRequest_NOTIFY_VQReport(t *testing.T) {
 		"\r\n" +
 		vqBody)
 
-	err := e.handleMessage("carrier-b", notify)
+	err := e.handleMessage("carrier-b", "", notify)
 	require.NoError(t, err)
 
 	require.Equal(t, 1, countCarrierMethod(mm.requests, "carrier-b", "NOTIFY"), "NOTIFY request should be counted")
@@ -3554,7 +3555,7 @@ func TestHandleRequest_PUBLISH_NoVQContentType(t *testing.T) {
 		"\r\n" +
 		"some sdp body")
 
-	err := e.handleMessage("carrier-a", publish)
+	err := e.handleMessage("carrier-a", "", publish)
 	require.NoError(t, err)
 	require.Equal(t, 0, mm.systemErrors)
 	require.Empty(t, mm.vqReports, "VQ handler should not be called for non-vq content type")
@@ -3574,7 +3575,7 @@ func TestHandleRequest_NOTIFY_NoVQContentType(t *testing.T) {
 		"\r\n" +
 		"some body")
 
-	err := e.handleMessage("carrier-a", notify)
+	err := e.handleMessage("carrier-a", "", notify)
 	require.NoError(t, err)
 	require.Equal(t, 0, mm.systemErrors)
 	require.Empty(t, mm.vqReports, "VQ handler should not be called for non-vq content type")
@@ -3593,7 +3594,7 @@ func TestHandleRequest_PUBLISH_VQEmptyBody(t *testing.T) {
 		"Content-Type: application/vq-rtcpxr\r\n" +
 		"\r\n")
 
-	err := e.handleMessage("carrier-a", publish)
+	err := e.handleMessage("carrier-a", "", publish)
 	require.NoError(t, err)
 	require.Equal(t, 1, mm.systemErrors, "empty VQ body should trigger system error")
 	require.Empty(t, mm.vqReports, "VQ handler should not report metrics for empty body")
@@ -3613,7 +3614,7 @@ func TestHandleRequest_NOTIFY_VQInvalidBody(t *testing.T) {
 		"\r\n" +
 		"this is not a valid vq report")
 
-	err := e.handleMessage("carrier-a", notify)
+	err := e.handleMessage("carrier-a", "", notify)
 	require.NoError(t, err)
 	require.Equal(t, 1, mm.systemErrors, "invalid VQ body should trigger system error")
 	require.Empty(t, mm.vqReports, "VQ handler should not report metrics for invalid body")

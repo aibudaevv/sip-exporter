@@ -209,7 +209,7 @@ func TestGetConfig_GeoIPCountryDBDefault(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
-	require.Equal(t, "", cfg.GeoIPCountryDB, "GeoIP country DB path must default to empty (disabled)")
+	require.Empty(t, cfg.GeoIPCountryDB, "GeoIP country DB path must default to empty (disabled)")
 }
 
 func TestGetConfig_GeoIPCountryDBCustom(t *testing.T) {

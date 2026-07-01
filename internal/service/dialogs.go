@@ -7,18 +7,20 @@ import (
 
 type (
 	dialogEntry struct {
-		expiresAt time.Time
-		createdAt time.Time
-		carrier   string
-		uaType    string
-		callID    string
+		expiresAt     time.Time
+		createdAt     time.Time
+		carrier       string
+		uaType        string
+		sourceCountry string
+		callID        string
 	}
 
 	CleanupResult struct {
-		Duration time.Duration
-		Carrier  string
-		UAType   string
-		CallID   string
+		Duration      time.Duration
+		Carrier       string
+		UAType        string
+		SourceCountry string
+		CallID        string
 	}
 
 	dialogs struct {
@@ -26,7 +28,10 @@ type (
 		storage map[string]dialogEntry
 	}
 	Dialoger interface {
-		Create(dialogID string, expiresAt time.Time, createdAt time.Time, carrier string, uaType string, callID string)
+		Create(
+			dialogID string, expiresAt time.Time, createdAt time.Time,
+			carrier, uaType, sourceCountry, callID string,
+		)
 		Delete(dialogID string) CleanupResult
 		Size() int
 		Counts() []LabeledCount
@@ -52,24 +57,31 @@ func (c *dialogs) Delete(dialogID string) CleanupResult {
 	delete(c.storage, dialogID)
 	d := time.Since(entry.createdAt)
 	if d < 0 {
-		return CleanupResult{Carrier: entry.carrier, UAType: entry.uaType, CallID: entry.callID}
+		return CleanupResult{
+			Carrier: entry.carrier, UAType: entry.uaType,
+			SourceCountry: entry.sourceCountry, CallID: entry.callID,
+		}
 	}
-	return CleanupResult{Duration: d, Carrier: entry.carrier, UAType: entry.uaType, CallID: entry.callID}
+	return CleanupResult{
+		Duration: d, Carrier: entry.carrier, UAType: entry.uaType,
+		SourceCountry: entry.sourceCountry, CallID: entry.callID,
+	}
 }
 
 func (c *dialogs) Create(
 	dialogID string, expiresAt time.Time, createdAt time.Time,
-	carrier string, uaType string, callID string,
+	carrier string, uaType string, sourceCountry string, callID string,
 ) {
 	c.m.Lock()
 	defer c.m.Unlock()
 	if _, exists := c.storage[dialogID]; !exists {
 		c.storage[dialogID] = dialogEntry{
-			expiresAt: expiresAt,
-			createdAt: createdAt,
-			carrier:   carrier,
-			uaType:    uaType,
-			callID:    callID,
+			expiresAt:     expiresAt,
+			createdAt:     createdAt,
+			carrier:       carrier,
+			uaType:        uaType,
+			sourceCountry: sourceCountry,
+			callID:        callID,
 		}
 	}
 }
@@ -83,16 +95,19 @@ func (c *dialogs) Size() int {
 func (c *dialogs) Counts() []LabeledCount {
 	c.m.Lock()
 	defer c.m.Unlock()
-	type key struct{ carrier, uaType string }
+	type key struct{ carrier, uaType, sourceCountry string }
 	tmp := make(map[key]int)
 	for _, entry := range c.storage {
-		tmp[key{entry.carrier, entry.uaType}]++
+		tmp[key{entry.carrier, entry.uaType, entry.sourceCountry}]++
 	}
 	result := make([]LabeledCount, 0, len(tmp))
 	for k, n := range tmp {
 		result = append(result, LabeledCount{
-			Labels: map[string]string{"carrier": k.carrier, "ua_type": k.uaType},
-			Count:  n,
+			Labels: map[string]string{
+				"carrier": k.carrier, "ua_type": k.uaType,
+				"source_country": k.sourceCountry,
+			},
+			Count: n,
 		})
 	}
 	return result
@@ -108,7 +123,8 @@ func (c *dialogs) Cleanup() []CleanupResult {
 			d := now.Sub(entry.createdAt)
 			if d > 0 {
 				results = append(results, CleanupResult{
-					Duration: d, Carrier: entry.carrier, UAType: entry.uaType, CallID: entry.callID,
+					Duration: d, Carrier: entry.carrier, UAType: entry.uaType,
+					SourceCountry: entry.sourceCountry, CallID: entry.callID,
 				})
 			}
 			delete(c.storage, id)

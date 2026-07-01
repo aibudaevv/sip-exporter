@@ -48,7 +48,7 @@ func TestRTP_CorrelationViaSDP(t *testing.T) {
 		"t=0 0\r\n" +
 		"m=audio 5004 RTP/AVP 0\r\n" +
 		"a=rtpmap:0 PCMU/8000\r\n")
-	e.handleMessage("carrier-x", invite)
+	e.handleMessage("carrier-x", "", invite)
 
 	ok200 := []byte("SIP/2.0 200 OK\r\n" +
 		"From: <sip:a@b>;tag=fromtag\r\n" +
@@ -60,7 +60,7 @@ func TestRTP_CorrelationViaSDP(t *testing.T) {
 		"c=IN IP4 10.0.0.2\r\n" +
 		"m=audio 5006 RTP/AVP 0\r\n" +
 		"a=rtpmap:0 PCMU/8000\r\n")
-	e.handleMessage("carrier-x", ok200)
+	e.handleMessage("carrier-x", "", ok200)
 
 	require.Len(t, md.created, 1, "INVITE 200 OK must create a dialog")
 

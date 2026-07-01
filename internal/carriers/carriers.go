@@ -11,8 +11,9 @@ import (
 
 type (
 	Carrier struct {
-		Name  string   `yaml:"name"`
-		CIDRs []string `yaml:"cidrs"`
+		Name    string   `yaml:"name"`
+		Country string   `yaml:"country"`
+		CIDRs   []string `yaml:"cidrs"`
 	}
 
 	Config struct {
@@ -22,6 +23,7 @@ type (
 	cidrEntry struct {
 		cidr    *net.IPNet
 		carrier string
+		country string
 	}
 
 	Resolver struct {
@@ -55,17 +57,17 @@ func NewResolver(carrierList []Carrier) (*Resolver, error) {
 			if err != nil {
 				return nil, fmt.Errorf("invalid CIDR %q for carrier %q: %w", cidrStr, c.Name, err)
 			}
-			r.entries = append(r.entries, cidrEntry{cidr: cidr, carrier: c.Name})
+			r.entries = append(r.entries, cidrEntry{cidr: cidr, carrier: c.Name, country: c.Country})
 		}
 	}
 	return r, nil
 }
 
-func (r *Resolver) Lookup(ip net.IP) string {
+func (r *Resolver) Lookup(ip net.IP) (string, string) {
 	for _, e := range r.entries {
 		if e.cidr.Contains(ip) {
-			return e.carrier
+			return e.carrier, e.country
 		}
 	}
-	return "other"
+	return "other", ""
 }

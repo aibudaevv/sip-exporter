@@ -16,6 +16,7 @@ import (
 	"github.com/aibudaevv/sip-exporter/internal/carriers"
 	"github.com/aibudaevv/sip-exporter/internal/config"
 	"github.com/aibudaevv/sip-exporter/internal/exporter"
+	"github.com/aibudaevv/sip-exporter/internal/geoip"
 	"github.com/aibudaevv/sip-exporter/internal/service"
 	"github.com/aibudaevv/sip-exporter/internal/ua"
 )
@@ -34,8 +35,13 @@ type (
 	}
 )
 
-func NewServer(resolver *carriers.Resolver, classifier *ua.Classifier) Server {
-	return &server{exporter: exporter.NewExporter(service.NewMetricser(), service.NewDialoger(), resolver, classifier)}
+func NewServer(resolver *carriers.Resolver, classifier *ua.Classifier, gr *geoip.Reader) Server {
+	return &server{
+		exporter: exporter.NewExporter(
+			service.NewMetricser(), service.NewDialoger(),
+			resolver, classifier, gr,
+		),
+	}
 }
 
 func (s *server) Run(cfg *config.App) error {
