@@ -15,6 +15,10 @@ import (
 // determined solely by carrier.country precedence:
 //   - carrier with country field → that ISO code
 //   - carrier without country, no GeoIP DB → "unknown"
+//
+// For each subtest we verify the expected label value is present and the
+// alternative is absent (0) — this proves the label is set correctly, not
+// just that traffic flowed.
 func TestSourceCountry(t *testing.T) {
 	t.Parallel()
 
@@ -22,16 +26,19 @@ func TestSourceCountry(t *testing.T) {
 		name             string
 		carriersYAMLFile string
 		wantCountry      string
+		notWantCountry   string
 	}{
 		{
 			name:             "CarrierCountry_RU",
 			carriersYAMLFile: "carriers_country.yaml",
 			wantCountry:      "RU",
+			notWantCountry:   "unknown",
 		},
 		{
 			name:             "Unknown_NoCarrierCountry",
 			carriersYAMLFile: "carriers.yaml",
 			wantCountry:      "unknown",
+			notWantCountry:   "RU",
 		},
 	}
 
@@ -44,19 +51,26 @@ func TestSourceCountry(t *testing.T) {
 
 			runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 100, env)
 
-			label := `source_country="` + tt.wantCountry + `"`
+			wantLabel := `source_country="` + tt.wantCountry + `"`
+			notWantLabel := `source_country="` + tt.notWantCountry + `"`
 
-			invite := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", label)
-			t.Logf("invite_total{%s}=%.0f", label, invite)
-			require.Greater(t, invite, 0.0, "invite_total should have %s", label)
+			inviteOK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", wantLabel)
+			inviteBad := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", notWantLabel)
+			t.Logf("invite_total{%s}=%.0f, invite_total{%s}=%.0f", wantLabel, inviteOK, notWantLabel, inviteBad)
+			require.Equal(t, 100.0, inviteOK, "invite_total should carry %s", wantLabel)
+			require.Equal(t, 0.0, inviteBad, "invite_total should NOT carry %s", notWantLabel)
 
-			ser := getMetricWithLabel(t, env.endpoint, "sip_exporter_ser", label)
-			t.Logf("ser{%s}=%.2f", label, ser)
-			require.Greater(t, ser, 0.0, "SER should have %s", label)
+			serOK := getMetricWithLabel(t, env.endpoint, "sip_exporter_ser", wantLabel)
+			serBad := getMetricWithLabel(t, env.endpoint, "sip_exporter_ser", notWantLabel)
+			t.Logf("ser{%s}=%.2f, ser{%s}=%.2f", wantLabel, serOK, notWantLabel, serBad)
+			require.Equal(t, 100.0, serOK, "SER should carry %s", wantLabel)
+			require.Equal(t, 0.0, serBad, "SER should NOT carry %s", notWantLabel)
 
-			scr := getMetricWithLabel(t, env.endpoint, "sip_exporter_scr", label)
-			t.Logf("scr{%s}=%.2f", label, scr)
-			require.Greater(t, scr, 0.0, "SCR should have %s", label)
+			scrOK := getMetricWithLabel(t, env.endpoint, "sip_exporter_scr", wantLabel)
+			scrBad := getMetricWithLabel(t, env.endpoint, "sip_exporter_scr", notWantLabel)
+			t.Logf("scr{%s}=%.2f, scr{%s}=%.2f", wantLabel, scrOK, notWantLabel, scrBad)
+			require.Equal(t, 100.0, scrOK, "SCR should carry %s", wantLabel)
+			require.Equal(t, 0.0, scrBad, "SCR should NOT carry %s", notWantLabel)
 
 			env.waitForSessionsZeroByCarrier(t)
 		})
@@ -72,7 +86,7 @@ func TestSourceCountry(t *testing.T) {
 // Session 1: UAC=10.1.0.1 (carrier-A, RU) → UAS=10.2.0.1 → 200 OK.
 // Session 2: UAC=10.2.0.1 (carrier-B, US) → UAS=10.1.0.1 → 200 OK.
 //
-// Expected: invite_total{source_country="RU"} > 0, invite_total{source_country="US"} > 0.
+// Expected: invite_total{source_country="RU"}=100, invite_total{source_country="US"}=100.
 func TestSourceCountry_PerCarrier(t *testing.T) {
 	ctx := context.Background()
 	setupSecondaryIPs(t)
@@ -85,9 +99,11 @@ func TestSourceCountry_PerCarrier(t *testing.T) {
 
 	inviteRU := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", `source_country="RU"`)
 	inviteUS := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", `source_country="US"`)
-	t.Logf("invite_total{source_country=\"RU\"}=%.0f, invite_total{source_country=\"US\"}=%.0f", inviteRU, inviteUS)
-	require.Greater(t, inviteRU, 0.0, "carrier-A (RU) should have INVITEs")
-	require.Greater(t, inviteUS, 0.0, "carrier-B (US) should have INVITEs")
+	inviteUnknown := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", `source_country="unknown"`)
+	t.Logf("RU=%.0f, US=%.0f, unknown=%.0f", inviteRU, inviteUS, inviteUnknown)
+	require.Equal(t, 100.0, inviteRU, "carrier-A (RU) should have exactly 100 INVITEs")
+	require.Equal(t, 100.0, inviteUS, "carrier-B (US) should have exactly 100 INVITEs")
+	require.Equal(t, 0.0, inviteUnknown, "no traffic should have source_country=unknown when carriers have country fields")
 
 	assertSelfMonitoringHealthy(t, env.endpoint)
 }
