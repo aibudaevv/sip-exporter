@@ -28,7 +28,8 @@ const (
 
 type (
 	server struct {
-		exporter exporter.Exporter
+		exporter    exporter.Exporter
+		geoipReader *geoip.Reader
 	}
 	Server interface {
 		Run(cfg *config.App) error
@@ -46,6 +47,7 @@ func NewServer(
 			service.NewMetricser(), service.NewDialoger(),
 			resolver, classifier, gr, localCountryCode,
 		),
+		geoipReader: gr,
 	}
 }
 
@@ -80,9 +82,17 @@ func (s *server) Run(cfg *config.App) error {
 	}()
 
 	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
-	<-quit
+	for sig := range quit {
+		if sig != syscall.SIGHUP {
+			break
+		}
+		zap.L().Info("SIGHUP received, reloading GeoIP country DB")
+		if err := s.geoipReader.Reload(); err != nil {
+			zap.L().Warn("GeoIP country DB reload failed", zap.Error(err))
+		}
+	}
 
 	zap.L().Info("received signal from OS for shutdown")
 
