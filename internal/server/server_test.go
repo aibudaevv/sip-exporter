@@ -39,7 +39,7 @@ func (m *mockExporter) IsAlive() bool {
 }
 
 func TestNewServer(t *testing.T) {
-	srv := NewServer(nil, nil, nil, "")
+	srv := NewServer(nil, nil, nil, "", false)
 	require.NotNil(t, srv)
 
 	s, ok := srv.(*server)

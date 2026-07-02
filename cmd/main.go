@@ -65,7 +65,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	srv := server.NewServer(resolver, classifier, geoipReader, cfg.LocalCountryCode)
+	srv := server.NewServer(resolver, classifier, geoipReader, cfg.LocalCountryCode, cfg.HostLabels)
 
 	go telemetry.Run(context.Background(), telemetry.Config{
 		Enabled: cfg.Telemetry,

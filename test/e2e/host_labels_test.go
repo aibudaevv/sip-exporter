@@ -12,6 +12,10 @@ import (
 // TestHostLabels verifies caller_host and called_host labels on invite_total
 // and invite_200_total.
 //
+// Host labels are OPT-IN (SIP_EXPORTER_HOST_LABELS, default false): this test
+// enables them explicitly. See TestHostLabels_DisabledByDefault for the
+// default-off behavior.
+//
 // host values come from the SIP URI host part (From.Addr / To.Addr), not from
 // the IP packet header. SIPp populates [local_ip] / [remote_ip] in the From /
 // To headers respectively.
@@ -53,13 +57,13 @@ func TestHostLabels(t *testing.T) {
 			calledLabel := `called_host="` + tt.wantCalled + `"`
 
 			if tt.useLoopback {
-				env := newTestEnv(ctx, t)
+				env := newTestEnvWithExtraEnv(ctx, t, "", map[string]string{"SIP_EXPORTER_HOST_LABELS": "true"})
 				runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 100, env)
 				assertHostLabels(t, env.endpoint, callerLabel, calledLabel, tt.wantCaller, tt.wantCalled)
 				waitForSessionsZero(t, env.endpoint)
 			} else {
 				setupSecondaryIPs(t)
-				env := newTestEnv(ctx, t)
+				env := newTestEnvWithExtraEnv(ctx, t, "", map[string]string{"SIP_EXPORTER_HOST_LABELS": "true"})
 				runSippScenarioWithIPs(ctx, t, "uas_100.xml", "uac_100.xml", 100, env, "10.2.0.1", "10.1.0.1")
 				assertHostLabels(t, env.endpoint, callerLabel, calledLabel, tt.wantCaller, tt.wantCalled)
 				waitForSessionsZero(t, env.endpoint)
@@ -103,4 +107,34 @@ func assertHostLabels(t *testing.T, endpoint, callerLabel, calledLabel, wantCall
 	t.Logf("invite_200_total{%s}=%.0f, invite_200_total{called_host=%q}=%.0f", calledLabel, invite200CalledOK, notWantCalled, invite200CalledBad)
 	require.Equal(t, 100.0, invite200CalledOK, "invite_200_total should carry called_host=%q", wantCalled)
 	require.Equal(t, 0.0, invite200CalledBad, "invite_200_total should NOT carry called_host=%q", notWantCalled)
+}
+
+// TestHostLabels_DisabledByDefault verifies that when SIP_EXPORTER_HOST_LABELS
+// is not set (default false), caller_host/called_host collapse to the empty
+// value and do NOT carry the From/To host. This is the cardinality-safe default:
+// no unique host can inflate the invite_total / invite_200_total series.
+func TestHostLabels_DisabledByDefault(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	env := newTestEnv(ctx, t) // no SIP_EXPORTER_HOST_LABELS → default false
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 100, env)
+
+	// caller_host/called_host must be empty (""); the loopback host must NOT appear.
+	emptyCaller := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", `caller_host=""`)
+	loopbackCaller := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", `caller_host="127.0.0.1"`)
+	t.Logf("invite_total{caller_host=\"\"}=%.0f, invite_total{caller_host=\"127.0.0.1\"}=%.0f", emptyCaller, loopbackCaller)
+	require.Equal(t, 100.0, emptyCaller, "invite_total should collapse to caller_host=\"\" when host labels disabled")
+	require.Equal(t, 0.0, loopbackCaller, "caller_host must not carry the From host when host labels disabled")
+
+	emptyCalled := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", `called_host=""`)
+	loopbackCalled := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", `called_host="127.0.0.1"`)
+	t.Logf("invite_total{called_host=\"\"}=%.0f, invite_total{called_host=\"127.0.0.1\"}=%.0f", emptyCalled, loopbackCalled)
+	require.Equal(t, 100.0, emptyCalled, "invite_total should collapse to called_host=\"\" when host labels disabled")
+	require.Equal(t, 0.0, loopbackCalled, "called_host must not carry the To host when host labels disabled")
+
+	// Same for invite_200_total.
+	empty200Caller := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", `caller_host=""`)
+	require.Equal(t, 100.0, empty200Caller, "invite_200_total should collapse to caller_host=\"\" when host labels disabled")
+
+	waitForSessionsZero(t, env.endpoint)
 }

@@ -384,6 +384,7 @@ func startExporterWithConfigAndUA(ctx context.Context, t *testing.T, exporterPor
 		"SIP_EXPORTER_SIPS_PORT":       sippClientPort,
 		"SIP_EXPORTER_LOGGER_LEVEL":    exporterLogLevel,
 		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
+		"SIP_EXPORTER_TELEMETRY":       "false",
 	}
 	for k, v := range extraEnv {
 		envVars[k] = v
@@ -546,7 +547,12 @@ func getMetricWithLabel(t *testing.T, endpoint string, metricName string, labelF
 
 	var pattern string
 	if labelFilter != "" {
-		pattern = `^` + metricName + `\{[^}]*` + regexp.QuoteMeta(labelFilter) + `[^}]*\}\s+([0-9.]+)`
+		filters := strings.Split(labelFilter, ",")
+		quotedParts := make([]string, len(filters))
+		for i, f := range filters {
+			quotedParts[i] = regexp.QuoteMeta(f)
+		}
+		pattern = `^` + metricName + `\{[^}]*` + strings.Join(quotedParts, `[^}]*`) + `[^}]*\}\s+([0-9.]+)`
 	} else {
 		pattern = `^` + metricName + `(?:\{[^}]*\})?\s+([0-9.]+)`
 	}

@@ -120,6 +120,7 @@ type (
 		uaClassifier     *ua.Classifier
 		geoip            *geoip.Reader
 		localCountryCode string
+		hostLabels       bool
 		vqHandler        *vq.Handler
 		mediaTracker     *mediatracker.Tracker
 		registerTracker  map[string]registerEntry
@@ -156,6 +157,7 @@ func NewExporter(
 	classifier *ua.Classifier,
 	gr *geoip.Reader,
 	localCountryCode string,
+	hostLabels bool,
 ) Exporter {
 	return &exporter{
 		services: services{
@@ -166,6 +168,7 @@ func NewExporter(
 		uaClassifier:     classifier,
 		geoip:            gr,
 		localCountryCode: localCountryCode,
+		hostLabels:       hostLabels,
 		vqHandler:        vq.NewHandler(m),
 		mediaTracker:     mediatracker.NewTracker(rtpStreamTTL),
 		messages:         make(chan []byte, messagesChanSize),
@@ -802,8 +805,10 @@ func (e *exporter) handleRequest(carrier string, uaType string, sourceCountry st
 	var destinationCountry, callerHost, calledHost string
 	if bytes.Equal(packet.Method, []byte("INVITE")) {
 		destinationCountry = e.resolveDestinationCountry(packet.To.User)
-		callerHost = string(packet.From.Addr)
-		calledHost = string(packet.To.Addr)
+		if e.hostLabels {
+			callerHost = string(packet.From.Addr)
+			calledHost = string(packet.To.Addr)
+		}
 	}
 	e.services.metricser.Request(
 		carrier, uaType, sourceCountry, destinationCountry,
@@ -958,8 +963,11 @@ func (e *exporter) handle200OKResponse(
 
 	if bytes.Equal(packet.CSeq.Method, []byte("INVITE")) {
 		destinationCountry := e.resolveDestinationCountry(packet.To.User)
-		callerHost := string(packet.From.Addr)
-		calledHost := string(packet.To.Addr)
+		var callerHost, calledHost string
+		if e.hostLabels {
+			callerHost = string(packet.From.Addr)
+			calledHost = string(packet.To.Addr)
+		}
 		e.services.metricser.Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost)
 		if err := e.handleInvite200OK(carrier, uaType, sourceCountry, packet); err != nil {
 			zap.L().Error("handle INVITE 200 OK", zap.Error(err))

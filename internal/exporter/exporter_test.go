@@ -1259,7 +1259,7 @@ func TestNewExporter(t *testing.T) {
 	m := service.NewMetricser()
 	d := service.NewDialoger()
 
-	exp := NewExporter(m, d, nil, nil, nil, "")
+	exp := NewExporter(m, d, nil, nil, nil, "", false)
 	require.NotNil(t, exp)
 }
 

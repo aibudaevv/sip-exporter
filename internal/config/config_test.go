@@ -28,6 +28,8 @@ func unsetConfigEnv(t *testing.T) {
 		"SIP_EXPORTER_TELEMETRY_URL",
 		"SIP_EXPORTER_TELEMETRY_ID_FILE",
 		"SIP_EXPORTER_GEOIP_COUNTRY_DB",
+		"SIP_EXPORTER_LOCAL_COUNTRY_CODE",
+		"SIP_EXPORTER_HOST_LABELS",
 	} {
 		os.Unsetenv(k)
 	}
@@ -222,4 +224,27 @@ func TestGetConfig_GeoIPCountryDBCustom(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
 	require.Equal(t, "/data/geoip.mmdb", cfg.GeoIPCountryDB)
+}
+
+func TestGetConfig_HostLabelsDefault(t *testing.T) {
+	unsetConfigEnv(t)
+	t.Setenv("SIP_EXPORTER_INTERFACE", "eth0")
+
+	cfg, err := GetConfig()
+
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	require.False(t, cfg.HostLabels, "host labels must be disabled by default")
+}
+
+func TestGetConfig_HostLabelsEnabled(t *testing.T) {
+	unsetConfigEnv(t)
+	t.Setenv("SIP_EXPORTER_INTERFACE", "eth0")
+	t.Setenv("SIP_EXPORTER_HOST_LABELS", "true")
+
+	cfg, err := GetConfig()
+
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	require.True(t, cfg.HostLabels, "host labels must be enabled when env is true")
 }

@@ -41,11 +41,12 @@ func NewServer(
 	classifier *ua.Classifier,
 	gr *geoip.Reader,
 	localCountryCode string,
+	hostLabels bool,
 ) Server {
 	return &server{
 		exporter: exporter.NewExporter(
 			service.NewMetricser(), service.NewDialoger(),
-			resolver, classifier, gr, localCountryCode,
+			resolver, classifier, gr, localCountryCode, hostLabels,
 		),
 		geoipReader: gr,
 	}
