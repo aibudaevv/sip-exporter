@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/rlimit"
 	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
 
@@ -180,14 +181,24 @@ func NewExporter(
 	}
 }
 
+func checkPrerequisites() error {
+	if syscall.Geteuid() != 0 {
+		return ErrUserNotRoot
+	}
+	if err := rlimit.RemoveMemlock(); err != nil {
+		return fmt.Errorf("failed to remove memlock: %w", err)
+	}
+	return nil
+}
+
 func (e *exporter) Initialize(
 	interfaceName string, path string,
 	sipPort, sipsPort int,
 	ignoreOutgoing, rtpCapture bool,
 	rtpStreamTTL time.Duration,
 ) error {
-	if syscall.Geteuid() != 0 {
-		return ErrUserNotRoot
+	if err := checkPrerequisites(); err != nil {
+		return err
 	}
 
 	// Apply the config-driven RTP stream expiry (RFC 3550 §6.3.5 idle-timeout).
