@@ -11,7 +11,8 @@
 #   2. First matching pattern wins — order matters.
 #   3. If no pattern matches, ua_type="other" is used.
 #   4. If this config is not set, all metrics use ua_type="other".
-#   5. Patterns are case-insensitive.
+#   5. Patterns are compiled as-is (no implicit flags). Use the (?i) prefix for
+#      case-insensitive matching, as shown in every example below.
 
 user_agents:
   - regex: '(?i)^Yealink'

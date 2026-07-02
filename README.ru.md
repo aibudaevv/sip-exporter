@@ -37,6 +37,7 @@
 - 📈 **Нативный Prometheus** — стандартный эндпоинт `/metrics`
 - 🏷️ **Метрики по операторам** — разрешение carrier на основе CIDR для всех SIP-метрик
 - 🏷️ **Метрики по типам устройств** — классификация User-Agent для всех SIP-метрик
+- 🌍 **Гео-обогащение** — лейблы `source_country` (GeoIP) и `destination_country` (E.164 prefix) в SIP-метриках
 - 📞 **Качество голоса (RFC 6035)** — MOS, джиттер, потери пакетов из SIP PUBLISH/NOTIFY
 - 🎧 **Анализ RTP-медиа** — джиттер, потери и MOS (E-model G.107) из RTP-потоков, скоррелированных с SIP-диалогами, без захвата голосового payload (только заголовок)
 
@@ -113,6 +114,9 @@ docker pull frzq/sip-exporter:latest
 * `SIP_EXPORTER_RTP_CAPTURE` — включить захват и анализ RTP-медиа (по умолчанию true)
 * `SIP_EXPORTER_RTP_STREAM_TTL` — время жизни простаивающего RTP-потока до удаления, таймаут RFC 3550 §6.3.5 (по умолчанию 30s)
 * `SIP_EXPORTER_IGNORE_OUTGOING` — игнорировать исходящие пакеты, считать только входящие (по умолчанию false)
+* `SIP_EXPORTER_GEOIP_COUNTRY_DB` — путь к MaxMind GeoLite2-Country.mmdb для лейбла `source_country` (опционально)
+* `SIP_EXPORTER_LOCAL_COUNTRY_CODE` — код страны ISO alpha-2 для локальных номеров без международного префикса в `destination_country` (опционально, напр. `RU`)
+* `SIP_EXPORTER_TELEMETRY` — анонимная телеметрия использования, отключается значением `false` (по умолчанию true)
 
 Контейнер должен запускаться с `--privileged` и `--network host` (eBPF требует `CAP_BPF` и доступ к сетевому интерфейсу). Подробнее о безопасности — в [Безопасность](docs/SECURITY.ru.md).
 
@@ -220,7 +224,7 @@ services:
       - SIP_EXPORTER_INTERFACE=eth0
       - SIP_EXPORTER_USER_AGENTS_CONFIG=/etc/sip-exporter/user_agents.yaml
     volumes:
-      - ./user_agents.yaml:/etc/sip-exporter/user_agents.yaml:ro
+      - ./examples/user_agents.yaml:/etc/sip-exporter/user_agents.yaml:ro
 ```
 
 ```yaml
@@ -271,6 +275,52 @@ sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
 ```
 
 Полный пример конфигурации: [`examples/user_agents.yaml`](examples/user_agents.yaml)
+
+### Гео-обогащение метрик (Geo-Enrichment)
+
+Экспортер добавляет географический контекст к SIP-метрикам через два лейбла:
+
+| Лейбл | Метод | Область |
+|-------|-------|---------|
+| `source_country` | GeoIP-лукап source IP (MaxMind GeoLite2-Country) | Все SIP + RTP метрики |
+| `destination_country` | Префикс E.164 номера (embedded, без БД) | Только INVITE-метрики |
+
+**Разрешение source_country:**
+1. `carrier.country` — опциональное поле в `carriers.yaml`, приоритет над GeoIP (оператор знает лучше)
+2. `GeoIP(srcIP)` — лукап по базе MaxMind GeoLite2-Country
+3. `"unknown"` — fallback при отсутствии обоих
+
+**destination_country** не требует **никакой базы** — таблица префиксов встроена в бинарник (Google libphonenumber, Apache 2.0). Для локальных номеров без международного префикса укажите `SIP_EXPORTER_LOCAL_COUNTRY_CODE`.
+
+**Настройка:**
+
+```yaml
+# docker-compose.yml
+services:
+  sip-exporter:
+    image: frzq/sip-exporter:latest
+    privileged: true
+    network_mode: host
+    environment:
+      - SIP_EXPORTER_INTERFACE=eth0
+      - SIP_EXPORTER_GEOIP_COUNTRY_DB=/data/GeoLite2-Country.mmdb
+      - SIP_EXPORTER_LOCAL_COUNTRY_CODE=RU    # опционально: fallback для локальных номеров
+    volumes:
+      - ./GeoLite2-Country.mmdb:/data/GeoLite2-Country.mmdb:ro
+```
+
+Полный справочник с формулами и примерами PromQL: [docs/METRICS.md > Geo-Enrichment Labels](docs/METRICS.md#geo-enrichment-labels)
+
+Пошаговая настройка (как получить и подключить базу MaxMind): [`examples/geoip.md`](examples/geoip.md)
+
+```promql
+# SER для звонков в Россию
+sum(rate(sip_exporter_invite_200_total{destination_country="RU"}[5m]))
+  / sum(rate(sip_exporter_invite_total{destination_country="RU"}[5m])) * 100
+
+# Частота INVITE по странам назначения
+sum by (destination_country) (rate(sip_exporter_invite_total[5m]))
+```
 
 ### Анализ RTP-медиа
 
@@ -368,6 +418,11 @@ SIP-Exporter экспортирует метрики в формате Prometheu
 Проект лицензирован под **GNU Affero General Public License v3.0 (AGPL-3.0)**.
 
 Полный текст: [LICENSE](LICENSE).
+
+### Лицензии сторонних данных
+
+- **MaxMind GeoLite2** (`source_country`) — бесплатно для внутреннего использования с указанием авторства; распространение/встраивание требует [Commercial License](https://www.maxmind.com/en/geolite2/eula). Пользователь скачивает БД отдельно.
+- **Google libphonenumber** (`destination_country`) — [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0). Данные префиксов E.164 встроены в бинарник при компиляции.
 
 ### Коммерческое использование
 - ✅ Бесплатно для личного и образовательного использования

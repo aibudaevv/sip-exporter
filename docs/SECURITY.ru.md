@@ -43,7 +43,7 @@ SIP-exporter использует **eBPF** (extended Berkeley Packet Filter), п
 |---|---|
 | Базовый образ | `alpine:3.22` — минимальный (~5 МБ) |
 | Runtime-зависимости | `libelf` (для eBPF), `bash` (для healthcheck) |
-| Приложение | Один бинарник на Go |
+| Приложение | Один статически слинкованный бинарник на Go |
 | Volumes | `/etc/localtime:ro`, `/etc/timezone:ro` — только чтение часового пояса |
 | Сеть | Только HTTP-эндпоинт `/metrics` (порт 2112 по умолчанию) |
 | Процессы | Один процесс, нет shell, нет демонов |

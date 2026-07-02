@@ -46,13 +46,13 @@ groups:
           description: "SIP Exporter instance {{ $labels.instance }} has been down for more than 1 minute."
 
       - alert: SIPDDoSDetected
-        expr: rate(sip_exporter_isa[1m]) > 50
+        expr: sip_exporter_isa > 50
         for: 1m
         labels:
           severity: critical
         annotations:
           summary: "Possible DDoS attack detected"
-          description: "ISA rate is {{ $value | printf \"%.2f\" }}/s. High rate of ineffective sessions (408/500/503/504) indicates server overload or DDoS attack."
+          description: "ISA is {{ $value | printf \"%.2f\" }}%. High share of ineffective sessions (408/500/503/504) indicates server overload or DDoS attack."
           runbook_url: "https://wiki.example.com/runbooks/sip-ddos"
 
       - alert: SIPSessionEstablishmentCritical
@@ -173,7 +173,7 @@ These alerts monitor voice quality metrics extracted from SIP PUBLISH/NOTIFY wit
 
 ### RTP Media Alerts
 
-These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) measured passively from RTP headers (RFC 3550). Metrics are labeled by `carrier`, `ua_type`, and `codec`.
+These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) measured passively from RTP headers (RFC 3550). Metrics are labeled by `carrier`, `ua_type`, `codec`, and `source_country`.
 
 ```yaml
       - alert: RTPPacketLossHigh
@@ -243,7 +243,10 @@ These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) mea
 
       - alert: SIPStaleDialogsHigh
         expr: |
-          sip_exporter_sessions / sip_exporter_invite_total * 100 > 10
+          sip_exporter_sessions
+            / on (carrier, ua_type, source_country)
+              sum by (carrier, ua_type, source_country) (sip_exporter_invite_total)
+            * 100 > 10
         for: 10m
         labels:
           severity: warning
@@ -428,7 +431,7 @@ scrape_configs:
 
 ### Metric Cardinality
 
-The SIP Exporter exposes ~65 metrics with `carrier` and `ua_type` labels. RTP metrics additionally carry a `codec` label (typically 3-8 codecs). Cardinality equals the number of configured carriers × UA types × (for RTP) active codecs. Without a carriers config, all metrics use `carrier="other"` (cardinality = 1).
+The SIP Exporter exposes ~65 metrics with `carrier`, `ua_type`, and `source_country` labels. RTP metrics additionally carry a `codec` label (typically 3-8 codecs). Cardinality equals the number of configured carriers × UA types × source countries × (for RTP) active codecs. Without a carriers config and without GeoIP, `source_country="unknown"` (cardinality = 1); enabling GeoIP or setting `carrier.country` increases cardinality by the number of distinct source countries observed.
 
 ### Dashboard Organization
 

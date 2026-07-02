@@ -4,20 +4,33 @@ All metrics are exposed at `/metrics` endpoint in Prometheus exposition format.
 
 ## Labels
 
-All SIP metrics include **two labels** for multi-dimensional analysis:
+SIP metrics use a multi-layer label model. Most metrics include **three base labels**; INVITE-related raw counters add **three more**:
 
-| Label | Value | Description |
-|-------|-------|-------------|
-| `carrier` | Carrier name from config | Source IP → CIDR mapping, resolved at request time |
-| `ua_type` | UA type from config | `User-Agent` header → regex mapping, resolved at request time |
+| Label | Scope | Value | Description |
+|-------|-------|-------|-------------|
+| `carrier` | Base (all SIP) | Carrier name from config | Source IP → CIDR mapping, resolved at request time |
+| `ua_type` | Base (all SIP) | UA type from config | `User-Agent` header → regex mapping, resolved at request time |
+| `source_country` | Base (all SIP) | ISO 3166-1 alpha-2 | Country of the calling device. See [Geo-Enrichment Labels](#geo-enrichment-labels) |
+| `destination_country` | INVITE raw only | ISO alpha-2 or `"unknown"` | Destination country from E.164 phone-number prefix. See [Geo-Enrichment Labels](#geo-enrichment-labels) |
+| `caller_host` | INVITE raw only | IP or domain | Host part of the `From` SIP URI |
+| `called_host` | INVITE raw only | IP or domain | Host part of the `To` SIP URI |
 
-Both labels default to `"other"` when not configured or when no pattern matches.
+> **Note:** Individual metric signatures below show `{carrier="...",ua_type="..."}` for brevity. Use this table to determine the full label set for any metric:
+>
+> | Tier | Metrics | Full label set |
+> |------|---------|----------------|
+> | **System** | `packets_total`, `system_error_total`, self-monitoring | *(none)* |
+> | **Base** | All SIP requests, responses, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD, VQ reports, sessions | `carrier, ua_type, source_country` |
+> | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_active_streams` | `carrier, ua_type, codec, source_country` |
+> | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, destination_country, caller_host, called_host` |
+
+`carrier` and `ua_type` default to `"other"` when not configured or when no pattern matches. `source_country` defaults to `"unknown"` when neither carrier country nor GeoIP DB is available.
 
 **Example:**
 ```
-sip_exporter_invite_total{carrier="carrier-a",ua_type="yealink"} 1523
-sip_exporter_200_total{carrier="carrier-a",ua_type="yealink"} 847
-sip_exporter_ser{carrier="carrier-a",ua_type="yealink"} 95.2
+sip_exporter_invite_total{carrier="carrier-a",ua_type="yealink",source_country="RU",destination_country="US",caller_host="10.1.5.20",called_host="sip.example.com"} 1523
+sip_exporter_200_total{carrier="carrier-a",ua_type="yealink",source_country="RU"} 847
+sip_exporter_ser{carrier="carrier-a",ua_type="yealink",source_country="RU"} 95.2
 ```
 
 ### Metrics WITHOUT `carrier` and `ua_type` labels
@@ -310,7 +323,96 @@ sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
 
 ---
 
-## SIP traffic
+## Geo-Enrichment Labels
+
+SIP Exporter enriches metrics with geographic context using a **two-method model**:
+
+| Dimension | Method | Based on | Labels |
+|-----------|--------|----------|--------|
+| **Source country** (where the call originates) | GeoIP lookup of source IP | MaxMind GeoLite2-Country DB | `source_country` |
+| **Destination country** (where the call goes) | E.164 phone-number prefix | Embedded prefix table (Google libphonenumber, Apache 2.0) | `destination_country` |
+
+GeoIP for source IP, phone-number prefix for destination — two independent methods, each optimal for its task.
+
+### source_country
+
+**Resolution precedence:**
+
+```
+1. carrier.country  →  if the carrier has a "country" field in carriers.yaml, it takes priority
+2. GeoIP(srcIP)     →  MaxMind GeoLite2-Country lookup of the source IP
+3. "unknown"        →  fallback when neither is available
+```
+
+- **carrier.country** (operator-curated, authoritative): set `country: "RU"` on a carrier in `carriers.yaml` — overrides GeoIP for all IPs in that carrier's CIDRs
+- **GeoIP**: requires `GeoLite2-Country.mmdb` (download from [maxmind.com](https://www.maxmind.com)). Private IPs (RFC 1918: `10.x`, `172.16-31.x`, `192.168.x`) return no result from MaxMind — use `carrier.country` for enterprise/contact-center deployments
+- **Without GeoIP DB**: all `source_country` labels are `"unknown"` unless `carrier.country` is set — zero additional cardinality
+
+**Config:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SIP_EXPORTER_GEOIP_COUNTRY_DB` | (empty = disabled) | Path to `GeoLite2-Country.mmdb` |
+
+**Cardinality impact:** ~250 ISO alpha-2 codes. With GeoIP disabled and no `carrier.country`, every metric has `source_country="unknown"` — the same cardinality as without the label.
+
+### destination_country
+
+**Resolution logic:**
+
+```
+1. Number starts with "+" or "00"  →  E.164 longest-prefix match (e.g. "+7495..." → RU)
+2. Otherwise, LOCAL_COUNTRY_CODE set →  use that code (domestic number fallback)
+3. Otherwise                        →  "unknown"
+```
+
+- **E.164 table** is embedded in the binary (generated from Google libphonenumber `PhoneNumberMetadata.xml`, Apache 2.0). **No database download required** — unlike GeoIP
+- Correctly handles multi-national codes: `+1212...`→US, `+1416...`→CA (Toronto), `+7727...`→KZ (Almaty), `+7495...`→RU
+- **INVITE-only**: `destination_country` appears only on `invite_total` and `invite_200_total` (not on response counters, SER/SCR, RTP, etc.)
+
+**Config:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SIP_EXPORTER_LOCAL_COUNTRY_CODE` | (empty = off) | ISO alpha-2 code for domestic numbers without international prefix (e.g. `"RU"`, `"US"`) |
+
+**Example:**
+```
+# INVITE to +74951234567 (Moscow) with GeoIP enabled
+sip_exporter_invite_total{carrier="carrier-a",ua_type="yealink",source_country="RU",destination_country="RU",caller_host="10.1.5.20",called_host="sip.operator.com"} 100
+
+# INVITE to +442071838750 (London)
+sip_exporter_invite_total{...,destination_country="GB"} 50
+```
+
+### caller_host / called_host
+
+The host part of the `From` and `To` SIP URIs, respectively. Extracted during packet parsing from `<sip:user@host:port>`.
+
+- Can be an IP address (`10.1.5.20`) or a domain name (`sip.example.com`)
+- **INVITE-only**: appears only on `invite_total` and `invite_200_total`
+- Cardinality bounded by deployment size (~10–50 unique hosts)
+
+### SER by Destination (PromQL)
+
+Ratio metrics (SER, SEER, ISA, SCR) carry `source_country` but **not** `destination_country` (cardinality control). To calculate SER for a specific destination, use PromQL on the raw INVITE counters:
+
+```promql
+# SER for calls to Russia = successful / total INVITE
+# (approximation: 3xx not excluded — see note below)
+sum(rate(sip_exporter_invite_200_total{destination_country="RU"}[5m]))
+  / sum(rate(sip_exporter_invite_total{destination_country="RU"}[5m])) * 100
+
+# INVITE rate by destination country
+sum by (destination_country) (rate(sip_exporter_invite_total[5m]))
+
+# Top 10 destination countries by call volume
+topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
+```
+
+> **Why no 3xx exclusion?** Strict SER (per the formula in [Session Establishment Ratio (SER)](#session-establishment-ratio-ser)) subtracts 3xx responses from the denominator. But `300_total` is a response counter and does **not** carry `destination_country`, so 3xx cannot be partitioned by destination in PromQL. The approximation above (200 OK / total INVITE) is used instead; for most deployments the 3xx share is small and the difference is negligible.
+
+---
 
 `sip_exporter_packets_total`: total number of parsed SIP packets (requests + responses). **No `carrier` or `ua_type` label.**
 
@@ -343,7 +445,10 @@ sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
 `sip_exporter_subscribe_total{carrier="...",ua_type="..."}`: total number of received SIP SUBSCRIBE requests.  
 `sip_exporter_refer_total{carrier="...",ua_type="..."}`: total number of received SIP REFER requests.  
 `sip_exporter_info_total{carrier="...",ua_type="..."}`: total number of received SIP INFO requests.  
-`sip_exporter_update_total{carrier="...",ua_type="..."}`: total number of received SIP UPDATE requests.
+`sip_exporter_update_total{carrier="...",ua_type="..."}`: total number of received SIP UPDATE requests.  
+`sip_exporter_message_total{carrier="...",ua_type="..."}`: total number of received SIP MESSAGE requests.
+
+`sip_exporter_invite_200_total{carrier,ua_type,source_country,destination_country,caller_host,called_host}`: total number of `200 OK` responses to INVITE requests (successful call establishments). This is the numerator for [SER-by-destination](#ser-by-destination-promql) PromQL calculations. Carries the full 6-label set — same as `invite_total`.
 
 ## SIP response metrics (by status code)
 
@@ -382,17 +487,17 @@ sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
 
 RTP media metrics are derived from RTP packets captured by the eBPF filter and
 correlated with SIP dialogs via SDP (media IP:port → carrier/ua_type/call-id).
-All RTP metrics carry the `carrier`, `ua_type` and `codec` labels. Only RTP that
+All RTP metrics carry the `carrier`, `ua_type`, `codec`, and `source_country` labels. Only RTP that
 belongs to an established SIP dialog (after a 200 OK to INVITE with SDP) is
 counted; RTP without a correlated dialog is dropped.
 
-`{carrier="...",ua_type="...",codec="..."}` — `codec` is the RTP payload-type name resolved from SDP `a=rtpmap` (e.g. `PCMU`, `PCMA`, `opus`) with a static fallback table (RFC 3551).
+`{carrier="...",ua_type="...",codec="...",source_country="..."}` — `codec` is the RTP payload-type name resolved from SDP `a=rtpmap` (e.g. `PCMU`, `PCMA`, `opus`) with a static fallback table (RFC 3551). `source_country` is inherited from the SIP dialog (resolved at INVITE time).
 
-`sip_exporter_rtp_packets_total{carrier,ua_type,codec}` *(counter)*: total number of RTP packets observed.
-`sip_exporter_rtp_packets_lost_total{carrier,ua_type,codec}` *(counter)*: packets detected as lost via RTP sequence-number gaps.
-`sip_exporter_rtp_jitter_milliseconds{carrier,ua_type,codec}` *(histogram, buckets 0.1..500 ms)*: smoothed interarrival jitter (RFC 3550 A.8).
-`sip_exporter_rtp_mos_score{carrier,ua_type,codec}` *(histogram, buckets 1.0..5.0)*: MOS-LQ estimated via the ITU-T G.107 E-model (codec impairment + loss + jitter-induced discard).
-`sip_exporter_rtp_active_streams{carrier,ua_type,codec}` *(gauge)*: number of active RTP streams. Sampled once per second; idle streams expire after 30 s.
+`sip_exporter_rtp_packets_total{carrier,ua_type,codec,source_country}` *(counter)*: total number of RTP packets observed.
+`sip_exporter_rtp_packets_lost_total{carrier,ua_type,codec,source_country}` *(counter)*: packets detected as lost via RTP sequence-number gaps.
+`sip_exporter_rtp_jitter_milliseconds{carrier,ua_type,codec,source_country}` *(histogram, buckets 0.1..500 ms)*: smoothed interarrival jitter (RFC 3550 A.8).
+`sip_exporter_rtp_mos_score{carrier,ua_type,codec,source_country}` *(histogram, buckets 1.0..5.0)*: MOS-LQ estimated via the ITU-T G.107 E-model (codec impairment + loss + jitter-induced discard).
+`sip_exporter_rtp_active_streams{carrier,ua_type,codec,source_country}` *(gauge)*: number of active RTP streams. Sampled once per second; idle streams expire after 30 s.
 
 > MOS is sampled per stream once per second; the E-model uses G.113 codec Ie/Bpl
 > factors. Unknown codecs get a conservative default (Ie=10).
@@ -402,7 +507,7 @@ counted; RTP without a correlated dialog is dropped.
 > (`c=` IP + `m=` port). This requires symmetric RTP (source port equals the
 > advertised port). With NAT/port remapping (asymmetric RTP) the flow is not
 > matched and is dropped from RTP metrics; SIP signaling metrics are unaffected.
-> Future work: port-learning per RFC 4961 (see `backlog.md`).
+> Future work: port-learning per RFC 4961.
 
 ## System metrics
 
@@ -421,6 +526,7 @@ Self-monitoring metrics provide visibility into the exporter's internal health. 
 | `sip_exporter_parse_errors_total{type="..."}` | CounterVec | Total packet parse errors by type |
 | `sip_exporter_active_trackers{type="..."}` | GaugeVec | Current number of entries in tracker maps |
 | `sip_exporter_active_dialogs` | Gauge | Current number of active SIP dialogs |
+| `sip_exporter_build_info{version="..."}` | GaugeFunc | Build information; constant `version` label, value always `1`. Useful for `count by (version) (sip_exporter_build_info)` inventory queries |
 
 ### AF_PACKET Socket Statistics
 
@@ -498,7 +604,7 @@ sip_exporter_active_dialogs > 10000
 
 ## RFC 6076 Performance Metrics
 
-All RFC 6076 metrics are **scoped per carrier and ua_type** — each ratio/histogram is computed independently for each `carrier` and `ua_type` label combination. This allows comparing SER, SEER, ISA, SCR, ASR, NER across carriers and device types in a single Prometheus query.
+All RFC 6076 metrics are **scoped per carrier, ua_type, and source_country** — each ratio/histogram is computed independently for each label combination. This allows comparing SER, SEER, ISA, SCR, ASR, NER across carriers, device types, and source countries in a single Prometheus query.
 
 **Example:**
 ```promql
@@ -818,7 +924,7 @@ rate(sip_exporter_pdd_sum[5m]) / rate(sip_exporter_pdd_count[5m])
 ASR = (INVITE → 200 OK) / Total INVITE × 100
 ```
 
-- Classic telephony metric defined in ITU-T E.411, referenced by RFC 6076 §4.6
+- Classic telephony metric defined in ITU-T E.411; related to (but distinct from) SER defined in RFC 6076 §4.6
 - Unlike SER, 3xx responses are **NOT excluded from the denominator**
 - Undefined when no INVITE requests have been received
 
@@ -1025,20 +1131,21 @@ Both methods produce identical VQ report bodies. The exporter treats them equiva
 ### Detection
 
 The exporter detects VQ reports when:
-1. A SIP request (PUBLISH or NOTIFY) is received
+1. A SIP request is received (typically PUBLISH or NOTIFY, though the Content-Type check is method-agnostic)
 2. The `Content-Type` header contains `application/vq-rtcpxr`
-3. The body starts with `VQSessionReport: CallTerm`
+3. The body starts with `VQSessionReport`
 
-If the body fails to parse, the exporter increments `sip_exporter_system_error_total` and skips the report.
+If the body fails to parse, the exporter increments `sip_exporter_system_error_total` and `sip_exporter_parse_errors_total{type="vq"}`, and skips the report.
 
 ### Label Resolution
 
-All VQ metrics include `carrier` and `ua_type` labels, resolved from the SIP PUBLISH/NOTIFY packet itself:
+All VQ metrics include `carrier`, `ua_type`, and `source_country` labels, resolved from the SIP PUBLISH/NOTIFY packet itself:
 
 | Label | Resolution |
 |-------|-----------|
 | `carrier` | Source IP of the PUBLISH/NOTIFY request → CIDR matching against `carriers.yaml` |
 | `ua_type` | `User-Agent` header of the PUBLISH/NOTIFY request → regex matching against `user_agents.yaml` |
+| `source_country` | Source IP → GeoIP/carrier.country lookup (same precedence as all other metrics) |
 
 Unlike call setup metrics (INVITE/BYE) where carrier is resolved from the INVITE and propagated through trackers, VQ metrics use the carrier/ua_type of the PUBLISH/NOTIFY request directly. This is because VQ reports are sent **after** the call ends and may come from a different device than the one that initiated the call (e.g., an SBC generating reports for all calls it proxies).
 
