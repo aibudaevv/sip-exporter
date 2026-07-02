@@ -116,6 +116,7 @@ docker pull frzq/sip-exporter:latest
 * `SIP_EXPORTER_IGNORE_OUTGOING` — игнорировать исходящие пакеты, считать только входящие (по умолчанию false)
 * `SIP_EXPORTER_GEOIP_COUNTRY_DB` — путь к MaxMind GeoLite2-Country.mmdb для лейбла `source_country` (опционально)
 * `SIP_EXPORTER_LOCAL_COUNTRY_CODE` — код страны ISO alpha-2 для локальных номеров без международного префикса в `destination_country` (опционально, напр. `RU`)
+* `SIP_EXPORTER_HOST_LABELS` — включить лейблы `caller_host`/`called_host` в INVITE-метриках (по умолчанию `false`; opt-in — неограниченная кардинальность, включайте только в доверенных деплоях с ограниченным числом узлов)
 * `SIP_EXPORTER_TELEMETRY` — анонимная телеметрия использования, отключается значением `false` (по умолчанию true)
 
 Контейнер должен запускаться с `--privileged` и `--network host` (eBPF требует `CAP_BPF` и доступ к сетевому интерфейсу). Подробнее о безопасности — в [Безопасность](docs/SECURITY.ru.md).
@@ -291,6 +292,8 @@ sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
 3. `"unknown"` — fallback при отсутствии обоих
 
 **destination_country** не требует **никакой базы** — таблица префиксов встроена в бинарник (Google libphonenumber, Apache 2.0). Для локальных номеров без международного префикса укажите `SIP_EXPORTER_LOCAL_COUNTRY_CODE`.
+
+**caller_host / called_host** **отключены по умолчанию** (`SIP_EXPORTER_HOST_LABELS=false`). Они раскрывают host-часть SIP-URI `From`/`To` в `invite_total` / `invite_200_total`. Поскольку число уникальных узлов не ограничено, они opt-in: включайте (`SIP_EXPORTER_HOST_LABELS=true`) только в доверенных деплоях с ограниченным числом узлов, иначе они могут раздуть память Prometheus. См. [Безопасность > Данные в лейблах Prometheus](docs/SECURITY.ru.md#данные-в-лейблах-prometheus).
 
 **Настройка:**
 

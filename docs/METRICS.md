@@ -12,8 +12,8 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 | `ua_type` | Base (all SIP) | UA type from config | `User-Agent` header → regex mapping, resolved at request time |
 | `source_country` | Base (all SIP) | ISO 3166-1 alpha-2 | Country of the calling device. See [Geo-Enrichment Labels](#geo-enrichment-labels) |
 | `destination_country` | INVITE raw only | ISO alpha-2 or `"unknown"` | Destination country from E.164 phone-number prefix. See [Geo-Enrichment Labels](#geo-enrichment-labels) |
-| `caller_host` | INVITE raw only | IP or domain | Host part of the `From` SIP URI |
-| `called_host` | INVITE raw only | IP or domain | Host part of the `To` SIP URI |
+| `caller_host` | INVITE raw only (**opt-in**) | IP or domain | Host part of the `From` SIP URI |
+| `called_host` | INVITE raw only (**opt-in**) | IP or domain | Host part of the `To` SIP URI |
 
 > **Note:** Individual metric signatures below show `{carrier="...",ua_type="..."}` for brevity. Use this table to determine the full label set for any metric:
 >
@@ -391,7 +391,13 @@ The host part of the `From` and `To` SIP URIs, respectively. Extracted during pa
 
 - Can be an IP address (`10.1.5.20`) or a domain name (`sip.example.com`)
 - **INVITE-only**: appears only on `invite_total` and `invite_200_total`
-- Cardinality bounded by deployment size (~10–50 unique hosts)
+- **Opt-in** (`SIP_EXPORTER_HOST_LABELS`, default `false`): disabled by default because distinct endpoint identifiers are unbounded. When off, both labels are empty (zero cardinality). Enable only on trusted deployments where the endpoint count is bounded — see [Security](SECURITY.md#data-exposed-in-prometheus-labels).
+
+**Config:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SIP_EXPORTER_HOST_LABELS` | `false` | Enable `caller_host`/`called_host` on `invite_total` / `invite_200_total`. Off by default (unbounded cardinality). |
 
 ### SER by Destination (PromQL)
 

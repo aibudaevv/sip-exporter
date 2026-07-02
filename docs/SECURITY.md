@@ -37,6 +37,23 @@ That's it. No packet modification, no packet injection, no network redirection, 
 - Does **not** open any inbound ports except `/metrics` on the configured HTTP port (default 2112)
 - Does **not** make outbound network connections
 
+## Data Exposed in Prometheus Labels
+
+SIP-exporter derives metric labels from packet content, but no **phone numbers** ever reach a label — only aggregated geographic and identity context:
+
+| Label | Derived from | Scope | Example |
+|---|---|---|---|
+| `carrier` | CIDR match of source IP against `carriers.yaml` | All SIP + RTP metrics | `telecom-alpha` |
+| `ua_type` | User-Agent classification (`user_agents.yaml`) | All SIP + RTP metrics | `yealink` |
+| `source_country` | `carrier.country` → MaxMind GeoIP(src IP) → `unknown` | All SIP + RTP metrics | `RU` |
+| `destination_country` | E.164 prefix of the called number (embedded table) | INVITE metrics only | `US` |
+| `caller_host`, `called_host` | Host part of the From/To SIP URI | INVITE metrics only (**opt-in**, default off) | `10.0.0.5`, `sip.example.com` |
+| `codec` | RTP payload type / SDP `a=rtpmap` | RTP metrics only | `G.711` |
+
+**Infrastructure identifiers, opt-in by default:** `caller_host`/`called_host` are hostnames or IP addresses extracted from the SIP `From`/`To` URI — they identify network endpoints, not subscribers. Because the number of distinct endpoints is unbounded, these labels are **disabled by default** (`SIP_EXPORTER_HOST_LABELS=false`): when off, they collapse to the empty value, so they add **zero cardinality** and leak no endpoint identifiers. Enable them (`SIP_EXPORTER_HOST_LABELS=true`) only on trusted, bounded deployments — otherwise a flood of spoofed `From`/`To` hosts could grow Prometheus memory; if you enable them in a less-trusted environment, monitor `prometheus_tsdb_symbol_table_size`.
+
+**GeoIP is optional:** without `SIP_EXPORTER_GEOIP_COUNTRY_DB` (and no `carrier.country` configured), `source_country` is `"unknown"` — zero additional cardinality, no data leaves the host. `destination_country` needs **no database**: the E.164 prefix table is embedded in the binary at compile time.
+
 ## Minimal Attack Surface
 
 | Layer | Details |
@@ -63,7 +80,7 @@ The entire eBPF program is [~140 lines of C](../internal/bpf/sip.c). It does two
 8. If RTP capture is enabled: also checks the first payload byte for the RTP version-2 prefix (`0x80`–`0xBF`) and a valid payload type — these are non-SIP-port packets on any UDP port
 9. Returns `skb->len` (pass) or `0` (drop from buffer — the packet still reaches its destination, it's just not copied to userspace)
 
-**RTP privacy:** Only the 12-byte RTP header is read (version, PT, sequence, timestamp, SSRC). The voice payload is never accessed by the application. RTP metrics expose only `carrier`, `ua_type`, and `codec` labels — no phone numbers, IPs, or call identifiers appear in RTP metrics.
+**RTP privacy:** Only the 12-byte RTP header is read (version, PT, sequence, timestamp, SSRC). The voice payload is never accessed by the application. RTP metrics expose only `carrier`, `ua_type`, `codec`, and `source_country` labels — no phone numbers, raw IPs, or call identifiers appear in RTP metrics. The full label inventory across all metric families is documented in [Data Exposed in Prometheus Labels](#data-exposed-in-prometheus-labels).
 
 **Critical point:** The eBPF filter is a *socket filter*, not a *tc/XDP filter*. It only controls which packets are copied to the application's socket buffer. Dropped packets are **not** lost — they continue through the normal network stack to their destination. The filter cannot modify or block traffic.
 

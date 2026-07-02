@@ -118,6 +118,7 @@ Environment variables:
 * `SIP_EXPORTER_IGNORE_OUTGOING` - ignore outgoing packets, count incoming only (default false)
 * `SIP_EXPORTER_GEOIP_COUNTRY_DB` - path to MaxMind GeoLite2-Country.mmdb for `source_country` label (optional)
 * `SIP_EXPORTER_LOCAL_COUNTRY_CODE` - ISO alpha-2 country code for domestic phone-number fallback in `destination_country` (optional, e.g. `RU`)
+* `SIP_EXPORTER_HOST_LABELS` - enable `caller_host`/`called_host` labels on INVITE metrics (default `false`; opt-in — unbounded cardinality, enable only on trusted/bounded deployments)
 * `SIP_EXPORTER_TELEMETRY` - anonymous usage telemetry, opt-out with `false` (default true)
 
 The container must run with `--privileged` and `--network host` (eBPF requires `CAP_BPF` and access to the network interface). See [Security](docs/SECURITY.md) for details on why this is safe.
@@ -293,6 +294,8 @@ The exporter adds geographic context to SIP metrics via two labels:
 3. `"unknown"` — fallback when neither is available
 
 **destination_country** requires **no database** — the prefix table is embedded in the binary (Google libphonenumber, Apache 2.0). Set `SIP_EXPORTER_LOCAL_COUNTRY_CODE` for domestic numbers without international prefix.
+
+**caller_host / called_host** are **off by default** (`SIP_EXPORTER_HOST_LABELS=false`). They expose the host part of the SIP `From`/`To` URI on `invite_total` / `invite_200_total`. Since distinct endpoint identifiers are unbounded, they are opt-in: enable (`SIP_EXPORTER_HOST_LABELS=true`) only on trusted deployments where the endpoint count is bounded, otherwise they can grow Prometheus memory. See [Security > Data Exposed in Prometheus Labels](docs/SECURITY.md#data-exposed-in-prometheus-labels).
 
 **Setup:**
 
