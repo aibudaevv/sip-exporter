@@ -112,6 +112,13 @@ func TestStatusCodes_AllCodes(t *testing.T) {
 			metricName:  "sip_exporter_600_total",
 			callCount:   50,
 		},
+		{
+			name:        "407_proxy_auth_required",
+			uasScenario: "uas_proxy_auth_407.xml",
+			uacScenario: "uac_proxy_auth_407.xml",
+			metricName:  "sip_exporter_proxy_authentication_required_total",
+			callCount:   50,
+		},
 	}
 
 	for _, tt := range tests {
