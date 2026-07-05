@@ -106,13 +106,19 @@ func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) {
 	t.media[endpointKey{ip: ip, port: port}] = labels
 }
 
-// Unregister removes all media endpoints belonging to a SIP dialog (on BYE 200 OK).
+// Unregister removes all media endpoints and RTP streams belonging to a SIP
+// dialog (called on BYE 200 OK).
 func (t *Tracker) Unregister(callID string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for k, v := range t.media {
 		if v.CallID == callID {
 			delete(t.media, k)
+		}
+	}
+	for k, e := range t.streams {
+		if e.labels.CallID == callID {
+			delete(t.streams, k)
 		}
 	}
 }
