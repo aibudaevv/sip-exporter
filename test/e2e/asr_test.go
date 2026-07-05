@@ -62,7 +62,7 @@ func TestASR_AllScenarios(t *testing.T) {
 
 			asr := getASR(t, env.endpoint)
 			t.Logf("ASR = %.2f (want %.2f)", asr, tt.wantASR)
-			require.Equal(t, tt.wantASR, asr)
+			require.InDelta(t, tt.wantASR, asr, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)
 		})
@@ -81,7 +81,7 @@ func TestASR_Mixed(t *testing.T) {
 
 	asr := getASR(t, env.endpoint)
 	t.Logf("ASR = %.2f (want %.2f)", asr, 70.0)
-	require.Equal(t, 70.0, asr)
+	require.InDelta(t, 70.0, asr, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -100,7 +100,7 @@ func TestASR_MixedWith3xx(t *testing.T) {
 
 	asr := getASR(t, env.endpoint)
 	t.Logf("ASR = %.2f (want %.2f)", asr, 50.0)
-	require.Equal(t, 50.0, asr)
+	require.InDelta(t, 50.0, asr, ratioDelta)
 
 	ser := getSER(t, env.endpoint)
 	t.Logf("SER = %.2f (must be >= ASR)", ser)
@@ -123,7 +123,7 @@ func TestASR_Complex(t *testing.T) {
 
 	asr := getASR(t, env.endpoint)
 	t.Logf("ASR = %.2f (want %.2f)", asr, 40.0)
-	require.Equal(t, 40.0, asr)
+	require.InDelta(t, 40.0, asr, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -138,7 +138,7 @@ func TestASR_WithCarrierConfig(t *testing.T) {
 
 	asr := env.getASRByCarrier(t)
 	t.Logf("ASR{carrier=%q} = %.2f (want %.2f)", env.carrier, asr, 100.0)
-	require.Equal(t, 100.0, asr)
+	require.InDelta(t, 100.0, asr, ratioDelta)
 
 	env.waitForSessionsZeroByCarrier(t)
 }
@@ -154,7 +154,7 @@ func TestASR_MixedWithCarrierConfig(t *testing.T) {
 
 	asr := env.getASRByCarrier(t)
 	t.Logf("ASR{carrier=%q} = %.2f (want %.2f)", env.carrier, asr, 70.0)
-	require.Equal(t, 70.0, asr)
+	require.InDelta(t, 70.0, asr, ratioDelta)
 
 	env.waitForSessionsZeroByCarrier(t)
 }

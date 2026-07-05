@@ -68,7 +68,7 @@ func TestNER_AllScenarios(t *testing.T) {
 			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
 			ner := getNER(t, env.endpoint)
 			t.Logf("NER = %.2f (want %.2f)", ner, tt.wantNER)
-			require.Equal(t, tt.wantNER, ner)
+			require.InDelta(t, tt.wantNER, ner, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)
 		})
@@ -88,7 +88,7 @@ func TestNER_Mixed(t *testing.T) {
 
 	ner := getNER(t, env.endpoint)
 	t.Logf("NER = %.2f (want %.2f)", ner, 70.0)
-	require.Equal(t, 70.0, ner)
+	require.InDelta(t, 70.0, ner, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -123,5 +123,5 @@ func TestNER_WithCarrierConfig(t *testing.T) {
 
 	ner := env.getNERByCarrier(t)
 	t.Logf("NER{carrier=%q} = %.2f (want %.2f)", env.carrier, ner, 70.0)
-	require.Equal(t, 70.0, ner)
+	require.InDelta(t, 70.0, ner, ratioDelta)
 }

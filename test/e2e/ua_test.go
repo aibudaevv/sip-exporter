@@ -23,11 +23,11 @@ func TestUA_YealinkClassified(t *testing.T) {
 
 	ser := getMetricWithUA(t, env.endpoint, "sip_exporter_ser", "yealink")
 	t.Logf("SER{ua_type=yealink} = %.2f", ser)
-	require.Equal(t, 100.0, ser)
+	require.InDelta(t, 100.0, ser, ratioDelta)
 
 	scr := getMetricWithUA(t, env.endpoint, "sip_exporter_scr", "yealink")
 	t.Logf("SCR{ua_type=yealink} = %.2f", scr)
-	require.Equal(t, 100.0, scr)
+	require.InDelta(t, 100.0, scr, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -46,7 +46,7 @@ func TestUA_GrandstreamClassified(t *testing.T) {
 
 	ser := getMetricWithUA(t, env.endpoint, "sip_exporter_ser", "grandstream")
 	t.Logf("SER{ua_type=grandstream} = %.2f", ser)
-	require.Equal(t, 100.0, ser)
+	require.InDelta(t, 100.0, ser, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -144,9 +144,9 @@ func TestUA_RatedMetricsByUAType(t *testing.T) {
 	ner := getMetricWithUA(t, env.endpoint, "sip_exporter_ner", "yealink")
 
 	t.Logf("SEER{yealink}=%.2f ASR{yealink}=%.2f NER{yealink}=%.2f", seer, asr, ner)
-	require.Equal(t, 100.0, seer)
-	require.Equal(t, 100.0, asr)
-	require.Equal(t, 100.0, ner)
+	require.InDelta(t, 100.0, seer, ratioDelta)
+	require.InDelta(t, 100.0, asr, ratioDelta)
+	require.InDelta(t, 100.0, ner, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }

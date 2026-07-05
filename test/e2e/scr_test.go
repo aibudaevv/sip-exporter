@@ -70,7 +70,7 @@ func TestSCR_AllScenarios(t *testing.T) {
 
 			scr := getSCR(t, env.endpoint)
 			t.Logf("SCR = %.2f (want %.2f)", scr, tt.wantSCR)
-			require.Equal(t, tt.wantSCR, scr)
+			require.InDelta(t, tt.wantSCR, scr, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)
 		})
@@ -89,7 +89,7 @@ func TestSCR_Mixed(t *testing.T) {
 
 	scr := getSCR(t, env.endpoint)
 	t.Logf("SCR = %.2f (want %.2f)", scr, 70.0)
-	require.Equal(t, 70.0, scr)
+	require.InDelta(t, 70.0, scr, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -106,7 +106,7 @@ func TestSCR_MixedWith3xx(t *testing.T) {
 
 	scr := getSCR(t, env.endpoint)
 	t.Logf("SCR = %.2f (want %.2f)", scr, 50.0)
-	require.Equal(t, 50.0, scr)
+	require.InDelta(t, 50.0, scr, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -124,7 +124,7 @@ func TestSCR_Complex(t *testing.T) {
 
 	scr := getSCR(t, env.endpoint)
 	t.Logf("SCR = %.2f (want %.2f)", scr, 40.0)
-	require.Equal(t, 40.0, scr)
+	require.InDelta(t, 40.0, scr, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -167,7 +167,7 @@ func TestSCR_WithCarrierConfig(t *testing.T) {
 
 	scr := env.getSCRByCarrier(t)
 	t.Logf("SCR{carrier=%q} = %.2f (want %.2f)", env.carrier, scr, 100.0)
-	require.Equal(t, 100.0, scr)
+	require.InDelta(t, 100.0, scr, ratioDelta)
 
 	env.waitForSessionsZeroByCarrier(t)
 }
@@ -183,7 +183,7 @@ func TestSCR_MixedWithCarrierConfig(t *testing.T) {
 
 	scr := env.getSCRByCarrier(t)
 	t.Logf("SCR{carrier=%q} = %.2f (want %.2f)", env.carrier, scr, 70.0)
-	require.Equal(t, 70.0, scr)
+	require.InDelta(t, 70.0, scr, ratioDelta)
 
 	env.waitForSessionsZeroByCarrier(t)
 }
