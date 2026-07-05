@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	dualUAPacketsPerCall = 14.0
+	dualUAPacketsPerCall = 7.0
 	dualUATestTimeout    = 30 * time.Second
 )
 
@@ -60,13 +60,13 @@ func TestLoad_DualUAType(t *testing.T) {
 
 			uasYealink := startSippContainer(ctx, t,
 				[]string{"-sf", "/scenarios/" + uasFile, "-i", "127.0.0.1", "-p", env.sippPort,
-					"-m", strconv.Itoa(callCountPerType), "-nostdin"},
+					"-m", strconv.Itoa(callCountPerType), "-nr", "-nostdin"},
 				sippVol, false,
 			)
 
 			uasGrandstream := startSippContainer(ctx, t,
 				[]string{"-sf", "/scenarios/" + uasFile, "-i", "127.0.0.1", "-p", env.sippPort2,
-					"-m", strconv.Itoa(callCountPerType), "-nostdin"},
+					"-m", strconv.Itoa(callCountPerType), "-nr", "-nostdin"},
 				sippVol, false,
 			)
 
@@ -79,6 +79,7 @@ func TestLoad_DualUAType(t *testing.T) {
 				[]string{"-sf", "/scenarios/call_highrate_yealink_uac.xml",
 					"-i", "127.0.0.1", "-p", env.sippClientPort,
 					"-m", strconv.Itoa(callCountPerType), "-r", strconv.Itoa(rate),
+					"-nr",
 					"127.0.0.1:" + env.sippPort},
 				yealinkVol, true,
 			)
@@ -90,6 +91,7 @@ func TestLoad_DualUAType(t *testing.T) {
 				[]string{"-sf", "/scenarios/call_highrate_grandstream_uac.xml",
 					"-i", "127.0.0.1", "-p", env.sippClientPort2,
 					"-m", strconv.Itoa(callCountPerType), "-r", strconv.Itoa(rate),
+					"-nr",
 					"127.0.0.1:" + env.sippPort2},
 				grandstreamVol, true,
 			)

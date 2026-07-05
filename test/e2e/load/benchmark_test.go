@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	floodPacketsPerCall    = 2.0
-	fullCallPacketsPerCall = 14.0
+	floodPacketsPerCall    = 1.0
+	fullCallPacketsPerCall = 7.0
 	subtestTimeout         = 20 * time.Second
 )
 

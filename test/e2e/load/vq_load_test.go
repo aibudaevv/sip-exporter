@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	vqFloodPacketsPerCall    = 2.0
-	vqHighratePacketsPerCall = 4.0
-	fullCallVQPacketsPerCall = 18.0
+	vqFloodPacketsPerCall    = 1.0
+	vqHighratePacketsPerCall = 2.0
+	fullCallVQPacketsPerCall = 9.0
 )
 
 func TestLoad_VQReportFlood(t *testing.T) {

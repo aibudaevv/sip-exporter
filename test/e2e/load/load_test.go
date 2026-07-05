@@ -131,11 +131,12 @@ func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
 	}
 
 	envVars := map[string]string{
-		"SIP_EXPORTER_INTERFACE":    testInterface,
-		"SIP_EXPORTER_HTTP_PORT":    exporterHTTPPort,
-		"SIP_EXPORTER_SIP_PORT":     sippPort,
-		"SIP_EXPORTER_SIPS_PORT":    sippClientPort,
-		"SIP_EXPORTER_LOGGER_LEVEL": exporterLogLevel,
+		"SIP_EXPORTER_INTERFACE":       testInterface,
+		"SIP_EXPORTER_HTTP_PORT":       exporterHTTPPort,
+		"SIP_EXPORTER_SIP_PORT":        sippPort,
+		"SIP_EXPORTER_SIPS_PORT":       sippClientPort,
+		"SIP_EXPORTER_LOGGER_LEVEL":    exporterLogLevel,
+		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
 	}
 
 	if maxProcs := os.Getenv("SIP_EXPORTER_E2E_GOMAXPROCS"); maxProcs != "" {
@@ -220,11 +221,12 @@ func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML,
 	}
 
 	envVars := map[string]string{
-		"SIP_EXPORTER_INTERFACE":    testInterface,
-		"SIP_EXPORTER_HTTP_PORT":    exporterHTTPPort,
-		"SIP_EXPORTER_SIP_PORT":     sippPort,
-		"SIP_EXPORTER_SIPS_PORT":    sippPort2,
-		"SIP_EXPORTER_LOGGER_LEVEL": exporterLogLevel,
+		"SIP_EXPORTER_INTERFACE":       testInterface,
+		"SIP_EXPORTER_HTTP_PORT":       exporterHTTPPort,
+		"SIP_EXPORTER_SIP_PORT":        sippPort,
+		"SIP_EXPORTER_SIPS_PORT":       sippPort2,
+		"SIP_EXPORTER_LOGGER_LEVEL":    exporterLogLevel,
+		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
 	}
 
 	if maxProcs := os.Getenv("SIP_EXPORTER_E2E_GOMAXPROCS"); maxProcs != "" {
@@ -601,7 +603,7 @@ func runSippLoad(
 
 		uasContainer := startSippContainer(ctx, t,
 			[]string{"-sf", "/scenarios/" + uasFile, "-i", "127.0.0.1", "-p", env.sippPort,
-				"-m", strconv.Itoa(callCount), "-nostdin"},
+				"-m", strconv.Itoa(callCount), "-nr", "-nostdin"},
 			sippVol, false,
 		)
 
@@ -614,6 +616,7 @@ func runSippLoad(
 		startSippContainer(ctx, t,
 			[]string{"-sf", "/scenarios/" + uacFile, "-i", "127.0.0.1", "-p", env.sippClientPort,
 				"-m", strconv.Itoa(callCount), "-r", strconv.Itoa(rate),
+				"-nr",
 				"127.0.0.1:" + env.sippPort},
 			sippVol, true,
 		)
@@ -627,6 +630,7 @@ func runSippLoad(
 		startSippContainer(ctx, t,
 			[]string{"-sf", "/scenarios/" + uacFile, "-i", "127.0.0.1", "-p", env.sippClientPort,
 				"-m", strconv.Itoa(callCount), "-r", strconv.Itoa(rate),
+				"-nr",
 				"127.0.0.1:" + env.sippPort},
 			sippVol, true,
 		)
@@ -710,7 +714,7 @@ func runConcurrentLoad(
 
 	uasContainer := startSippContainer(ctx, t,
 		[]string{"-sf", "/scenarios/" + uasFile, "-i", "127.0.0.1", "-p", env.sippPort,
-			"-m", strconv.Itoa(callCount), "-nostdin"},
+			"-m", strconv.Itoa(callCount), "-nr", "-nostdin"},
 		sippVol, false,
 	)
 
@@ -723,6 +727,7 @@ func runConcurrentLoad(
 	startSippContainer(ctx, t,
 		[]string{"-sf", "/scenarios/" + uacFile, "-i", "127.0.0.1", "-p", env.sippClientPort,
 			"-m", strconv.Itoa(callCount), "-r", strconv.Itoa(rate),
+			"-nr",
 			"-l", strconv.Itoa(limit),
 			"127.0.0.1:" + env.sippPort},
 		sippVol, true,
