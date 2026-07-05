@@ -434,4 +434,4 @@ See [LICENSE](LICENSE) for full text.
 - 📧 For commercial licensing without AGPL requirements, contact the author
 
 ## Changelog
-See [CHANGELOG.md](CHANGELOG.md) for version history.
+See the [GitHub Releases](https://github.com/aibudaevv/sip-exporter/releases) for version history.

@@ -434,4 +434,4 @@ SIP-Exporter экспортирует метрики в формате Prometheu
 - 📧 Для коммерческого лицензирования без требований AGPL — свяжитесь с автором
 
 ## Changelog
-См. [CHANGELOG.md](CHANGELOG.md) для истории версий.
+История версий — на странице [GitHub Releases](https://github.com/aibudaevv/sip-exporter/releases).
