@@ -273,7 +273,7 @@ These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) mea
 3. Select your Prometheus or VictoriaMetrics datasource
 4. Click "Import"
 
-The dashboard includes a `$carrier` variable for per-operator filtering, with panels for:
+The dashboard includes `$carrier`, `$source_country`, and `$destination_country` variables for per-operator and geographic filtering, with panels for:
 - **Overview** — Active sessions, packet rate, INVITE rate, completed sessions
 - **RFC 6076 Ratios** — SER, SEER, ISA, SCR, ASR, NER gauges + trend graph
 - **Latency Histograms** — RRD, TTR, SPD, ORD, LRD (p50/p95/p99 per carrier)
@@ -281,6 +281,7 @@ The dashboard includes a `$carrier` variable for per-operator filtering, with pa
 - **RTP Media Analysis** — Active RTP streams, packet rate, packet loss rate, MOS (E-model), jitter p95 — all by codec
 - **SIP Traffic** — Request/response rate breakdown by method and status code
 - **System Health** — Error rate, ISS rate
+- **Geographic Distribution** — Top source/destination countries by INVITE rate (GeoIP-enriched)
 
 Dashboard file: [`examples/grafana-dashboard.json`](../examples/grafana-dashboard.json)
 
