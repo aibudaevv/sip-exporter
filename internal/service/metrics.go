@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -60,7 +61,8 @@ type (
 		sdc *prometheus.CounterVec
 		iss *prometheus.CounterVec
 
-		sessions *prometheus.GaugeVec
+		sessions        *prometheus.GaugeVec
+		prevSessionKeys map[string][]string
 
 		rrd *prometheus.HistogramVec
 		spd *prometheus.HistogramVec
@@ -89,6 +91,7 @@ type (
 		rtpJitter        *prometheus.HistogramVec
 		rtpMOS           *prometheus.HistogramVec
 		rtpActiveStreams *prometheus.GaugeVec
+		prevRTPKeys      map[string][]string
 
 		carrierCounters sync.Map
 
@@ -700,12 +703,19 @@ func (m *metrics) UpdateSession(carrier, uaType, sourceCountry string, size int)
 }
 
 func (m *metrics) UpdateSessions(counts []LabeledCount) {
-	m.sessions.Reset()
+	current := make(map[string][]string, len(counts))
 	for _, lc := range counts {
-		m.sessions.WithLabelValues(
-			lc.Labels["carrier"], lc.Labels["ua_type"], lc.Labels["source_country"],
-		).Set(float64(lc.Count))
+		vals := []string{lc.Labels["carrier"], lc.Labels["ua_type"], lc.Labels["source_country"]}
+		key := strings.Join(vals, "\x00")
+		current[key] = vals
+		m.sessions.WithLabelValues(vals[0], vals[1], vals[2]).Set(float64(lc.Count))
 	}
+	for key, vals := range m.prevSessionKeys {
+		if _, ok := current[key]; !ok {
+			m.sessions.WithLabelValues(vals[0], vals[1], vals[2]).Set(0)
+		}
+	}
+	m.prevSessionKeys = current
 }
 
 func (m *metrics) SystemError() {
@@ -775,12 +785,22 @@ func (m *metrics) UpdateRTPMOS(carrier, uaType, codec, sourceCountry string, mos
 }
 
 func (m *metrics) UpdateRTPActiveStreams(counts []LabeledCount) {
-	m.rtpActiveStreams.Reset()
+	current := make(map[string][]string, len(counts))
 	for _, lc := range counts {
-		m.rtpActiveStreams.WithLabelValues(
-			lc.Labels["carrier"], lc.Labels["ua_type"], lc.Labels["codec"], lc.Labels["source_country"],
-		).Set(float64(lc.Count))
+		vals := []string{
+			lc.Labels["carrier"], lc.Labels["ua_type"],
+			lc.Labels["codec"], lc.Labels["source_country"],
+		}
+		key := strings.Join(vals, "\x00")
+		current[key] = vals
+		m.rtpActiveStreams.WithLabelValues(vals[0], vals[1], vals[2], vals[3]).Set(float64(lc.Count))
 	}
+	for key, vals := range m.prevRTPKeys {
+		if _, ok := current[key]; !ok {
+			m.rtpActiveStreams.WithLabelValues(vals[0], vals[1], vals[2], vals[3]).Set(0)
+		}
+	}
+	m.prevRTPKeys = current
 }
 
 func isEffectiveResponse(code []byte) bool {
