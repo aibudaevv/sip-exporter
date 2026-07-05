@@ -1,10 +1,8 @@
 package geoip
 
 import (
-	"errors"
 	"fmt"
 	"net"
-	"os"
 	"sync"
 
 	"github.com/oschwald/maxminddb-golang"
@@ -34,13 +32,10 @@ func New(path string) (*Reader, error) {
 
 	db, err := maxminddb.Open(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			zap.L().
-				Warn(`GeoIP country DB file not found; source_country will be "unknown" for traffic without carrier.country`,
-					zap.String("path", path))
-			return &Reader{path: path}, nil
-		}
-		return nil, fmt.Errorf("open geoip db %q: %w", path, err)
+		zap.L().
+			Warn(`GeoIP country DB failed to open; source_country will be "unknown" for traffic without carrier.country`,
+				zap.String("path", path), zap.Error(err))
+		return &Reader{path: path}, nil
 	}
 
 	zap.L().Info("GeoIP country DB loaded", zap.String("path", path))

@@ -39,12 +39,17 @@ func TestReader_MissingFile_DisabledLookup(t *testing.T) {
 	require.Equal(t, "unknown", country)
 }
 
-func TestReader_CorruptFile_Error(t *testing.T) {
+func TestReader_CorruptFile_DegradesToUnknown(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "corrupt.mmdb")
 	require.NoError(t, os.WriteFile(path, []byte("not a valid mmdb"), 0o600))
 
-	_, err := New(path)
-	require.Error(t, err)
+	r, err := New(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, r.Close()) })
+
+	country, ok := r.Lookup(net.ParseIP("8.8.8.8"))
+	require.False(t, ok)
+	require.Equal(t, "unknown", country)
 }
 
 func TestReader_EmptyPath_Reload_NoOp(t *testing.T) {
