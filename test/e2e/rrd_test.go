@@ -27,6 +27,7 @@ func TestRRD_RegistrationSuccess(t *testing.T) {
 	rrd := getRRD(t, env.endpoint)
 	t.Logf("RRD = %.2f ms", rrd)
 	require.Greater(t, rrd, 0.0, "RRD should be greater than 0 after successful registrations")
+	require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_rrd_count"), 0.0, "RRD histogram should have observations")
 	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
@@ -125,6 +126,7 @@ func TestRRD_ConcurrentRegistrations(t *testing.T) {
 	rrd := getRRD(t, env.endpoint)
 	t.Logf("RRD = %.2f ms", rrd)
 	require.Greater(t, rrd, 0.0, "RRD should be measured for all concurrent registrations")
+	require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_rrd_count"), 0.0, "RRD histogram should have observations")
 	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
