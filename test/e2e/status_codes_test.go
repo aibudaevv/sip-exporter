@@ -91,6 +91,27 @@ func TestStatusCodes_AllCodes(t *testing.T) {
 			metricName:  "sip_exporter_606_total",
 			callCount:   50,
 		},
+		{
+			name:        "408_request_timeout",
+			uasScenario: "uas_timeout_408.xml",
+			uacScenario: "uac_timeout_408.xml",
+			metricName:  "sip_exporter_408_total",
+			callCount:   50,
+		},
+		{
+			name:        "504_server_timeout",
+			uasScenario: "uas_server_error_504.xml",
+			uacScenario: "uac_server_error_504.xml",
+			metricName:  "sip_exporter_504_total",
+			callCount:   50,
+		},
+		{
+			name:        "600_busy_everywhere",
+			uasScenario: "uas_decline_600.xml",
+			uacScenario: "uac_decline_600.xml",
+			metricName:  "sip_exporter_600_total",
+			callCount:   50,
+		},
 	}
 
 	for _, tt := range tests {
