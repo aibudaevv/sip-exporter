@@ -52,6 +52,13 @@ func TestSEER_AllScenarios(t *testing.T) {
 			wantSEER:    100.0,
 		},
 		{
+			name:        "all_600",
+			uasScenario: "uas_decline_600.xml",
+			uacScenario: "uac_decline_600.xml",
+			callCount:   100,
+			wantSEER:    100.0,
+		},
+		{
 			name:        "all_500",
 			uasScenario: "uas_server_error.xml",
 			uacScenario: "uac_server_error.xml",

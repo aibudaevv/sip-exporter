@@ -38,6 +38,20 @@ func TestISA_AllScenarios(t *testing.T) {
 			wantISA:     100.0,
 		},
 		{
+			name:        "all_408",
+			uasScenario: "uas_timeout_408.xml",
+			uacScenario: "uac_timeout_408.xml",
+			callCount:   100,
+			wantISA:     100.0,
+		},
+		{
+			name:        "all_504",
+			uasScenario: "uas_server_error_504.xml",
+			uacScenario: "uac_server_error_504.xml",
+			callCount:   100,
+			wantISA:     100.0,
+		},
+		{
 			name:        "all_200",
 			uasScenario: "uas_100.xml",
 			uacScenario: "uac_100.xml",
