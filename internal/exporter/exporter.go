@@ -32,12 +32,13 @@ var (
 )
 
 const (
-	ethPAll            = 0x0003
-	readBufSize        = 65536
-	defaultRegisterTTL = 60 * time.Second
-	defaultInviteTTL   = 60 * time.Second
-	defaultOptionsTTL  = 60 * time.Second
-	rtpStreamTTL       = 30 * time.Second // idle RTP stream expiry
+	ethPAll                  = 0x0003
+	readBufSize              = 65536
+	defaultRegisterTTL       = 60 * time.Second
+	defaultInviteTTL         = 60 * time.Second
+	defaultOptionsTTL        = 60 * time.Second
+	rtpStreamTTL             = 30 * time.Second // idle RTP stream expiry
+	defaultSessionExpiresSec = 1800             // RFC 4028 default Session-Expires (30 min)
 
 	messagesChanSize = 10_000
 	socketRecvBufMB  = 4
@@ -79,6 +80,10 @@ const (
 )
 
 type (
+	timed interface {
+		created() time.Time
+	}
+
 	registerEntry struct {
 		timestamp     time.Time
 		carrier       string
@@ -138,6 +143,15 @@ type (
 		metricser service.Metricser
 		dialoger  service.Dialoger
 	}
+	Deps struct {
+		Metricser        service.Metricser
+		Dialoger         service.Dialoger
+		CarrierResolver  *carriers.Resolver
+		UAClassifier     *ua.Classifier
+		GeoIPReader      *geoip.Reader
+		LocalCountryCode string
+		HostLabels       bool
+	}
 	Exporter interface {
 		Initialize(
 			interfaceName string,
@@ -151,26 +165,23 @@ type (
 	}
 )
 
-func NewExporter(
-	m service.Metricser,
-	d service.Dialoger,
-	resolver *carriers.Resolver,
-	classifier *ua.Classifier,
-	gr *geoip.Reader,
-	localCountryCode string,
-	hostLabels bool,
-) Exporter {
+func (e registerEntry) created() time.Time   { return e.timestamp }
+func (e inviteEntry) created() time.Time     { return e.timestamp }
+func (e optionsEntry) created() time.Time    { return e.timestamp }
+func (e inviteSDPEntity) created() time.Time { return e.timestamp }
+
+func NewExporter(deps Deps) Exporter {
 	return &exporter{
 		services: services{
-			metricser: m,
-			dialoger:  d,
+			metricser: deps.Metricser,
+			dialoger:  deps.Dialoger,
 		},
-		carrierResolver:  resolver,
-		uaClassifier:     classifier,
-		geoip:            gr,
-		localCountryCode: localCountryCode,
-		hostLabels:       hostLabels,
-		vqHandler:        vq.NewHandler(m),
+		carrierResolver:  deps.CarrierResolver,
+		uaClassifier:     deps.UAClassifier,
+		geoip:            deps.GeoIPReader,
+		localCountryCode: deps.LocalCountryCode,
+		hostLabels:       deps.HostLabels,
+		vqHandler:        vq.NewHandler(deps.Metricser),
 		mediaTracker:     mediatracker.NewTracker(rtpStreamTTL),
 		messages:         make(chan []byte, messagesChanSize),
 		done:             make(chan struct{}),
@@ -405,34 +416,23 @@ func (e *exporter) sipDialogMetricsUpdate() {
 	}
 }
 
-func (e *exporter) cleanupRegisterTracker() {
-	e.registerMutex.Lock()
-	defer e.registerMutex.Unlock()
-
+func cleanupExpired[V timed](mu sync.Locker, m map[string]V, ttl time.Duration) {
+	mu.Lock()
+	defer mu.Unlock()
 	now := time.Now()
-	for callID, entry := range e.registerTracker {
-		if now.Sub(entry.timestamp) > defaultRegisterTTL {
-			delete(e.registerTracker, callID)
-			zap.L().Debug("register tracker expired",
-				zap.String("call_id", callID),
-				zap.Duration("age", now.Sub(entry.timestamp)))
+	for k, v := range m {
+		if now.Sub(v.created()) > ttl {
+			delete(m, k)
 		}
 	}
 }
 
-func (e *exporter) cleanupInviteTracker() {
-	e.inviteMutex.Lock()
-	defer e.inviteMutex.Unlock()
+func (e *exporter) cleanupRegisterTracker() {
+	cleanupExpired(&e.registerMutex, e.registerTracker, defaultRegisterTTL)
+}
 
-	now := time.Now()
-	for callID, entry := range e.inviteTracker {
-		if now.Sub(entry.timestamp) > defaultInviteTTL {
-			delete(e.inviteTracker, callID)
-			zap.L().Debug("invite tracker expired",
-				zap.String("call_id", callID),
-				zap.Duration("age", now.Sub(entry.timestamp)))
-		}
-	}
+func (e *exporter) cleanupInviteTracker() {
+	cleanupExpired(&e.inviteMutex, e.inviteTracker, defaultInviteTTL)
 }
 
 func (e *exporter) Close() {
@@ -541,10 +541,8 @@ func (e *exporter) sendPacket(packet []byte) bool {
 }
 
 // isSIPPacket does a quick L4 port check to classify a packet as SIP (port
-// 5060/5061) or RTP/other. SIP packets use a blocking channel send (must not
-// be starved by RTP flood); all other packets use a non-blocking send (dropped
-// if the channel is full). When headers can't be parsed, defaults to true
-// (blocking) to avoid dropping potentially critical traffic.
+// 5060/5061) or RTP/other. When headers can't be parsed, defaults to true
+// to avoid dropping potentially critical traffic.
 func (e *exporter) isSIPPacket(packet []byte) bool {
 	if len(packet) < minRawPacketLen {
 		return true
@@ -564,38 +562,80 @@ func (e *exporter) isSIPPacket(packet []byte) bool {
 		dstPort == e.sipPort || dstPort == e.sipsPort
 }
 
-// parseRawPacket parses raw L2 packet. Returns error type (l2, l3, l4, sip) and error.
-func (e *exporter) parseRawPacket(packet []byte) (string, error) {
+// parseEthernet extracts the IP offset from the L2 Ethernet header,
+// handling VLAN (802.1Q). Returns ipOffset and the ethType bytes.
+func parseEthernet(packet []byte) (int, []byte, error) {
 	if len(packet) < minRawPacketLen {
-		return parseErrTypeL2, fmt.Errorf("wrong len packet %d", len(packet))
+		return 0, nil, fmt.Errorf("wrong len packet %d", len(packet))
 	}
-
-	// Parse Ethernet header (14 bytes)
 	ethType := packet[12:14]
 	ipOffset := ethHeaderLen
-
-	// VLAN (802.1Q)
 	if ethType[0] == vlanEthTypeHi && ethType[1] == vlanEthTypeLo {
 		if len(packet) < minVLANPacketLen {
-			return parseErrTypeL2, fmt.Errorf("wrong len packet %d", len(packet))
+			return 0, nil, fmt.Errorf("wrong len packet %d", len(packet))
 		}
 		ethType = packet[16:18]
 		ipOffset = vlanHeaderLen
 	}
+	return ipOffset, ethType, nil
+}
 
-	// Only IPv4
+// parseIPv4Header validates the IPv4 header and returns the header slice
+// and its computed length (IHL * 4).
+func parseIPv4Header(packet []byte, ipOffset int) ([]byte, int, error) {
+	if len(packet) < ipOffset+ipV4MinHeaderLen {
+		return nil, 0, errors.New("ip header too short")
+	}
+	ipHeader := packet[ipOffset : ipOffset+ipV4MinHeaderLen]
+	ihl := ipHeader[0] & ipV4HdrLenMask
+	headerLen := int(ihl) * ipV4HdrLenShift
+	return ipHeader, headerLen, nil
+}
+
+// parseUDPOffset validates the UDP header fits and returns its offset.
+func parseUDPOffset(packet []byte, ipOffset, ipHeaderLen int) (int, error) {
+	udpOffset := ipOffset + ipHeaderLen
+	if len(packet) < udpOffset+udpHeaderLen {
+		return 0, errors.New("udp header too short")
+	}
+	return udpOffset, nil
+}
+
+// isSIPMethod checks if data starts with a known SIP method or SIP/2.0.
+func isSIPMethod(data []byte) bool {
+	return bytes.HasPrefix(data, []byte("INVITE")) ||
+		bytes.HasPrefix(data, []byte("ACK")) ||
+		bytes.HasPrefix(data, []byte("BYE")) ||
+		bytes.HasPrefix(data, []byte("CANCEL")) ||
+		bytes.HasPrefix(data, []byte("OPTIONS")) ||
+		bytes.HasPrefix(data, []byte("REGISTER")) ||
+		bytes.HasPrefix(data, []byte("SUBSCRIBE")) ||
+		bytes.HasPrefix(data, []byte("NOTIFY")) ||
+		bytes.HasPrefix(data, []byte("PUBLISH")) ||
+		bytes.HasPrefix(data, []byte("INFO")) ||
+		bytes.HasPrefix(data, []byte("PRACK")) ||
+		bytes.HasPrefix(data, []byte("UPDATE")) ||
+		bytes.HasPrefix(data, []byte("MESSAGE")) ||
+		bytes.HasPrefix(data, []byte("REFER")) ||
+		bytes.HasPrefix(data, []byte("SIP/2.0"))
+}
+
+// parseRawPacket parses raw L2 packet. Returns error type (l2, l3, l4, sip) and error.
+func (e *exporter) parseRawPacket(packet []byte) (string, error) {
+	ipOffset, ethType, err := parseEthernet(packet)
+	if err != nil {
+		return parseErrTypeL2, err
+	}
+
 	if ethType[0] != ethTypeIPv4Hi || ethType[1] != ethTypeIPv4Lo {
 		return parseErrTypeL3, errors.New("not IPv4 packet")
 	}
 
-	// IP header
-	if len(packet) < ipOffset+ipV4MinHeaderLen {
-		return parseErrTypeL3, errors.New("ip header too short")
+	ipHeader, ipHeaderLen, err := parseIPv4Header(packet, ipOffset)
+	if err != nil {
+		return parseErrTypeL3, err
 	}
 
-	ipHeader := packet[ipOffset : ipOffset+ipV4MinHeaderLen]
-	ihl := ipHeader[0] & ipV4HdrLenMask
-	ipHeaderLen := int(ihl) * ipV4HdrLenShift
 	carrier, carrierCountry := e.resolveCarrier(ipHeader)
 	sourceCountry := e.resolveSourceCountry(carrierCountry, ipHeader)
 
@@ -603,13 +643,11 @@ func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 		return parseErrTypeL4, errors.New("not UDP packet")
 	}
 
-	// UDP header (8 bytes)
-	udpOffset := ipOffset + ipHeaderLen
-	if len(packet) < udpOffset+udpHeaderLen {
-		return parseErrTypeL4, errors.New("udp header too short")
+	udpOffset, err := parseUDPOffset(packet, ipOffset, ipHeaderLen)
+	if err != nil {
+		return parseErrTypeL4, err
 	}
 
-	// SIP data after UDP header
 	sipOffset := udpOffset + udpHeaderLen
 	if sipOffset >= len(packet) {
 		return parseErrTypeSIP, errors.New("no SIP payload")
@@ -627,34 +665,19 @@ func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 		return e.handleRTP(srcIP, srcPort, dstIP, dstPort, sipData)
 	}
 
-	// Minimum SIP packet should be at least 50 bytes
 	if len(sipData) < minSIPDataLen {
 		return parseErrTypeSIP, fmt.Errorf("packet too small for SIP: %d", len(sipData))
 	}
 
-	// Check if this is a SIP packet (starts with SIP method or SIP/2.0)
-	if !bytes.HasPrefix(sipData, []byte("INVITE")) &&
-		!bytes.HasPrefix(sipData, []byte("ACK")) &&
-		!bytes.HasPrefix(sipData, []byte("BYE")) &&
-		!bytes.HasPrefix(sipData, []byte("CANCEL")) &&
-		!bytes.HasPrefix(sipData, []byte("OPTIONS")) &&
-		!bytes.HasPrefix(sipData, []byte("REGISTER")) &&
-		!bytes.HasPrefix(sipData, []byte("SUBSCRIBE")) &&
-		!bytes.HasPrefix(sipData, []byte("NOTIFY")) &&
-		!bytes.HasPrefix(sipData, []byte("PUBLISH")) &&
-		!bytes.HasPrefix(sipData, []byte("INFO")) &&
-		!bytes.HasPrefix(sipData, []byte("PRACK")) &&
-		!bytes.HasPrefix(sipData, []byte("UPDATE")) &&
-		!bytes.HasPrefix(sipData, []byte("MESSAGE")) &&
-		!bytes.HasPrefix(sipData, []byte("REFER")) &&
-		!bytes.HasPrefix(sipData, []byte("SIP/2.0")) {
+	if !isSIPMethod(sipData) {
 		return parseErrTypeSIP, errors.New("not a SIP packet")
 	}
 
 	zap.L().Debug("packet raw", zap.ByteString("sip_data", sipData))
 
-	if err := e.handleMessage(carrier, sourceCountry, sipData); err != nil {
-		return "sip", err
+	err = e.handleMessage(carrier, sourceCountry, sipData)
+	if err != nil {
+		return parseErrTypeSIP, err
 	}
 
 	return "", nil
@@ -826,22 +849,17 @@ func (e *exporter) handleRequest(carrier string, uaType string, sourceCountry st
 		callerHost, calledHost, packet.Method,
 	)
 
-	if bytes.Equal(packet.Method, []byte("REGISTER")) {
+	switch {
+	case bytes.Equal(packet.Method, []byte("REGISTER")):
 		e.storeRegisterTime(string(packet.CallID), carrier, uaType, sourceCountry)
-	}
-
-	if bytes.Equal(packet.Method, []byte("INVITE")) {
+	case bytes.Equal(packet.Method, []byte("INVITE")):
 		e.storeInviteTime(string(packet.CallID), carrier, uaType, sourceCountry)
 		if bytes.Contains(packet.ContentType, []byte("application/sdp")) {
 			e.storeInviteSDP(string(packet.CallID), packet.Body)
 		}
-	}
-
-	if bytes.Equal(packet.Method, []byte("CANCEL")) {
+	case bytes.Equal(packet.Method, []byte("CANCEL")):
 		e.removeInviteTime(string(packet.CallID))
-	}
-
-	if bytes.Equal(packet.Method, []byte("OPTIONS")) {
+	case bytes.Equal(packet.Method, []byte("OPTIONS")):
 		e.storeOptionsTime(string(packet.CallID), carrier, uaType, sourceCountry)
 	}
 
@@ -1004,7 +1022,7 @@ func (e *exporter) handleInvite200OK(carrier string, uaType string, sourceCountr
 
 	expires := packet.SessionExpires
 	if expires == 0 {
-		expires = 1800
+		expires = defaultSessionExpiresSec
 	}
 	expiresAt := time.Now().Add(time.Duration(expires) * time.Second)
 
@@ -1273,14 +1291,7 @@ func (e *exporter) takeInviteSDP(callID string) ([]byte, bool) {
 }
 
 func (e *exporter) cleanupInviteSDP() {
-	e.inviteSDPMutex.Lock()
-	defer e.inviteSDPMutex.Unlock()
-	now := time.Now()
-	for callID, entry := range e.inviteSDP {
-		if now.Sub(entry.timestamp) > defaultInviteTTL {
-			delete(e.inviteSDP, callID)
-		}
-	}
+	cleanupExpired(&e.inviteSDPMutex, e.inviteSDP, defaultInviteTTL)
 }
 
 // registerMediaEndpoints parses an SDP body and registers each audio media
@@ -1328,13 +1339,5 @@ func (e *exporter) measureOptionsTime(callID string) (float64, string, string, s
 }
 
 func (e *exporter) cleanupOptionsTracker() {
-	e.optionsMutex.Lock()
-	defer e.optionsMutex.Unlock()
-
-	now := time.Now()
-	for callID, entry := range e.optionsTracker {
-		if now.Sub(entry.timestamp) > defaultOptionsTTL {
-			delete(e.optionsTracker, callID)
-		}
-	}
+	cleanupExpired(&e.optionsMutex, e.optionsTracker, defaultOptionsTTL)
 }

@@ -11,13 +11,21 @@ import (
 
 // ==================== Benchmark for parseRawPacket ====================
 
-func BenchmarkParseRawPacket_INVITE(b *testing.B) {
-	e := &exporter{
+func newBenchExporter() *exporter {
+	return &exporter{
 		services: services{
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
 		},
+		inviteTracker:   make(map[string]inviteEntry),
+		registerTracker: make(map[string]registerEntry),
+		inviteSDP:       make(map[string]inviteSDPEntity),
+		optionsTracker:  make(map[string]optionsEntry),
 	}
+}
+
+func BenchmarkParseRawPacket_INVITE(b *testing.B) {
+	e := newBenchExporter()
 
 	packet := buildTestPacket("INVITE sip:1001@192.168.0.89 SIP/2.0\r\n" +
 		"Via: SIP/2.0/UDP 192.168.0.89:49375;rport\r\n" +
@@ -38,12 +46,7 @@ func BenchmarkParseRawPacket_INVITE(b *testing.B) {
 }
 
 func BenchmarkParseRawPacket_200OK(b *testing.B) {
-	e := &exporter{
-		services: services{
-			metricser: &mockMetricser{},
-			dialoger:  &mockDialoger{},
-		},
-	}
+	e := newBenchExporter()
 
 	packet := buildTestPacket("SIP/2.0 200 OK\r\n" +
 		"Via: SIP/2.0/UDP 192.168.0.89:49375;rport=49375\r\n" +
@@ -62,12 +65,7 @@ func BenchmarkParseRawPacket_200OK(b *testing.B) {
 }
 
 func BenchmarkParseRawPacket_BYE(b *testing.B) {
-	e := &exporter{
-		services: services{
-			metricser: &mockMetricser{},
-			dialoger:  &mockDialoger{},
-		},
-	}
+	e := newBenchExporter()
 
 	packet := buildTestPacket("BYE sip:1000@192.168.0.89:49375 SIP/2.0\r\n" +
 		"Via: SIP/2.0/UDP 192.168.0.89:5060;rport\r\n" +
@@ -84,12 +82,7 @@ func BenchmarkParseRawPacket_BYE(b *testing.B) {
 }
 
 func BenchmarkParseRawPacket_REGISTER(b *testing.B) {
-	e := &exporter{
-		services: services{
-			metricser: &mockMetricser{},
-			dialoger:  &mockDialoger{},
-		},
-	}
+	e := newBenchExporter()
 
 	packet := buildTestPacket("REGISTER sip:192.168.0.89:5060 SIP/2.0\r\n" +
 		"Via: SIP/2.0/UDP 192.168.0.89:49375;rport\r\n" +
@@ -108,12 +101,7 @@ func BenchmarkParseRawPacket_REGISTER(b *testing.B) {
 }
 
 func BenchmarkParseRawPacket_401Unauthorized(b *testing.B) {
-	e := &exporter{
-		services: services{
-			metricser: &mockMetricser{},
-			dialoger:  &mockDialoger{},
-		},
-	}
+	e := newBenchExporter()
 
 	packet := buildTestPacket("SIP/2.0 401 Unauthorized\r\n" +
 		"Via: SIP/2.0/UDP 192.168.0.89:49375;rport=49375\r\n" +
@@ -239,15 +227,7 @@ func BenchmarkExtractSessionExpires(b *testing.B) {
 // ==================== Benchmark for handleMessage ====================
 
 func BenchmarkHandleMessage_INVITE(b *testing.B) {
-	mm := &mockMetricser{}
-	md := &mockDialoger{}
-
-	e := &exporter{
-		services: services{
-			metricser: mm,
-			dialoger:  md,
-		},
-	}
+	e := newBenchExporter()
 
 	input := []byte("INVITE sip:test SIP/2.0\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
@@ -263,15 +243,7 @@ func BenchmarkHandleMessage_INVITE(b *testing.B) {
 }
 
 func BenchmarkHandleMessage_200OK_INVITE(b *testing.B) {
-	mm := &mockMetricser{}
-	md := &mockDialoger{}
-
-	e := &exporter{
-		services: services{
-			metricser: mm,
-			dialoger:  md,
-		},
-	}
+	e := newBenchExporter()
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
@@ -315,19 +287,6 @@ func BenchmarkParseRawPacket_INVITE_Labels(b *testing.B) {
 	geoipReader, err := geoip.New(dbPath)
 	if err != nil {
 		b.Skipf("GeoIP test DB not available: %v", err)
-	}
-
-	mock := &mockMetricser{}
-	dlg := &mockDialoger{}
-
-	newBenchExporter := func() *exporter {
-		return &exporter{
-			services:        services{metricser: mock, dialoger: dlg},
-			inviteTracker:   make(map[string]inviteEntry),
-			registerTracker: make(map[string]registerEntry),
-			inviteSDP:       make(map[string]inviteSDPEntity),
-			optionsTracker:  make(map[string]optionsEntry),
-		}
 	}
 
 	type benchCase struct {

@@ -44,10 +44,15 @@ func NewServer(
 	hostLabels bool,
 ) Server {
 	return &server{
-		exporter: exporter.NewExporter(
-			service.NewMetricser(), service.NewDialoger(),
-			resolver, classifier, gr, localCountryCode, hostLabels,
-		),
+		exporter: exporter.NewExporter(exporter.Deps{
+			Metricser:        service.NewMetricser(),
+			Dialoger:         service.NewDialoger(),
+			CarrierResolver:  resolver,
+			UAClassifier:     classifier,
+			GeoIPReader:      gr,
+			LocalCountryCode: localCountryCode,
+			HostLabels:       hostLabels,
+		}),
 		geoipReader: gr,
 	}
 }
