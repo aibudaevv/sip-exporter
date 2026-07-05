@@ -174,8 +174,7 @@ func TestSER_ConcurrentRequests(t *testing.T) {
 
 	ser := getSER(t, env.endpoint)
 	t.Logf("SER = %.2f%%", ser)
-	require.Greater(t, ser, 0.0, "SER should be calculated")
-	require.LessOrEqual(t, ser, 100.0, "SER should not exceed 100%")
+	require.InDelta(t, 75.0, ser, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
