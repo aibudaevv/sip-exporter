@@ -120,6 +120,8 @@ func TestLoad_DualUAType(t *testing.T) {
 			if expectedTotal > 0 {
 				lossRate = 1 - totalCaptured/expectedTotal
 				if lossRate < 0 {
+					t.Logf("WARNING: captured %.0f > expected %.0f (%.2f%% extra), possible retransmission",
+						totalCaptured, expectedTotal, -lossRate*100)
 					lossRate = 0
 				}
 			}

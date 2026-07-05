@@ -56,6 +56,7 @@ type (
 		CPUAvg        float64
 		CPUPeak       float64
 		MemMaxMB      float64
+		PeakSessions  float64
 	}
 
 	statsCollector struct {
@@ -661,6 +662,8 @@ func runSippLoad(
 	if expectedTotal > 0 {
 		lossRate = 1 - totalCaptured/expectedTotal
 		if lossRate < 0 {
+			t.Logf("WARNING: captured %.0f > expected %.0f (%.2f%% extra), possible retransmission or duplicate packets",
+				totalCaptured, expectedTotal, -lossRate*100)
 			lossRate = 0
 		}
 	}
@@ -724,14 +727,27 @@ func runConcurrentLoad(
 	sippVol = filepath.Dir(uacPath)
 	uacFile := filepath.Base(uacScenario)
 
-	startSippContainer(ctx, t,
+	uacContainer := startSippContainer(ctx, t,
 		[]string{"-sf", "/scenarios/" + uacFile, "-i", "127.0.0.1", "-p", env.sippClientPort,
 			"-m", strconv.Itoa(callCount), "-r", strconv.Itoa(rate),
 			"-nr",
 			"-l", strconv.Itoa(limit),
 			"127.0.0.1:" + env.sippPort},
-		sippVol, true,
+		sippVol, false,
 	)
+
+	var peakSessions float64
+	require.Eventually(t, func() bool {
+		s := getMetric(t, env.endpoint, "sip_exporter_sessions")
+		if s > peakSessions {
+			peakSessions = s
+		}
+		state, stateErr := uacContainer.State(ctx)
+		if stateErr != nil {
+			return false
+		}
+		return !state.Running
+	}, 300*time.Second, 500*time.Millisecond, "UAC container did not exit in time")
 
 	waitForContainerExit(ctx, t, uasContainer)
 
@@ -762,13 +778,13 @@ func runConcurrentLoad(
 		CPUAvg:        cpuAvg,
 		CPUPeak:       cpuPeak,
 		MemMaxMB:      memMaxMB,
+		PeakSessions:  peakSessions,
 	}
 
-	sessions := getMetric(t, env.endpoint, "sip_exporter_sessions")
 	inviteTotal := getMetric(t, env.endpoint, "sip_exporter_invite_total")
 
-	t.Logf("Concurrent result: actual=%.0f PPS, sessions=%.0f, invites=%.0f, drain=%v, cpu=%.2f%%(peak=%.2f%%), mem=%.1fMB, duration=%v",
-		result.ActualPPS, sessions, inviteTotal, result.DrainTime,
+	t.Logf("Concurrent result: actual=%.0f PPS, peak_sessions=%.0f, invites=%.0f, drain=%v, cpu=%.2f%%(peak=%.2f%%), mem=%.1fMB, duration=%v",
+		result.ActualPPS, peakSessions, inviteTotal, result.DrainTime,
 		result.CPUAvg, result.CPUPeak, result.MemMaxMB, result.Duration)
 
 	return result
