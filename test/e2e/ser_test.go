@@ -58,6 +58,9 @@ func TestSER_AllScenarios(t *testing.T) {
 
 			ser := getSER(t, env.endpoint)
 			t.Logf("SER = %.2f (want %.2f)", ser, tt.wantSER)
+			if tt.uacScenario != "uac_no_invite.xml" {
+				require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"))
+			}
 			require.InDelta(t, tt.wantSER, ser, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)
@@ -135,6 +138,7 @@ func TestSER_WithCarrierConfig(t *testing.T) {
 
 			ser := env.getSERByCarrier(t)
 			t.Logf("SER{carrier=%q} = %.2f (want %.2f)", env.carrier, ser, tt.wantSER)
+			require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"))
 			require.InDelta(t, tt.wantSER, ser, ratioDelta)
 
 			env.waitForSessionsZeroByCarrier(t)

@@ -74,6 +74,7 @@ func TestSEER_AllScenarios(t *testing.T) {
 
 			seer := getSEER(t, env.endpoint)
 			t.Logf("SEER = %.2f (want %.2f)", seer, tt.wantSEER)
+			require.True(t, metricExists(t, env.endpoint, "sip_exporter_seer"))
 			require.InDelta(t, tt.wantSEER, seer, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)

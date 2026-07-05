@@ -62,6 +62,9 @@ func TestASR_AllScenarios(t *testing.T) {
 
 			asr := getASR(t, env.endpoint)
 			t.Logf("ASR = %.2f (want %.2f)", asr, tt.wantASR)
+			if tt.uacScenario != "uac_no_invite.xml" {
+				require.True(t, metricExists(t, env.endpoint, "sip_exporter_asr"))
+			}
 			require.InDelta(t, tt.wantASR, asr, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)

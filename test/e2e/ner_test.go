@@ -68,6 +68,9 @@ func TestNER_AllScenarios(t *testing.T) {
 			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
 			ner := getNER(t, env.endpoint)
 			t.Logf("NER = %.2f (want %.2f)", ner, tt.wantNER)
+			if tt.uacScenario != "uac_no_invite.xml" {
+				require.True(t, metricExists(t, env.endpoint, "sip_exporter_ner"))
+			}
 			require.InDelta(t, tt.wantNER, ner, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)

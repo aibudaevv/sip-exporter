@@ -538,6 +538,19 @@ func getMetric(t *testing.T, endpoint string, metricName string) float64 {
 	return getMetricWithLabel(t, endpoint, metricName, "")
 }
 
+// metricExists checks whether a metric name appears in the exporter /metrics output.
+// Use before assertions that check a metric == 0 to prevent vacuum-pass when the
+// metric name is misspelled or missing entirely (getMetric returns 0.0 for unknown metrics).
+func metricExists(t *testing.T, endpoint string, metricName string) bool {
+	t.Helper()
+	resp, err := http.Get(endpoint + "/metrics") //nolint:noctx // test helper
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return strings.Contains(string(body), metricName)
+}
+
 // getMetricWithLabel reads a metric with an optional label filter.
 // If labelFilter is empty, matches any label set (first match).
 // If labelFilter is set (e.g. `carrier="loopback-carrier"`), matches that exact label.

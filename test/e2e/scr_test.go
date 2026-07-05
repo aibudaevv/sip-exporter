@@ -70,6 +70,9 @@ func TestSCR_AllScenarios(t *testing.T) {
 
 			scr := getSCR(t, env.endpoint)
 			t.Logf("SCR = %.2f (want %.2f)", scr, tt.wantSCR)
+			if tt.uacScenario != "uac_no_invite.xml" {
+				require.True(t, metricExists(t, env.endpoint, "sip_exporter_scr"))
+			}
 			require.InDelta(t, tt.wantSCR, scr, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)

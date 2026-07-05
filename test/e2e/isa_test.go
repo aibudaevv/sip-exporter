@@ -53,6 +53,7 @@ func TestISA_AllScenarios(t *testing.T) {
 
 			isa := getISA(t, env.endpoint)
 			t.Logf("ISA = %.2f (want %.2f)", isa, tt.wantISA)
+			require.True(t, metricExists(t, env.endpoint, "sip_exporter_isa"))
 			require.InDelta(t, tt.wantISA, isa, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)
