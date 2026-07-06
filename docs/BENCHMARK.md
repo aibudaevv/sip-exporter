@@ -11,7 +11,7 @@ Load testing results for sip-exporter, measuring packet capture reliability unde
 | Docker | 29.3.1 |
 | SIPp | pbertera/sipp:latest |
 | Interface | loopback (`lo`) |
-| Socket buffer | 4 MB (`SO_RCVBUF`) |
+| Socket buffer | 4 MB (`SO_RCVBUFFORCE`, falls back to `SO_RCVBUF` without `CAP_NET_ADMIN`) |
 | Go | 1.25.11 |
 
 ## Methodology
@@ -189,11 +189,11 @@ Go GC stop-the-world pauses measured at 2000 CPS (14,000 PPS). 85 GC cycles obse
 | P95 STW | 0.264 ms |
 | Max STW | 0.970 ms |
 
-Maximum STW pause is **< 1 ms**. With `SO_RCVBUF = 4 MB` (~420 ms buffer at 28K PPS), GC pauses are 400× smaller than the socket buffer capacity — packets are never lost due to GC.
+Maximum STW pause is **< 1 ms**. With `SO_RCVBUFFORCE = 4 MB` (~420 ms buffer at 28K PPS), GC pauses are 400× smaller than the socket buffer capacity — packets are never lost due to GC.
 
 ## Memory Per Dialog
 
-Memory overhead per active SIP dialog. Dialog map stores `map[string]time.Time` — dialog ID as key, expiration timestamp as value.
+Memory overhead per active SIP dialog. Dialog map stores `map[string]dialogEntry` — each entry holds `expiresAt`/`createdAt` timestamps plus label metadata (carrier, UA type, source country, Call-ID).
 
 | Active Dialogs | Total RAM | Delta from Baseline | Bytes/Dialog |
 |---------------|-----------|--------------------:|-------------:|
@@ -204,13 +204,13 @@ Memory overhead per active SIP dialog. Dialog map stores `map[string]time.Time` 
 | 1,627 | 14.9 MB | 5.0 MB | ~3 KB |
 | 4,064 | 12.5 MB | 2.5 MB | < 1 KB |
 
-Per-dialog overhead is within GC measurement noise. Even 4,000+ active dialogs add < 7 MB to total memory. The theoretical per-dialog cost is ~100-200 bytes (string key + time.Time value + map overhead), but container-level memory measurement includes Go runtime overhead that obscures per-entry costs.
+Per-dialog overhead is within GC measurement noise. Even 4,000+ active dialogs add < 7 MB to total memory. The theoretical per-dialog cost is ~112 bytes per `dialogEntry` (two `time.Time` + four `string` fields + map bucket overhead), but container-level memory measurement includes Go runtime overhead that obscures per-entry costs.
 
 **Practical conclusion:** dialog storage is negligible. Plan for ~10 MB base + 1-2 MB per 1,000 active dialogs as a conservative estimate.
 
 ## Memory Per RTP Stream
 
-Memory overhead per active RTP stream. Each stream stores a `StreamState` struct plus map entry, keyed by media endpoint IP:port + SSRC.
+Memory overhead per active RTP stream. Each stream stores a `StreamState` struct (jitter, loss, sequence state) wrapped in a `streamEntry` with correlation labels, keyed by media endpoint IP:port + SSRC.
 
 | Active Streams | Total RAM | Delta from Baseline | Bytes/Stream |
 |---------------|-----------|--------------------:|-------------:|
@@ -220,7 +220,7 @@ Memory overhead per active RTP stream. Each stream stores a `StreamState` struct
 | 413 | 14.7 MB | 7.3 MB | ~19 KB |
 | 1,030 | 12.2 MB | 4.9 MB | ~5 KB |
 
-Same pattern as dialogs: container-level memory measurement includes Go runtime overhead that dominates at low counts. The theoretical per-stream cost is ~80-130 bytes (StreamState struct + map overhead). Streams expire after the configured TTL (default 30s), bounding memory under SSRC reuse.
+Same pattern as dialogs: container-level memory measurement includes Go runtime overhead that dominates at low counts. The theoretical per-stream cost is ~96 bytes for the `StreamState` struct plus ~130 bytes for the `streamEntry` wrapper and map overhead. Streams expire after the configured TTL (default 30s), bounding memory under SSRC reuse.
 
 **Practical conclusion:** RTP stream storage is negligible. Even 1,000+ active streams add < 7 MB to total memory.
 
@@ -242,7 +242,7 @@ With SIP-vs-RTP channel priority (RTP uses non-blocking send), RTP packets are d
 
 ### Memory Per RTP Stream
 
-Each active RTP stream stores a `StreamState` struct (~80 bytes) plus map overhead. The Snapshot call allocates a `[]StreamStats` slice proportional to the number of active streams (128 KB for 1000 streams — one allocation).
+Each active RTP stream stores a `StreamState` struct (~96 bytes) plus `streamEntry` wrapper and map overhead. The Snapshot call allocates a `[]StreamStats` slice proportional to the number of active streams (128 KB for 1000 streams — one allocation).
 
 | Active Streams | Snapshot Allocation | Per-Stream Cost |
 |---------------|--------------------:|----------------:|
