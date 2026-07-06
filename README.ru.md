@@ -125,7 +125,7 @@ docker pull frzq/sip-exporter:latest
 
 Все метрики доступны на `/metrics` в формате Prometheus. Все SIP-метрики содержат лейблы `carrier` и `ua_type` для многомерного анализа. Экспортер предоставляет:
 
-- **Счётчики трафика** — типы SIP-запросов (INVITE, BYE, REGISTER и т.д.) и коды ответов (100–606)
+- **Счётчики трафика** — типы SIP-запросов (INVITE, re-INVITE, BYE, REGISTER и т.д.) и коды ответов (100–606)
 - **Активные сессии** — количество активных SIP-диалогов в реальном времени
 - **Метрики RFC 6076** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, PDD
 - **Метрики качества голоса RFC 6035** — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL

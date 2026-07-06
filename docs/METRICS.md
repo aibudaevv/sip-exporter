@@ -20,7 +20,7 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 > | Tier | Metrics | Full label set |
 > |------|---------|----------------|
 > | **System** | `packets_total`, `system_error_total`, self-monitoring | *(none)* |
-> | **Base** | All SIP requests, responses, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD, VQ reports, sessions | `carrier, ua_type, source_country` |
+> | **Base** | All SIP requests, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD, VQ reports, sessions, `reinvite_total` | `carrier, ua_type, source_country` |
 > | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_active_streams` | `carrier, ua_type, codec, source_country` |
 > | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, destination_country, caller_host, called_host` |
 
@@ -431,6 +431,7 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 - A dialog is identified by the tuple: `{Call-ID, From tag, To tag}`
 - A dialog is terminated when a `200 OK` response is received for a `BYE` request
 - Dialog ID format: `{call-id}:{min-tag}:{max-tag}` (tags sorted lexicographically)
+- A re-INVITE (INVITE within an existing dialog) **refreshes** the dialog's Session-Expires timer without creating a new dialog or incrementing `invite_total`
 - Dialogs are cleaned up when:
   - `200 OK` received for `BYE` request (normal termination)
   - Session-Expires timeout reached (RFC 4028)
@@ -439,7 +440,8 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 
 ## SIP request metrics
 
-`sip_exporter_invite_total{carrier="...",ua_type="..."}`: total number of received SIP INVITE requests.  
+`sip_exporter_invite_total{carrier="...",ua_type="..."}`: total number of received SIP INVITE requests. Re-INVITEs (INVITE within an existing dialog) are **excluded** — see `reinvite_total` below.  
+`sip_exporter_reinvite_total{carrier="...",ua_type="..."}`: total number of re-INVITE requests (INVITE sent within an already established dialog, RFC 3261 §14). Re-INVITEs refresh the dialog's Session-Expires timer without creating a new dialog or contaminating SER/SCR/ASR ratios.  
 `sip_exporter_register_total{carrier="...",ua_type="..."}`: total number of received SIP REGISTER requests.  
 `sip_exporter_options_total{carrier="...",ua_type="..."}`: total number of received SIP OPTIONS requests.  
 `sip_exporter_cancel_total{carrier="...",ua_type="..."}`: total number of received SIP CANCEL requests.  
@@ -666,6 +668,7 @@ Dialogs are tracked with Session-Expires (RFC 4028). If no BYE is received befor
 SER = (INVITE → 200 OK) / (Total INVITE - INVITE → 3xx) × 100
 ```
 
+- **Re-INVITEs are excluded** from both numerator and denominator — they are not new session attempts and are tracked separately in `reinvite_total`
 - 3xx responses (redirects) are **excluded from the denominator** — they are neither success nor failure, but a routing instruction
 - A session is counted as established only when the originating UA receives `200 OK` for its INVITE
 - Undefined when no INVITE requests have been received

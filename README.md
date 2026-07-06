@@ -127,7 +127,7 @@ The container must run with `--privileged` and `--network host` (eBPF requires `
 
 All metrics are exposed at `/metrics` in Prometheus exposition format. All SIP metrics include `carrier` and `ua_type` labels for multi-dimensional analysis. The exporter provides:
 
-- **Traffic counters** — SIP request types (INVITE, BYE, REGISTER, etc.) and response status codes (100–606)
+- **Traffic counters** — SIP request types (INVITE, re-INVITE, BYE, REGISTER, etc.) and response status codes (100–606)
 - **Active sessions** — real-time count of active SIP dialogs
 - **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, PDD
 - **RFC 6035 voice quality metrics** — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
