@@ -316,7 +316,7 @@ services:
 
 Full reference with formulas and PromQL examples: [docs/METRICS.md > Geo-Enrichment Labels](docs/METRICS.md#geo-enrichment-labels)
 
-Step-by-step setup (how to get and connect the MaxMind database): [`examples/geoip.md`](examples/geoip.md)
+Step-by-step setup (how to get and connect the MaxMind database): [`docs/geoip.md`](docs/geoip.md)
 
 ```promql
 # SER for calls to Russia

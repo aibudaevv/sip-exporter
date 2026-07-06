@@ -314,7 +314,7 @@ services:
 
 Полный справочник с формулами и примерами PromQL: [docs/METRICS.md > Geo-Enrichment Labels](docs/METRICS.md#geo-enrichment-labels)
 
-Пошаговая настройка (как получить и подключить базу MaxMind): [`examples/geoip.md`](examples/geoip.md)
+Пошаговая настройка (как получить и подключить базу MaxMind): [`docs/geoip.ru.md`](docs/geoip.ru.md)
 
 ```promql
 # SER для звонков в Россию
