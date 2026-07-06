@@ -25,6 +25,7 @@ import (
 
 	"github.com/aibudaevv/sip-exporter/internal/carriers"
 	"github.com/aibudaevv/sip-exporter/internal/config"
+	"github.com/aibudaevv/sip-exporter/internal/geoip"
 	"github.com/aibudaevv/sip-exporter/internal/server"
 	"github.com/aibudaevv/sip-exporter/internal/telemetry"
 	"github.com/aibudaevv/sip-exporter/internal/ua"
@@ -59,7 +60,12 @@ func main() {
 		zap.L().Info("user agents config loaded", zap.String("path", cfg.UserAgentsConfigPath))
 	}
 
-	srv := server.NewServer(resolver, classifier)
+	geoipReader, err := geoip.New(cfg.GeoIPCountryDB)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	srv := server.NewServer(resolver, classifier, geoipReader, cfg.LocalCountryCode, cfg.HostLabels)
 
 	go telemetry.Run(context.Background(), telemetry.Config{
 		Enabled: cfg.Telemetry,
@@ -67,7 +73,9 @@ func main() {
 		IDFile:  cfg.TelemetryIDFile,
 	}, time.Now())
 
-	if err = srv.Run(cfg); err != nil {
+	err = srv.Run(cfg)
+	_ = geoipReader.Close()
+	if err != nil {
 		log.Fatal(err)
 	}
 }

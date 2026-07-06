@@ -16,6 +16,7 @@ import (
 	"github.com/aibudaevv/sip-exporter/internal/carriers"
 	"github.com/aibudaevv/sip-exporter/internal/config"
 	"github.com/aibudaevv/sip-exporter/internal/exporter"
+	"github.com/aibudaevv/sip-exporter/internal/geoip"
 	"github.com/aibudaevv/sip-exporter/internal/service"
 	"github.com/aibudaevv/sip-exporter/internal/ua"
 )
@@ -27,15 +28,33 @@ const (
 
 type (
 	server struct {
-		exporter exporter.Exporter
+		exporter    exporter.Exporter
+		geoipReader *geoip.Reader
 	}
 	Server interface {
 		Run(cfg *config.App) error
 	}
 )
 
-func NewServer(resolver *carriers.Resolver, classifier *ua.Classifier) Server {
-	return &server{exporter: exporter.NewExporter(service.NewMetricser(), service.NewDialoger(), resolver, classifier)}
+func NewServer(
+	resolver *carriers.Resolver,
+	classifier *ua.Classifier,
+	gr *geoip.Reader,
+	localCountryCode string,
+	hostLabels bool,
+) Server {
+	return &server{
+		exporter: exporter.NewExporter(exporter.Deps{
+			Metricser:        service.NewMetricser(),
+			Dialoger:         service.NewDialoger(),
+			CarrierResolver:  resolver,
+			UAClassifier:     classifier,
+			GeoIPReader:      gr,
+			LocalCountryCode: localCountryCode,
+			HostLabels:       hostLabels,
+		}),
+		geoipReader: gr,
+	}
 }
 
 func (s *server) Run(cfg *config.App) error {
@@ -69,9 +88,17 @@ func (s *server) Run(cfg *config.App) error {
 	}()
 
 	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
-	<-quit
+	for sig := range quit {
+		if sig != syscall.SIGHUP {
+			break
+		}
+		zap.L().Info("SIGHUP received, reloading GeoIP country DB")
+		if err := s.geoipReader.Reload(); err != nil {
+			zap.L().Warn("GeoIP country DB reload failed", zap.Error(err))
+		}
+	}
 
 	zap.L().Info("received signal from OS for shutdown")
 

@@ -16,6 +16,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// gcLineRe matches Go runtime gctrace lines: "gc N @Ts ... A+B+C ms clock".
+// A = sweep-termination STW (start of GC), B = concurrent mark (NOT STW),
+// C = mark-termination STW (end of GC). Groups 1+2 capture A and C;
+// their sum is the total stop-the-world duration per GC cycle.
 var gcLineRe = regexp.MustCompile(`gc \d+ @[\d.]+s.*?([\d.]+)\+[\d.]+\+([\d.]+) ms clock`)
 
 func parseGCPauses(logs string) []float64 {

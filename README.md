@@ -38,6 +38,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - 📈 **Prometheus native** — standard `/metrics` endpoint for scraping
 - 🏷️ **Per-carrier metrics** — CIDR-based carrier resolution for all SIP metrics
 - 🏷️ **Per-device-type metrics** — User-Agent classification for all SIP metrics
+- 🌍 **Geo-enrichment** — `source_country` (GeoIP) and `destination_country` (E.164 prefix) labels on SIP metrics
 - 📞 **Voice quality (RFC 6035)** — MOS scores, jitter, packet loss from SIP PUBLISH/NOTIFY
 - 🎧 **RTP media analysis** — jitter, packet loss, and MOS (E-model G.107) from RTP streams correlated with SIP dialogs, with no voice payload captured (header-only)
 
@@ -115,6 +116,9 @@ Environment variables:
 * `SIP_EXPORTER_RTP_CAPTURE` - enable RTP media capture and analysis (default true)
 * `SIP_EXPORTER_RTP_STREAM_TTL` - idle RTP stream expiry, RFC 3550 §6.3.5 timeout (default 30s)
 * `SIP_EXPORTER_IGNORE_OUTGOING` - ignore outgoing packets, count incoming only (default false)
+* `SIP_EXPORTER_GEOIP_COUNTRY_DB` - path to MaxMind GeoLite2-Country.mmdb for `source_country` label (optional)
+* `SIP_EXPORTER_LOCAL_COUNTRY_CODE` - ISO alpha-2 country code for domestic phone-number fallback in `destination_country` (optional, e.g. `RU`)
+* `SIP_EXPORTER_HOST_LABELS` - enable `caller_host`/`called_host` labels on INVITE metrics (default `false`; opt-in — unbounded cardinality, enable only on trusted/bounded deployments)
 * `SIP_EXPORTER_TELEMETRY` - anonymous usage telemetry, opt-out with `false` (default true)
 
 The container must run with `--privileged` and `--network host` (eBPF requires `CAP_BPF` and access to the network interface). See [Security](docs/SECURITY.md) for details on why this is safe.
@@ -123,7 +127,7 @@ The container must run with `--privileged` and `--network host` (eBPF requires `
 
 All metrics are exposed at `/metrics` in Prometheus exposition format. All SIP metrics include `carrier` and `ua_type` labels for multi-dimensional analysis. The exporter provides:
 
-- **Traffic counters** — SIP request types (INVITE, BYE, REGISTER, etc.) and response status codes (100–606)
+- **Traffic counters** — SIP request types (INVITE, re-INVITE, BYE, REGISTER, etc.) and response status codes (100–606)
 - **Active sessions** — real-time count of active SIP dialogs
 - **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, PDD
 - **RFC 6035 voice quality metrics** — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
@@ -223,7 +227,7 @@ services:
       - SIP_EXPORTER_INTERFACE=eth0
       - SIP_EXPORTER_USER_AGENTS_CONFIG=/etc/sip-exporter/user_agents.yaml
     volumes:
-      - ./user_agents.yaml:/etc/sip-exporter/user_agents.yaml:ro
+      - ./examples/user_agents.yaml:/etc/sip-exporter/user_agents.yaml:ro
 ```
 
 ```yaml
@@ -274,6 +278,54 @@ sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
 ```
 
 Full config reference with examples: [`examples/user_agents.yaml`](examples/user_agents.yaml)
+
+### Geo-Enrichment Labels
+
+The exporter adds geographic context to SIP metrics via two labels:
+
+| Label | Method | Scope |
+|-------|--------|-------|
+| `source_country` | GeoIP lookup of source IP (MaxMind GeoLite2-Country) | All SIP + RTP metrics |
+| `destination_country` | E.164 phone-number prefix (embedded, no DB needed) | INVITE metrics only |
+
+**source_country resolution:**
+1. `carrier.country` — optional field in `carriers.yaml`, overrides GeoIP (operator-curated)
+2. `GeoIP(srcIP)` — MaxMind GeoLite2-Country database lookup
+3. `"unknown"` — fallback when neither is available
+
+**destination_country** requires **no database** — the prefix table is embedded in the binary (Google libphonenumber, Apache 2.0). Set `SIP_EXPORTER_LOCAL_COUNTRY_CODE` for domestic numbers without international prefix.
+
+**caller_host / called_host** are **off by default** (`SIP_EXPORTER_HOST_LABELS=false`). They expose the host part of the SIP `From`/`To` URI on `invite_total` / `invite_200_total`. Since distinct endpoint identifiers are unbounded, they are opt-in: enable (`SIP_EXPORTER_HOST_LABELS=true`) only on trusted deployments where the endpoint count is bounded, otherwise they can grow Prometheus memory. See [Security > Data Exposed in Prometheus Labels](docs/SECURITY.md#data-exposed-in-prometheus-labels).
+
+**Setup:**
+
+```yaml
+# docker-compose.yml
+services:
+  sip-exporter:
+    image: frzq/sip-exporter:latest
+    privileged: true
+    network_mode: host
+    environment:
+      - SIP_EXPORTER_INTERFACE=eth0
+      - SIP_EXPORTER_GEOIP_COUNTRY_DB=/data/GeoLite2-Country.mmdb
+      - SIP_EXPORTER_LOCAL_COUNTRY_CODE=RU    # optional: domestic number fallback
+    volumes:
+      - ./GeoLite2-Country.mmdb:/data/GeoLite2-Country.mmdb:ro
+```
+
+Full reference with formulas and PromQL examples: [docs/METRICS.md > Geo-Enrichment Labels](docs/METRICS.md#geo-enrichment-labels)
+
+Step-by-step setup (how to get and connect the MaxMind database): [`docs/geoip.md`](docs/geoip.md)
+
+```promql
+# SER for calls to Russia
+sum(rate(sip_exporter_invite_200_total{destination_country="RU"}[5m]))
+  / sum(rate(sip_exporter_invite_total{destination_country="RU"}[5m])) * 100
+
+# INVITE rate by destination country
+sum by (destination_country) (rate(sip_exporter_invite_total[5m]))
+```
 
 ### RTP Media Analysis
 
@@ -370,6 +422,11 @@ This project is licensed under the **GNU Affero General Public License v3.0 (AGP
 
 See [LICENSE](LICENSE) for full text.
 
+### Third-Party Data Licenses
+
+- **MaxMind GeoLite2** (`source_country`) — free for internal use with attribution; redistribution/bundling requires a [Commercial License](https://www.maxmind.com/en/geolite2/eula). Users download the database separately.
+- **Google libphonenumber** (`destination_country`) — [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0). E.164 prefix data embedded in the binary at compile time.
+
 ### Commercial Use
 - ✅ Free for personal and educational use
 - ✅ Free for commercial use with conditions
@@ -377,4 +434,4 @@ See [LICENSE](LICENSE) for full text.
 - 📧 For commercial licensing without AGPL requirements, contact the author
 
 ## Changelog
-See [CHANGELOG.md](CHANGELOG.md) for version history.
+See the [GitHub Releases](https://github.com/aibudaevv/sip-exporter/releases) for version history.

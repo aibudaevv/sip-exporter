@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	floodPacketsPerCall    = 2.0
-	fullCallPacketsPerCall = 14.0
+	floodPacketsPerCall    = 1.0
+	fullCallPacketsPerCall = 7.0
 	subtestTimeout         = 20 * time.Second
 )
 
@@ -37,6 +37,8 @@ func TestLoad_INVITEFlood(t *testing.T) {
 			maxErrors := totalPackets * 0.001
 			require.LessOrEqual(t, result.ErrorCount, maxErrors,
 				"error rate SLO: < 0.1%% of processed packets")
+			require.LessOrEqual(t, result.LossRate, 0.01,
+				"packet loss SLO: < 1%% at rate %d (got %.2f%%)", rate, result.LossRate*100)
 			require.Greater(t, result.PacketsAfter, result.PacketsBefore,
 				"exporter should have processed packets")
 
@@ -72,6 +74,8 @@ func TestLoad_FullCallFlow(t *testing.T) {
 			maxErrors := totalPackets * 0.001
 			require.LessOrEqual(t, result.ErrorCount, maxErrors,
 				"error rate SLO: < 0.1%% of processed packets")
+			require.LessOrEqual(t, result.LossRate, 0.01,
+				"packet loss SLO: < 1%% at rate %d (got %.2f%%)", rate, result.LossRate*100)
 			require.Greater(t, result.PacketsAfter, result.PacketsBefore,
 				"exporter should have processed packets")
 
@@ -104,20 +108,23 @@ func TestLoad_ConcurrentSessions(t *testing.T) {
 				"concurrent_uas.xml", "concurrent_uac.xml",
 				callCount, rate, limit, env)
 
-			sessions := getMetric(t, env.endpoint, "sip_exporter_sessions")
 			inviteTotal := getMetric(t, env.endpoint, "sip_exporter_invite_total")
 
-			t.Logf("Concurrent %d: sessions_peak=%.0f, invites=%.0f, drain=%v, cpu=%.2f%%(peak=%.2f%%), mem=%.1fMB, duration=%v",
-				limit, sessions, inviteTotal, result.DrainTime,
+			t.Logf("Concurrent %d: peak_sessions=%.0f, invites=%.0f, drain=%v, cpu=%.2f%%(peak=%.2f%%), mem=%.1fMB, duration=%v",
+				limit, result.PeakSessions, inviteTotal, result.DrainTime,
 				result.CPUAvg, result.CPUPeak, result.MemMaxMB, result.Duration)
 
+			require.Greater(t, result.PeakSessions, float64(0),
+				"peak sessions should be > 0 during concurrent load")
+			require.GreaterOrEqual(t, result.PeakSessions, float64(limit)*0.5,
+				"peak sessions should reach >= 50%% of limit %d (got %.0f)", limit, result.PeakSessions)
 			require.Greater(t, inviteTotal, float64(0),
 				"should have INVITE requests")
 			require.Greater(t, result.PacketsAfter, result.PacketsBefore,
 				"exporter should have processed packets")
 
 			recordResult(t.Name(), map[string]MetricEntry{
-				"sessions": {Value: sessions, Unit: "count", Direction: dirHigherIsBetter},
+				"sessions": {Value: result.PeakSessions, Unit: "count", Direction: dirHigherIsBetter},
 				"invites":  {Value: inviteTotal, Unit: "count", Direction: dirHigherIsBetter},
 				"cpu_peak": {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},
 				"cpu_avg":  {Value: result.CPUAvg, Unit: "%", Direction: dirLowerIsBetter},

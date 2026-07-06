@@ -15,10 +15,12 @@ type (
 		Body           []byte
 	}
 	From struct {
+		User []byte
 		Addr []byte
 		Tag  []byte
 	}
 	To struct {
+		User []byte
 		Addr []byte
 		Tag  []byte
 	}

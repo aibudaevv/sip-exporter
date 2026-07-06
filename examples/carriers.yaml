@@ -27,25 +27,30 @@
 #   6. CIDR notation is required — plain IP addresses are NOT accepted.
 #      Use /32 for a single host, e.g. "10.226.97.5/32" instead of "10.226.97.5".
 #
+#   7. Optional "country" field (ISO 3166-1 alpha-2) sets the source_country label
+#      for all IPs in this carrier's CIDRs. Takes priority over GeoIP lookup.
+#
 # Example metric output:
-#   sip_exporter_invite_total{carrier="telecom-alpha"} 1523
-#   sip_exporter_ser{carrier="telecom-alpha"} 95.2
-#   sip_exporter_sdc_total{carrier="telecom-beta"} 847
+#   sip_exporter_invite_total{carrier="telecom-alpha",ua_type="other",source_country="RU",destination_country="US",caller_host="10.1.0.5",called_host="sip.example.com"} 1523
+#   sip_exporter_ser{carrier="telecom-alpha",ua_type="other",source_country="RU"} 95.2
 
 carriers:
   - name: "telecom-alpha"
+    country: "RU"              # Optional: ISO alpha-2 — sets source_country for all IPs in these CIDRs
     cidrs:
       - "10.1.0.0/16"
       - "10.2.0.0/16"
       - "172.16.0.0/12"
 
   - name: "telecom-beta"
+    country: "GB"              # Optional: overrides GeoIP lookup
     cidrs:
       - "192.168.10.0/24"
       - "192.168.11.0/24"
       - "192.168.12.0/24"
 
   - name: "voip-provider-gamma"
+    # No "country" field — source_country falls back to GeoIP lookup (if configured)
     cidrs:
       - "10.100.0.0/24"
       - "10.100.1.0/24"

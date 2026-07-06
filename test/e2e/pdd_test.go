@@ -52,6 +52,7 @@ func TestPDD_180Ringing_Measured(t *testing.T) {
 	pdd := getPDD(t, env.endpoint)
 	t.Logf("PDD = %.2f ms", pdd)
 	require.Greater(t, pdd, 0.0, "PDD should be > 0 when 180 Ringing is received (C1=T, C2=T, C3=T)")
+	require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_pdd_count"), 0.0, "PDD histogram should have observations")
 
 	ttr := getTTR(t, env.endpoint)
 	t.Logf("TTR = %.2f ms", ttr)
@@ -212,6 +213,7 @@ func TestPDD_ConcurrentCalls(t *testing.T) {
 	pdd := getPDD(t, env.endpoint)
 	t.Logf("PDD = %.2f ms (100 concurrent calls)", pdd)
 	require.Greater(t, pdd, 0.0, "PDD should be measured for concurrent calls with 180 Ringing")
+	require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_pdd_count"), 0.0, "PDD histogram should have observations")
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -231,6 +233,7 @@ func TestPDD_MixedScenarios(t *testing.T) {
 	pdd := getPDD(t, env.endpoint)
 	t.Logf("PDD = %.2f ms (mixed: 30 with 180, 20 without)", pdd)
 	require.Greater(t, pdd, 0.0, "PDD should be measured for calls with 180 Ringing in mixed scenario")
+	require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_pdd_count"), 0.0, "PDD histogram should have observations")
 
 	waitForSessionsZero(t, env.endpoint)
 }

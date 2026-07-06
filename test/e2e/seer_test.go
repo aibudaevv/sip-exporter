@@ -52,6 +52,13 @@ func TestSEER_AllScenarios(t *testing.T) {
 			wantSEER:    100.0,
 		},
 		{
+			name:        "all_600",
+			uasScenario: "uas_decline_600.xml",
+			uacScenario: "uac_decline_600.xml",
+			callCount:   100,
+			wantSEER:    100.0,
+		},
+		{
 			name:        "all_500",
 			uasScenario: "uas_server_error.xml",
 			uacScenario: "uac_server_error.xml",
@@ -74,7 +81,8 @@ func TestSEER_AllScenarios(t *testing.T) {
 
 			seer := getSEER(t, env.endpoint)
 			t.Logf("SEER = %.2f (want %.2f)", seer, tt.wantSEER)
-			require.Equal(t, tt.wantSEER, seer)
+			require.True(t, metricExists(t, env.endpoint, "sip_exporter_seer"))
+			require.InDelta(t, tt.wantSEER, seer, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)
 		})
@@ -93,7 +101,7 @@ func TestSEER_MixedEffective(t *testing.T) {
 
 	seer := getSEER(t, env.endpoint)
 	t.Logf("SEER = %.2f (want %.2f)", seer, 100.0)
-	require.Equal(t, 100.0, seer)
+	require.InDelta(t, 100.0, seer, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -110,7 +118,7 @@ func TestSEER_MixedWithErrors(t *testing.T) {
 
 	seer := getSEER(t, env.endpoint)
 	t.Logf("SEER = %.2f (want %.2f)", seer, 50.0)
-	require.Equal(t, 50.0, seer)
+	require.InDelta(t, 50.0, seer, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -127,7 +135,7 @@ func TestSEER_Mixed3xx(t *testing.T) {
 
 	seer := getSEER(t, env.endpoint)
 	t.Logf("SEER = %.2f (want %.2f)", seer, 100.0)
-	require.Equal(t, 100.0, seer)
+	require.InDelta(t, 100.0, seer, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -145,7 +153,7 @@ func TestSEER_Complex(t *testing.T) {
 
 	seer := getSEER(t, env.endpoint)
 	t.Logf("SEER = %.2f (want %.2f)", seer, 70.0)
-	require.Equal(t, 70.0, seer)
+	require.InDelta(t, 70.0, seer, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -161,7 +169,7 @@ func TestSEER_WithCarrierConfig(t *testing.T) {
 
 	seer := env.getSEERByCarrier(t)
 	t.Logf("SEER{carrier=%q} = %.2f (want %.2f)", env.carrier, seer, 100.0)
-	require.Equal(t, 100.0, seer)
+	require.InDelta(t, 100.0, seer, ratioDelta)
 
 	env.waitForSessionsZeroByCarrier(t)
 }

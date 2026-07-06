@@ -12,34 +12,37 @@ const defaultClockRate = 8000
 type (
 	// MediaLabels is the SIP-dialog context attached to a media endpoint via SDP.
 	MediaLabels struct {
-		Carrier    string
-		UAType     string
-		CallID     string
-		SDPCodecs  map[uint8]string // payload type → codec name (from SDP a=rtpmap)
-		ClockRates map[uint8]uint32 // payload type → clock rate (Hz, from SDP)
+		Carrier       string
+		UAType        string
+		SourceCountry string
+		CallID        string
+		SDPCodecs     map[uint8]string // payload type → codec name (from SDP a=rtpmap)
+		ClockRates    map[uint8]uint32 // payload type → clock rate (Hz, from SDP)
 	}
 
 	// StreamStats is a point-in-time view of an RTP stream, used for metric export.
 	StreamStats struct {
-		SSRC         uint32
-		Codec        string
-		Carrier      string
-		UAType       string
-		CallID       string
-		PacketsTotal uint64
-		PacketsLost  uint64
-		JitterMs     float64
-		MOS          float64
-		LastSeen     time.Time
+		SSRC          uint32
+		Codec         string
+		Carrier       string
+		UAType        string
+		SourceCountry string
+		CallID        string
+		PacketsTotal  uint64
+		PacketsLost   uint64
+		JitterMs      float64
+		MOS           float64
+		LastSeen      time.Time
 	}
 
 	// ObserveResult is the per-packet outcome of an RTP observation.
 	ObserveResult struct {
-		Counted bool   // packet counted as received (not duplicate/reorder)
-		Lost    uint64 // packets newly marked lost by this observation
-		Codec   string // resolved codec name
-		Carrier string // dialog carrier (for metric labels)
-		UAType  string // dialog UA type (for metric labels)
+		Counted       bool   // packet counted as received (not duplicate/reorder)
+		Lost          uint64 // packets newly marked lost by this observation
+		Codec         string // resolved codec name
+		Carrier       string // dialog carrier (for metric labels)
+		UAType        string // dialog UA type (for metric labels)
+		SourceCountry string // dialog source country (for metric labels)
 	}
 
 	endpointKey struct {
@@ -103,13 +106,19 @@ func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) {
 	t.media[endpointKey{ip: ip, port: port}] = labels
 }
 
-// Unregister removes all media endpoints belonging to a SIP dialog (on BYE 200 OK).
+// Unregister removes all media endpoints and RTP streams belonging to a SIP
+// dialog (called on BYE 200 OK).
 func (t *Tracker) Unregister(callID string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for k, v := range t.media {
 		if v.CallID == callID {
 			delete(t.media, k)
+		}
+	}
+	for k, e := range t.streams {
+		if e.labels.CallID == callID {
+			delete(t.streams, k)
 		}
 	}
 }
@@ -184,11 +193,12 @@ func (t *Tracker) Observe(
 	}
 
 	return ObserveResult{
-		Counted: entry.state.packetsTotal > prevTotal,
-		Lost:    lostDelta,
-		Codec:   codec,
-		Carrier: labels.Carrier,
-		UAType:  labels.UAType,
+		Counted:       entry.state.packetsTotal > prevTotal,
+		Lost:          lostDelta,
+		Codec:         codec,
+		Carrier:       labels.Carrier,
+		UAType:        labels.UAType,
+		SourceCountry: labels.SourceCountry,
 	}, true
 }
 
@@ -201,16 +211,17 @@ func (t *Tracker) Snapshot() []StreamStats {
 		s := e.state
 		jitter := s.JitterMs()
 		out = append(out, StreamStats{
-			SSRC:         s.SSRC,
-			Codec:        e.codec,
-			Carrier:      e.labels.Carrier,
-			UAType:       e.labels.UAType,
-			CallID:       e.labels.CallID,
-			PacketsTotal: s.packetsTotal,
-			PacketsLost:  s.packetsLost,
-			JitterMs:     jitter,
-			MOS:          ComputeMOS(e.codec, s.LossRate(), jitter),
-			LastSeen:     s.lastArrival,
+			SSRC:          s.SSRC,
+			Codec:         e.codec,
+			Carrier:       e.labels.Carrier,
+			UAType:        e.labels.UAType,
+			SourceCountry: e.labels.SourceCountry,
+			CallID:        e.labels.CallID,
+			PacketsTotal:  s.packetsTotal,
+			PacketsLost:   s.packetsLost,
+			JitterMs:      jitter,
+			MOS:           ComputeMOS(e.codec, s.LossRate(), jitter),
+			LastSeen:      s.lastArrival,
 		})
 	}
 	return out

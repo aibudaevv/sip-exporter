@@ -92,6 +92,7 @@ func startExporter(ctx context.Context, t *testing.T, httpPort, sipPort, sipsPor
 		"SIP_EXPORTER_LOGGER_LEVEL":    logLevel,
 		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
 		"SIP_EXPORTER_RTP_CAPTURE":     rtpFlag,
+		"SIP_EXPORTER_TELEMETRY":       "false",
 	}
 	if ttl != "" {
 		env["SIP_EXPORTER_RTP_STREAM_TTL"] = ttl
@@ -166,6 +167,7 @@ func startExporterWithCarrierUA(
 		"SIP_EXPORTER_LOGGER_LEVEL":    logLevel,
 		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
 		"SIP_EXPORTER_RTP_CAPTURE":     "true",
+		"SIP_EXPORTER_TELEMETRY":       "false",
 	}
 	if ttl != "" {
 		envVars["SIP_EXPORTER_RTP_STREAM_TTL"] = ttl

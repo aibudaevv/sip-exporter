@@ -1,0 +1,9 @@
+carriers:
+  - name: "carrier-A"
+    cidrs:
+      - "10.1.0.0/16"
+    country: "RU"
+  - name: "carrier-B"
+    cidrs:
+      - "10.2.0.0/16"
+    country: "US"

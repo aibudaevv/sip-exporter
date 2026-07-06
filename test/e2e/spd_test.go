@@ -19,6 +19,7 @@ func TestSPD_SuccessfulCalls(t *testing.T) {
 	spd := getSPD(t, env.endpoint)
 	t.Logf("SPD = %.4f seconds", spd)
 	require.Greater(t, spd, 0.0, "SPD should be greater than 0 after successful calls")
+	require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_spd_count"), 0.0, "SPD histogram should have observations")
 
 	waitForSessionsZero(t, env.endpoint)
 }

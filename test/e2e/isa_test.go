@@ -38,6 +38,20 @@ func TestISA_AllScenarios(t *testing.T) {
 			wantISA:     100.0,
 		},
 		{
+			name:        "all_408",
+			uasScenario: "uas_timeout_408.xml",
+			uacScenario: "uac_timeout_408.xml",
+			callCount:   100,
+			wantISA:     100.0,
+		},
+		{
+			name:        "all_504",
+			uasScenario: "uas_server_error_504.xml",
+			uacScenario: "uac_server_error_504.xml",
+			callCount:   100,
+			wantISA:     100.0,
+		},
+		{
 			name:        "all_200",
 			uasScenario: "uas_100.xml",
 			uacScenario: "uac_100.xml",
@@ -53,7 +67,8 @@ func TestISA_AllScenarios(t *testing.T) {
 
 			isa := getISA(t, env.endpoint)
 			t.Logf("ISA = %.2f (want %.2f)", isa, tt.wantISA)
-			require.Equal(t, tt.wantISA, isa)
+			require.True(t, metricExists(t, env.endpoint, "sip_exporter_isa"))
+			require.InDelta(t, tt.wantISA, isa, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)
 		})
@@ -72,7 +87,7 @@ func TestISA_Mixed(t *testing.T) {
 
 	isa := getISA(t, env.endpoint)
 	t.Logf("ISA = %.2f (want %.2f)", isa, 50.0)
-	require.Equal(t, 50.0, isa)
+	require.InDelta(t, 50.0, isa, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -90,7 +105,7 @@ func TestISA_MixedWith3xx(t *testing.T) {
 
 	isa := getISA(t, env.endpoint)
 	t.Logf("ISA = %.2f (want %.2f)", isa, 50.0)
-	require.Equal(t, 50.0, isa)
+	require.InDelta(t, 50.0, isa, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -108,7 +123,7 @@ func TestISA_Complex(t *testing.T) {
 
 	isa := getISA(t, env.endpoint)
 	t.Logf("ISA = %.2f (want %.2f)", isa, 60.0)
-	require.Equal(t, 60.0, isa)
+	require.InDelta(t, 60.0, isa, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -123,7 +138,7 @@ func TestISA_WithCarrierConfig(t *testing.T) {
 
 	isa := env.getISAByCarrier(t)
 	t.Logf("ISA{carrier=%q} = %.2f (want %.2f)", env.carrier, isa, 100.0)
-	require.Equal(t, 100.0, isa)
+	require.InDelta(t, 100.0, isa, ratioDelta)
 
 	env.waitForSessionsZeroByCarrier(t)
 }
@@ -139,7 +154,7 @@ func TestISA_MixedWithCarrierConfig(t *testing.T) {
 
 	isa := env.getISAByCarrier(t)
 	t.Logf("ISA{carrier=%q} = %.2f (want %.2f)", env.carrier, isa, 50.0)
-	require.Equal(t, 50.0, isa)
+	require.InDelta(t, 50.0, isa, ratioDelta)
 
 	env.waitForSessionsZeroByCarrier(t)
 }

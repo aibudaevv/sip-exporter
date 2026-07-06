@@ -7,18 +7,20 @@ import (
 
 type (
 	dialogEntry struct {
-		expiresAt time.Time
-		createdAt time.Time
-		carrier   string
-		uaType    string
-		callID    string
+		expiresAt     time.Time
+		createdAt     time.Time
+		carrier       string
+		uaType        string
+		sourceCountry string
+		callID        string
 	}
 
 	CleanupResult struct {
-		Duration time.Duration
-		Carrier  string
-		UAType   string
-		CallID   string
+		Duration      time.Duration
+		Carrier       string
+		UAType        string
+		SourceCountry string
+		CallID        string
 	}
 
 	dialogs struct {
@@ -26,10 +28,15 @@ type (
 		storage map[string]dialogEntry
 	}
 	Dialoger interface {
-		Create(dialogID string, expiresAt time.Time, createdAt time.Time, carrier string, uaType string, callID string)
+		Create(
+			dialogID string, expiresAt time.Time, createdAt time.Time,
+			carrier, uaType, sourceCountry, callID string,
+		)
 		Delete(dialogID string) CleanupResult
+		HasActiveDialog(dialogID string) bool
+		Refresh(dialogID string, expiresAt time.Time) bool
 		Size() int
-		SizeByCarrierAndUA() map[string]map[string]int
+		Counts() []LabeledCount
 		Cleanup() []CleanupResult
 	}
 )
@@ -52,26 +59,52 @@ func (c *dialogs) Delete(dialogID string) CleanupResult {
 	delete(c.storage, dialogID)
 	d := time.Since(entry.createdAt)
 	if d < 0 {
-		return CleanupResult{Carrier: entry.carrier, UAType: entry.uaType, CallID: entry.callID}
+		return CleanupResult{
+			Carrier: entry.carrier, UAType: entry.uaType,
+			SourceCountry: entry.sourceCountry, CallID: entry.callID,
+		}
 	}
-	return CleanupResult{Duration: d, Carrier: entry.carrier, UAType: entry.uaType, CallID: entry.callID}
+	return CleanupResult{
+		Duration: d, Carrier: entry.carrier, UAType: entry.uaType,
+		SourceCountry: entry.sourceCountry, CallID: entry.callID,
+	}
 }
 
 func (c *dialogs) Create(
 	dialogID string, expiresAt time.Time, createdAt time.Time,
-	carrier string, uaType string, callID string,
+	carrier string, uaType string, sourceCountry string, callID string,
 ) {
 	c.m.Lock()
 	defer c.m.Unlock()
 	if _, exists := c.storage[dialogID]; !exists {
 		c.storage[dialogID] = dialogEntry{
-			expiresAt: expiresAt,
-			createdAt: createdAt,
-			carrier:   carrier,
-			uaType:    uaType,
-			callID:    callID,
+			expiresAt:     expiresAt,
+			createdAt:     createdAt,
+			carrier:       carrier,
+			uaType:        uaType,
+			sourceCountry: sourceCountry,
+			callID:        callID,
 		}
 	}
+}
+
+func (c *dialogs) HasActiveDialog(dialogID string) bool {
+	c.m.Lock()
+	defer c.m.Unlock()
+	_, exists := c.storage[dialogID]
+	return exists
+}
+
+func (c *dialogs) Refresh(dialogID string, expiresAt time.Time) bool {
+	c.m.Lock()
+	defer c.m.Unlock()
+	entry, exists := c.storage[dialogID]
+	if !exists {
+		return false
+	}
+	entry.expiresAt = expiresAt
+	c.storage[dialogID] = entry
+	return true
 }
 
 func (c *dialogs) Size() int {
@@ -80,15 +113,23 @@ func (c *dialogs) Size() int {
 	return len(c.storage)
 }
 
-func (c *dialogs) SizeByCarrierAndUA() map[string]map[string]int {
+func (c *dialogs) Counts() []LabeledCount {
 	c.m.Lock()
 	defer c.m.Unlock()
-	result := make(map[string]map[string]int)
+	type key struct{ carrier, uaType, sourceCountry string }
+	tmp := make(map[key]int)
 	for _, entry := range c.storage {
-		if result[entry.carrier] == nil {
-			result[entry.carrier] = make(map[string]int)
-		}
-		result[entry.carrier][entry.uaType]++
+		tmp[key{entry.carrier, entry.uaType, entry.sourceCountry}]++
+	}
+	result := make([]LabeledCount, 0, len(tmp))
+	for k, n := range tmp {
+		result = append(result, LabeledCount{
+			Labels: map[string]string{
+				"carrier": k.carrier, "ua_type": k.uaType,
+				"source_country": k.sourceCountry,
+			},
+			Count: n,
+		})
 	}
 	return result
 }
@@ -103,7 +144,8 @@ func (c *dialogs) Cleanup() []CleanupResult {
 			d := now.Sub(entry.createdAt)
 			if d > 0 {
 				results = append(results, CleanupResult{
-					Duration: d, Carrier: entry.carrier, UAType: entry.uaType, CallID: entry.callID,
+					Duration: d, Carrier: entry.carrier, UAType: entry.uaType,
+					SourceCountry: entry.sourceCountry, CallID: entry.callID,
 				})
 			}
 			delete(c.storage, id)

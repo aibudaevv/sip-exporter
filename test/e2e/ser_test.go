@@ -58,7 +58,10 @@ func TestSER_AllScenarios(t *testing.T) {
 
 			ser := getSER(t, env.endpoint)
 			t.Logf("SER = %.2f (want %.2f)", ser, tt.wantSER)
-			require.Equal(t, tt.wantSER, ser)
+			if tt.uacScenario != "uac_no_invite.xml" {
+				require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"))
+			}
+			require.InDelta(t, tt.wantSER, ser, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)
 		})
@@ -76,7 +79,7 @@ func TestSER_Mixed(t *testing.T) {
 
 	ser := getSER(t, env.endpoint)
 	t.Logf("SER = %.2f (want %.2f)", ser, 70.0)
-	require.Equal(t, 70.0, ser)
+	require.InDelta(t, 70.0, ser, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -93,7 +96,7 @@ func TestSER_Mixed3xx(t *testing.T) {
 
 	ser := getSER(t, env.endpoint)
 	t.Logf("SER = %.2f (want %.2f)", ser, 100.0)
-	require.Equal(t, 100.0, ser)
+	require.InDelta(t, 100.0, ser, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -135,7 +138,8 @@ func TestSER_WithCarrierConfig(t *testing.T) {
 
 			ser := env.getSERByCarrier(t)
 			t.Logf("SER{carrier=%q} = %.2f (want %.2f)", env.carrier, ser, tt.wantSER)
-			require.Equal(t, tt.wantSER, ser)
+			require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"))
+			require.InDelta(t, tt.wantSER, ser, ratioDelta)
 
 			env.waitForSessionsZeroByCarrier(t)
 		})
@@ -153,7 +157,7 @@ func TestSER_MixedWithCarrierConfig(t *testing.T) {
 
 	ser := env.getSERByCarrier(t)
 	t.Logf("SER{carrier=%q} = %.2f (want %.2f)", env.carrier, ser, 70.0)
-	require.Equal(t, 70.0, ser)
+	require.InDelta(t, 70.0, ser, ratioDelta)
 
 	env.waitForSessionsZeroByCarrier(t)
 }
@@ -170,8 +174,7 @@ func TestSER_ConcurrentRequests(t *testing.T) {
 
 	ser := getSER(t, env.endpoint)
 	t.Logf("SER = %.2f%%", ser)
-	require.Greater(t, ser, 0.0, "SER should be calculated")
-	require.LessOrEqual(t, ser, 100.0, "SER should not exceed 100%")
+	require.InDelta(t, 75.0, ser, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }

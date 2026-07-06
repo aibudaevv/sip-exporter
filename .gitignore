@@ -14,9 +14,11 @@ exporter.test
 # Load test results (per-run artifact, baseline.json is committed)
 test/e2e/load/load_result.json
 
+# Remote simulation harness (local-only, not committed)
+test/remote_test/
+
 # Session notes
 session*
 docs/superpowers/
-docs/habr-article.md
+docs/internalwiki/posts/habr-article.md
 docs/internalwiki/
-sip-exporter-ai/

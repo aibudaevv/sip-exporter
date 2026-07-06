@@ -5,6 +5,7 @@ package e2e
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -109,11 +110,18 @@ func TestSelfMonitoring_ActiveDialogs(t *testing.T) {
 
 	t.Run("gt_zero_during_active_calls", func(t *testing.T) {
 		env.restart(t)
-		runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 10, &env.testEnv)
 
-		dialogs := getMetric(t, env.endpoint, "sip_exporter_active_dialogs")
-		require.GreaterOrEqual(t, dialogs, 0.0, "active_dialogs should be >= 0")
+		sippDone := make(chan struct{})
+		go func() {
+			defer close(sippDone)
+			runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 50, &env.testEnv)
+		}()
 
+		require.Eventually(t, func() bool {
+			return getMetric(t, env.endpoint, "sip_exporter_active_dialogs") > 0
+		}, 30*time.Second, 100*time.Millisecond, "active_dialogs should be > 0 during active calls")
+
+		<-sippDone
 		waitForSessionsZero(t, env.endpoint)
 	})
 }

@@ -27,6 +27,7 @@ func TestTTR_SuccessfulCalls(t *testing.T) {
 	ttr := getTTR(t, env.endpoint)
 	t.Logf("TTR = %.2f ms", ttr)
 	require.Greater(t, ttr, 0.0, "TTR should be greater than 0 when 1xx responses are sent")
+	require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_ttr_count"), 0.0, "TTR histogram should have observations")
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -49,6 +50,7 @@ func TestTTR_BusyCalls(t *testing.T) {
 	ttr := getTTR(t, env.endpoint)
 	t.Logf("TTR = %.2f ms", ttr)
 	require.Greater(t, ttr, 0.0, "TTR should be measured even for rejected calls (100 Trying is sent)")
+	require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_ttr_count"), 0.0, "TTR histogram should have observations")
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -117,6 +119,7 @@ func TestTTR_ConcurrentCalls(t *testing.T) {
 	ttr := getTTR(t, env.endpoint)
 	t.Logf("TTR = %.2f ms (100 concurrent calls)", ttr)
 	require.Greater(t, ttr, 0.0, "TTR should be measured for concurrent calls")
+	require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_ttr_count"), 0.0, "TTR histogram should have observations")
 
 	waitForSessionsZero(t, env.endpoint)
 }
@@ -136,6 +139,7 @@ func TestTTR_MixedScenarios(t *testing.T) {
 	ttr := getTTR(t, env.endpoint)
 	t.Logf("TTR = %.2f ms (mixed)", ttr)
 	require.Greater(t, ttr, 0.0, "TTR should be measured for mixed scenarios")
+	require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_ttr_count"), 0.0, "TTR histogram should have observations")
 
 	waitForSessionsZero(t, env.endpoint)
 }

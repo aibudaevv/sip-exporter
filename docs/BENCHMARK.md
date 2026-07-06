@@ -11,8 +11,8 @@ Load testing results for sip-exporter, measuring packet capture reliability unde
 | Docker | 29.3.1 |
 | SIPp | pbertera/sipp:latest |
 | Interface | loopback (`lo`) |
-| Socket buffer | 4 MB (`SO_RCVBUF`) |
-| Go | 1.25.8 |
+| Socket buffer | 4 MB (`SO_RCVBUFFORCE`, falls back to `SO_RCVBUF` without `CAP_NET_ADMIN`) |
+| Go | 1.25.11 |
 
 ## Methodology
 
@@ -189,11 +189,11 @@ Go GC stop-the-world pauses measured at 2000 CPS (14,000 PPS). 85 GC cycles obse
 | P95 STW | 0.264 ms |
 | Max STW | 0.970 ms |
 
-Maximum STW pause is **< 1 ms**. With `SO_RCVBUF = 4 MB` (~420 ms buffer at 28K PPS), GC pauses are 400× smaller than the socket buffer capacity — packets are never lost due to GC.
+Maximum STW pause is **< 1 ms**. With `SO_RCVBUFFORCE = 4 MB` (~420 ms buffer at 28K PPS), GC pauses are 400× smaller than the socket buffer capacity — packets are never lost due to GC.
 
 ## Memory Per Dialog
 
-Memory overhead per active SIP dialog. Dialog map stores `map[string]time.Time` — dialog ID as key, expiration timestamp as value.
+Memory overhead per active SIP dialog. Dialog map stores `map[string]dialogEntry` — each entry holds `expiresAt`/`createdAt` timestamps plus label metadata (carrier, UA type, source country, Call-ID).
 
 | Active Dialogs | Total RAM | Delta from Baseline | Bytes/Dialog |
 |---------------|-----------|--------------------:|-------------:|
@@ -204,13 +204,13 @@ Memory overhead per active SIP dialog. Dialog map stores `map[string]time.Time` 
 | 1,627 | 14.9 MB | 5.0 MB | ~3 KB |
 | 4,064 | 12.5 MB | 2.5 MB | < 1 KB |
 
-Per-dialog overhead is within GC measurement noise. Even 4,000+ active dialogs add < 7 MB to total memory. The theoretical per-dialog cost is ~100-200 bytes (string key + time.Time value + map overhead), but container-level memory measurement includes Go runtime overhead that obscures per-entry costs.
+Per-dialog overhead is within GC measurement noise. Even 4,000+ active dialogs add < 7 MB to total memory. The theoretical per-dialog cost is ~112 bytes per `dialogEntry` (two `time.Time` + four `string` fields + map bucket overhead), but container-level memory measurement includes Go runtime overhead that obscures per-entry costs.
 
 **Practical conclusion:** dialog storage is negligible. Plan for ~10 MB base + 1-2 MB per 1,000 active dialogs as a conservative estimate.
 
 ## Memory Per RTP Stream
 
-Memory overhead per active RTP stream. Each stream stores a `StreamState` struct plus map entry, keyed by media endpoint IP:port + SSRC.
+Memory overhead per active RTP stream. Each stream stores a `StreamState` struct (jitter, loss, sequence state) wrapped in a `streamEntry` with correlation labels, keyed by media endpoint IP:port + SSRC.
 
 | Active Streams | Total RAM | Delta from Baseline | Bytes/Stream |
 |---------------|-----------|--------------------:|-------------:|
@@ -220,7 +220,7 @@ Memory overhead per active RTP stream. Each stream stores a `StreamState` struct
 | 413 | 14.7 MB | 7.3 MB | ~19 KB |
 | 1,030 | 12.2 MB | 4.9 MB | ~5 KB |
 
-Same pattern as dialogs: container-level memory measurement includes Go runtime overhead that dominates at low counts. The theoretical per-stream cost is ~80-130 bytes (StreamState struct + map overhead). Streams expire after the configured TTL (default 30s), bounding memory under SSRC reuse.
+Same pattern as dialogs: container-level memory measurement includes Go runtime overhead that dominates at low counts. The theoretical per-stream cost is ~96 bytes for the `StreamState` struct plus ~130 bytes for the `streamEntry` wrapper and map overhead. Streams expire after the configured TTL (default 30s), bounding memory under SSRC reuse.
 
 **Practical conclusion:** RTP stream storage is negligible. Even 1,000+ active streams add < 7 MB to total memory.
 
@@ -238,11 +238,11 @@ Per-packet performance of the RTP processing pipeline (header parse + media trac
 
 At ~210 ns/packet end-to-end (parse + observe), the theoretical capacity is ~4.7M RTP pps on a single core. In practice, the SIP/RTP shared channel (10K buffer) and the 1-second snapshot loop are the bottlenecks, not the per-packet cost.
 
-With SIP-vs-RTP channel priority (S1-9.5: non-blocking RTP send), RTP packets are dropped under extreme load without affecting SIP processing.
+With SIP-vs-RTP channel priority (RTP uses non-blocking send), RTP packets are dropped under extreme load without affecting SIP processing.
 
 ### Memory Per RTP Stream
 
-Each active RTP stream stores a `StreamState` struct (~80 bytes) plus map overhead. The Snapshot call allocates a `[]StreamStats` slice proportional to the number of active streams (128 KB for 1000 streams — one allocation).
+Each active RTP stream stores a `StreamState` struct (~96 bytes) plus `streamEntry` wrapper and map overhead. The Snapshot call allocates a `[]StreamStats` slice proportional to the number of active streams (128 KB for 1000 streams — one allocation).
 
 | Active Streams | Snapshot Allocation | Per-Stream Cost |
 |---------------|--------------------:|----------------:|
@@ -251,6 +251,50 @@ Each active RTP stream stores a `StreamState` struct (~80 bytes) plus map overhe
 | 10,000 | ~1.3 MB | ~128 bytes |
 
 Streams expire after the configured TTL (default 30s, `SIP_EXPORTER_RTP_STREAM_TTL`), bounding memory under SSRC reuse.
+
+## Geo-Enrichment & Label Resolution Micro-Benchmarks
+
+Per-packet cost of label resolution (`carrier`, `ua_type`, `source_country`, `destination_country`, `caller_host`, `called_host`) including the MaxMind GeoIP lookup. Measured with `go test -bench` on the same i7-8665U (8 logical cores), Go 1.25.11, 3 runs, using the MaxMind GeoLite2-Country **test** database (`test/e2e/data/GeoIP2-Country-Test.mmdb`).
+
+### Packet parse + label resolution (`BenchmarkParseRawPacket_INVITE_Labels`)
+
+Full L2 (Ethernet) → L3 (IPv4) → L4 (UDP) → SIP parse of an INVITE plus label resolution, varying the enrichment path:
+
+| Scenario | Time | Allocs | Memory | Description |
+|----------|------|--------|--------|-------------|
+| `NoResolver` | ~2.6 µs/op | 11 | 1024 B | Baseline: no carrier, no GeoIP — `source_country="unknown"` |
+| `CarrierCountry` | ~2.2 µs/op | 13 | 1056 B | `carrier.country="RU"` set — source resolved from config, no DB lookup |
+| `GeoIPLookup` | ~3.4 µs/op | 17 | 1104 B | GeoIP DB lookup of a public IP (`81.2.69.142` → GB) |
+| `CarrierCountry_GeoIPLoaded` | ~2.4 µs/op | 13 | 1056 B | `carrier.country` set **and** DB loaded — carrier wins, lookup skipped |
+
+**GeoIP lookup overhead:** ~1.0 µs and +4 allocs per packet when a lookup is actually performed — compare `GeoIPLookup` vs `CarrierCountry_GeoIPLoaded`, which run the identical pipeline and differ only in whether the DB is queried. When `carrier.country` is set, GeoIP is never consulted, so enabling the DB adds **zero** cost for those carriers.
+
+### Prometheus counter cost (`BenchmarkRequest_*`)
+
+Steady-state cost of incrementing the raw INVITE / REGISTER counters (label-value tuples are cached by Prometheus after first use):
+
+| Benchmark | Labels | Time | Allocs | Description |
+|-----------|--------|------|--------|-------------|
+| `BenchmarkRequest_INVITE` | 6 | ~310 ns/op | 0 | `invite_total` (carrier, ua_type, source_country, destination_country, caller_host, called_host) |
+| `BenchmarkRequest_REGISTER` | 3 | ~126 ns/op | 0 | `register_total` (carrier, ua_type, source_country) |
+| `BenchmarkInvite200OK` | 6 | ~188 ns/op | 0 | `invite_200_total` |
+
+**Zero allocations** in steady state — Prometheus caches label-value entries. The 3 extra INVITE labels add ~50 ns over the 3-label REGISTER path. At 2,000 CPS this is < 0.1% of one core: the Prometheus layer is not a bottleneck.
+
+### Throughput Estimate
+
+At ~3.4 µs per INVITE (full parse + GeoIP lookup), the exporter's parse/label pipeline alone handles ~290K INVITE/s on a single core. At the tested maximum of 2,000 CPS, label resolution consumes < 1% of one core; enabling GeoIP adds ~0.2% CPU over the `carrier.country` fast path. The real bottlenecks remain the SIP/RTP shared channel and the 1-second snapshot loop, not label resolution.
+
+### How to run
+
+```bash
+# Packet parse + GeoIP lookup (skips automatically if the test DB is absent)
+go test -run='^$' -bench='BenchmarkParseRawPacket_INVITE_Labels' -benchmem ./internal/exporter/
+
+# Prometheus counter cost
+go test -run='^$' -bench='BenchmarkRequest_INVITE|BenchmarkRequest_REGISTER|BenchmarkInvite200OK' \
+  -benchmem ./internal/service/
+```
 
 ## Minimum System Requirements
 

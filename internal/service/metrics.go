@@ -15,8 +15,6 @@ import (
 	"github.com/aibudaevv/sip-exporter/internal/vq"
 )
 
-const compositeKeyParts = 2
-
 type (
 	carrierAtomicCounters struct {
 		inviteTotal            atomic.Int64
@@ -27,31 +25,45 @@ type (
 		sessionCompletedTotal  atomic.Int64
 	}
 
+	counterKey struct {
+		Carrier string
+		UAType  string
+		Country string
+	}
+
+	LabeledCount struct {
+		Labels map[string]string
+		Count  int
+	}
+
 	metrics struct {
 		systemErrorTotal prometheus.Counter
 		sipPacketsTotal  prometheus.Counter
 
-		requestInviteTotal    *prometheus.CounterVec
-		requestACKTotal       *prometheus.CounterVec
-		requestByeTotal       *prometheus.CounterVec
-		requestCancelTotal    *prometheus.CounterVec
-		requestOptionsTotal   *prometheus.CounterVec
-		requestRegisterTotal  *prometheus.CounterVec
-		requestUpdateTotal    *prometheus.CounterVec
-		requestInfoTotal      *prometheus.CounterVec
-		requestReferTotal     *prometheus.CounterVec
-		requestSubscribeTotal *prometheus.CounterVec
-		requestNotifyTotal    *prometheus.CounterVec
-		requestPrackTotal     *prometheus.CounterVec
-		requestPublishTotal   *prometheus.CounterVec
-		requestMessageTotal   *prometheus.CounterVec
+		requestInviteTotal      *prometheus.CounterVec
+		requestReinviteTotal    *prometheus.CounterVec
+		requestInvite200OKTotal *prometheus.CounterVec
+		requestACKTotal         *prometheus.CounterVec
+		requestByeTotal         *prometheus.CounterVec
+		requestCancelTotal      *prometheus.CounterVec
+		requestOptionsTotal     *prometheus.CounterVec
+		requestRegisterTotal    *prometheus.CounterVec
+		requestUpdateTotal      *prometheus.CounterVec
+		requestInfoTotal        *prometheus.CounterVec
+		requestReferTotal       *prometheus.CounterVec
+		requestSubscribeTotal   *prometheus.CounterVec
+		requestNotifyTotal      *prometheus.CounterVec
+		requestPrackTotal       *prometheus.CounterVec
+		requestPublishTotal     *prometheus.CounterVec
+		requestMessageTotal     *prometheus.CounterVec
 
 		statusCounters map[string]*prometheus.CounterVec
 
 		sdc *prometheus.CounterVec
 		iss *prometheus.CounterVec
 
-		sessions *prometheus.GaugeVec
+		sessions        *prometheus.GaugeVec
+		prevSessionKeys map[string][]string
 
 		rrd *prometheus.HistogramVec
 		spd *prometheus.HistogramVec
@@ -74,12 +86,14 @@ type (
 		vqRCQ     *prometheus.HistogramVec
 		vqRERL    *prometheus.HistogramVec
 		vqReports *prometheus.CounterVec
+		vqTable   []vqTableEntry
 
 		rtpPackets       *prometheus.CounterVec
 		rtpLost          *prometheus.CounterVec
 		rtpJitter        *prometheus.HistogramVec
 		rtpMOS           *prometheus.HistogramVec
 		rtpActiveStreams *prometheus.GaugeVec
+		prevRTPKeys      map[string][]string
 
 		carrierCounters sync.Map
 
@@ -93,25 +107,26 @@ type (
 	}
 
 	Metricser interface {
-		Request(carrier string, uaType string, in []byte)
-		Response(carrier string, uaType string, in []byte, isInviteResponse bool)
-		ResponseWithMetrics(carrier string, uaType string, status []byte, isInviteResponse, is200OK bool)
-		Invite200OK(carrier string, uaType string)
-		SessionCompleted(carrier string, uaType string)
-		UpdateRRD(carrier string, uaType string, delayMs float64)
-		UpdateSPD(carrier string, uaType string, duration time.Duration)
-		UpdateTTR(carrier string, uaType string, delayMs float64)
-		UpdatePDD(carrier string, uaType string, delayMs float64)
-		UpdateORD(carrier string, uaType string, delayMs float64)
-		UpdateLRD(carrier string, uaType string, delayMs float64)
-		UpdateSession(carrier string, uaType string, size int)
-		UpdateSessionsByCarrierAndUA(counts map[string]map[string]int)
-		UpdateVQReport(carrier string, uaType string, report *vq.SessionReport)
-		UpdateRTPPackets(carrier string, uaType string, codec string)
-		UpdateRTPLoss(carrier string, uaType string, codec string, lost uint64)
-		UpdateRTPJitter(carrier string, uaType string, codec string, jitterMs float64)
-		UpdateRTPMOS(carrier string, uaType string, codec string, mos float64)
-		UpdateRTPActiveStreams(counts map[string]map[string]map[string]int)
+		Request(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost string, in []byte)
+		Reinvite(carrier, uaType, sourceCountry string)
+		Response(carrier, uaType, sourceCountry string, in []byte, isInviteResponse bool)
+		ResponseWithMetrics(carrier, uaType, sourceCountry string, status []byte, isInviteResponse, is200OK bool)
+		Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost string)
+		SessionCompleted(carrier, uaType, sourceCountry string)
+		UpdateRRD(carrier, uaType, sourceCountry string, delayMs float64)
+		UpdateSPD(carrier, uaType, sourceCountry string, duration time.Duration)
+		UpdateTTR(carrier, uaType, sourceCountry string, delayMs float64)
+		UpdatePDD(carrier, uaType, sourceCountry string, delayMs float64)
+		UpdateORD(carrier, uaType, sourceCountry string, delayMs float64)
+		UpdateLRD(carrier, uaType, sourceCountry string, delayMs float64)
+		UpdateSession(carrier, uaType, sourceCountry string, size int)
+		UpdateSessions(counts []LabeledCount)
+		UpdateVQReport(carrier, uaType, sourceCountry string, report *vq.SessionReport)
+		UpdateRTPPackets(carrier, uaType, codec, sourceCountry string)
+		UpdateRTPLoss(carrier, uaType, codec, sourceCountry string, lost uint64)
+		UpdateRTPJitter(carrier, uaType, codec, sourceCountry string, jitterMs float64)
+		UpdateRTPMOS(carrier, uaType, codec, sourceCountry string, mos float64)
+		UpdateRTPActiveStreams(counts []LabeledCount)
 		SystemError()
 		ParseError(errorType string)
 		SocketStats(received, dropped uint32)
@@ -126,7 +141,21 @@ type (
 		m      *metrics
 		calcFn func(c *carrierAtomicCounters) float64
 	}
+
+	vqTableEntry struct {
+		key  string
+		hist *prometheus.HistogramVec
+		val  func(*vq.SessionReport) float64
+	}
 )
+
+func (counterKey) labelNames() []string {
+	return []string{"carrier", "ua_type", "source_country"}
+}
+
+func (k counterKey) labelValues() []string {
+	return []string{k.Carrier, k.UAType, k.Country}
+}
 
 func (rc *ratioCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- rc.desc
@@ -134,22 +163,16 @@ func (rc *ratioCollector) Describe(ch chan<- *prometheus.Desc) {
 
 func (rc *ratioCollector) Collect(ch chan<- prometheus.Metric) {
 	rc.m.carrierCounters.Range(func(key, value any) bool {
-		keyStr, ok := key.(string)
+		k, ok := key.(counterKey)
 		if !ok {
 			return true
-		}
-		parts := strings.SplitN(keyStr, "\x00", compositeKeyParts)
-		carrier := parts[0]
-		uaType := "other"
-		if len(parts) == compositeKeyParts {
-			uaType = parts[1]
 		}
 		counters, ok := value.(*carrierAtomicCounters)
 		if !ok {
 			return true
 		}
 		val := rc.calcFn(counters)
-		ch <- prometheus.MustNewConstMetric(rc.desc, prometheus.GaugeValue, val, carrier, uaType)
+		ch <- prometheus.MustNewConstMetric(rc.desc, prometheus.GaugeValue, val, k.labelValues()...)
 		return true
 	})
 }
@@ -172,6 +195,7 @@ func newMetricserWithRegistry(reg *prometheus.Registry) Metricser {
 	m.initStatusCounters(reg)
 	m.initSessionMetrics(reg)
 	m.initHistograms(reg)
+	m.initVQHistograms(reg)
 	registerRatioCollectors(m, reg)
 	m.initRTPMetrics(reg)
 	m.initSelfMetrics(reg)
@@ -179,10 +203,20 @@ func newMetricserWithRegistry(reg *prometheus.Registry) Metricser {
 }
 
 func (m *metrics) initRequestCounters(reg *prometheus.Registry) {
-	cl := []string{"carrier", "ua_type"}
+	cl := []string{"carrier", "ua_type", "source_country"}
+	clInvite := []string{
+		"carrier", "ua_type", "source_country",
+		"destination_country", "caller_host", "called_host",
+	}
 	m.requestInviteTotal = newCounterVecWithRegistry(
 		"sip_exporter_invite_total",
-		"Total number of INVITE requests", cl, reg)
+		"Total number of INVITE requests", clInvite, reg)
+	m.requestReinviteTotal = newCounterVecWithRegistry(
+		"sip_exporter_reinvite_total",
+		"Total number of re-INVITE requests (INVITE within an existing dialog)", cl, reg)
+	m.requestInvite200OKTotal = newCounterVecWithRegistry(
+		"sip_exporter_invite_200_total",
+		"Total number of 200 OK responses to INVITE", clInvite, reg)
 	m.requestACKTotal = newCounterVecWithRegistry(
 		"sip_exporter_ack_total",
 		"Total number of ACK requests", cl, reg)
@@ -225,7 +259,7 @@ func (m *metrics) initRequestCounters(reg *prometheus.Registry) {
 }
 
 func (m *metrics) initStatusCounters(reg *prometheus.Registry) {
-	cl := []string{"carrier", "ua_type"}
+	cl := []string{"carrier", "ua_type", "source_country"}
 	statusCodes := []struct {
 		code string
 		help string
@@ -271,7 +305,7 @@ func (m *metrics) initStatusCounters(reg *prometheus.Registry) {
 }
 
 func (m *metrics) initSessionMetrics(reg *prometheus.Registry) {
-	cl := []string{"carrier", "ua_type"}
+	cl := []string{"carrier", "ua_type", "source_country"}
 	m.sdc = newCounterVecWithRegistry(
 		"sip_exporter_sdc_total",
 		"Total number of completed SIP sessions", cl, reg)
@@ -285,11 +319,12 @@ func (m *metrics) initSessionMetrics(reg *prometheus.Registry) {
 }
 
 func (m *metrics) initHistograms(reg *prometheus.Registry) {
-	cl := []string{"carrier", "ua_type"}
+	msBuckets := []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000}
+	cl := []string{"carrier", "ua_type", "source_country"}
 	m.rrd = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_rrd",
 		Help:    "Registration Request Delay in milliseconds (RFC 6076)",
-		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
+		Buckets: msBuckets,
 	}, cl, reg)
 	m.spd = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_spd",
@@ -299,96 +334,123 @@ func (m *metrics) initHistograms(reg *prometheus.Registry) {
 	m.ttr = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_ttr",
 		Help:    "Time to First Response in milliseconds (time from INVITE to first provisional 1xx response)",
-		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
+		Buckets: msBuckets,
 	}, cl, reg)
 	m.pdd = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_pdd",
 		Help:    "Post Dial Delay in milliseconds (time from INVITE to 180 Ringing response)",
-		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
+		Buckets: msBuckets,
 	}, cl, reg)
 	m.ord = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_ord",
 		Help:    "OPTIONS Response Delay in milliseconds (RFC 3261 §11.1)",
-		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
+		Buckets: msBuckets,
 	}, cl, reg)
 	m.lrd = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_lrd",
 		Help:    "Location Registration Delay in milliseconds: delay between REGISTER and 3xx redirect response",
-		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
+		Buckets: msBuckets,
 	}, cl, reg)
+}
+
+func (m *metrics) initVQHistograms(reg *prometheus.Registry) {
+	msBuckets := []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000}
+	percentBuckets := []float64{0, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100}
+	jitterBuckets := []float64{0.1, 0.5, 1, 5, 10, 20, 50, 100, 200, 500}
+	mosBuckets := []float64{1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0}
+	rFactorBuckets := []float64{0, 10, 20, 30, 50, 60, 70, 80, 90, 100, 120}
+	rerlBuckets := []float64{0, 5, 10, 15, 20, 30, 40, 50, 60, 80, 100}
+	cl := []string{"carrier", "ua_type", "source_country"}
 	m.vqNLR = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_vq_nlr_percent",
 		Help:    "Voice Quality Network Packet Loss Rate percentage (RFC 6035)",
-		Buckets: []float64{0, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100},
+		Buckets: percentBuckets,
 	}, cl, reg)
 	m.vqJDR = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_vq_jdr_percent",
 		Help:    "Voice Quality Jitter Buffer Discard Rate percentage (RFC 6035)",
-		Buckets: []float64{0, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100},
+		Buckets: percentBuckets,
 	}, cl, reg)
 	m.vqBLD = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_vq_bld_percent",
 		Help:    "Voice Quality Burst Loss Density percentage (RFC 6035)",
-		Buckets: []float64{0, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100},
+		Buckets: percentBuckets,
 	}, cl, reg)
 	m.vqGLD = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_vq_gld_percent",
 		Help:    "Voice Quality Gap Loss Density percentage (RFC 6035)",
-		Buckets: []float64{0, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100},
+		Buckets: percentBuckets,
 	}, cl, reg)
 	m.vqRTD = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_vq_rtd_ms",
 		Help:    "Voice Quality Round Trip Delay in milliseconds (RFC 6035)",
-		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
+		Buckets: msBuckets,
 	}, cl, reg)
 	m.vqESD = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_vq_esd_ms",
 		Help:    "Voice Quality End System Delay in milliseconds (RFC 6035)",
-		Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
+		Buckets: msBuckets,
 	}, cl, reg)
 	m.vqIAJ = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_vq_iaj_ms",
 		Help:    "Voice Quality Interarrival Jitter in milliseconds (RFC 6035)",
-		Buckets: []float64{0.1, 0.5, 1, 5, 10, 20, 50, 100, 200, 500},
+		Buckets: jitterBuckets,
 	}, cl, reg)
 	m.vqMAJ = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_vq_maj_ms",
 		Help:    "Voice Quality Mean Absolute Jitter in milliseconds (RFC 6035)",
-		Buckets: []float64{0.1, 0.5, 1, 5, 10, 20, 50, 100, 200, 500},
+		Buckets: jitterBuckets,
 	}, cl, reg)
 	m.vqMOSLQ = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_vq_mos_lq",
 		Help:    "Voice Quality MOS Listening Quality score 0.0-4.9 (RFC 6035)",
-		Buckets: []float64{1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0},
+		Buckets: mosBuckets,
 	}, cl, reg)
 	m.vqMOSCQ = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_vq_mos_cq",
 		Help:    "Voice Quality MOS Conversational Quality score 0.0-4.9 (RFC 6035)",
-		Buckets: []float64{1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0},
+		Buckets: mosBuckets,
 	}, cl, reg)
 	m.vqRLQ = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_vq_rlq",
 		Help:    "Voice Quality R-factor Listening Quality 0-120 (RFC 6035)",
-		Buckets: []float64{0, 10, 20, 30, 50, 60, 70, 80, 90, 100, 120},
+		Buckets: rFactorBuckets,
 	}, cl, reg)
 	m.vqRCQ = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_vq_rcq",
 		Help:    "Voice Quality R-factor Conversational Quality 0-120 (RFC 6035)",
-		Buckets: []float64{0, 10, 20, 30, 50, 60, 70, 80, 90, 100, 120},
+		Buckets: rFactorBuckets,
 	}, cl, reg)
 	m.vqRERL = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_vq_rerl_db",
 		Help:    "Voice Quality Residual Echo Return Loss in dB (RFC 6035)",
-		Buckets: []float64{0, 5, 10, 15, 20, 30, 40, 50, 60, 80, 100},
+		Buckets: rerlBuckets,
 	}, cl, reg)
 	m.vqReports = newCounterVecWithRegistry(
 		"sip_exporter_vq_reports_total",
 		"Total number of Voice Quality session reports processed (RFC 6035)",
 		cl, reg)
+	m.vqTable = []vqTableEntry{
+		{"NLR", m.vqNLR, func(r *vq.SessionReport) float64 { return r.NLR }},
+		{"JDR", m.vqJDR, func(r *vq.SessionReport) float64 { return r.JDR }},
+		{"BLD", m.vqBLD, func(r *vq.SessionReport) float64 { return r.BLD }},
+		{"GLD", m.vqGLD, func(r *vq.SessionReport) float64 { return r.GLD }},
+		{"RTD", m.vqRTD, func(r *vq.SessionReport) float64 { return r.RTD }},
+		{"ESD", m.vqESD, func(r *vq.SessionReport) float64 { return r.ESD }},
+		{"IAJ", m.vqIAJ, func(r *vq.SessionReport) float64 { return r.IAJ }},
+		{"MAJ", m.vqMAJ, func(r *vq.SessionReport) float64 { return r.MAJ }},
+		{"MOSLQ", m.vqMOSLQ, func(r *vq.SessionReport) float64 { return r.MOSLQ }},
+		{"MOSCQ", m.vqMOSCQ, func(r *vq.SessionReport) float64 { return r.MOSCQ }},
+		{"RLQ", m.vqRLQ, func(r *vq.SessionReport) float64 { return r.RLQ }},
+		{"RCQ", m.vqRCQ, func(r *vq.SessionReport) float64 { return r.RCQ }},
+		{"RERL", m.vqRERL, func(r *vq.SessionReport) float64 { return r.RERL }},
+	}
 }
 
 func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
-	rl := []string{"carrier", "ua_type", "codec"}
+	jitterBuckets := []float64{0.1, 0.5, 1, 5, 10, 20, 50, 100, 200, 500}
+	mosBuckets := []float64{1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0}
+	rl := []string{"carrier", "ua_type", "codec", "source_country"}
 	m.rtpPackets = newCounterVecWithRegistry(
 		"sip_exporter_rtp_packets_total",
 		"Total number of RTP packets observed (correlated with SIP dialogs)", rl, reg)
@@ -398,12 +460,12 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 	m.rtpJitter = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_rtp_jitter_milliseconds",
 		Help:    "RTP interarrival jitter in milliseconds (RFC 3550 A.8)",
-		Buckets: []float64{0.1, 0.5, 1, 5, 10, 20, 50, 100, 200, 500},
+		Buckets: jitterBuckets,
 	}, rl, reg)
 	m.rtpMOS = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_rtp_mos_score",
 		Help:    "RTP MOS-LQ score 1.0-4.9 estimated via ITU-T G.107 E-model",
-		Buckets: []float64{1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0},
+		Buckets: mosBuckets,
 	}, rl, reg)
 	m.rtpActiveStreams = newGaugeVecWithRegistry(
 		"sip_exporter_rtp_active_streams",
@@ -546,7 +608,7 @@ func registerRatioCollector(
 	calcFn func(c *carrierAtomicCounters) float64,
 ) {
 	rc := &ratioCollector{
-		desc:   prometheus.NewDesc(name, help, []string{"carrier", "ua_type"}, nil),
+		desc:   prometheus.NewDesc(name, help, counterKey{}.labelNames(), nil),
 		m:      m,
 		calcFn: calcFn,
 	}
@@ -557,204 +619,199 @@ func registerRatioCollector(
 	}
 }
 
-func (m *metrics) Request(carrier string, uaType string, in []byte) {
+func (m *metrics) Request(
+	carrier, uaType, sourceCountry, destinationCountry,
+	callerHost, calledHost string, in []byte,
+) {
 	defer m.sipPacketsTotal.Inc()
 
 	switch {
 	case bytes.Equal(in, []byte("PUBLISH")):
-		m.requestPublishTotal.WithLabelValues(carrier, uaType).Inc()
+		m.requestPublishTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 	case bytes.Equal(in, []byte("PRACK")):
-		m.requestPrackTotal.WithLabelValues(carrier, uaType).Inc()
+		m.requestPrackTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 	case bytes.Equal(in, []byte("NOTIFY")):
-		m.requestNotifyTotal.WithLabelValues(carrier, uaType).Inc()
+		m.requestNotifyTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 	case bytes.Equal(in, []byte("SUBSCRIBE")):
-		m.requestSubscribeTotal.WithLabelValues(carrier, uaType).Inc()
+		m.requestSubscribeTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 	case bytes.Equal(in, []byte("REFER")):
-		m.requestReferTotal.WithLabelValues(carrier, uaType).Inc()
+		m.requestReferTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 	case bytes.Equal(in, []byte("INFO")):
-		m.requestInfoTotal.WithLabelValues(carrier, uaType).Inc()
+		m.requestInfoTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 	case bytes.Equal(in, []byte("UPDATE")):
-		m.requestUpdateTotal.WithLabelValues(carrier, uaType).Inc()
+		m.requestUpdateTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 	case bytes.Equal(in, []byte("REGISTER")):
-		m.requestRegisterTotal.WithLabelValues(carrier, uaType).Inc()
+		m.requestRegisterTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 	case bytes.Equal(in, []byte("OPTIONS")):
-		m.requestOptionsTotal.WithLabelValues(carrier, uaType).Inc()
+		m.requestOptionsTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 	case bytes.Equal(in, []byte("CANCEL")):
-		m.requestCancelTotal.WithLabelValues(carrier, uaType).Inc()
+		m.requestCancelTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 	case bytes.Equal(in, []byte("BYE")):
-		m.requestByeTotal.WithLabelValues(carrier, uaType).Inc()
+		m.requestByeTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 	case bytes.Equal(in, []byte("ACK")):
-		m.requestACKTotal.WithLabelValues(carrier, uaType).Inc()
+		m.requestACKTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 	case bytes.Equal(in, []byte("INVITE")):
-		m.requestInviteTotal.WithLabelValues(carrier, uaType).Inc()
-		m.getOrCreateCarrierCounters(carrier, uaType).inviteTotal.Add(1)
+		m.requestInviteTotal.WithLabelValues(
+			carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost,
+		).Inc()
+		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).inviteTotal.Add(1)
 	case bytes.Equal(in, []byte("MESSAGE")):
-		m.requestMessageTotal.WithLabelValues(carrier, uaType).Inc()
+		m.requestMessageTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 	default:
 		zap.L().Warn("unknown request", zap.ByteString("in", in))
 	}
 }
 
-func (m *metrics) Response(carrier string, uaType string, in []byte, isInviteResponse bool) {
+func (m *metrics) Reinvite(carrier, uaType, sourceCountry string) {
+	defer m.sipPacketsTotal.Inc()
+	m.requestReinviteTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+}
+
+func (m *metrics) Response(carrier, uaType, sourceCountry string, in []byte, isInviteResponse bool) {
 	defer m.sipPacketsTotal.Inc()
 
-	m.incrementStatusCodeCounter(carrier, uaType, in)
+	m.incrementStatusCodeCounter(carrier, uaType, sourceCountry, in)
 
 	if isInviteResponse && len(in) == 3 && in[0] == '3' {
-		m.getOrCreateCarrierCounters(carrier, uaType).invite3xxTotal.Add(1)
+		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).invite3xxTotal.Add(1)
 	}
 
 	if isInviteResponse && isEffectiveResponse(in) {
-		m.getOrCreateCarrierCounters(carrier, uaType).inviteEffectiveTotal.Add(1)
+		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).inviteEffectiveTotal.Add(1)
 	}
 
 	if isInviteResponse && isIneffectiveResponse(in) {
-		m.getOrCreateCarrierCounters(carrier, uaType).inviteIneffectiveTotal.Add(1)
-		m.iss.WithLabelValues(carrier, uaType).Inc()
+		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).inviteIneffectiveTotal.Add(1)
+		m.iss.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 	}
 }
 
-func (m *metrics) incrementStatusCodeCounter(carrier string, uaType string, in []byte) {
+func (m *metrics) incrementStatusCodeCounter(carrier, uaType, sourceCountry string, in []byte) {
 	counter, ok := m.statusCounters[string(in)]
 	if ok {
-		counter.WithLabelValues(carrier, uaType).Inc()
+		counter.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 		return
 	}
 	zap.L().Warn("unknown response", zap.ByteString("in", in))
 }
 
-func (m *metrics) ResponseWithMetrics(carrier string, uaType string, status []byte, isInviteResponse, is200OK bool) {
-	m.Response(carrier, uaType, status, isInviteResponse)
+func (m *metrics) ResponseWithMetrics(
+	carrier, uaType, sourceCountry string,
+	status []byte, isInviteResponse, is200OK bool,
+) {
+	m.Response(carrier, uaType, sourceCountry, status, isInviteResponse)
 
 	if isInviteResponse && is200OK {
-		m.getOrCreateCarrierCounters(carrier, uaType).invite200OKTotal.Add(1)
+		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).invite200OKTotal.Add(1)
 	}
 }
 
-func (m *metrics) Invite200OK(carrier string, uaType string) {
-	m.getOrCreateCarrierCounters(carrier, uaType).invite200OKTotal.Add(1)
+func (m *metrics) Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost string) {
+	m.requestInvite200OKTotal.WithLabelValues(
+		carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost,
+	).Inc()
 }
 
-func (m *metrics) SessionCompleted(carrier string, uaType string) {
-	m.getOrCreateCarrierCounters(carrier, uaType).sessionCompletedTotal.Add(1)
-	m.sdc.WithLabelValues(carrier, uaType).Inc()
+func (m *metrics) SessionCompleted(carrier, uaType, sourceCountry string) {
+	m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).sessionCompletedTotal.Add(1)
+	m.sdc.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 }
 
-func (m *metrics) UpdateSPD(carrier string, uaType string, duration time.Duration) {
+func (m *metrics) UpdateSPD(carrier, uaType, sourceCountry string, duration time.Duration) {
 	if duration < 0 {
 		return
 	}
-	m.spd.WithLabelValues(carrier, uaType).Observe(duration.Seconds())
+	m.spd.WithLabelValues(carrier, uaType, sourceCountry).Observe(duration.Seconds())
 }
 
-func (m *metrics) UpdateRRD(carrier string, uaType string, delayMs float64) {
-	m.rrd.WithLabelValues(carrier, uaType).Observe(delayMs)
+func (m *metrics) UpdateRRD(carrier, uaType, sourceCountry string, delayMs float64) {
+	m.rrd.WithLabelValues(carrier, uaType, sourceCountry).Observe(delayMs)
 }
 
-func (m *metrics) UpdateTTR(carrier string, uaType string, delayMs float64) {
-	m.ttr.WithLabelValues(carrier, uaType).Observe(delayMs)
+func (m *metrics) UpdateTTR(carrier, uaType, sourceCountry string, delayMs float64) {
+	m.ttr.WithLabelValues(carrier, uaType, sourceCountry).Observe(delayMs)
 }
 
-func (m *metrics) UpdatePDD(carrier string, uaType string, delayMs float64) {
-	m.pdd.WithLabelValues(carrier, uaType).Observe(delayMs)
+func (m *metrics) UpdatePDD(carrier, uaType, sourceCountry string, delayMs float64) {
+	m.pdd.WithLabelValues(carrier, uaType, sourceCountry).Observe(delayMs)
 }
 
-func (m *metrics) UpdateORD(carrier string, uaType string, delayMs float64) {
-	m.ord.WithLabelValues(carrier, uaType).Observe(delayMs)
+func (m *metrics) UpdateORD(carrier, uaType, sourceCountry string, delayMs float64) {
+	m.ord.WithLabelValues(carrier, uaType, sourceCountry).Observe(delayMs)
 }
 
-func (m *metrics) UpdateLRD(carrier string, uaType string, delayMs float64) {
-	m.lrd.WithLabelValues(carrier, uaType).Observe(delayMs)
+func (m *metrics) UpdateLRD(carrier, uaType, sourceCountry string, delayMs float64) {
+	m.lrd.WithLabelValues(carrier, uaType, sourceCountry).Observe(delayMs)
 }
 
-func (m *metrics) UpdateSession(carrier string, uaType string, size int) {
-	m.sessions.WithLabelValues(carrier, uaType).Set(float64(size))
+func (m *metrics) UpdateSession(carrier, uaType, sourceCountry string, size int) {
+	m.sessions.WithLabelValues(carrier, uaType, sourceCountry).Set(float64(size))
 }
 
-func (m *metrics) UpdateSessionsByCarrierAndUA(counts map[string]map[string]int) {
-	m.sessions.Reset()
-	for carrier, uaCounts := range counts {
-		for uaType, count := range uaCounts {
-			m.sessions.WithLabelValues(carrier, uaType).Set(float64(count))
+func setGaugeFromCounts(
+	gv *prometheus.GaugeVec,
+	prevKeys *map[string][]string,
+	counts []LabeledCount,
+	labelNames []string,
+) {
+	current := make(map[string][]string, len(counts))
+	for _, lc := range counts {
+		vals := make([]string, len(labelNames))
+		for i, name := range labelNames {
+			vals[i] = lc.Labels[name]
+		}
+		key := strings.Join(vals, "\x00")
+		current[key] = vals
+		gv.WithLabelValues(vals...).Set(float64(lc.Count))
+	}
+	for key, vals := range *prevKeys {
+		if _, ok := current[key]; !ok {
+			gv.WithLabelValues(vals...).Set(0)
 		}
 	}
+	*prevKeys = current
+}
+
+func (m *metrics) UpdateSessions(counts []LabeledCount) {
+	setGaugeFromCounts(m.sessions, &m.prevSessionKeys, counts,
+		[]string{"carrier", "ua_type", "source_country"})
 }
 
 func (m *metrics) SystemError() {
 	m.systemErrorTotal.Inc()
 }
 
-func (m *metrics) UpdateVQReport(carrier string, uaType string, report *vq.SessionReport) {
-	if report.Present["NLR"] {
-		m.vqNLR.WithLabelValues(carrier, uaType).Observe(report.NLR)
+func (m *metrics) UpdateVQReport(carrier, uaType, sourceCountry string, report *vq.SessionReport) {
+	for _, vm := range m.vqTable {
+		if report.Present[vm.key] {
+			vm.hist.WithLabelValues(carrier, uaType, sourceCountry).Observe(vm.val(report))
+		}
 	}
-	if report.Present["JDR"] {
-		m.vqJDR.WithLabelValues(carrier, uaType).Observe(report.JDR)
-	}
-	if report.Present["BLD"] {
-		m.vqBLD.WithLabelValues(carrier, uaType).Observe(report.BLD)
-	}
-	if report.Present["GLD"] {
-		m.vqGLD.WithLabelValues(carrier, uaType).Observe(report.GLD)
-	}
-	if report.Present["RTD"] {
-		m.vqRTD.WithLabelValues(carrier, uaType).Observe(report.RTD)
-	}
-	if report.Present["ESD"] {
-		m.vqESD.WithLabelValues(carrier, uaType).Observe(report.ESD)
-	}
-	if report.Present["IAJ"] {
-		m.vqIAJ.WithLabelValues(carrier, uaType).Observe(report.IAJ)
-	}
-	if report.Present["MAJ"] {
-		m.vqMAJ.WithLabelValues(carrier, uaType).Observe(report.MAJ)
-	}
-	if report.Present["MOSLQ"] {
-		m.vqMOSLQ.WithLabelValues(carrier, uaType).Observe(report.MOSLQ)
-	}
-	if report.Present["MOSCQ"] {
-		m.vqMOSCQ.WithLabelValues(carrier, uaType).Observe(report.MOSCQ)
-	}
-	if report.Present["RLQ"] {
-		m.vqRLQ.WithLabelValues(carrier, uaType).Observe(report.RLQ)
-	}
-	if report.Present["RCQ"] {
-		m.vqRCQ.WithLabelValues(carrier, uaType).Observe(report.RCQ)
-	}
-	if report.Present["RERL"] {
-		m.vqRERL.WithLabelValues(carrier, uaType).Observe(report.RERL)
-	}
-	m.vqReports.WithLabelValues(carrier, uaType).Inc()
+	m.vqReports.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 }
 
-func (m *metrics) UpdateRTPPackets(carrier string, uaType string, codec string) {
-	m.rtpPackets.WithLabelValues(carrier, uaType, codec).Inc()
+func (m *metrics) UpdateRTPPackets(carrier, uaType, codec, sourceCountry string) {
+	m.rtpPackets.WithLabelValues(carrier, uaType, codec, sourceCountry).Inc()
 }
 
-func (m *metrics) UpdateRTPLoss(carrier string, uaType string, codec string, lost uint64) {
+func (m *metrics) UpdateRTPLoss(carrier, uaType, codec, sourceCountry string, lost uint64) {
 	if lost == 0 {
 		return
 	}
-	m.rtpLost.WithLabelValues(carrier, uaType, codec).Add(float64(lost))
+	m.rtpLost.WithLabelValues(carrier, uaType, codec, sourceCountry).Add(float64(lost))
 }
 
-func (m *metrics) UpdateRTPJitter(carrier string, uaType string, codec string, jitterMs float64) {
-	m.rtpJitter.WithLabelValues(carrier, uaType, codec).Observe(jitterMs)
+func (m *metrics) UpdateRTPJitter(carrier, uaType, codec, sourceCountry string, jitterMs float64) {
+	m.rtpJitter.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(jitterMs)
 }
 
-func (m *metrics) UpdateRTPMOS(carrier string, uaType string, codec string, mos float64) {
-	m.rtpMOS.WithLabelValues(carrier, uaType, codec).Observe(mos)
+func (m *metrics) UpdateRTPMOS(carrier, uaType, codec, sourceCountry string, mos float64) {
+	m.rtpMOS.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(mos)
 }
 
-func (m *metrics) UpdateRTPActiveStreams(counts map[string]map[string]map[string]int) {
-	m.rtpActiveStreams.Reset()
-	for carrier, uaCounts := range counts {
-		for uaType, codecCounts := range uaCounts {
-			for codec, n := range codecCounts {
-				m.rtpActiveStreams.WithLabelValues(carrier, uaType, codec).Set(float64(n))
-			}
-		}
-	}
+func (m *metrics) UpdateRTPActiveStreams(counts []LabeledCount) {
+	setGaugeFromCounts(m.rtpActiveStreams, &m.prevRTPKeys, counts,
+		[]string{"carrier", "ua_type", "codec", "source_country"})
 }
 
 func isEffectiveResponse(code []byte) bool {
@@ -789,8 +846,8 @@ func (m *metrics) registerBuildInfo(reg *prometheus.Registry) {
 	}
 }
 
-func (m *metrics) getOrCreateCarrierCounters(carrier string, uaType string) *carrierAtomicCounters {
-	key := carrier + "\x00" + uaType
+func (m *metrics) getOrCreateCarrierCounters(carrier, uaType, sourceCountry string) *carrierAtomicCounters {
+	key := counterKey{Carrier: carrier, UAType: uaType, Country: sourceCountry}
 	if v, ok := m.carrierCounters.Load(key); ok {
 		c, _ := v.(*carrierAtomicCounters)
 		return c
