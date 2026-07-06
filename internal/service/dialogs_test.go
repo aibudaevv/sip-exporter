@@ -55,6 +55,43 @@ func TestDialoger_Delete_NonExisting(t *testing.T) {
 	require.Equal(t, time.Duration(0), result.Duration)
 }
 
+func TestDialoger_HasActiveDialog(t *testing.T) {
+	d := NewDialoger()
+	d.Create("dialog-1", time.Now().Add(1*time.Hour), time.Now(), "", "", "", "")
+
+	require.True(t, d.HasActiveDialog("dialog-1"))
+	require.False(t, d.HasActiveDialog("non-existing"))
+
+	d.Delete("dialog-1")
+	require.False(t, d.HasActiveDialog("dialog-1"))
+}
+
+func TestDialoger_Refresh(t *testing.T) {
+	d := NewDialoger()
+	createdAt := time.Now()
+	originalExpires := time.Now().Add(1 * time.Hour)
+	d.Create("dialog-1", originalExpires, createdAt, "carrier-a", "yealink", "RU", "call-1")
+
+	newExpires := time.Now().Add(2 * time.Hour)
+	ok := d.Refresh("dialog-1", newExpires)
+	require.True(t, ok)
+
+	require.False(t, d.Refresh("non-existing", newExpires))
+}
+
+func TestDialoger_Refresh_PreservesCreatedAt(t *testing.T) {
+	d := NewDialoger()
+	createdAt := time.Now()
+	d.Create("dialog-1", time.Now().Add(1*time.Hour), createdAt, "carrier-a", "yealink", "RU", "call-1")
+
+	d.Refresh("dialog-1", time.Now().Add(2*time.Hour))
+	result := d.Delete("dialog-1")
+
+	require.GreaterOrEqual(t, result.Duration, time.Duration(0))
+	require.Equal(t, "carrier-a", result.Carrier)
+	require.Equal(t, "call-1", result.CallID)
+}
+
 func TestDialoger_Size_Multiple(t *testing.T) {
 	d := NewDialoger()
 

@@ -41,6 +41,7 @@ type (
 		sipPacketsTotal  prometheus.Counter
 
 		requestInviteTotal      *prometheus.CounterVec
+		requestReinviteTotal    *prometheus.CounterVec
 		requestInvite200OKTotal *prometheus.CounterVec
 		requestACKTotal         *prometheus.CounterVec
 		requestByeTotal         *prometheus.CounterVec
@@ -107,6 +108,7 @@ type (
 
 	Metricser interface {
 		Request(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost string, in []byte)
+		Reinvite(carrier, uaType, sourceCountry string)
 		Response(carrier, uaType, sourceCountry string, in []byte, isInviteResponse bool)
 		ResponseWithMetrics(carrier, uaType, sourceCountry string, status []byte, isInviteResponse, is200OK bool)
 		Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost string)
@@ -209,6 +211,9 @@ func (m *metrics) initRequestCounters(reg *prometheus.Registry) {
 	m.requestInviteTotal = newCounterVecWithRegistry(
 		"sip_exporter_invite_total",
 		"Total number of INVITE requests", clInvite, reg)
+	m.requestReinviteTotal = newCounterVecWithRegistry(
+		"sip_exporter_reinvite_total",
+		"Total number of re-INVITE requests (INVITE within an existing dialog)", cl, reg)
 	m.requestInvite200OKTotal = newCounterVecWithRegistry(
 		"sip_exporter_invite_200_total",
 		"Total number of 200 OK responses to INVITE", clInvite, reg)
@@ -655,6 +660,11 @@ func (m *metrics) Request(
 	default:
 		zap.L().Warn("unknown request", zap.ByteString("in", in))
 	}
+}
+
+func (m *metrics) Reinvite(carrier, uaType, sourceCountry string) {
+	defer m.sipPacketsTotal.Inc()
+	m.requestReinviteTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 }
 
 func (m *metrics) Response(carrier, uaType, sourceCountry string, in []byte, isInviteResponse bool) {

@@ -33,6 +33,8 @@ type (
 			carrier, uaType, sourceCountry, callID string,
 		)
 		Delete(dialogID string) CleanupResult
+		HasActiveDialog(dialogID string) bool
+		Refresh(dialogID string, expiresAt time.Time) bool
 		Size() int
 		Counts() []LabeledCount
 		Cleanup() []CleanupResult
@@ -84,6 +86,25 @@ func (c *dialogs) Create(
 			callID:        callID,
 		}
 	}
+}
+
+func (c *dialogs) HasActiveDialog(dialogID string) bool {
+	c.m.Lock()
+	defer c.m.Unlock()
+	_, exists := c.storage[dialogID]
+	return exists
+}
+
+func (c *dialogs) Refresh(dialogID string, expiresAt time.Time) bool {
+	c.m.Lock()
+	defer c.m.Unlock()
+	entry, exists := c.storage[dialogID]
+	if !exists {
+		return false
+	}
+	entry.expiresAt = expiresAt
+	c.storage[dialogID] = entry
+	return true
 }
 
 func (c *dialogs) Size() int {

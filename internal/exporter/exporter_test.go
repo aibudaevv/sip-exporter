@@ -19,6 +19,7 @@ import (
 // Mock services for testing.
 type mockMetricser struct {
 	requestCalled             []byte
+	reinviteCalled            bool
 	responseCalled            []byte
 	responseIsInvite          bool
 	sessionUpdated            int
@@ -52,6 +53,11 @@ func (m *mockMetricser) UpdateSessions(_ []service.LabeledCount) {}
 
 func (m *mockMetricser) Request(_, _, _, _, _, _ string, in []byte) {
 	m.requestCalled = in
+	m.packetsIncremented++
+}
+
+func (m *mockMetricser) Reinvite(_, _, _ string) {
+	m.reinviteCalled = true
 	m.packetsIncremented++
 }
 
@@ -174,10 +180,25 @@ func (m *mockDialoger) Delete(dialogID string) service.CleanupResult {
 	m.deleted = append(m.deleted, dialogID)
 	if m.created != nil {
 		if args, ok := m.created[dialogID]; ok {
+			delete(m.created, dialogID)
 			return service.CleanupResult{Duration: 100 * time.Millisecond, Carrier: args.carrier}
 		}
 	}
 	return service.CleanupResult{}
+}
+
+func (m *mockDialoger) HasActiveDialog(dialogID string) bool {
+	_, ok := m.created[dialogID]
+	return ok
+}
+
+func (m *mockDialoger) Refresh(dialogID string, expiresAt time.Time) bool {
+	if args, ok := m.created[dialogID]; ok {
+		args.expiresAt = expiresAt
+		m.created[dialogID] = args
+		return true
+	}
+	return false
 }
 
 func (m *mockDialoger) Size() int {
@@ -883,6 +904,108 @@ func TestHandleMessage_Response200_INVITE(t *testing.T) {
 	require.True(t, mm.responseIsInvite)
 	require.True(t, mm.invite200OKCalled)
 	require.Len(t, md.created, 1)
+}
+
+func TestHandleMessage_ReINVITE_CountedAsReinvite(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		inviteTracker:  make(map[string]inviteEntry),
+		inviteSDP:      make(map[string]inviteSDPEntity),
+		optionsTracker: make(map[string]optionsEntry),
+		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
+	}
+
+	md.Create("test-call:abc:xyz",
+		time.Now().Add(1*time.Hour), time.Now(), "", "", "", "test-call")
+
+	input := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: test-call\r\n" +
+		"CSeq: 2 INVITE\r\n")
+
+	err := e.handleMessage("other", "", input)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		return mm.reinviteCalled
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	require.True(t, mm.reinviteCalled)
+	require.Nil(t, mm.requestCalled)
+	_, hasTracker := e.inviteTracker["test-call"]
+	require.False(t, hasTracker)
+}
+
+func TestHandleMessage_InitialINVITE_CountedAsInvite(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		inviteTracker:  make(map[string]inviteEntry),
+		inviteSDP:      make(map[string]inviteSDPEntity),
+		optionsTracker: make(map[string]optionsEntry),
+		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
+	}
+
+	input := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: test-call\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	err := e.handleMessage("other", "", input)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		return len(mm.requestCalled) > 0
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	require.Equal(t, []byte("INVITE"), mm.requestCalled)
+	require.False(t, mm.reinviteCalled)
+}
+
+func TestHandleMessage_ReINVITE_200OK_DoesNotInflateMetrics(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		inviteTracker:  make(map[string]inviteEntry),
+		inviteSDP:      make(map[string]inviteSDPEntity),
+		optionsTracker: make(map[string]optionsEntry),
+		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
+	}
+
+	md.Create("test-call:abc:xyz",
+		time.Now().Add(1*time.Hour), time.Now(), "carrier-a", "yealink", "RU", "test-call")
+
+	input := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: test-call\r\n" +
+		"CSeq: 2 INVITE\r\n" +
+		"Session-Expires: 3600\r\n")
+
+	err := e.handleMessage("other", "", input)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		return mm.responseWithMetricsCalled
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	require.False(t, mm.invite200OKCalled)
+	require.False(t, mm.responseIsInvite)
 }
 
 func TestHandleMessage_Response200_BYE(t *testing.T) {
@@ -2830,6 +2953,11 @@ func newCarrierTrackingMetricser() *carrierTrackingMetricser {
 
 func (m *carrierTrackingMetricser) Request(carrier, _, _, _, _, _ string, in []byte) {
 	m.requests = append(m.requests, carrierCall{carrier: carrier, method: string(in)})
+	m.packetsTotal++
+}
+
+func (m *carrierTrackingMetricser) Reinvite(carrier, _, _ string) {
+	m.requests = append(m.requests, carrierCall{carrier: carrier, method: "REINVITE"})
 	m.packetsTotal++
 }
 

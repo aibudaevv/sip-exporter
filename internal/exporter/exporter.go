@@ -837,23 +837,35 @@ func (e *exporter) updateRTPMetrics() {
 
 func (e *exporter) handleRequest(carrier string, uaType string, sourceCountry string, packet dto.Packet) {
 	var destinationCountry, callerHost, calledHost string
+	isReinvite := false
 	if bytes.Equal(packet.Method, []byte("INVITE")) {
 		destinationCountry = e.resolveDestinationCountry(packet.To.User)
 		if e.hostLabels {
 			callerHost = string(packet.From.Addr)
 			calledHost = string(packet.To.Addr)
 		}
+		if dialogID, err := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag); err == nil &&
+			e.services.dialoger.HasActiveDialog(dialogID) {
+			isReinvite = true
+		}
 	}
-	e.services.metricser.Request(
-		carrier, uaType, sourceCountry, destinationCountry,
-		callerHost, calledHost, packet.Method,
-	)
+
+	if isReinvite {
+		e.services.metricser.Reinvite(carrier, uaType, sourceCountry)
+	} else {
+		e.services.metricser.Request(
+			carrier, uaType, sourceCountry, destinationCountry,
+			callerHost, calledHost, packet.Method,
+		)
+	}
 
 	switch {
 	case bytes.Equal(packet.Method, []byte("REGISTER")):
 		e.storeRegisterTime(string(packet.CallID), carrier, uaType, sourceCountry)
 	case bytes.Equal(packet.Method, []byte("INVITE")):
-		e.storeInviteTime(string(packet.CallID), carrier, uaType, sourceCountry)
+		if !isReinvite {
+			e.storeInviteTime(string(packet.CallID), carrier, uaType, sourceCountry)
+		}
 		if bytes.Contains(packet.ContentType, []byte("application/sdp")) {
 			e.storeInviteSDP(string(packet.CallID), packet.Body)
 		}
@@ -899,17 +911,31 @@ func (e *exporter) handleResponse(
 		}
 	}
 
+	// Detect re-INVITE response: dialog already exists for this INVITE.
+	// re-INVITE responses must not contaminate SER/SEER/ISA/SCR/ASR/NER
+	// atomic counters, since the INVITE itself was not counted in inviteTotal.
+	// This also deduplicates 200 OK retransmissions (Timer G on UDP): after
+	// the dialog is created by the first 200 OK, subsequent retransmissions
+	// hit the same HasActiveDialog check and are excluded from ratio counters.
+	isReinviteResponse := false
+	if isInviteResponse {
+		if dialogID, err := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag); err == nil &&
+			e.services.dialoger.HasActiveDialog(dialogID) {
+			isReinviteResponse = true
+		}
+	}
+
 	e.services.metricser.ResponseWithMetrics(
 		carrier,
 		uaType,
 		sourceCountry,
 		packet.ResponseStatus,
-		isInviteResponse,
+		isInviteResponse && !isReinviteResponse,
 		is200OK,
 	)
 
 	if is200OK {
-		e.handle200OKResponse(carrier, uaType, sourceCountry, packet, isRegisterResponse)
+		e.handle200OKResponse(carrier, uaType, sourceCountry, packet, isRegisterResponse, isReinviteResponse)
 	} else if isRegisterResponse {
 		e.handleRegisterNon200Response(carrier, uaType, sourceCountry, packet)
 	}
@@ -986,19 +1012,21 @@ func (e *exporter) handleRegisterNon200Response(
 
 func (e *exporter) handle200OKResponse(
 	carrier, uaType, sourceCountry string,
-	packet dto.Packet, isRegisterResponse bool,
+	packet dto.Packet, isRegisterResponse, isReinvite bool,
 ) {
 	zap.L().Debug("handle message", zap.ByteString("200 OK cseq method", packet.CSeq.Method))
 
 	if bytes.Equal(packet.CSeq.Method, []byte("INVITE")) {
-		destinationCountry := e.resolveDestinationCountry(packet.To.User)
-		var callerHost, calledHost string
-		if e.hostLabels {
-			callerHost = string(packet.From.Addr)
-			calledHost = string(packet.To.Addr)
+		if !isReinvite {
+			destinationCountry := e.resolveDestinationCountry(packet.To.User)
+			var callerHost, calledHost string
+			if e.hostLabels {
+				callerHost = string(packet.From.Addr)
+				calledHost = string(packet.To.Addr)
+			}
+			e.services.metricser.Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost)
 		}
-		e.services.metricser.Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost)
-		if err := e.handleInvite200OK(carrier, uaType, sourceCountry, packet); err != nil {
+		if err := e.handleInvite200OK(carrier, uaType, sourceCountry, packet, isReinvite); err != nil {
 			zap.L().Error("handle INVITE 200 OK", zap.Error(err))
 		}
 	}
@@ -1014,7 +1042,10 @@ func (e *exporter) handle200OKResponse(
 	}
 }
 
-func (e *exporter) handleInvite200OK(carrier string, uaType string, sourceCountry string, packet dto.Packet) error {
+func (e *exporter) handleInvite200OK(
+	carrier, uaType, sourceCountry string,
+	packet dto.Packet, isReinvite bool,
+) error {
 	dialogID, err := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag)
 	if err != nil {
 		return fmt.Errorf("normalize dialog ID: %w", err)
@@ -1026,11 +1057,18 @@ func (e *exporter) handleInvite200OK(carrier string, uaType string, sourceCountr
 	}
 	expiresAt := time.Now().Add(time.Duration(expires) * time.Second)
 
-	zap.L().Debug("create sip dialog",
-		zap.String("session", dialogID),
-		zap.Int("expires_sec", expires))
 	callID := string(packet.CallID)
-	e.services.dialoger.Create(dialogID, expiresAt, time.Now(), carrier, uaType, sourceCountry, callID)
+	if isReinvite {
+		zap.L().Debug("refresh sip dialog (re-INVITE)",
+			zap.String("session", dialogID),
+			zap.Int("expires_sec", expires))
+		e.services.dialoger.Refresh(dialogID, expiresAt)
+	} else {
+		zap.L().Debug("create sip dialog",
+			zap.String("session", dialogID),
+			zap.Int("expires_sec", expires))
+		e.services.dialoger.Create(dialogID, expiresAt, time.Now(), carrier, uaType, sourceCountry, callID)
+	}
 
 	// Register RTP media endpoints for correlation: the caller side from the
 	// cached INVITE SDP offer, the callee side from this 200 OK SDP answer.
