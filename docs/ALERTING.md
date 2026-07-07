@@ -115,6 +115,39 @@ groups:
           description: "500 Server Error rate is {{ $value | printf \"%.2f\" }}/s. SIP server may be overloaded or misconfigured."
       ```
 
+### Registration Health Alerts
+
+```yaml
+      - alert: SIPRegistrationSuccessLow
+        expr: sip_exporter_register_success_ratio < 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low registration success ratio"
+          description: "REGISTER success ratio is {{ $value | printf \"%.1f\" }}% (below 80%). Clients are failing to register — check registrar health, credentials, or ACLs. Note: 401/407 digest-auth challenges are excluded from the denominator."
+
+      - alert: SIPRegistrationBruteForce
+        expr: sum by (carrier, ua_type, source_country) (rate(sip_exporter_register_failure_total{code="401"}[5m])) > 10
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Possible SIP registration brute-force"
+          description: "REGISTER 401 Unauthorized rate is {{ $value | printf \"%.2f\" }}/s. A flood of failed authentications against the registrar — consider fail2ban or rate-limiting. (REGISTER-specific; distinct from the generic 401 alert.)"
+
+      - alert: SIPRegistrationDrop
+        expr: sip_exporter_active_registrations < 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Active registrations critically low"
+          description: "Only {{ $value | printf \"%.0f\" }} active registrations. Mass deregistration may indicate registrar outage or network partition."
+```
+
+> **401 vs `register_failure_total{code="401"}`:** The generic `sip_exporter_401_total` counts 401s across **all** methods (INVITE auth challenges + REGISTER challenges). `sip_exporter_register_failure_total{code="401"}` is **REGISTER-only**, giving a cleaner brute-force signal. The success-ratio alert uses `register_success_ratio`, which excludes 401/407 from its denominator.
+
 ### Voice Quality Alerts (RFC 6035)
 
 These alerts monitor voice quality metrics extracted from SIP PUBLISH/NOTIFY with `Content-Type: application/vq-rtcpxr` (RFC 6035).

@@ -20,7 +20,8 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 > | Tier | Metrics | Full label set |
 > |------|---------|----------------|
 > | **System** | `packets_total`, `system_error_total`, self-monitoring | *(none)* |
-> | **Base** | All SIP requests, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD, VQ reports, sessions, `reinvite_total` | `carrier, ua_type, source_country` |
+> | **Base** | All SIP requests, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD, VQ reports, sessions, `reinvite_total`, registration health (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country` |
+> | **Reg failure** | `register_failure_total` | `carrier, ua_type, source_country, code` |
 > | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_active_streams` | `carrier, ua_type, codec, source_country` |
 > | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, destination_country, caller_host, called_host` |
 
@@ -490,6 +491,48 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 `sip_exporter_603_total{carrier="...",ua_type="..."}`: total number of SIP 603 Decline responses.  
 `sip_exporter_604_total{carrier="...",ua_type="..."}`: total number of SIP 604 Does Not Exist Anywhere responses.  
 `sip_exporter_606_total{carrier="...",ua_type="..."}`: total number of SIP 606 Not Acceptable responses.  
+
+## Registration Health
+
+Registration metrics track the full lifecycle of SIP registrations (RFC 3261 §10): success/failure outcomes, a computed success ratio, and the count of currently active registrations. All are scoped per `carrier,ua_type,source_country`.
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `sip_exporter_register_success_total` | counter | `carrier,ua_type,source_country` | REGISTER responses with status `200 OK` |
+| `sip_exporter_register_failure_total` | counter | `carrier,ua_type,source_country,code` | REGISTER responses with status `3xx/4xx/5xx/6xx`, by code |
+| `sip_exporter_register_success_ratio` | gauge | `carrier,ua_type,source_country` | `200 OK / (200 OK + terminal failures) × 100` |
+| `sip_exporter_active_registrations` | gauge | `carrier,ua_type,source_country` | Currently active registrations (Expires-TTL tracked) |
+
+### register_success_ratio
+
+```
+register_success_ratio = (REGISTER → 200 OK) / (REGISTER → 200 OK + terminal failures) × 100
+```
+
+- **Terminal failures** = non-200 responses **excluding** `401 Unauthorized` and `407 Proxy Authentication Required` (these are digest-auth challenges — a normal part of the registration handshake, not genuine failures) and `3xx` redirects.
+- Excluding challenges keeps the ratio meaningful on systems using SIP digest authentication: a healthy auth flow (`REGISTER → 401 → REGISTER+creds → 200 OK`) yields a ratio near 100%, not ~50%.
+- Undefined (emits `0`) when no successful or terminal-failed registrations have been observed.
+
+> **Note:** `register_failure_total{code}` counts **all** non-1xx/non-2xx responses including `401`/`407`. The sum across codes therefore exceeds the failure count used in the ratio denominator. Use `register_failure_total{code="401"}` for brute-force detection (see [ALERTING.md](ALERTING.md)), and `register_success_ratio` for overall registration health.
+
+### active_registrations
+
+- Incremented on each `REGISTER → 200 OK`, keyed by the Address-of-Record (`user@host` parsed from the `From` URI).
+- Each entry has a TTL from the `Expires` header (RFC 3261 §20.19); default **3600 s** when absent.
+- A **refresh** (same AOR, new `200 OK`) updates the TTL — it does **not** create a duplicate.
+- Entries are removed by a background cleanup (every 1 s) once their TTL expires; the gauge is updated accordingly.
+
+**PromQL examples:**
+```promql
+# Registration success ratio per carrier
+sip_exporter_register_success_ratio
+
+# Active registrations over time (rate of churn)
+rate(sip_exporter_register_success_total[5m])
+
+# Top failing status codes
+topk(5, sum by (code) (rate(sip_exporter_register_failure_total[5m])))
+```
 
 ## RTP media metrics
 
