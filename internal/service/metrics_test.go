@@ -110,6 +110,21 @@ func (m *metrics) getSCR() float64 {
 	return float64(completed) / float64(total) * 100
 }
 
+func (m *metrics) getRegisterSuccessRatio() float64 {
+	val, ok := m.carrierCounters.Load(counterKey{})
+	if !ok {
+		return 0
+	}
+	counters := val.(*carrierAtomicCounters)
+	success := counters.registerSuccessTotal.Load()
+	failure := counters.registerFailureTotal.Load()
+	denominator := success + failure
+	if denominator == 0 {
+		return 0
+	}
+	return float64(success) / float64(denominator) * 100
+}
+
 func (m *metrics) getRRDFromHistogram() (float64, uint64) {
 	if m.rrd == nil {
 		return 0, 0
@@ -388,6 +403,17 @@ func (m *metrics) sessionsGauge(carrier, uaType string) float64 {
 	return d.GetGauge().GetValue()
 }
 
+func (m *metrics) activeRegistrationsGauge(carrier, uaType, sourceCountry string) float64 {
+	if m.activeRegistrations == nil {
+		return 0
+	}
+	var d dto.Metric
+	if err := m.activeRegistrations.WithLabelValues(carrier, uaType, sourceCountry).Write(&d); err != nil {
+		return 0
+	}
+	return d.GetGauge().GetValue()
+}
+
 func TestMetrics_UpdateSessions(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateSessions([]LabeledCount{
@@ -402,6 +428,22 @@ func TestMetrics_UpdateSessions(t *testing.T) {
 	})
 	require.InDelta(t, 1.0, m.sessionsGauge("provider-a", "yealink"), 0.01)
 	require.InDelta(t, 0.0, m.sessionsGauge("provider-b", "cisco"), 0.01, "stale combo must reset")
+}
+
+func TestMetrics_UpdateActiveRegistrations(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateActiveRegistrations([]LabeledCount{
+		{Labels: map[string]string{"carrier": "provider-a", "ua_type": "yealink", "source_country": "US"}, Count: 3},
+		{Labels: map[string]string{"carrier": "provider-b", "ua_type": "cisco", "source_country": "DE"}, Count: 1},
+	})
+	require.InDelta(t, 3.0, m.activeRegistrationsGauge("provider-a", "yealink", "US"), 0.01)
+	require.InDelta(t, 1.0, m.activeRegistrationsGauge("provider-b", "cisco", "DE"), 0.01)
+
+	m.UpdateActiveRegistrations([]LabeledCount{
+		{Labels: map[string]string{"carrier": "provider-a", "ua_type": "yealink", "source_country": "US"}, Count: 1},
+	})
+	require.InDelta(t, 1.0, m.activeRegistrationsGauge("provider-a", "yealink", "US"), 0.01)
+	require.InDelta(t, 0.0, m.activeRegistrationsGauge("provider-b", "cisco", "DE"), 0.01, "stale series must reset")
 }
 
 func TestMetricser_SystemError_Multiple(t *testing.T) {
@@ -2113,4 +2155,139 @@ func TestRatioCollector_StructKeyLabelEmission(t *testing.T) {
 	}
 	require.True(t, found["carrier-a/sip/US"], "missing carrier-a/sip/US series")
 	require.True(t, found["carrier-b/yealink/DE"], "missing carrier-b/yealink/DE series")
+}
+
+// ==================== Registration success/failure + ratio (S4-2.1) ====================
+
+func TestMetrics_RegisterSuccess_IncrementsCounter(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.RegisterSuccess("carrier-a", "sip", "US")
+
+	counter, err := m.registerSuccessTotal.GetMetricWithLabelValues("carrier-a", "sip", "US")
+	require.NoError(t, err)
+	var d dto.Metric
+	require.NoError(t, counter.Write(&d))
+	require.InDelta(t, 1.0, d.GetCounter().GetValue(), 0.01)
+}
+
+func TestMetrics_RegisterFailure_IncrementsCodeCounter(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.RegisterFailure("carrier-a", "sip", "US", "403")
+
+	counter, err := m.registerFailureTotal.GetMetricWithLabelValues("carrier-a", "sip", "US", "403")
+	require.NoError(t, err)
+	var d dto.Metric
+	require.NoError(t, counter.Write(&d))
+	require.InDelta(t, 1.0, d.GetCounter().GetValue(), 0.01)
+}
+
+// Challenge (401) counts in failure_total{code} but NOT in ratio — verified
+// end-to-end in TestMetrics_RegisterSuccessRatio_ViaPublicMethods below.
+
+func TestMetrics_RegisterSuccessRatio_NoData(t *testing.T) {
+	m := &metrics{}
+	require.InDelta(t, 0.0, m.getRegisterSuccessRatio(), 0.01)
+}
+
+func TestMetrics_RegisterSuccessRatio_AllSuccessful(t *testing.T) {
+	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("", "", "")
+	counters.registerSuccessTotal.Store(100)
+
+	require.InDelta(t, 100.0, m.getRegisterSuccessRatio(), 0.01)
+}
+
+func TestMetrics_RegisterSuccessRatio_HalfSuccessful(t *testing.T) {
+	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("", "", "")
+	counters.registerSuccessTotal.Store(50)
+	counters.registerFailureTotal.Store(50)
+
+	require.InDelta(t, 50.0, m.getRegisterSuccessRatio(), 0.01)
+}
+
+// 401/407 challenges excluded from ratio denominator; terminal failures counted.
+func TestMetrics_RegisterSuccessRatio_ChallengesExcluded(t *testing.T) {
+	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("", "", "")
+	// 1 success, 1 terminal failure, 5 challenge 401s — challenges must not
+	// affect the ratio.
+	counters.registerSuccessTotal.Store(1)
+	counters.registerFailureTotal.Store(1)
+
+	require.InDelta(t, 50.0, m.getRegisterSuccessRatio(), 0.01)
+}
+
+func TestMetrics_RegisterSuccessRatio_AllFailure(t *testing.T) {
+	m := &metrics{}
+	counters := m.getOrCreateCarrierCounters("", "", "")
+	counters.registerFailureTotal.Store(10)
+
+	require.InDelta(t, 0.0, m.getRegisterSuccessRatio(), 0.01)
+}
+
+// End-to-end via public methods: success + terminal failure + challenge mix.
+func TestMetrics_RegisterSuccessRatio_ViaPublicMethods(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	for range 8 {
+		m.RegisterSuccess("", "", "")
+	}
+	m.RegisterFailure("", "", "", "403")
+	m.RegisterFailure("", "", "", "500")
+	// Challenges: must be counted in failure_total{code} but excluded from ratio.
+	m.RegisterFailure("", "", "", "401")
+	m.RegisterFailure("", "", "", "407")
+
+	require.InDelta(t, 80.0, m.getRegisterSuccessRatio(), 0.01)
+
+	// failure_total{code} records all codes including challenges.
+	for _, code := range []string{"401", "407", "403", "500"} {
+		counter, err := m.registerFailureTotal.GetMetricWithLabelValues("", "", "", code)
+		require.NoError(t, err)
+		var d dto.Metric
+		require.NoError(t, counter.Write(&d))
+		require.InDelta(t, 1.0, d.GetCounter().GetValue(), 0.01, "code=%s", code)
+	}
+}
+
+// ratioCollector emits register_success_ratio as a gauge with correct labels.
+func TestRatioCollector_RegisterSuccessRatio(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newMetricserWithRegistry(reg).(*metrics)
+
+	m.RegisterSuccess("carrier-a", "sip", "US")
+	m.RegisterSuccess("carrier-a", "sip", "US")
+	m.RegisterFailure("carrier-a", "sip", "US", "403")
+
+	m.RegisterSuccess("carrier-b", "yealink", "DE")
+
+	gathered, err := reg.Gather()
+	require.NoError(t, err)
+
+	var fam *dto.MetricFamily
+	for _, f := range gathered {
+		if f.GetName() == "sip_exporter_register_success_ratio" {
+			fam = f
+			break
+		}
+	}
+	require.NotNil(t, fam, "register_success_ratio metric not found")
+	require.Len(t, fam.GetMetric(), 2, "expected 2 series")
+
+	for _, metric := range fam.GetMetric() {
+		labels := make(map[string]string, len(metric.GetLabel()))
+		for _, l := range metric.GetLabel() {
+			labels[l.GetName()] = l.GetValue()
+		}
+		key := labels["carrier"] + "/" + labels["ua_type"] + "/" + labels["source_country"]
+		switch key {
+		case "carrier-a/sip/US":
+			require.InDelta(t, 66.67, metric.GetGauge().GetValue(), 0.1)
+		case "carrier-b/yealink/DE":
+			require.InDelta(t, 100.0, metric.GetGauge().GetValue(), 0.01)
+		}
+	}
 }

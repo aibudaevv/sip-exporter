@@ -10,6 +10,7 @@ type (
 		CallID         []byte
 		CSeq           CSeq
 		SessionExpires int // seconds
+		Expires        int // seconds (RFC 3261 §20.19, registration binding TTL)
 		UserAgent      []byte
 		ContentType    []byte
 		Body           []byte

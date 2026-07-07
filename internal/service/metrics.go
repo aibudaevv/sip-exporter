@@ -23,6 +23,8 @@ type (
 		inviteEffectiveTotal   atomic.Int64
 		inviteIneffectiveTotal atomic.Int64
 		sessionCompletedTotal  atomic.Int64
+		registerSuccessTotal   atomic.Int64
+		registerFailureTotal   atomic.Int64 // terminal failures (excludes 401/407 challenges and 3xx redirects)
 	}
 
 	counterKey struct {
@@ -56,6 +58,12 @@ type (
 		requestPrackTotal       *prometheus.CounterVec
 		requestPublishTotal     *prometheus.CounterVec
 		requestMessageTotal     *prometheus.CounterVec
+
+		registerSuccessTotal *prometheus.CounterVec
+		registerFailureTotal *prometheus.CounterVec
+
+		activeRegistrations *prometheus.GaugeVec
+		prevActiveRegKeys   map[string][]string
 
 		statusCounters map[string]*prometheus.CounterVec
 
@@ -121,6 +129,9 @@ type (
 		UpdateLRD(carrier, uaType, sourceCountry string, delayMs float64)
 		UpdateSession(carrier, uaType, sourceCountry string, size int)
 		UpdateSessions(counts []LabeledCount)
+		RegisterSuccess(carrier, uaType, sourceCountry string)
+		RegisterFailure(carrier, uaType, sourceCountry, code string)
+		UpdateActiveRegistrations(counts []LabeledCount)
 		UpdateVQReport(carrier, uaType, sourceCountry string, report *vq.SessionReport)
 		UpdateRTPPackets(carrier, uaType, codec, sourceCountry string)
 		UpdateRTPLoss(carrier, uaType, codec, sourceCountry string, lost uint64)
@@ -194,6 +205,7 @@ func newMetricserWithRegistry(reg *prometheus.Registry) Metricser {
 	m.initRequestCounters(reg)
 	m.initStatusCounters(reg)
 	m.initSessionMetrics(reg)
+	m.initRegistrationMetrics(reg)
 	m.initHistograms(reg)
 	m.initVQHistograms(reg)
 	registerRatioCollectors(m, reg)
@@ -316,6 +328,20 @@ func (m *metrics) initSessionMetrics(reg *prometheus.Registry) {
 	m.sessions = newGaugeVecWithRegistry(
 		"sip_exporter_sessions",
 		"Number of active SIP dialogs", cl, reg)
+}
+
+func (m *metrics) initRegistrationMetrics(reg *prometheus.Registry) {
+	cl := []string{"carrier", "ua_type", "source_country"}
+	m.registerSuccessTotal = newCounterVecWithRegistry(
+		"sip_exporter_register_success_total",
+		"Total number of successful REGISTER responses (200 OK)", cl, reg)
+	m.registerFailureTotal = newCounterVecWithRegistry(
+		"sip_exporter_register_failure_total",
+		"Total number of failed REGISTER responses by status code (non-1xx, non-2xx)",
+		[]string{"carrier", "ua_type", "source_country", "code"}, reg)
+	m.activeRegistrations = newGaugeVecWithRegistry(
+		"sip_exporter_active_registrations",
+		"Number of active SIP registrations tracked by Expires-TTL", cl, reg)
 }
 
 func (m *metrics) initHistograms(reg *prometheus.Registry) {
@@ -545,6 +571,19 @@ func registerRatioCollectors(m *metrics, reg *prometheus.Registry) {
 			return float64(total-ineffective) / float64(total) * 100 //nolint:mnd // percentage formula
 		},
 	)
+	registerRatioCollector(m, "sip_exporter_register_success_ratio",
+		"REGISTER success ratio percentage: 200 OK / (200 OK + terminal failures). "+
+			"Excludes 401/407 digest-auth challenges and 3xx redirects from the denominator", reg,
+		func(c *carrierAtomicCounters) float64 {
+			success := c.registerSuccessTotal.Load()
+			failure := c.registerFailureTotal.Load()
+			denominator := success + failure
+			if denominator == 0 {
+				return 0
+			}
+			return float64(success) / float64(denominator) * 100 //nolint:mnd // percentage formula
+		},
+	)
 }
 
 func newCounterWithRegistry(name, help string, reg *prometheus.Registry) prometheus.Counter {
@@ -717,6 +756,27 @@ func (m *metrics) SessionCompleted(carrier, uaType, sourceCountry string) {
 	m.sdc.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 }
 
+func (m *metrics) RegisterSuccess(carrier, uaType, sourceCountry string) {
+	m.registerSuccessTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+	m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).registerSuccessTotal.Add(1)
+}
+
+func (m *metrics) RegisterFailure(carrier, uaType, sourceCountry, code string) {
+	m.registerFailureTotal.WithLabelValues(carrier, uaType, sourceCountry, code).Inc()
+	if isRegisterChallenge(code) || isRedirectStatus(code) {
+		return
+	}
+	m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).registerFailureTotal.Add(1)
+}
+
+func isRegisterChallenge(code string) bool {
+	return code == "401" || code == "407"
+}
+
+func isRedirectStatus(code string) bool {
+	return len(code) > 0 && code[0] == '3'
+}
+
 func (m *metrics) UpdateSPD(carrier, uaType, sourceCountry string, duration time.Duration) {
 	if duration < 0 {
 		return
@@ -774,6 +834,11 @@ func setGaugeFromCounts(
 
 func (m *metrics) UpdateSessions(counts []LabeledCount) {
 	setGaugeFromCounts(m.sessions, &m.prevSessionKeys, counts,
+		[]string{"carrier", "ua_type", "source_country"})
+}
+
+func (m *metrics) UpdateActiveRegistrations(counts []LabeledCount) {
+	setGaugeFromCounts(m.activeRegistrations, &m.prevActiveRegKeys, counts,
 		[]string{"carrier", "ua_type", "source_country"})
 }
 

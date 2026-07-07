@@ -32,13 +32,14 @@ var (
 )
 
 const (
-	ethPAll                  = 0x0003
-	readBufSize              = 65536
-	defaultRegisterTTL       = 60 * time.Second
-	defaultInviteTTL         = 60 * time.Second
-	defaultOptionsTTL        = 60 * time.Second
-	rtpStreamTTL             = 30 * time.Second // idle RTP stream expiry
-	defaultSessionExpiresSec = 1800             // RFC 4028 default Session-Expires (30 min)
+	ethPAll                   = 0x0003
+	readBufSize               = 65536
+	defaultRegisterTTL        = 60 * time.Second
+	defaultInviteTTL          = 60 * time.Second
+	defaultOptionsTTL         = 60 * time.Second
+	rtpStreamTTL              = 30 * time.Second // idle RTP stream expiry
+	defaultSessionExpiresSec  = 1800             // RFC 4028 default Session-Expires (30 min)
+	defaultRegisterExpiresSec = 3600             // RFC 3261 §10.2 default registration expiry (1 hour)
 
 	messagesChanSize = 10_000
 	socketRecvBufMB  = 4
@@ -107,37 +108,46 @@ type (
 		sourceCountry string
 	}
 
+	registerExpiryEntry struct {
+		expiry        time.Time
+		carrier       string
+		uaType        string
+		sourceCountry string
+	}
+
 	inviteSDPEntity struct {
 		body      []byte
 		timestamp time.Time
 	}
 
 	exporter struct {
-		collection       *ebpf.Collection
-		sock             int
-		messages         chan []byte
-		done             chan struct{}
-		wg               sync.WaitGroup
-		closeOnce        sync.Once
-		sipPort          uint16
-		sipsPort         uint16
-		services         services
-		carrierResolver  *carriers.Resolver
-		uaClassifier     *ua.Classifier
-		geoip            *geoip.Reader
-		localCountryCode string
-		hostLabels       bool
-		vqHandler        *vq.Handler
-		mediaTracker     *mediatracker.Tracker
-		registerTracker  map[string]registerEntry
-		registerMutex    sync.RWMutex
-		inviteTracker    map[string]inviteEntry
-		inviteMutex      sync.RWMutex
-		inviteSDP        map[string]inviteSDPEntity
-		inviteSDPMutex   sync.Mutex
-		optionsTracker   map[string]optionsEntry
-		optionsMutex     sync.RWMutex
-		initialized      atomic.Bool
+		collection            *ebpf.Collection
+		sock                  int
+		messages              chan []byte
+		done                  chan struct{}
+		wg                    sync.WaitGroup
+		closeOnce             sync.Once
+		sipPort               uint16
+		sipsPort              uint16
+		services              services
+		carrierResolver       *carriers.Resolver
+		uaClassifier          *ua.Classifier
+		geoip                 *geoip.Reader
+		localCountryCode      string
+		hostLabels            bool
+		vqHandler             *vq.Handler
+		mediaTracker          *mediatracker.Tracker
+		registerTracker       map[string]registerEntry
+		registerMutex         sync.RWMutex
+		registerExpiryTracker map[string]registerExpiryEntry
+		registerExpiryMutex   sync.RWMutex
+		inviteTracker         map[string]inviteEntry
+		inviteMutex           sync.RWMutex
+		inviteSDP             map[string]inviteSDPEntity
+		inviteSDPMutex        sync.Mutex
+		optionsTracker        map[string]optionsEntry
+		optionsMutex          sync.RWMutex
+		initialized           atomic.Bool
 	}
 	services struct {
 		metricser service.Metricser
@@ -176,19 +186,20 @@ func NewExporter(deps Deps) Exporter {
 			metricser: deps.Metricser,
 			dialoger:  deps.Dialoger,
 		},
-		carrierResolver:  deps.CarrierResolver,
-		uaClassifier:     deps.UAClassifier,
-		geoip:            deps.GeoIPReader,
-		localCountryCode: deps.LocalCountryCode,
-		hostLabels:       deps.HostLabels,
-		vqHandler:        vq.NewHandler(deps.Metricser),
-		mediaTracker:     mediatracker.NewTracker(rtpStreamTTL),
-		messages:         make(chan []byte, messagesChanSize),
-		done:             make(chan struct{}),
-		registerTracker:  make(map[string]registerEntry),
-		inviteTracker:    make(map[string]inviteEntry),
-		inviteSDP:        make(map[string]inviteSDPEntity),
-		optionsTracker:   make(map[string]optionsEntry),
+		carrierResolver:       deps.CarrierResolver,
+		uaClassifier:          deps.UAClassifier,
+		geoip:                 deps.GeoIPReader,
+		localCountryCode:      deps.LocalCountryCode,
+		hostLabels:            deps.HostLabels,
+		vqHandler:             vq.NewHandler(deps.Metricser),
+		mediaTracker:          mediatracker.NewTracker(rtpStreamTTL),
+		messages:              make(chan []byte, messagesChanSize),
+		done:                  make(chan struct{}),
+		registerTracker:       make(map[string]registerEntry),
+		registerExpiryTracker: make(map[string]registerExpiryEntry),
+		inviteTracker:         make(map[string]inviteEntry),
+		inviteSDP:             make(map[string]inviteSDPEntity),
+		optionsTracker:        make(map[string]optionsEntry),
 	}
 }
 
@@ -388,6 +399,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		}
 		results := e.services.dialoger.Cleanup()
 		e.cleanupRegisterTracker()
+		e.cleanupExpiredRegistrations()
 		e.cleanupInviteTracker()
 		e.cleanupInviteSDP()
 		e.cleanupOptionsTracker()
@@ -403,6 +415,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", len(results)))
 
 		e.services.metricser.UpdateSessions(e.services.dialoger.Counts())
+		e.services.metricser.UpdateActiveRegistrations(e.registrationCounts())
 
 		received, dropped := e.readSocketStats()
 		e.services.metricser.SocketStats(received, dropped)
@@ -744,6 +757,8 @@ func (e *exporter) parseHeaders(lines [][]byte, p *dto.Packet) error {
 			p.CSeq.ID = id
 		case bytes.Equal(header, []byte("Session-Expires")):
 			p.SessionExpires = extractSessionExpires(value)
+		case bytes.Equal(header, []byte("Expires")):
+			p.Expires = extractExpires(value)
 		case bytes.Equal(header, []byte("User-Agent")):
 			if p.UserAgent == nil {
 				p.UserAgent = value
@@ -993,6 +1008,10 @@ func (e *exporter) measurePDD(
 func (e *exporter) handleRegisterNon200Response(
 	carrier, uaType, sourceCountry string, packet dto.Packet,
 ) {
+	if len(packet.ResponseStatus) > 0 && packet.ResponseStatus[0] >= '3' {
+		e.services.metricser.RegisterFailure(carrier, uaType, sourceCountry, string(packet.ResponseStatus))
+	}
+
 	if len(packet.ResponseStatus) > 0 && packet.ResponseStatus[0] == '3' {
 		if startTime, ok := e.getRegisterTime(string(packet.CallID)); ok {
 			delayMs := float64(time.Since(startTime).Nanoseconds()) / nanosPerMs
@@ -1101,6 +1120,15 @@ func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {
 }
 
 func (e *exporter) handleRegister200OK(carrier string, uaType string, sourceCountry string, packet dto.Packet) {
+	e.services.metricser.RegisterSuccess(carrier, uaType, sourceCountry)
+
+	expires := packet.Expires
+	if expires <= 0 {
+		expires = defaultRegisterExpiresSec
+	}
+	aor := string(packet.From.User) + "@" + string(packet.From.Addr)
+	e.storeRegistration(aor, carrier, uaType, sourceCountry, expires)
+
 	startTime, ok := e.getRegisterTime(string(packet.CallID))
 	if !ok {
 		return
@@ -1187,6 +1215,15 @@ func extractSessionExpires(value []byte) int {
 	return n
 }
 
+func extractExpires(value []byte) int {
+	// "3600" -> 3600 (RFC 3261 §20.19 delta-seconds; no params unlike Session-Expires)
+	var n int
+	if _, err := fmt.Sscanf(string(value), "%d", &n); err != nil {
+		return 0
+	}
+	return n
+}
+
 func (e *exporter) storeRegisterTime(callID, carrier, uaType, sourceCountry string) {
 	e.registerMutex.Lock()
 	defer e.registerMutex.Unlock()
@@ -1209,6 +1246,61 @@ func (e *exporter) removeRegisterTime(callID string) {
 	e.registerMutex.Lock()
 	defer e.registerMutex.Unlock()
 	delete(e.registerTracker, callID)
+}
+
+// storeRegistration records or refreshes an active registration keyed by its
+// Address-of-Record (the SIP URI). A refresh of an existing AOR overwrites the
+// entry (extending its TTL) instead of creating a duplicate.
+func (e *exporter) storeRegistration(aor, carrier, uaType, sourceCountry string, expiresSec int) {
+	expiry := time.Now().Add(time.Duration(expiresSec) * time.Second)
+	e.registerExpiryMutex.Lock()
+	defer e.registerExpiryMutex.Unlock()
+	if e.registerExpiryTracker == nil {
+		e.registerExpiryTracker = make(map[string]registerExpiryEntry)
+	}
+	e.registerExpiryTracker[aor] = registerExpiryEntry{
+		expiry:        expiry,
+		carrier:       carrier,
+		uaType:        uaType,
+		sourceCountry: sourceCountry,
+	}
+}
+
+func (e *exporter) cleanupExpiredRegistrations() {
+	e.registerExpiryMutex.Lock()
+	defer e.registerExpiryMutex.Unlock()
+	now := time.Now()
+	for aor, entry := range e.registerExpiryTracker {
+		if now.After(entry.expiry) {
+			delete(e.registerExpiryTracker, aor)
+		}
+	}
+}
+
+// registrationCounts aggregates active registrations by carrier/ua_type/source_country.
+func (e *exporter) registrationCounts() []service.LabeledCount {
+	e.registerExpiryMutex.RLock()
+	defer e.registerExpiryMutex.RUnlock()
+	type labelKey struct {
+		carrier, uaType, sourceCountry string
+	}
+	counts := make(map[labelKey]int, len(e.registerExpiryTracker))
+	for _, entry := range e.registerExpiryTracker {
+		k := labelKey{entry.carrier, entry.uaType, entry.sourceCountry}
+		counts[k]++
+	}
+	result := make([]service.LabeledCount, 0, len(counts))
+	for k, n := range counts {
+		result = append(result, service.LabeledCount{
+			Labels: map[string]string{
+				"carrier":        k.carrier,
+				"ua_type":        k.uaType,
+				"source_country": k.sourceCountry,
+			},
+			Count: n,
+		})
+	}
+	return result
 }
 
 func (e *exporter) storeInviteTime(callID, carrier, uaType, sourceCountry string) {

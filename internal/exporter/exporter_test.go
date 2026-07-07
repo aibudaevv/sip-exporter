@@ -40,6 +40,8 @@ type mockMetricser struct {
 	ordDelay                  float64
 	lrdUpdated                bool
 	lrdDelay                  float64
+	registerSuccessCalls      int
+	registerFailureCodes      []string
 	vqReportCalled            bool
 	vqCarrier                 string
 	vqUAType                  string
@@ -50,6 +52,8 @@ type mockMetricser struct {
 }
 
 func (m *mockMetricser) UpdateSessions(_ []service.LabeledCount) {}
+
+func (m *mockMetricser) UpdateActiveRegistrations(_ []service.LabeledCount) {}
 
 func (m *mockMetricser) Request(_, _, _, _, _, _ string, in []byte) {
 	m.requestCalled = in
@@ -83,6 +87,14 @@ func (m *mockMetricser) Invite200OK(_, _, _, _, _, _ string) {
 
 func (m *mockMetricser) SessionCompleted(_, _, _ string) {
 	m.sessionCompletedFlag = true
+}
+
+func (m *mockMetricser) RegisterSuccess(_, _, _ string) {
+	m.registerSuccessCalls++
+}
+
+func (m *mockMetricser) RegisterFailure(_, _, _, code string) {
+	m.registerFailureCodes = append(m.registerFailureCodes, code)
 }
 
 func (m *mockMetricser) UpdateRRD(_, _, _ string, delayMs float64) {
@@ -425,6 +437,28 @@ func TestExtractSessionExpires_InvalidNumber(t *testing.T) {
 
 func TestExtractSessionExpires_Zero(t *testing.T) {
 	expires := extractSessionExpires([]byte("0"))
+	require.Equal(t, 0, expires)
+}
+
+// ==================== extractExpires tests ====================
+
+func TestExtractExpires_NormalValue(t *testing.T) {
+	expires := extractExpires([]byte("3600"))
+	require.Equal(t, 3600, expires)
+}
+
+func TestExtractExpires_Zero(t *testing.T) {
+	expires := extractExpires([]byte("0"))
+	require.Equal(t, 0, expires)
+}
+
+func TestExtractExpires_Empty(t *testing.T) {
+	expires := extractExpires([]byte(""))
+	require.Equal(t, 0, expires)
+}
+
+func TestExtractExpires_InvalidNumber(t *testing.T) {
+	expires := extractExpires([]byte("invalid"))
 	require.Equal(t, 0, expires)
 }
 
@@ -827,6 +861,50 @@ func TestSIPPacketParse_InvalidSessionExpires(t *testing.T) {
 	require.Equal(t, 0, p.SessionExpires)
 }
 
+func TestSIPPacketParse_WithExpires(t *testing.T) {
+	e := exporter{}
+
+	input := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: test\r\n" +
+		"CSeq: 1 REGISTER\r\n" +
+		"Expires: 3600\r\n")
+
+	p, err := e.sipPacketParse(input)
+	require.NoError(t, err)
+	require.Equal(t, 3600, p.Expires)
+}
+
+func TestSIPPacketParse_ExpiresAbsenceIsZero(t *testing.T) {
+	e := exporter{}
+
+	input := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: test\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+
+	p, err := e.sipPacketParse(input)
+	require.NoError(t, err)
+	require.Equal(t, 0, p.Expires)
+}
+
+func TestSIPPacketParse_ExpiresZero(t *testing.T) {
+	e := exporter{}
+
+	input := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: test\r\n" +
+		"CSeq: 1 REGISTER\r\n" +
+		"Expires: 0\r\n")
+
+	p, err := e.sipPacketParse(input)
+	require.NoError(t, err)
+	require.Equal(t, 0, p.Expires)
+}
+
 func TestSIPPacketParse_NoCSeqMethod(t *testing.T) {
 	e := exporter{}
 
@@ -1113,6 +1191,241 @@ func TestHandleMessage_RRD_FullCycle(t *testing.T) {
 	}, 100*time.Millisecond, 10*time.Millisecond)
 	require.True(t, mm.rrdUpdated)
 	require.Greater(t, mm.rrdDelay, 0.0)
+}
+
+func TestHandleMessage_Register200OK_CallsRegisterSuccess(t *testing.T) {
+	mm := &mockMetricser{}
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  &mockDialoger{},
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+		inviteSDP:       make(map[string]inviteSDPEntity),
+		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
+	}
+
+	require.NoError(t, e.handleMessage("c", "US", makeRegister("ok1", "ft")))
+	time.Sleep(5 * time.Millisecond)
+	require.NoError(t, e.handleMessage("c", "US", makeRegister200OK("ok1", "ft", "tt")))
+
+	require.Eventually(t, func() bool { return mm.registerSuccessCalls == 1 },
+		100*time.Millisecond, 10*time.Millisecond)
+	require.Empty(t, mm.registerFailureCodes)
+}
+
+func TestHandleMessage_Register403_CallsRegisterFailure(t *testing.T) {
+	mm := &mockMetricser{}
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  &mockDialoger{},
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+		inviteSDP:       make(map[string]inviteSDPEntity),
+		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
+	}
+
+	require.NoError(t, e.handleMessage("c", "US", makeRegister("f403", "ft")))
+	time.Sleep(5 * time.Millisecond)
+	require.NoError(t, e.handleMessage("c", "US", makeRegisterStatus("403 Forbidden", "f403", "ft", "tt")))
+
+	require.Eventually(t, func() bool { return len(mm.registerFailureCodes) == 1 },
+		100*time.Millisecond, 10*time.Millisecond)
+	require.Equal(t, []string{"403"}, mm.registerFailureCodes)
+	require.Zero(t, mm.registerSuccessCalls)
+}
+
+// Challenge 401 is recorded in failure_total{code} (for brute-force detection)
+// even though it does not affect register_success_ratio.
+func TestHandleMessage_Register401Challenge_CallsRegisterFailure(t *testing.T) {
+	mm := &mockMetricser{}
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  &mockDialoger{},
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+		inviteSDP:       make(map[string]inviteSDPEntity),
+		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
+	}
+
+	require.NoError(t, e.handleMessage("c", "US", makeRegister("ch1", "ft")))
+	time.Sleep(5 * time.Millisecond)
+	require.NoError(t, e.handleMessage("c", "US", makeRegisterStatus("401 Unauthorized", "ch1", "ft", "tt")))
+
+	require.Eventually(t, func() bool { return len(mm.registerFailureCodes) == 1 },
+		100*time.Millisecond, 10*time.Millisecond)
+	require.Equal(t, []string{"401"}, mm.registerFailureCodes)
+}
+
+// 1xx provisional response must NOT be counted as a registration failure.
+func TestHandleMessage_Register100Trying_NotAFailure(t *testing.T) {
+	mm := &mockMetricser{}
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  &mockDialoger{},
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+		inviteSDP:       make(map[string]inviteSDPEntity),
+		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
+	}
+
+	require.NoError(t, e.handleMessage("c", "US", makeRegister("t100", "ft")))
+	time.Sleep(5 * time.Millisecond)
+	require.NoError(t, e.handleMessage("c", "US", makeRegisterStatus("100 Trying", "t100", "ft", "tt")))
+
+	time.Sleep(20 * time.Millisecond)
+	require.Empty(t, mm.registerFailureCodes)
+	require.Zero(t, mm.registerSuccessCalls)
+}
+
+// ==================== registerExpiryTracker (S4-2.2) ====================
+
+func newExporterWithRegTracker() *exporter {
+	return &exporter{
+		services: services{
+			metricser: &mockMetricser{},
+			dialoger:  &mockDialoger{},
+		},
+		registerTracker:       make(map[string]registerEntry),
+		registerExpiryTracker: make(map[string]registerExpiryEntry),
+		inviteTracker:         make(map[string]inviteEntry),
+		inviteSDP:             make(map[string]inviteSDPEntity),
+		mediaTracker:          mediatracker.NewTracker(rtpStreamTTL),
+	}
+}
+
+func TestRegisterExpiryTracker_NewRegistration(t *testing.T) {
+	e := newExporterWithRegTracker()
+
+	e.storeRegistration("sip:user1@example.com", "c", "sip", "US", 3600)
+
+	counts := e.registrationCounts()
+	require.Len(t, counts, 1)
+	require.Equal(t, 1, counts[0].Count)
+}
+
+func TestRegisterExpiryTracker_RefreshNoDoubleCount(t *testing.T) {
+	e := newExporterWithRegTracker()
+	aor := "sip:user1@example.com"
+
+	e.storeRegistration(aor, "c", "sip", "US", 3600)
+	e.storeRegistration(aor, "c", "sip", "US", 3600)
+	e.storeRegistration(aor, "c", "sip", "US", 3600)
+
+	counts := e.registrationCounts()
+	require.Len(t, counts, 1)
+	require.Equal(t, 1, counts[0].Count, "refresh of same AOR must not double-count")
+}
+
+func TestRegisterExpiryTracker_DifferentAORs(t *testing.T) {
+	e := newExporterWithRegTracker()
+
+	e.storeRegistration("sip:user1@example.com", "c", "sip", "US", 3600)
+	e.storeRegistration("sip:user2@example.com", "c", "sip", "US", 3600)
+
+	counts := e.registrationCounts()
+	require.Len(t, counts, 1)
+	require.Equal(t, 2, counts[0].Count)
+}
+
+func TestRegisterExpiryTracker_GroupsByLabels(t *testing.T) {
+	e := newExporterWithRegTracker()
+
+	e.storeRegistration("sip:u1@a", "carrier-A", "sip", "US", 3600)
+	e.storeRegistration("sip:u2@a", "carrier-A", "sip", "US", 3600)
+	e.storeRegistration("sip:u3@b", "carrier-B", "yealink", "DE", 3600)
+
+	counts := e.registrationCounts()
+	require.Len(t, counts, 2)
+	byCarrier := map[string]int{}
+	for _, c := range counts {
+		byCarrier[c.Labels["carrier"]] = c.Count
+	}
+	require.Equal(t, 2, byCarrier["carrier-A"])
+	require.Equal(t, 1, byCarrier["carrier-B"])
+}
+
+func TestRegisterExpiryTracker_CleanupExpired(t *testing.T) {
+	e := newExporterWithRegTracker()
+
+	e.storeRegistration("sip:user1@example.com", "c", "sip", "US", 1)
+	// Force expiry by backdating the entry.
+	e.registerExpiryMutex.Lock()
+	for k := range e.registerExpiryTracker {
+		ent := e.registerExpiryTracker[k]
+		ent.expiry = time.Now().Add(-time.Second)
+		e.registerExpiryTracker[k] = ent
+	}
+	e.registerExpiryMutex.Unlock()
+
+	e.cleanupExpiredRegistrations()
+
+	counts := e.registrationCounts()
+	require.Empty(t, counts, "expired registration must be removed")
+}
+
+func TestRegisterExpiryTracker_RefreshKeepsActive(t *testing.T) {
+	e := newExporterWithRegTracker()
+	aor := "sip:user1@example.com"
+
+	e.storeRegistration(aor, "c", "sip", "US", 1)
+	// Backdate close to expiry.
+	e.registerExpiryMutex.Lock()
+	ent := e.registerExpiryTracker[aor]
+	ent.expiry = time.Now().Add(100 * time.Millisecond)
+	e.registerExpiryTracker[aor] = ent
+	e.registerExpiryMutex.Unlock()
+
+	// Refresh before expiry.
+	e.storeRegistration(aor, "c", "sip", "US", 3600)
+
+	// Even though the old expiry has passed, the refresh extended it.
+	time.Sleep(150 * time.Millisecond)
+	e.cleanupExpiredRegistrations()
+
+	counts := e.registrationCounts()
+	require.Len(t, counts, 1, "refreshed registration must survive old-expiry cleanup")
+}
+
+// End-to-end: REGISTER then 200 OK populates the expiry tracker from the
+// parsed From URI and labels.
+func TestHandleMessage_Register200OK_PopulatesExpiryTracker(t *testing.T) {
+	e := &exporter{
+		services: services{
+			metricser: &mockMetricser{},
+			dialoger:  &mockDialoger{},
+		},
+		registerTracker:       make(map[string]registerEntry),
+		registerExpiryTracker: make(map[string]registerExpiryEntry),
+		inviteTracker:         make(map[string]inviteEntry),
+		inviteSDP:             make(map[string]inviteSDPEntity),
+		mediaTracker:          mediatracker.NewTracker(rtpStreamTTL),
+	}
+
+	require.NoError(t, e.handleMessage("carrier-A", "US", makeRegister("e2e1", "ft")))
+	time.Sleep(5 * time.Millisecond)
+	require.NoError(t, e.handleMessage("carrier-A", "US", makeRegister200OK("e2e1", "ft", "tt")))
+
+	require.Eventually(t, func() bool { return len(e.registrationCounts()) == 1 },
+		100*time.Millisecond, 10*time.Millisecond)
+	counts := e.registrationCounts()
+	require.Equal(t, 1, counts[0].Count)
+	require.Equal(t, "carrier-A", counts[0].Labels["carrier"])
+	require.Equal(t, "user@domain", func() string {
+		e.registerExpiryMutex.RLock()
+		defer e.registerExpiryMutex.RUnlock()
+		for aor := range e.registerExpiryTracker {
+			return aor
+		}
+		return ""
+	}())
 }
 
 func TestHandleMessage_Response401(t *testing.T) {
@@ -2928,6 +3241,11 @@ type carrierCall struct {
 	uaType  string
 }
 
+type carrierFailure struct {
+	carrier string
+	code    string
+}
+
 type carrierTrackingMetricser struct {
 	requests               []carrierCall
 	responseWithMetrics    []carrierCall
@@ -2940,6 +3258,8 @@ type carrierTrackingMetricser struct {
 	sessionCompleted       []carrierCall
 	invite200OK            []carrierCall
 	vqReports              []carrierCall
+	registerSuccess        []string
+	registerFailure        []carrierFailure
 	packetsTotal           int
 	systemErrors           int
 	sessionsByCarrierAndUA map[string]map[string]int
@@ -2983,6 +3303,14 @@ func (m *carrierTrackingMetricser) SessionCompleted(carrier, _, _ string) {
 	m.sessionCompleted = append(m.sessionCompleted, carrierCall{carrier: carrier})
 }
 
+func (m *carrierTrackingMetricser) RegisterSuccess(carrier, _, _ string) {
+	m.registerSuccess = append(m.registerSuccess, carrier)
+}
+
+func (m *carrierTrackingMetricser) RegisterFailure(carrier, _, _, code string) {
+	m.registerFailure = append(m.registerFailure, carrierFailure{carrier: carrier, code: code})
+}
+
 func (m *carrierTrackingMetricser) UpdateRRD(carrier, _, _ string, delayMs float64) {
 	m.rrdCalls = append(m.rrdCalls, carrierCall{carrier: carrier, value: delayMs})
 }
@@ -3015,6 +3343,8 @@ func (m *carrierTrackingMetricser) UpdateSession(carrier, uaType, _ string, size
 }
 
 func (m *carrierTrackingMetricser) UpdateSessions(_ []service.LabeledCount) {}
+
+func (m *carrierTrackingMetricser) UpdateActiveRegistrations(_ []service.LabeledCount) {}
 
 func (m *carrierTrackingMetricser) SystemError() {
 	m.systemErrors++
@@ -3082,6 +3412,16 @@ func makeRegister(callID string, fromTag string) []byte {
 
 func makeRegister200OK(callID string, fromTag string, toTag string) []byte {
 	return []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=" + fromTag + "\r\n" +
+		"To: <sip:other@domain>;tag=" + toTag + "\r\n" +
+		"Call-ID: " + callID + "\r\n" +
+		"CSeq: 1 REGISTER\r\n")
+}
+
+// makeRegisterStatus builds a REGISTER response with an arbitrary status line
+// (e.g. "403 Forbidden", "401 Unauthorized", "100 Trying").
+func makeRegisterStatus(statusLine, callID, fromTag, toTag string) []byte {
+	return []byte("SIP/2.0 " + statusLine + "\r\n" +
 		"From: <sip:user@domain>;tag=" + fromTag + "\r\n" +
 		"To: <sip:other@domain>;tag=" + toTag + "\r\n" +
 		"Call-ID: " + callID + "\r\n" +
