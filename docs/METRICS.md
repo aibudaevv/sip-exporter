@@ -22,7 +22,8 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 > | **System** | `packets_total`, `system_error_total`, self-monitoring | *(none)* |
 > | **Base** | All SIP requests, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD, VQ reports, sessions, `reinvite_total`, registration health (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country` |
 > | **Reg failure** | `register_failure_total` | `carrier, ua_type, source_country, code` |
-> | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_active_streams` | `carrier, ua_type, codec, source_country` |
+> | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country` |
+> | **RTP dialog** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country` |
 > | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, destination_country, caller_host, called_host` |
 
 `carrier` and `ua_type` default to `"other"` when not configured or when no pattern matches. `source_country` defaults to `"unknown"` when neither carrier country nor GeoIP DB is available.
@@ -546,12 +547,21 @@ counted; RTP without a correlated dialog is dropped.
 
 `sip_exporter_rtp_packets_total{carrier,ua_type,codec,source_country}` *(counter)*: total number of RTP packets observed.
 `sip_exporter_rtp_packets_lost_total{carrier,ua_type,codec,source_country}` *(counter)*: packets detected as lost via RTP sequence-number gaps.
+`sip_exporter_rtp_duplicate_packets_total{carrier,ua_type,codec,source_country}` *(counter)*: duplicate RTP packets detected (same sequence number as the previous packet, indicating retransmission or media loop).
 `sip_exporter_rtp_jitter_milliseconds{carrier,ua_type,codec,source_country}` *(histogram, buckets 0.1..500 ms)*: smoothed interarrival jitter (RFC 3550 A.8).
-`sip_exporter_rtp_mos_score{carrier,ua_type,codec,source_country}` *(histogram, buckets 1.0..5.0)*: MOS-LQ estimated via the ITU-T G.107 E-model (codec impairment + loss + jitter-induced discard).
+`sip_exporter_rtp_mos_score{carrier,ua_type,codec,source_country}` *(histogram, buckets 1.0..5.0)*: MOS-LQ estimated via the ITU-T G.107 E-model with a 60 ms jitter buffer assumption.
+`sip_exporter_rtp_mos_f1{carrier,ua_type,codec,source_country}` *(histogram, buckets 1.0..5.0)*: MOS-LQ with a strict jitter buffer (50 ms) — models low-latency endpoints that tolerate less jitter.
+`sip_exporter_rtp_mos_f2{carrier,ua_type,codec,source_country}` *(histogram, buckets 1.0..5.0)*: MOS-LQ with a generous jitter buffer (200 ms) — models managed endpoints with deeper buffers.
+`sip_exporter_rtp_mos_adaptive{carrier,ua_type,codec,source_country}` *(histogram, buckets 1.0..5.0)*: MOS-LQ with an adaptive jitter buffer (500 ms) — models adaptive endpoints that absorb significant jitter.
+`sip_exporter_rtp_r_factor{carrier,ua_type,codec,source_country}` *(histogram, buckets 10..100)*: E-model R-factor (ITU-T G.107), range 0–100. Underlying quality score before the R→MOS transform.
+`sip_exporter_rtp_burst_loss_density{carrier,ua_type,codec,source_country}` *(histogram, buckets 10..100)*: percentage of lost packets that occurred in burst runs (≥ 3 consecutive losses), range 0–100.
+`sip_exporter_rtp_gap_loss_density{carrier,ua_type,codec,source_country}` *(histogram, buckets 10..100)*: percentage of lost packets that occurred in isolated gaps (< 3 consecutive losses), range 0–100.
 `sip_exporter_rtp_active_streams{carrier,ua_type,codec,source_country}` *(gauge)*: number of active RTP streams. Sampled once per second; idle streams expire after 30 s.
 
-> MOS is sampled per stream once per second; the E-model uses G.113 codec Ie/Bpl
-> factors. Unknown codecs get a conservative default (Ie=10).
+> MOS and R-factor are sampled per stream once per second; the E-model uses G.113 codec Ie/Bpl
+> factors. Unknown codecs get a conservative default (Ie=10). Burst/gap density uses a simplified
+> heuristic inspired by RFC 3611: consecutive loss runs of ≥ 3 packets are classified as burst,
+> shorter runs as gap.
 
 > **Correlation limitation:** RTP streams are correlated to SIP dialogs by matching
 > the packet's source IP:port against the media endpoints advertised in SDP
@@ -559,6 +569,16 @@ counted; RTP without a correlated dialog is dropped.
 > advertised port). With NAT/port remapping (asymmetric RTP) the flow is not
 > matched and is dropped from RTP metrics; SIP signaling metrics are unaffected.
 > Future work: port-learning per RFC 4961.
+
+### RTP Dialog Quality Metrics
+
+These counters are evaluated at dialog teardown (BYE 200 OK or Session-Expires expiry) and carry only `carrier, ua_type, source_country` (no `codec` label — they describe the dialog, not a single stream).
+
+`sip_exporter_rtp_oneway_calls_total{carrier,ua_type,source_country}` *(counter)*: dialogs where 2+ media endpoints were registered (SDP from both parties) but RTP was observed in only one direction.
+`sip_exporter_sessions_missing_rtp_total{carrier,ua_type,source_country}` *(counter)*: dialogs with SDP media endpoints but no RTP observed at all.
+
+> Both metrics rely on a persistent per-dialog RTP record that survives stream TTL expiry,
+> ensuring accurate detection even when RTP streams were cleaned up before dialog teardown.
 
 ## System metrics
 
