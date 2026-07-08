@@ -101,6 +101,7 @@ type (
 		rtpDuplicate     *prometheus.CounterVec
 		rtpJitter        *prometheus.HistogramVec
 		rtpMOS           *prometheus.HistogramVec
+		rtpRFactor       *prometheus.HistogramVec
 		rtpActiveStreams *prometheus.GaugeVec
 		prevRTPKeys      map[string][]string
 
@@ -139,6 +140,7 @@ type (
 		UpdateRTPDuplicates(carrier, uaType, codec, sourceCountry string)
 		UpdateRTPJitter(carrier, uaType, codec, sourceCountry string, jitterMs float64)
 		UpdateRTPMOS(carrier, uaType, codec, sourceCountry string, mos float64)
+		UpdateRTPRFactor(carrier, uaType, codec, sourceCountry string, rFactor float64)
 		UpdateRTPActiveStreams(counts []LabeledCount)
 		SystemError()
 		ParseError(errorType string)
@@ -478,6 +480,7 @@ func (m *metrics) initVQHistograms(reg *prometheus.Registry) {
 func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 	jitterBuckets := []float64{0.1, 0.5, 1, 5, 10, 20, 50, 100, 200, 500}
 	mosBuckets := []float64{1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0}
+	rFactorBuckets := []float64{10, 20, 30, 40, 50, 60, 70, 80, 85, 90, 93, 100}
 	rl := []string{"carrier", "ua_type", "codec", "source_country"}
 	m.rtpPackets = newCounterVecWithRegistry(
 		"sip_exporter_rtp_packets_total",
@@ -497,6 +500,11 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 		Name:    "sip_exporter_rtp_mos_score",
 		Help:    "RTP MOS-LQ score 1.0-4.9 estimated via ITU-T G.107 E-model",
 		Buckets: mosBuckets,
+	}, rl, reg)
+	m.rtpRFactor = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_rtp_r_factor",
+		Help:    "RTP E-model R-factor (ITU-T G.107), range 0-100",
+		Buckets: rFactorBuckets,
 	}, rl, reg)
 	m.rtpActiveStreams = newGaugeVecWithRegistry(
 		"sip_exporter_rtp_active_streams",
@@ -881,6 +889,10 @@ func (m *metrics) UpdateRTPJitter(carrier, uaType, codec, sourceCountry string, 
 
 func (m *metrics) UpdateRTPMOS(carrier, uaType, codec, sourceCountry string, mos float64) {
 	m.rtpMOS.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(mos)
+}
+
+func (m *metrics) UpdateRTPRFactor(carrier, uaType, codec, sourceCountry string, rFactor float64) {
+	m.rtpRFactor.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(rFactor)
 }
 
 func (m *metrics) UpdateRTPActiveStreams(counts []LabeledCount) {

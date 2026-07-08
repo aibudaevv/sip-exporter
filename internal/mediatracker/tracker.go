@@ -33,6 +33,7 @@ type (
 		PacketsDuplicate uint64
 		JitterMs         float64
 		MOS              float64
+		RFactor          float64
 		LastSeen         time.Time
 	}
 
@@ -214,6 +215,7 @@ func (t *Tracker) Snapshot() []StreamStats {
 	for _, e := range t.streams {
 		s := e.state
 		jitter := s.JitterMs()
+		r := ComputeRFactor(e.codec, s.LossRate(), jitter)
 		out = append(out, StreamStats{
 			SSRC:             s.SSRC,
 			Codec:            e.codec,
@@ -225,7 +227,8 @@ func (t *Tracker) Snapshot() []StreamStats {
 			PacketsLost:      s.packetsLost,
 			PacketsDuplicate: s.packetsDuplicate,
 			JitterMs:         jitter,
-			MOS:              ComputeMOS(e.codec, s.LossRate(), jitter),
+			MOS:              mosFromR(r),
+			RFactor:          r,
 			LastSeen:         s.lastArrival,
 		})
 	}

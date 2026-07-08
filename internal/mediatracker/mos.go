@@ -89,8 +89,9 @@ func jitterDiscardRate(jitterMs float64) float64 {
 	return r
 }
 
-// ComputeMOS estimates MOS-LQ from codec, measured loss rate (fraction) and jitter (ms).
-func ComputeMOS(codec string, lossRate, jitterMs float64) float64 {
+// ComputeRFactor estimates the E-model R-factor (ITU-T G.107) from codec,
+// measured loss rate (fraction 0..1) and jitter (ms). R ∈ [0, 100].
+func ComputeRFactor(codec string, lossRate, jitterMs float64) float64 {
 	p := codecParams(codec)
 	effLoss := lossRate + jitterDiscardRate(jitterMs)
 	if effLoss > 1 {
@@ -99,5 +100,15 @@ func ComputeMOS(codec string, lossRate, jitterMs float64) float64 {
 		effLoss = 0
 	}
 	r := r0Factor - ieEff(p, effLoss)
-	return mosFromR(r)
+	if r < 0 {
+		r = 0
+	} else if r > rFactorMax {
+		r = rFactorMax
+	}
+	return r
+}
+
+// ComputeMOS estimates MOS-LQ from codec, measured loss rate (fraction) and jitter (ms).
+func ComputeMOS(codec string, lossRate, jitterMs float64) float64 {
+	return mosFromR(ComputeRFactor(codec, lossRate, jitterMs))
 }

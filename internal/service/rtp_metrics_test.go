@@ -87,6 +87,16 @@ func TestRTP_JitterAndMOS(t *testing.T) {
 	require.Equal(t, uint64(1), mcount)
 }
 
+func TestRTP_RFactor(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateRTPRFactor("carrier-a", "yealink", "PCMU", "", 93.2)
+	m.UpdateRTPRFactor("carrier-a", "yealink", "PCMU", "", 70.0)
+
+	sum, count := m.rtpHist(m.rtpRFactor, "carrier-a", "yealink", "PCMU")
+	require.InDelta(t, 163.2, sum, 0.01)
+	require.Equal(t, uint64(2), count)
+}
+
 func TestRTP_ActiveStreams(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTPActiveStreams([]LabeledCount{

@@ -94,3 +94,27 @@ func TestComputeMOS_HighLossClampsEffLoss(t *testing.T) {
 	mos := ComputeMOS("PCMU", 0.6, 150)
 	require.GreaterOrEqual(t, mos, 1.0, "effLoss>1 must clamp, MOS must not go below 1.0")
 }
+
+func TestComputeRFactor_PCMU_Clean(t *testing.T) {
+	r := ComputeRFactor("PCMU", 0, 0)
+	require.InDelta(t, 93.2, r, 0.01)
+}
+
+func TestComputeRFactor_LossReducesR(t *testing.T) {
+	clean := ComputeRFactor("PCMU", 0, 0)
+	degraded := ComputeRFactor("PCMU", 0.05, 0)
+	require.Less(t, degraded, clean)
+}
+
+func TestComputeRFactor_HighLossClamped(t *testing.T) {
+	r := ComputeRFactor("PCMU", 0.6, 150)
+	require.GreaterOrEqual(t, r, 0.0)
+	require.LessOrEqual(t, r, 100.0)
+}
+
+func TestComputeRFactor_MOSConsistency(t *testing.T) {
+	// MOS computed from ComputeMOS must match mosFromR(ComputeRFactor)
+	r := ComputeRFactor("PCMU", 0.05, 30)
+	mos := ComputeMOS("PCMU", 0.05, 30)
+	require.InDelta(t, mos, mosFromR(r), 0.0001)
+}
