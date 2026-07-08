@@ -814,6 +814,9 @@ func (e *exporter) handleRTP(
 	if res.Counted {
 		e.services.metricser.UpdateRTPPackets(res.Carrier, res.UAType, res.Codec, res.SourceCountry)
 	}
+	if res.Duplicate {
+		e.services.metricser.UpdateRTPDuplicates(res.Carrier, res.UAType, res.Codec, res.SourceCountry)
+	}
 	if res.Lost > 0 {
 		e.services.metricser.UpdateRTPLoss(res.Carrier, res.UAType, res.Codec, res.SourceCountry, res.Lost)
 	}

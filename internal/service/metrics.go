@@ -98,6 +98,7 @@ type (
 
 		rtpPackets       *prometheus.CounterVec
 		rtpLost          *prometheus.CounterVec
+		rtpDuplicate     *prometheus.CounterVec
 		rtpJitter        *prometheus.HistogramVec
 		rtpMOS           *prometheus.HistogramVec
 		rtpActiveStreams *prometheus.GaugeVec
@@ -135,6 +136,7 @@ type (
 		UpdateVQReport(carrier, uaType, sourceCountry string, report *vq.SessionReport)
 		UpdateRTPPackets(carrier, uaType, codec, sourceCountry string)
 		UpdateRTPLoss(carrier, uaType, codec, sourceCountry string, lost uint64)
+		UpdateRTPDuplicates(carrier, uaType, codec, sourceCountry string)
 		UpdateRTPJitter(carrier, uaType, codec, sourceCountry string, jitterMs float64)
 		UpdateRTPMOS(carrier, uaType, codec, sourceCountry string, mos float64)
 		UpdateRTPActiveStreams(counts []LabeledCount)
@@ -483,6 +485,9 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 	m.rtpLost = newCounterVecWithRegistry(
 		"sip_exporter_rtp_packets_lost_total",
 		"Total number of RTP packets detected as lost via sequence gaps", rl, reg)
+	m.rtpDuplicate = newCounterVecWithRegistry(
+		"sip_exporter_rtp_duplicate_packets_total",
+		"Total number of duplicate RTP packets detected (same sequence number)", rl, reg)
 	m.rtpJitter = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_rtp_jitter_milliseconds",
 		Help:    "RTP interarrival jitter in milliseconds (RFC 3550 A.8)",
@@ -864,6 +869,10 @@ func (m *metrics) UpdateRTPLoss(carrier, uaType, codec, sourceCountry string, lo
 		return
 	}
 	m.rtpLost.WithLabelValues(carrier, uaType, codec, sourceCountry).Add(float64(lost))
+}
+
+func (m *metrics) UpdateRTPDuplicates(carrier, uaType, codec, sourceCountry string) {
+	m.rtpDuplicate.WithLabelValues(carrier, uaType, codec, sourceCountry).Inc()
 }
 
 func (m *metrics) UpdateRTPJitter(carrier, uaType, codec, sourceCountry string, jitterMs float64) {

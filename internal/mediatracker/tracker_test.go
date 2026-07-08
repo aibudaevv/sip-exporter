@@ -85,6 +85,35 @@ func TestTracker_ObserveWithCorrelation(t *testing.T) {
 	require.True(t, stats[0].MOS >= 1.0 && stats[0].MOS <= 4.5)
 }
 
+func TestTracker_ObserveDuplicateFlag(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-dup"))
+	t0 := time.Unix(1000, 0)
+
+	// first packet
+	res, ok := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(5, 160), t0)
+	require.True(t, ok)
+	require.True(t, res.Counted)
+	require.False(t, res.Duplicate, "first packet must not be a duplicate")
+
+	// same sequence number → duplicate
+	res, ok = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(5, 160), t0.Add(1*time.Millisecond))
+	require.True(t, ok)
+	require.False(t, res.Counted, "duplicate must not be counted as received")
+	require.True(t, res.Duplicate, "same seq must set Duplicate flag")
+
+	// normal forward packet → not a duplicate
+	res, ok = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(6, 320), t0.Add(20*time.Millisecond))
+	require.True(t, ok)
+	require.True(t, res.Counted)
+	require.False(t, res.Duplicate)
+
+	stats := tr.Snapshot()
+	require.Len(t, stats, 1)
+	require.Equal(t, uint64(2), stats[0].PacketsTotal)
+	require.Equal(t, uint64(1), stats[0].PacketsDuplicate, "snapshot must report 1 duplicate")
+}
+
 func TestTracker_SnapshotComputesMOSAndJitter(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))

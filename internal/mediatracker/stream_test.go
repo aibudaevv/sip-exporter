@@ -80,6 +80,7 @@ func TestStreamState_DuplicateIgnored(t *testing.T) {
 
 	require.Equal(t, uint64(1), s.packetsTotal)
 	require.Equal(t, uint64(0), s.packetsLost)
+	require.Equal(t, uint64(1), s.packetsDuplicate, "duplicate must be counted")
 }
 
 func TestStreamState_StreamRestartNoHugeLoss(t *testing.T) {
@@ -91,6 +92,18 @@ func TestStreamState_StreamRestartNoHugeLoss(t *testing.T) {
 
 	require.Equal(t, uint64(1), s.packetsTotal, "restart resets the flow counter to this packet")
 	require.Equal(t, uint64(0), s.packetsLost, "restart must not count 4998 lost")
+}
+
+func TestStreamState_RestartResetsDuplicate(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
+	s.Observe(newHeader(1, 160), t0)
+	s.Observe(newHeader(1, 160), t0.Add(1*time.Millisecond)) // duplicate
+	require.Equal(t, uint64(1), s.packetsDuplicate)
+
+	// huge jump → stream restart → duplicate counter must reset
+	s.Observe(newHeader(5000, 320), t0.Add(20*time.Millisecond))
+	require.Equal(t, uint64(0), s.packetsDuplicate, "restart must reset duplicate counter")
 }
 
 func TestStreamState_RestartResetsJitter(t *testing.T) {

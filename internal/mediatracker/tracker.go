@@ -22,22 +22,24 @@ type (
 
 	// StreamStats is a point-in-time view of an RTP stream, used for metric export.
 	StreamStats struct {
-		SSRC          uint32
-		Codec         string
-		Carrier       string
-		UAType        string
-		SourceCountry string
-		CallID        string
-		PacketsTotal  uint64
-		PacketsLost   uint64
-		JitterMs      float64
-		MOS           float64
-		LastSeen      time.Time
+		SSRC             uint32
+		Codec            string
+		Carrier          string
+		UAType           string
+		SourceCountry    string
+		CallID           string
+		PacketsTotal     uint64
+		PacketsLost      uint64
+		PacketsDuplicate uint64
+		JitterMs         float64
+		MOS              float64
+		LastSeen         time.Time
 	}
 
 	// ObserveResult is the per-packet outcome of an RTP observation.
 	ObserveResult struct {
 		Counted       bool   // packet counted as received (not duplicate/reorder)
+		Duplicate     bool   // packet is a duplicate (same sequence number)
 		Lost          uint64 // packets newly marked lost by this observation
 		Codec         string // resolved codec name
 		Carrier       string // dialog carrier (for metric labels)
@@ -185,6 +187,7 @@ func (t *Tracker) Observe(
 
 	prevLost := entry.state.packetsLost
 	prevTotal := entry.state.packetsTotal
+	prevDup := entry.state.packetsDuplicate
 	entry.state.Observe(h, arrival)
 
 	var lostDelta uint64
@@ -194,6 +197,7 @@ func (t *Tracker) Observe(
 
 	return ObserveResult{
 		Counted:       entry.state.packetsTotal > prevTotal,
+		Duplicate:     entry.state.packetsDuplicate > prevDup,
 		Lost:          lostDelta,
 		Codec:         codec,
 		Carrier:       labels.Carrier,
@@ -211,17 +215,18 @@ func (t *Tracker) Snapshot() []StreamStats {
 		s := e.state
 		jitter := s.JitterMs()
 		out = append(out, StreamStats{
-			SSRC:          s.SSRC,
-			Codec:         e.codec,
-			Carrier:       e.labels.Carrier,
-			UAType:        e.labels.UAType,
-			SourceCountry: e.labels.SourceCountry,
-			CallID:        e.labels.CallID,
-			PacketsTotal:  s.packetsTotal,
-			PacketsLost:   s.packetsLost,
-			JitterMs:      jitter,
-			MOS:           ComputeMOS(e.codec, s.LossRate(), jitter),
-			LastSeen:      s.lastArrival,
+			SSRC:             s.SSRC,
+			Codec:            e.codec,
+			Carrier:          e.labels.Carrier,
+			UAType:           e.labels.UAType,
+			SourceCountry:    e.labels.SourceCountry,
+			CallID:           e.labels.CallID,
+			PacketsTotal:     s.packetsTotal,
+			PacketsLost:      s.packetsLost,
+			PacketsDuplicate: s.packetsDuplicate,
+			JitterMs:         jitter,
+			MOS:              ComputeMOS(e.codec, s.LossRate(), jitter),
+			LastSeen:         s.lastArrival,
 		})
 	}
 	return out

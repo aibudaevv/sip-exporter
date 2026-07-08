@@ -49,6 +49,7 @@ type mockMetricser struct {
 	rtpPacketsCalls           int
 	rtpLossCalls              int
 	rtpLossValue              uint64
+	rtpDuplicateCalls         int
 }
 
 func (m *mockMetricser) UpdateSessions(_ []service.LabeledCount) {}
@@ -155,6 +156,9 @@ func (m *mockMetricser) UpdateRTPPackets(_, _, _, _ string) {
 func (m *mockMetricser) UpdateRTPLoss(_, _, _, _ string, lost uint64) {
 	m.rtpLossCalls++
 	m.rtpLossValue = lost
+}
+func (m *mockMetricser) UpdateRTPDuplicates(_, _, _, _ string) {
+	m.rtpDuplicateCalls++
 }
 func (m *mockMetricser) UpdateRTPJitter(string, string, string, string, float64) {}
 func (m *mockMetricser) UpdateRTPMOS(string, string, string, string, float64)    {}
@@ -3363,6 +3367,7 @@ func (m *carrierTrackingMetricser) UpdateVQReport(carrier, uaType, _ string, _ *
 
 func (m *carrierTrackingMetricser) UpdateRTPPackets(string, string, string, string)         {}
 func (m *carrierTrackingMetricser) UpdateRTPLoss(string, string, string, string, uint64)    {}
+func (m *carrierTrackingMetricser) UpdateRTPDuplicates(string, string, string, string)      {}
 func (m *carrierTrackingMetricser) UpdateRTPJitter(string, string, string, string, float64) {}
 func (m *carrierTrackingMetricser) UpdateRTPMOS(string, string, string, string, float64)    {}
 func (m *carrierTrackingMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount)         {}

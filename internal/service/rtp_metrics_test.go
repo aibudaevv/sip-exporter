@@ -60,6 +60,18 @@ func TestRTP_PacketsAndLoss(t *testing.T) {
 	require.InDelta(t, 3.0, m.rtpCounter(m.rtpLost, "carrier-a", "yealink", "PCMU"), 0.01)
 }
 
+func TestRTP_Duplicates(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateRTPDuplicates("carrier-a", "yealink", "PCMU", "")
+	m.UpdateRTPDuplicates("carrier-a", "yealink", "PCMU", "")
+
+	require.InDelta(t, 2.0, m.rtpCounter(m.rtpDuplicate, "carrier-a", "yealink", "PCMU"), 0.01)
+
+	// distinct label set → separate counter
+	m.UpdateRTPDuplicates("carrier-b", "cisco", "G.729", "")
+	require.InDelta(t, 1.0, m.rtpCounter(m.rtpDuplicate, "carrier-b", "cisco", "G.729"), 0.01)
+}
+
 func TestRTP_JitterAndMOS(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTPJitter("carrier-a", "yealink", "PCMU", "", 5.5)

@@ -16,16 +16,17 @@ const (
 // StreamState tracks per-SSRC RTP statistics: jitter (RFC 3550 A.8),
 // packet loss via sequence-number gaps, and total packet count.
 type StreamState struct {
-	SSRC         uint32
-	Codec        string
-	clockRate    uint32
-	maxSeq       uint16
-	lastTS       uint32
-	lastArrival  time.Time
-	jitterTicks  float64
-	packetsTotal uint64
-	packetsLost  uint64
-	hasPrev      bool
+	SSRC             uint32
+	Codec            string
+	clockRate        uint32
+	maxSeq           uint16
+	lastTS           uint32
+	lastArrival      time.Time
+	jitterTicks      float64
+	packetsTotal     uint64
+	packetsLost      uint64
+	packetsDuplicate uint64
+	hasPrev          bool
 }
 
 func newStreamState(ssrc uint32, codec string, clockRate uint32, now time.Time) *StreamState {
@@ -59,6 +60,7 @@ func (s *StreamState) Observe(h rtp.Header, arrival time.Time) {
 		// counters — this is a new flow instance, the previous totals are stale.
 		s.jitterTicks = 0
 		s.packetsLost = 0
+		s.packetsDuplicate = 0
 		s.packetsTotal = 1
 		s.maxSeq = h.SequenceNumber
 	case delta > 0:
@@ -71,6 +73,7 @@ func (s *StreamState) Observe(h rtp.Header, arrival time.Time) {
 		s.maxSeq = h.SequenceNumber
 	default:
 		// delta == 0: duplicate/retransmit — update timing, ignore for loss
+		s.packetsDuplicate++
 		s.updateJitter(h, arrival)
 	}
 
