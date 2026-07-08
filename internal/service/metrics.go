@@ -96,19 +96,21 @@ type (
 		vqReports *prometheus.CounterVec
 		vqTable   []vqTableEntry
 
-		rtpPackets       *prometheus.CounterVec
-		rtpLost          *prometheus.CounterVec
-		rtpDuplicate     *prometheus.CounterVec
-		rtpJitter        *prometheus.HistogramVec
-		rtpMOS           *prometheus.HistogramVec
-		rtpMOSF1         *prometheus.HistogramVec
-		rtpMOSF2         *prometheus.HistogramVec
-		rtpMOSAdaptive   *prometheus.HistogramVec
-		rtpRFactor       *prometheus.HistogramVec
-		rtpBurstLoss     *prometheus.HistogramVec
-		rtpGapLoss       *prometheus.HistogramVec
-		rtpActiveStreams *prometheus.GaugeVec
-		prevRTPKeys      map[string][]string
+		rtpPackets         *prometheus.CounterVec
+		rtpLost            *prometheus.CounterVec
+		rtpDuplicate       *prometheus.CounterVec
+		rtpJitter          *prometheus.HistogramVec
+		rtpMOS             *prometheus.HistogramVec
+		rtpMOSF1           *prometheus.HistogramVec
+		rtpMOSF2           *prometheus.HistogramVec
+		rtpMOSAdaptive     *prometheus.HistogramVec
+		rtpRFactor         *prometheus.HistogramVec
+		rtpBurstLoss       *prometheus.HistogramVec
+		rtpGapLoss         *prometheus.HistogramVec
+		rtpOneWayCalls     *prometheus.CounterVec
+		sessionsMissingRTP *prometheus.CounterVec
+		rtpActiveStreams   *prometheus.GaugeVec
+		prevRTPKeys        map[string][]string
 
 		carrierCounters sync.Map
 
@@ -149,6 +151,8 @@ type (
 		UpdateRTPRFactor(carrier, uaType, codec, sourceCountry string, rFactor float64)
 		UpdateRTPLossDistribution(carrier, uaType, codec, sourceCountry string, burstDensity, gapDensity float64)
 		UpdateRTPActiveStreams(counts []LabeledCount)
+		OneWayCall(carrier, uaType, sourceCountry string)
+		MissingRTP(carrier, uaType, sourceCountry string)
 		SystemError()
 		ParseError(errorType string)
 		SocketStats(received, dropped uint32)
@@ -539,6 +543,13 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 		Help:    "Percentage of lost RTP packets in isolated gaps, range 0-100",
 		Buckets: lossDensityBuckets,
 	}, rl, reg)
+	rl3 := []string{"carrier", "ua_type", "source_country"}
+	m.rtpOneWayCalls = newCounterVecWithRegistry(
+		"sip_exporter_rtp_oneway_calls_total",
+		"SIP dialogs where RTP was observed in only one direction (one-way audio)", rl3, reg)
+	m.sessionsMissingRTP = newCounterVecWithRegistry(
+		"sip_exporter_sessions_missing_rtp_total",
+		"SIP dialogs with SDP but no RTP observed at all", rl3, reg)
 	m.rtpActiveStreams = newGaugeVecWithRegistry(
 		"sip_exporter_rtp_active_streams",
 		"Number of active RTP streams correlated with SIP dialogs", rl, reg)
@@ -948,6 +959,14 @@ func (m *metrics) UpdateRTPLossDistribution(
 func (m *metrics) UpdateRTPActiveStreams(counts []LabeledCount) {
 	setGaugeFromCounts(m.rtpActiveStreams, &m.prevRTPKeys, counts,
 		[]string{"carrier", "ua_type", "codec", "source_country"})
+}
+
+func (m *metrics) OneWayCall(carrier, uaType, sourceCountry string) {
+	m.rtpOneWayCalls.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+}
+
+func (m *metrics) MissingRTP(carrier, uaType, sourceCountry string) {
+	m.sessionsMissingRTP.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 }
 
 func isEffectiveResponse(code []byte) bool {

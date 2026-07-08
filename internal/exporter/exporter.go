@@ -409,7 +409,8 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		for _, r := range results {
 			e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry)
 			e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
-			e.mediaTracker.Unregister(r.CallID)
+			rtpResult := e.mediaTracker.Unregister(r.CallID)
+			e.handleRTPDialogResult(rtpResult, r.Carrier, r.UAType, r.SourceCountry)
 		}
 
 		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", len(results)))
@@ -862,6 +863,18 @@ func (e *exporter) updateRTPMetrics() {
 	e.services.metricser.UpdateRTPActiveStreams(counts)
 }
 
+func (e *exporter) handleRTPDialogResult(
+	r mediatracker.RTPDialogResult,
+	carrier, uaType, sourceCountry string,
+) {
+	if r.MediaExpected && !r.RTPObserved {
+		e.services.metricser.MissingRTP(carrier, uaType, sourceCountry)
+	}
+	if r.OneWay {
+		e.services.metricser.OneWayCall(carrier, uaType, sourceCountry)
+	}
+}
+
 func (e *exporter) handleRequest(carrier string, uaType string, sourceCountry string, packet dto.Packet) {
 	var destinationCountry, callerHost, calledHost string
 	isReinvite := false
@@ -1123,7 +1136,8 @@ func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {
 
 	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
 	result := e.services.dialoger.Delete(dialogID)
-	e.mediaTracker.Unregister(string(packet.CallID))
+	rtpResult := e.mediaTracker.Unregister(string(packet.CallID))
+	e.handleRTPDialogResult(rtpResult, result.Carrier, result.UAType, result.SourceCountry)
 	if result.Duration > 0 {
 		e.services.metricser.UpdateSPD(result.Carrier, result.UAType, result.SourceCountry, result.Duration)
 		e.services.metricser.SessionCompleted(result.Carrier, result.UAType, result.SourceCountry)

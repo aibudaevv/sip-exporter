@@ -53,6 +53,13 @@ type (
 		SourceCountry string // dialog source country (for metric labels)
 	}
 
+	// RTPDialogResult is the per-dialog RTP summary returned at teardown.
+	RTPDialogResult struct {
+		MediaExpected bool // at least 1 media endpoint was registered (SDP seen)
+		RTPObserved   bool // at least 1 RTP stream was active
+		OneWay        bool // 2+ endpoints registered but only 1 has RTP
+	}
+
 	endpointKey struct {
 		ip   string
 		port uint16
@@ -72,6 +79,7 @@ type (
 		mu      sync.Mutex
 		streams map[streamKey]*streamEntry
 		media   map[endpointKey]MediaLabels
+		callRTP map[string]map[endpointKey]struct{} // per-CallID endpoints that ever had RTP (TTL-independent)
 		ttl     time.Duration
 		now     func() time.Time
 	}
@@ -89,6 +97,7 @@ func NewTracker(ttl time.Duration) *Tracker {
 	return &Tracker{
 		streams: make(map[streamKey]*streamEntry),
 		media:   make(map[endpointKey]MediaLabels),
+		callRTP: make(map[string]map[endpointKey]struct{}),
 		ttl:     ttl,
 		now:     time.Now,
 	}
@@ -115,19 +124,36 @@ func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) {
 }
 
 // Unregister removes all media endpoints and RTP streams belonging to a SIP
-// dialog (called on BYE 200 OK).
-func (t *Tracker) Unregister(callID string) {
+// dialog (called on BYE 200 OK or Session-Expires cleanup) and returns a
+// summary of the RTP activity observed for that dialog.
+func (t *Tracker) Unregister(callID string) RTPDialogResult {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	mediaCount := 0
 	for k, v := range t.media {
 		if v.CallID == callID {
+			mediaCount++
 			delete(t.media, k)
 		}
 	}
+
+	rtpEndpointCount := 0
+	if eps, ok := t.callRTP[callID]; ok {
+		rtpEndpointCount = len(eps)
+		delete(t.callRTP, callID)
+	}
+
 	for k, e := range t.streams {
 		if e.labels.CallID == callID {
 			delete(t.streams, k)
 		}
+	}
+
+	return RTPDialogResult{
+		MediaExpected: mediaCount > 0,
+		RTPObserved:   rtpEndpointCount > 0,
+		OneWay:        mediaCount >= 2 && rtpEndpointCount == 1,
 	}
 }
 
@@ -189,6 +215,10 @@ func (t *Tracker) Observe(
 			codec:  codec,
 		}
 		t.streams[key] = entry
+		if t.callRTP[labels.CallID] == nil {
+			t.callRTP[labels.CallID] = make(map[endpointKey]struct{})
+		}
+		t.callRTP[labels.CallID][ep] = struct{}{}
 	}
 
 	prevLost := entry.state.packetsLost

@@ -311,3 +311,73 @@ func TestTracker_ZeroClockRateFallback(t *testing.T) {
 	stats := tr.Snapshot()
 	require.Len(t, stats, 1)
 }
+
+func TestTracker_UnregisterResult_NoMediaNoRTP(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	r := tr.Unregister("call-1")
+	require.False(t, r.MediaExpected)
+	require.False(t, r.RTPObserved)
+	require.False(t, r.OneWay)
+}
+
+func TestTracker_UnregisterResult_MediaExpectedNoRTP(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5006, sampleLabels("call-1"))
+	r := tr.Unregister("call-1")
+	require.True(t, r.MediaExpected)
+	require.False(t, r.RTPObserved)
+	require.False(t, r.OneWay)
+}
+
+func TestTracker_UnregisterResult_TwoWayRTP(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5006, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+	// RTP to endpoint 1 (dst=10.0.0.1:5004)
+	_, ok := tr.Observe("10.0.0.99", 9999, "10.0.0.1", 5004, newHeader(1, 160), t0)
+	require.True(t, ok)
+	// RTP to endpoint 2 (dst=10.0.0.2:5006)
+	_, ok = tr.Observe("10.0.0.99", 9999, "10.0.0.2", 5006, newHeader(1, 160), t0)
+	require.True(t, ok)
+	r := tr.Unregister("call-1")
+	require.True(t, r.MediaExpected)
+	require.True(t, r.RTPObserved)
+	require.False(t, r.OneWay)
+}
+
+func TestTracker_UnregisterResult_OneWayRTP(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5006, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+	// RTP only to endpoint 1
+	_, ok := tr.Observe("10.0.0.99", 9999, "10.0.0.1", 5004, newHeader(1, 160), t0)
+	require.True(t, ok)
+	r := tr.Unregister("call-1")
+	require.True(t, r.MediaExpected)
+	require.True(t, r.RTPObserved)
+	require.True(t, r.OneWay, "2 endpoints registered, only 1 with RTP = one-way")
+}
+
+func TestTracker_UnregisterResult_SurvivesTTL(t *testing.T) {
+	tr := NewTracker(30 * time.Millisecond)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5006, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+
+	_, ok := tr.Observe("10.0.0.99", 9999, "10.0.0.1", 5004, newHeader(1, 160), t0)
+	require.True(t, ok)
+	_, ok = tr.Observe("10.0.0.99", 9999, "10.0.0.2", 5006, newHeader(1, 160), t0)
+	require.True(t, ok)
+
+	tr.SetNow(func() time.Time { return t0.Add(100 * time.Millisecond) })
+	tr.Cleanup()
+	require.Empty(t, tr.Snapshot(), "streams must be TTL-expired")
+
+	r := tr.Unregister("call-1")
+	require.True(t, r.MediaExpected, "media endpoints persist")
+	require.True(t, r.RTPObserved, "RTP fact must survive stream TTL")
+	require.False(t, r.OneWay, "two-way RTP was observed")
+}

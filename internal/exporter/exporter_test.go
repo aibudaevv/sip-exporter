@@ -167,6 +167,8 @@ func (m *mockMetricser) UpdateRTPMOSVariants(string, string, string, string, flo
 func (m *mockMetricser) UpdateRTPRFactor(string, string, string, string, float64)                   {}
 func (m *mockMetricser) UpdateRTPLossDistribution(string, string, string, string, float64, float64) {}
 func (m *mockMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount)                            {}
+func (m *mockMetricser) OneWayCall(string, string, string)                                          {}
+func (m *mockMetricser) MissingRTP(string, string, string)                                          {}
 
 type dialogCreateArgs struct {
 	expiresAt time.Time
@@ -3380,6 +3382,8 @@ func (m *carrierTrackingMetricser) UpdateRTPRFactor(string, string, string, stri
 func (m *carrierTrackingMetricser) UpdateRTPLossDistribution(string, string, string, string, float64, float64) {
 }
 func (m *carrierTrackingMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount) {}
+func (m *carrierTrackingMetricser) OneWayCall(string, string, string)               {}
+func (m *carrierTrackingMetricser) MissingRTP(string, string, string)               {}
 
 // ==================== SIP message builders for MC/DC tests ====================
 

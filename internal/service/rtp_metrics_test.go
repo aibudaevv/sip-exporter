@@ -129,6 +129,20 @@ func TestRTP_MOSVariants(t *testing.T) {
 	require.Equal(t, uint64(2), adaptCount)
 }
 
+func TestRTP_OneWayAndMissing(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.OneWayCall("carrier-a", "yealink", "US")
+	m.OneWayCall("carrier-a", "yealink", "US")
+	m.MissingRTP("carrier-b", "cisco", "")
+
+	var d dto.Metric
+	require.NoError(t, m.rtpOneWayCalls.WithLabelValues("carrier-a", "yealink", "US").Write(&d))
+	require.InDelta(t, 2.0, d.GetCounter().GetValue(), 0.01)
+
+	require.NoError(t, m.sessionsMissingRTP.WithLabelValues("carrier-b", "cisco", "").Write(&d))
+	require.InDelta(t, 1.0, d.GetCounter().GetValue(), 0.01)
+}
+
 func TestRTP_ActiveStreams(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTPActiveStreams([]LabeledCount{
