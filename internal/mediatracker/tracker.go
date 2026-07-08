@@ -33,6 +33,9 @@ type (
 		PacketsDuplicate uint64
 		JitterMs         float64
 		MOS              float64
+		MOSF1            float64
+		MOSF2            float64
+		MOSAdaptive      float64
 		RFactor          float64
 		BurstLossDensity float64
 		GapLossDensity   float64
@@ -217,7 +220,8 @@ func (t *Tracker) Snapshot() []StreamStats {
 	for _, e := range t.streams {
 		s := e.state
 		jitter := s.JitterMs()
-		r := ComputeRFactor(e.codec, s.LossRate(), jitter)
+		lossRate := s.LossRate()
+		r := ComputeRFactor(e.codec, lossRate, jitter)
 		s.classifyLossRun()
 		out = append(out, StreamStats{
 			SSRC:             s.SSRC,
@@ -231,6 +235,9 @@ func (t *Tracker) Snapshot() []StreamStats {
 			PacketsDuplicate: s.packetsDuplicate,
 			JitterMs:         jitter,
 			MOS:              mosFromR(r),
+			MOSF1:            ComputeMOSF1(e.codec, lossRate, jitter),
+			MOSF2:            ComputeMOSF2(e.codec, lossRate, jitter),
+			MOSAdaptive:      ComputeMOSAdaptive(e.codec, lossRate, jitter),
 			RFactor:          r,
 			BurstLossDensity: s.BurstLossDensity(),
 			GapLossDensity:   s.GapLossDensity(),

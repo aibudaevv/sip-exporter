@@ -129,6 +129,24 @@ func TestTracker_SnapshotComputesMOSAndJitter(t *testing.T) {
 	require.Less(t, stats[0].MOS, 4.41) // some impairment from jitter
 }
 
+func TestTracker_SnapshotMOSVariants(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(1, 160), t0)
+	// delay 1050ms → jitter ≈ 64ms (> jbMsDefault=60, < jbMsF2=200)
+	// F1 (jb=50): discard 0.29, default (jb=60): discard 0.07, F2/Adaptive: 0
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(2, 320), t0.Add(1050*time.Millisecond))
+
+	stats := tr.Snapshot()
+	require.Len(t, stats, 1)
+	require.Greater(t, stats[0].JitterMs, 60.0, "jitter must exceed jbMsDefault")
+	require.Less(t, stats[0].MOSF1, stats[0].MOS, "F1 (strict JB) must be < default")
+	require.Less(t, stats[0].MOS, stats[0].MOSF2, "default must be < F2 (generous JB)")
+	require.InDelta(t, stats[0].MOSF2, stats[0].MOSAdaptive, 0.0001, "F2=Adaptive when jitter<200ms")
+}
+
 func TestTracker_SnapshotFlushesPendingLossRun(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))

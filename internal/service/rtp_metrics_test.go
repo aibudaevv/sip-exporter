@@ -111,6 +111,24 @@ func TestRTP_LossDistribution(t *testing.T) {
 	require.Equal(t, uint64(2), gCount)
 }
 
+func TestRTP_MOSVariants(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateRTPMOSVariants("carrier-c", "grandstream", "PCMA", "", 3.5, 4.0, 4.2)
+	m.UpdateRTPMOSVariants("carrier-c", "grandstream", "PCMA", "", 3.0, 3.8, 4.1)
+
+	f1Sum, f1Count := m.rtpHist(m.rtpMOSF1, "carrier-c", "grandstream", "PCMA")
+	require.InDelta(t, 6.5, f1Sum, 0.01)
+	require.Equal(t, uint64(2), f1Count)
+
+	f2Sum, f2Count := m.rtpHist(m.rtpMOSF2, "carrier-c", "grandstream", "PCMA")
+	require.InDelta(t, 7.8, f2Sum, 0.01)
+	require.Equal(t, uint64(2), f2Count)
+
+	adaptSum, adaptCount := m.rtpHist(m.rtpMOSAdaptive, "carrier-c", "grandstream", "PCMA")
+	require.InDelta(t, 8.3, adaptSum, 0.01)
+	require.Equal(t, uint64(2), adaptCount)
+}
+
 func TestRTP_ActiveStreams(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTPActiveStreams([]LabeledCount{

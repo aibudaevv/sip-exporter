@@ -836,6 +836,10 @@ func (e *exporter) updateRTPMetrics() {
 	for _, s := range stats {
 		e.services.metricser.UpdateRTPJitter(s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.JitterMs)
 		e.services.metricser.UpdateRTPMOS(s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.MOS)
+		e.services.metricser.UpdateRTPMOSVariants(
+			s.Carrier, s.UAType, s.Codec, s.SourceCountry,
+			s.MOSF1, s.MOSF2, s.MOSAdaptive,
+		)
 		e.services.metricser.UpdateRTPRFactor(s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.RFactor)
 		e.services.metricser.UpdateRTPLossDistribution(
 			s.Carrier, s.UAType, s.Codec, s.SourceCountry,

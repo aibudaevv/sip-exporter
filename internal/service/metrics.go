@@ -101,6 +101,9 @@ type (
 		rtpDuplicate     *prometheus.CounterVec
 		rtpJitter        *prometheus.HistogramVec
 		rtpMOS           *prometheus.HistogramVec
+		rtpMOSF1         *prometheus.HistogramVec
+		rtpMOSF2         *prometheus.HistogramVec
+		rtpMOSAdaptive   *prometheus.HistogramVec
 		rtpRFactor       *prometheus.HistogramVec
 		rtpBurstLoss     *prometheus.HistogramVec
 		rtpGapLoss       *prometheus.HistogramVec
@@ -142,6 +145,7 @@ type (
 		UpdateRTPDuplicates(carrier, uaType, codec, sourceCountry string)
 		UpdateRTPJitter(carrier, uaType, codec, sourceCountry string, jitterMs float64)
 		UpdateRTPMOS(carrier, uaType, codec, sourceCountry string, mos float64)
+		UpdateRTPMOSVariants(carrier, uaType, codec, sourceCountry string, f1, f2, adapt float64)
 		UpdateRTPRFactor(carrier, uaType, codec, sourceCountry string, rFactor float64)
 		UpdateRTPLossDistribution(carrier, uaType, codec, sourceCountry string, burstDensity, gapDensity float64)
 		UpdateRTPActiveStreams(counts []LabeledCount)
@@ -503,6 +507,21 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 	m.rtpMOS = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_rtp_mos_score",
 		Help:    "RTP MOS-LQ score 1.0-4.9 estimated via ITU-T G.107 E-model",
+		Buckets: mosBuckets,
+	}, rl, reg)
+	m.rtpMOSF1 = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_rtp_mos_f1",
+		Help:    "RTP MOS-LQ with strict jitter buffer (50ms), range 1.0-4.5",
+		Buckets: mosBuckets,
+	}, rl, reg)
+	m.rtpMOSF2 = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_rtp_mos_f2",
+		Help:    "RTP MOS-LQ with generous jitter buffer (200ms), range 1.0-4.5",
+		Buckets: mosBuckets,
+	}, rl, reg)
+	m.rtpMOSAdaptive = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_rtp_mos_adaptive",
+		Help:    "RTP MOS-LQ with adaptive jitter buffer (500ms), range 1.0-4.5",
 		Buckets: mosBuckets,
 	}, rl, reg)
 	m.rtpRFactor = newHistogramVecWithRegistry(prometheus.HistogramOpts{
@@ -903,6 +922,15 @@ func (m *metrics) UpdateRTPJitter(carrier, uaType, codec, sourceCountry string, 
 
 func (m *metrics) UpdateRTPMOS(carrier, uaType, codec, sourceCountry string, mos float64) {
 	m.rtpMOS.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(mos)
+}
+
+func (m *metrics) UpdateRTPMOSVariants(
+	carrier, uaType, codec, sourceCountry string,
+	f1, f2, adapt float64,
+) {
+	m.rtpMOSF1.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(f1)
+	m.rtpMOSF2.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(f2)
+	m.rtpMOSAdaptive.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(adapt)
 }
 
 func (m *metrics) UpdateRTPRFactor(carrier, uaType, codec, sourceCountry string, rFactor float64) {
