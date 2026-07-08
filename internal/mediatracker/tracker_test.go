@@ -129,6 +129,22 @@ func TestTracker_SnapshotComputesMOSAndJitter(t *testing.T) {
 	require.Less(t, stats[0].MOS, 4.41) // some impairment from jitter
 }
 
+func TestTracker_SnapshotFlushesPendingLossRun(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(1, 160), t0)
+	// 4 lost, no terminating good packet — lossRun=4 is pending at snapshot time
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(6, 640), t0.Add(40*time.Millisecond))
+
+	stats := tr.Snapshot()
+	require.Len(t, stats, 1)
+	require.Equal(t, uint64(4), stats[0].PacketsLost)
+	require.InDelta(t, 100.0, stats[0].BurstLossDensity, 0.01, "pending burst must be flushed at snapshot")
+	require.InDelta(t, 0.0, stats[0].GapLossDensity, 0.01)
+}
+
 func TestTracker_CleanupExpiredStreams(t *testing.T) {
 	tr := NewTracker(30 * time.Millisecond) // short TTL
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))

@@ -89,12 +89,26 @@ func TestRTP_JitterAndMOS(t *testing.T) {
 
 func TestRTP_RFactor(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
-	m.UpdateRTPRFactor("carrier-a", "yealink", "PCMU", "", 93.2)
-	m.UpdateRTPRFactor("carrier-a", "yealink", "PCMU", "", 70.0)
+	m.UpdateRTPRFactor("carrier-a", "polycom", "PCMU", "", 93.2)
+	m.UpdateRTPRFactor("carrier-a", "polycom", "PCMU", "", 70.0)
 
-	sum, count := m.rtpHist(m.rtpRFactor, "carrier-a", "yealink", "PCMU")
+	sum, count := m.rtpHist(m.rtpRFactor, "carrier-a", "polycom", "PCMU")
 	require.InDelta(t, 163.2, sum, 0.01)
 	require.Equal(t, uint64(2), count)
+}
+
+func TestRTP_LossDistribution(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateRTPLossDistribution("carrier-b", "cisco", "G.729", "", 75.0, 25.0)
+	m.UpdateRTPLossDistribution("carrier-b", "cisco", "G.729", "", 50.0, 50.0)
+
+	bSum, bCount := m.rtpHist(m.rtpBurstLoss, "carrier-b", "cisco", "G.729")
+	require.InDelta(t, 125.0, bSum, 0.01)
+	require.Equal(t, uint64(2), bCount)
+
+	gSum, gCount := m.rtpHist(m.rtpGapLoss, "carrier-b", "cisco", "G.729")
+	require.InDelta(t, 75.0, gSum, 0.01)
+	require.Equal(t, uint64(2), gCount)
 }
 
 func TestRTP_ActiveStreams(t *testing.T) {

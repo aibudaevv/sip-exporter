@@ -34,6 +34,8 @@ type (
 		JitterMs         float64
 		MOS              float64
 		RFactor          float64
+		BurstLossDensity float64
+		GapLossDensity   float64
 		LastSeen         time.Time
 	}
 
@@ -216,6 +218,7 @@ func (t *Tracker) Snapshot() []StreamStats {
 		s := e.state
 		jitter := s.JitterMs()
 		r := ComputeRFactor(e.codec, s.LossRate(), jitter)
+		s.classifyLossRun()
 		out = append(out, StreamStats{
 			SSRC:             s.SSRC,
 			Codec:            e.codec,
@@ -229,6 +232,8 @@ func (t *Tracker) Snapshot() []StreamStats {
 			JitterMs:         jitter,
 			MOS:              mosFromR(r),
 			RFactor:          r,
+			BurstLossDensity: s.BurstLossDensity(),
+			GapLossDensity:   s.GapLossDensity(),
 			LastSeen:         s.lastArrival,
 		})
 	}

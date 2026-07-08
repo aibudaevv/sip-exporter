@@ -837,6 +837,10 @@ func (e *exporter) updateRTPMetrics() {
 		e.services.metricser.UpdateRTPJitter(s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.JitterMs)
 		e.services.metricser.UpdateRTPMOS(s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.MOS)
 		e.services.metricser.UpdateRTPRFactor(s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.RFactor)
+		e.services.metricser.UpdateRTPLossDistribution(
+			s.Carrier, s.UAType, s.Codec, s.SourceCountry,
+			s.BurstLossDensity, s.GapLossDensity,
+		)
 		tmp[aggKey{s.Carrier, s.UAType, s.Codec, s.SourceCountry}]++
 	}
 	counts := make([]service.LabeledCount, 0, len(tmp))

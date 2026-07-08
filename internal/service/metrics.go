@@ -102,6 +102,8 @@ type (
 		rtpJitter        *prometheus.HistogramVec
 		rtpMOS           *prometheus.HistogramVec
 		rtpRFactor       *prometheus.HistogramVec
+		rtpBurstLoss     *prometheus.HistogramVec
+		rtpGapLoss       *prometheus.HistogramVec
 		rtpActiveStreams *prometheus.GaugeVec
 		prevRTPKeys      map[string][]string
 
@@ -141,6 +143,7 @@ type (
 		UpdateRTPJitter(carrier, uaType, codec, sourceCountry string, jitterMs float64)
 		UpdateRTPMOS(carrier, uaType, codec, sourceCountry string, mos float64)
 		UpdateRTPRFactor(carrier, uaType, codec, sourceCountry string, rFactor float64)
+		UpdateRTPLossDistribution(carrier, uaType, codec, sourceCountry string, burstDensity, gapDensity float64)
 		UpdateRTPActiveStreams(counts []LabeledCount)
 		SystemError()
 		ParseError(errorType string)
@@ -481,6 +484,7 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 	jitterBuckets := []float64{0.1, 0.5, 1, 5, 10, 20, 50, 100, 200, 500}
 	mosBuckets := []float64{1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0}
 	rFactorBuckets := []float64{10, 20, 30, 40, 50, 60, 70, 80, 85, 90, 93, 100}
+	lossDensityBuckets := []float64{10, 25, 50, 75, 100}
 	rl := []string{"carrier", "ua_type", "codec", "source_country"}
 	m.rtpPackets = newCounterVecWithRegistry(
 		"sip_exporter_rtp_packets_total",
@@ -505,6 +509,16 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 		Name:    "sip_exporter_rtp_r_factor",
 		Help:    "RTP E-model R-factor (ITU-T G.107), range 0-100",
 		Buckets: rFactorBuckets,
+	}, rl, reg)
+	m.rtpBurstLoss = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_rtp_burst_loss_density",
+		Help:    "Percentage of lost RTP packets in burst runs, range 0-100",
+		Buckets: lossDensityBuckets,
+	}, rl, reg)
+	m.rtpGapLoss = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_rtp_gap_loss_density",
+		Help:    "Percentage of lost RTP packets in isolated gaps, range 0-100",
+		Buckets: lossDensityBuckets,
 	}, rl, reg)
 	m.rtpActiveStreams = newGaugeVecWithRegistry(
 		"sip_exporter_rtp_active_streams",
@@ -893,6 +907,14 @@ func (m *metrics) UpdateRTPMOS(carrier, uaType, codec, sourceCountry string, mos
 
 func (m *metrics) UpdateRTPRFactor(carrier, uaType, codec, sourceCountry string, rFactor float64) {
 	m.rtpRFactor.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(rFactor)
+}
+
+func (m *metrics) UpdateRTPLossDistribution(
+	carrier, uaType, codec, sourceCountry string,
+	burstDensity, gapDensity float64,
+) {
+	m.rtpBurstLoss.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(burstDensity)
+	m.rtpGapLoss.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(gapDensity)
 }
 
 func (m *metrics) UpdateRTPActiveStreams(counts []LabeledCount) {
