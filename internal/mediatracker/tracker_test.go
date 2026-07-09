@@ -85,6 +85,35 @@ func TestTracker_ObserveWithCorrelation(t *testing.T) {
 	require.True(t, stats[0].MOS >= 1.0 && stats[0].MOS <= 4.5)
 }
 
+func TestTracker_ObserveDuplicateFlag(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-dup"))
+	t0 := time.Unix(1000, 0)
+
+	// first packet
+	res, ok := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(5, 160), t0)
+	require.True(t, ok)
+	require.True(t, res.Counted)
+	require.False(t, res.Duplicate, "first packet must not be a duplicate")
+
+	// same sequence number → duplicate
+	res, ok = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(5, 160), t0.Add(1*time.Millisecond))
+	require.True(t, ok)
+	require.False(t, res.Counted, "duplicate must not be counted as received")
+	require.True(t, res.Duplicate, "same seq must set Duplicate flag")
+
+	// normal forward packet → not a duplicate
+	res, ok = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(6, 320), t0.Add(20*time.Millisecond))
+	require.True(t, ok)
+	require.True(t, res.Counted)
+	require.False(t, res.Duplicate)
+
+	stats := tr.Snapshot()
+	require.Len(t, stats, 1)
+	require.Equal(t, uint64(2), stats[0].PacketsTotal)
+	require.Equal(t, uint64(1), stats[0].PacketsDuplicate, "snapshot must report 1 duplicate")
+}
+
 func TestTracker_SnapshotComputesMOSAndJitter(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
@@ -98,6 +127,40 @@ func TestTracker_SnapshotComputesMOSAndJitter(t *testing.T) {
 	require.Len(t, stats, 1)
 	require.Greater(t, stats[0].JitterMs, 0.0)
 	require.Less(t, stats[0].MOS, 4.41) // some impairment from jitter
+}
+
+func TestTracker_SnapshotMOSVariants(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(1, 160), t0)
+	// delay 1050ms → jitter ≈ 64ms (> jbMsDefault=60, < jbMsF2=200)
+	// F1 (jb=50): discard 0.29, default (jb=60): discard 0.07, F2/Adaptive: 0
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(2, 320), t0.Add(1050*time.Millisecond))
+
+	stats := tr.Snapshot()
+	require.Len(t, stats, 1)
+	require.Greater(t, stats[0].JitterMs, 60.0, "jitter must exceed jbMsDefault")
+	require.Less(t, stats[0].MOSF1, stats[0].MOS, "F1 (strict JB) must be < default")
+	require.Less(t, stats[0].MOS, stats[0].MOSF2, "default must be < F2 (generous JB)")
+	require.InDelta(t, stats[0].MOSF2, stats[0].MOSAdaptive, 0.0001, "F2=Adaptive when jitter<200ms")
+}
+
+func TestTracker_SnapshotFlushesPendingLossRun(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(1, 160), t0)
+	// 4 lost, no terminating good packet — lossRun=4 is pending at snapshot time
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(6, 640), t0.Add(40*time.Millisecond))
+
+	stats := tr.Snapshot()
+	require.Len(t, stats, 1)
+	require.Equal(t, uint64(4), stats[0].PacketsLost)
+	require.InDelta(t, 100.0, stats[0].BurstLossDensity, 0.01, "pending burst must be flushed at snapshot")
+	require.InDelta(t, 0.0, stats[0].GapLossDensity, 0.01)
 }
 
 func TestTracker_CleanupExpiredStreams(t *testing.T) {
@@ -247,4 +310,74 @@ func TestTracker_ZeroClockRateFallback(t *testing.T) {
 	require.True(t, ok)
 	stats := tr.Snapshot()
 	require.Len(t, stats, 1)
+}
+
+func TestTracker_UnregisterResult_NoMediaNoRTP(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	r := tr.Unregister("call-1")
+	require.False(t, r.MediaExpected)
+	require.False(t, r.RTPObserved)
+	require.False(t, r.OneWay)
+}
+
+func TestTracker_UnregisterResult_MediaExpectedNoRTP(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5006, sampleLabels("call-1"))
+	r := tr.Unregister("call-1")
+	require.True(t, r.MediaExpected)
+	require.False(t, r.RTPObserved)
+	require.False(t, r.OneWay)
+}
+
+func TestTracker_UnregisterResult_TwoWayRTP(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5006, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+	// RTP to endpoint 1 (dst=10.0.0.1:5004)
+	_, ok := tr.Observe("10.0.0.99", 9999, "10.0.0.1", 5004, newHeader(1, 160), t0)
+	require.True(t, ok)
+	// RTP to endpoint 2 (dst=10.0.0.2:5006)
+	_, ok = tr.Observe("10.0.0.99", 9999, "10.0.0.2", 5006, newHeader(1, 160), t0)
+	require.True(t, ok)
+	r := tr.Unregister("call-1")
+	require.True(t, r.MediaExpected)
+	require.True(t, r.RTPObserved)
+	require.False(t, r.OneWay)
+}
+
+func TestTracker_UnregisterResult_OneWayRTP(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5006, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+	// RTP only to endpoint 1
+	_, ok := tr.Observe("10.0.0.99", 9999, "10.0.0.1", 5004, newHeader(1, 160), t0)
+	require.True(t, ok)
+	r := tr.Unregister("call-1")
+	require.True(t, r.MediaExpected)
+	require.True(t, r.RTPObserved)
+	require.True(t, r.OneWay, "2 endpoints registered, only 1 with RTP = one-way")
+}
+
+func TestTracker_UnregisterResult_SurvivesTTL(t *testing.T) {
+	tr := NewTracker(30 * time.Millisecond)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5006, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+
+	_, ok := tr.Observe("10.0.0.99", 9999, "10.0.0.1", 5004, newHeader(1, 160), t0)
+	require.True(t, ok)
+	_, ok = tr.Observe("10.0.0.99", 9999, "10.0.0.2", 5006, newHeader(1, 160), t0)
+	require.True(t, ok)
+
+	tr.SetNow(func() time.Time { return t0.Add(100 * time.Millisecond) })
+	tr.Cleanup()
+	require.Empty(t, tr.Snapshot(), "streams must be TTL-expired")
+
+	r := tr.Unregister("call-1")
+	require.True(t, r.MediaExpected, "media endpoints persist")
+	require.True(t, r.RTPObserved, "RTP fact must survive stream TTL")
+	require.False(t, r.OneWay, "two-way RTP was observed")
 }

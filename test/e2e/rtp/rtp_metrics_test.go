@@ -94,20 +94,19 @@ func getMetricByLabel(t *testing.T, endpoint, name string, labels ...string) flo
 	return 0
 }
 
-// runSippRTP runs a UAS+UAC SIPp scenario pair that establishes a SIP dialog with
-// SDP and streams real G.711a RTP (built-in /build/pcap/g711a.pcap). The exporter
-// captures the SIP signalling (correlating media endpoints from SDP) and the RTP,
-// producing labelled RTP metrics.
-func runSippRTP(ctx context.Context, t *testing.T, uasSIP, uacSIP, uasMedia, uacMedia string) {
+// startSippContainers starts UAS and UAC SIPp containers with the given scenario
+// files. UAC is launched in a goroutine so the caller can inject traffic
+// concurrently during the dialog's active phase (between ACK and BYE). The
+// returned function blocks until both containers finish and must be called
+// (typically at the end of the test, possibly via defer).
+func startSippContainers(ctx context.Context, t *testing.T, uasXML, uacXML, uasSIP, uacSIP, uasMedia, uacMedia string) func() {
 	t.Helper()
 
 	scenarioDir := filepath.Join(projectRoot, "test", "e2e", "sipp")
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
+	t.Cleanup(cancel)
 
-	// When verbose, stream SIPp output to the test log; otherwise capture stderr
-	// into a buffer so it can be dumped on failure for diagnostics.
 	var stdout io.Writer = &testWriter{t}
 	var stderrBuf bytes.Buffer
 	var stderr io.Writer = &stderrBuf
@@ -120,13 +119,11 @@ func runSippRTP(ctx context.Context, t *testing.T, uasSIP, uacSIP, uasMedia, uac
 		}
 	}
 
-	// UAS (callee): answers 200 OK + SDP, streams RTP from its -mp media port.
-	// -mi forces the media IP to 127.0.0.1 so RTP flows on lo and matches the SDP c= line.
 	uasCmd := exec.CommandContext(ctx, "docker", "run", "--rm",
 		"--network", "host",
 		"-v", scenarioDir+":/scenarios:ro",
 		sippImage,
-		"-sf", "/scenarios/uas_rtp.xml",
+		"-sf", "/scenarios/"+uasXML,
 		"-i", "127.0.0.1",
 		"-mi", "127.0.0.1",
 		"-p", uasSIP,
@@ -139,7 +136,6 @@ func runSippRTP(ctx context.Context, t *testing.T, uasSIP, uacSIP, uasMedia, uac
 	uasCmd.Stderr = stderr
 	require.NoError(t, uasCmd.Start())
 
-	// Wait for UAS to bind its SIP port.
 	require.Eventually(t, func() bool {
 		addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:"+uasSIP)
 		if err != nil {
@@ -153,12 +149,11 @@ func runSippRTP(ctx context.Context, t *testing.T, uasSIP, uacSIP, uasMedia, uac
 		return false
 	}, 5*time.Second, 50*time.Millisecond, "UAS should listen on SIP port %s", uasSIP)
 
-	// UAC (caller): INVITE+SDP, ACK, streams RTP, BYE.
 	uacCmd := exec.CommandContext(ctx, "docker", "run", "--rm",
 		"--network", "host",
 		"-v", scenarioDir+":/scenarios:ro",
 		sippImage,
-		"-sf", "/scenarios/uac_rtp.xml",
+		"-sf", "/scenarios/"+uacXML,
 		"-i", "127.0.0.1",
 		"-mi", "127.0.0.1",
 		"-p", uacSIP,
@@ -169,11 +164,27 @@ func runSippRTP(ctx context.Context, t *testing.T, uasSIP, uacSIP, uasMedia, uac
 	)
 	uacCmd.Stdout = stdout
 	uacCmd.Stderr = stderr
-	if err := uacCmd.Run(); err != nil {
-		dumpStderr("UAC")
-		require.NoErrorf(t, err, "UAC SIPp failed (enable SIP_EXPORTER_E2E_SIPP_VERBOSE=true for full output)")
+
+	uacDone := make(chan error, 1)
+	go func() {
+		uacDone <- uacCmd.Run()
+	}()
+
+	return func() {
+		if err := <-uacDone; err != nil {
+			dumpStderr("UAC")
+			require.NoErrorf(t, err, "UAC SIPp failed (enable SIP_EXPORTER_E2E_SIPP_VERBOSE=true for full output)")
+		}
+		_ = uasCmd.Wait()
 	}
-	_ = uasCmd.Wait()
+}
+
+// runSippRTP runs a UAS+UAC SIPp scenario pair that establishes a SIP dialog with
+// SDP and streams real G.711a RTP (built-in /build/pcap/g711a.pcap). The exporter
+// captures the SIP signalling (correlating media endpoints from SDP) and the RTP,
+// producing labelled RTP metrics.
+func runSippRTP(ctx context.Context, t *testing.T, uasSIP, uacSIP, uasMedia, uacMedia string) {
+	startSippContainers(ctx, t, "uas_rtp.xml", "uac_rtp.xml", uasSIP, uacSIP, uasMedia, uacMedia)()
 }
 
 // TestRTP_MetricsFromSIPpStream verifies the full pipeline end-to-end: a real SIP

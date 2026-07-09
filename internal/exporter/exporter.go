@@ -409,7 +409,8 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		for _, r := range results {
 			e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry)
 			e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
-			e.mediaTracker.Unregister(r.CallID)
+			rtpResult := e.mediaTracker.Unregister(r.CallID)
+			e.handleRTPDialogResult(rtpResult, r.Carrier, r.UAType, r.SourceCountry)
 		}
 
 		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", len(results)))
@@ -814,6 +815,9 @@ func (e *exporter) handleRTP(
 	if res.Counted {
 		e.services.metricser.UpdateRTPPackets(res.Carrier, res.UAType, res.Codec, res.SourceCountry)
 	}
+	if res.Duplicate {
+		e.services.metricser.UpdateRTPDuplicates(res.Carrier, res.UAType, res.Codec, res.SourceCountry)
+	}
 	if res.Lost > 0 {
 		e.services.metricser.UpdateRTPLoss(res.Carrier, res.UAType, res.Codec, res.SourceCountry, res.Lost)
 	}
@@ -833,6 +837,15 @@ func (e *exporter) updateRTPMetrics() {
 	for _, s := range stats {
 		e.services.metricser.UpdateRTPJitter(s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.JitterMs)
 		e.services.metricser.UpdateRTPMOS(s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.MOS)
+		e.services.metricser.UpdateRTPMOSVariants(
+			s.Carrier, s.UAType, s.Codec, s.SourceCountry,
+			s.MOSF1, s.MOSF2, s.MOSAdaptive,
+		)
+		e.services.metricser.UpdateRTPRFactor(s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.RFactor)
+		e.services.metricser.UpdateRTPLossDistribution(
+			s.Carrier, s.UAType, s.Codec, s.SourceCountry,
+			s.BurstLossDensity, s.GapLossDensity,
+		)
 		tmp[aggKey{s.Carrier, s.UAType, s.Codec, s.SourceCountry}]++
 	}
 	counts := make([]service.LabeledCount, 0, len(tmp))
@@ -848,6 +861,18 @@ func (e *exporter) updateRTPMetrics() {
 		})
 	}
 	e.services.metricser.UpdateRTPActiveStreams(counts)
+}
+
+func (e *exporter) handleRTPDialogResult(
+	r mediatracker.RTPDialogResult,
+	carrier, uaType, sourceCountry string,
+) {
+	if r.MediaExpected && !r.RTPObserved {
+		e.services.metricser.MissingRTP(carrier, uaType, sourceCountry)
+	}
+	if r.OneWay {
+		e.services.metricser.OneWayCall(carrier, uaType, sourceCountry)
+	}
 }
 
 func (e *exporter) handleRequest(carrier string, uaType string, sourceCountry string, packet dto.Packet) {
@@ -1111,7 +1136,8 @@ func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {
 
 	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
 	result := e.services.dialoger.Delete(dialogID)
-	e.mediaTracker.Unregister(string(packet.CallID))
+	rtpResult := e.mediaTracker.Unregister(string(packet.CallID))
+	e.handleRTPDialogResult(rtpResult, result.Carrier, result.UAType, result.SourceCountry)
 	if result.Duration > 0 {
 		e.services.metricser.UpdateSPD(result.Carrier, result.UAType, result.SourceCountry, result.Duration)
 		e.services.metricser.SessionCompleted(result.Carrier, result.UAType, result.SourceCountry)

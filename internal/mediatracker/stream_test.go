@@ -80,6 +80,7 @@ func TestStreamState_DuplicateIgnored(t *testing.T) {
 
 	require.Equal(t, uint64(1), s.packetsTotal)
 	require.Equal(t, uint64(0), s.packetsLost)
+	require.Equal(t, uint64(1), s.packetsDuplicate, "duplicate must be counted")
 }
 
 func TestStreamState_StreamRestartNoHugeLoss(t *testing.T) {
@@ -91,6 +92,18 @@ func TestStreamState_StreamRestartNoHugeLoss(t *testing.T) {
 
 	require.Equal(t, uint64(1), s.packetsTotal, "restart resets the flow counter to this packet")
 	require.Equal(t, uint64(0), s.packetsLost, "restart must not count 4998 lost")
+}
+
+func TestStreamState_RestartResetsDuplicate(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
+	s.Observe(newHeader(1, 160), t0)
+	s.Observe(newHeader(1, 160), t0.Add(1*time.Millisecond)) // duplicate
+	require.Equal(t, uint64(1), s.packetsDuplicate)
+
+	// huge jump → stream restart → duplicate counter must reset
+	s.Observe(newHeader(5000, 320), t0.Add(20*time.Millisecond))
+	require.Equal(t, uint64(0), s.packetsDuplicate, "restart must reset duplicate counter")
 }
 
 func TestStreamState_RestartResetsJitter(t *testing.T) {
@@ -176,4 +189,50 @@ func TestStreamState_EarlyArrivalNegativeDAbs(t *testing.T) {
 
 	// jitterTicks = (80-0)/16 = 5.0; JitterMs = 5/8 = 0.625
 	require.InDelta(t, 0.625, s.JitterMs(), 0.001, "negative d must be abs'd correctly")
+}
+
+func TestStreamState_BurstLoss(t *testing.T) {
+	// seq 1 → 6: 4 lost, then seq 7 arrives → lossRun=4 classified as burst
+	t0 := time.Unix(1000, 0)
+	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
+	s.Observe(newHeader(1, 160), t0)
+	s.Observe(newHeader(6, 320), t0.Add(20*time.Millisecond)) // lossRun=4
+	s.Observe(newHeader(7, 480), t0.Add(40*time.Millisecond)) // classify: 4≥3 → burst
+
+	require.Equal(t, uint64(4), s.burstLoss, "4 consecutive losses = burst")
+	require.Equal(t, uint64(0), s.gapLoss)
+}
+
+func TestStreamState_GapLoss(t *testing.T) {
+	// seq 1 → 3: 1 lost, then seq 4 arrives → lossRun=1 classified as gap
+	t0 := time.Unix(1000, 0)
+	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
+	s.Observe(newHeader(1, 160), t0)
+	s.Observe(newHeader(3, 320), t0.Add(20*time.Millisecond)) // lossRun=1
+	s.Observe(newHeader(4, 480), t0.Add(40*time.Millisecond)) // classify: 1<3 → gap
+
+	require.Equal(t, uint64(1), s.gapLoss, "1 isolated loss = gap")
+	require.Equal(t, uint64(0), s.burstLoss)
+}
+
+func TestStreamState_MixedBurstGap(t *testing.T) {
+	// seq 1 → 3 (1 lost=gap), seq 4 → 8 (3 lost=burst)
+	t0 := time.Unix(1000, 0)
+	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
+	s.Observe(newHeader(1, 160), t0)
+	s.Observe(newHeader(3, 320), t0.Add(20*time.Millisecond)) // lossRun=1
+	s.Observe(newHeader(4, 480), t0.Add(40*time.Millisecond)) // classify: gap=1, lossRun=0
+	s.Observe(newHeader(8, 640), t0.Add(60*time.Millisecond)) // lossRun=3
+	s.Observe(newHeader(9, 800), t0.Add(80*time.Millisecond)) // classify: burst=3, lossRun=0
+
+	require.Equal(t, uint64(1), s.gapLoss)
+	require.Equal(t, uint64(3), s.burstLoss)
+	require.InDelta(t, 75.0, s.BurstLossDensity(), 0.01, "3 of 4 = 75%")
+	require.InDelta(t, 25.0, s.GapLossDensity(), 0.01, "1 of 4 = 25%")
+}
+
+func TestStreamState_NoLossZeroDensity(t *testing.T) {
+	s := &StreamState{packetsTotal: 100}
+	require.InDelta(t, 0.0, s.BurstLossDensity(), 0.0001)
+	require.InDelta(t, 0.0, s.GapLossDensity(), 0.0001)
 }

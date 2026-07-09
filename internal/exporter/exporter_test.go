@@ -49,6 +49,7 @@ type mockMetricser struct {
 	rtpPacketsCalls           int
 	rtpLossCalls              int
 	rtpLossValue              uint64
+	rtpDuplicateCalls         int
 }
 
 func (m *mockMetricser) UpdateSessions(_ []service.LabeledCount) {}
@@ -156,9 +157,18 @@ func (m *mockMetricser) UpdateRTPLoss(_, _, _, _ string, lost uint64) {
 	m.rtpLossCalls++
 	m.rtpLossValue = lost
 }
+func (m *mockMetricser) UpdateRTPDuplicates(_, _, _, _ string) {
+	m.rtpDuplicateCalls++
+}
 func (m *mockMetricser) UpdateRTPJitter(string, string, string, string, float64) {}
 func (m *mockMetricser) UpdateRTPMOS(string, string, string, string, float64)    {}
-func (m *mockMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount)         {}
+func (m *mockMetricser) UpdateRTPMOSVariants(string, string, string, string, float64, float64, float64) {
+}
+func (m *mockMetricser) UpdateRTPRFactor(string, string, string, string, float64)                   {}
+func (m *mockMetricser) UpdateRTPLossDistribution(string, string, string, string, float64, float64) {}
+func (m *mockMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount)                            {}
+func (m *mockMetricser) OneWayCall(string, string, string)                                          {}
+func (m *mockMetricser) MissingRTP(string, string, string)                                          {}
 
 type dialogCreateArgs struct {
 	expiresAt time.Time
@@ -3363,9 +3373,17 @@ func (m *carrierTrackingMetricser) UpdateVQReport(carrier, uaType, _ string, _ *
 
 func (m *carrierTrackingMetricser) UpdateRTPPackets(string, string, string, string)         {}
 func (m *carrierTrackingMetricser) UpdateRTPLoss(string, string, string, string, uint64)    {}
+func (m *carrierTrackingMetricser) UpdateRTPDuplicates(string, string, string, string)      {}
 func (m *carrierTrackingMetricser) UpdateRTPJitter(string, string, string, string, float64) {}
 func (m *carrierTrackingMetricser) UpdateRTPMOS(string, string, string, string, float64)    {}
-func (m *carrierTrackingMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount)         {}
+func (m *carrierTrackingMetricser) UpdateRTPMOSVariants(string, string, string, string, float64, float64, float64) {
+}
+func (m *carrierTrackingMetricser) UpdateRTPRFactor(string, string, string, string, float64) {}
+func (m *carrierTrackingMetricser) UpdateRTPLossDistribution(string, string, string, string, float64, float64) {
+}
+func (m *carrierTrackingMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount) {}
+func (m *carrierTrackingMetricser) OneWayCall(string, string, string)               {}
+func (m *carrierTrackingMetricser) MissingRTP(string, string, string)               {}
 
 // ==================== SIP message builders for MC/DC tests ====================
 

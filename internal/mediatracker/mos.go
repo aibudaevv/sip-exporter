@@ -18,6 +18,9 @@ const (
 	ieScale = 95.0
 	// Jitter-buffer assumption for discard modelling.
 	jbMsDefault = 60.0
+	jbMsF1      = 50.0  // strict jitter buffer (low-latency)
+	jbMsF2      = 200.0 // generous jitter buffer (managed)
+	jbMsAdapt   = 500.0 // adaptive jitter buffer (large)
 	discardCap  = 0.5
 	// Codec impairment defaults for unknown codecs.
 	ieDefault  = 10.0
@@ -77,27 +80,59 @@ func ieEff(p CodecParams, lossRate float64) float64 {
 }
 
 // jitterDiscardRate models packets discarded by the jitter buffer as equivalent loss.
-// Jitter up to jbMsDefault is absorbed; beyond that, a growing fraction is discarded (capped).
-func jitterDiscardRate(jitterMs float64) float64 {
-	if jitterMs <= jbMsDefault {
+// Jitter up to jbMs is absorbed; beyond that, a growing fraction is discarded (capped).
+func jitterDiscardRate(jitterMs, jbMs float64) float64 {
+	if jitterMs <= jbMs {
 		return 0
 	}
-	r := (jitterMs - jbMsDefault) / jbMsDefault
+	r := (jitterMs - jbMs) / jbMs
 	if r > discardCap {
 		r = discardCap
 	}
 	return r
 }
 
-// ComputeMOS estimates MOS-LQ from codec, measured loss rate (fraction) and jitter (ms).
-func ComputeMOS(codec string, lossRate, jitterMs float64) float64 {
+// computeRFactorWithJB estimates the E-model R-factor with a specific jitter-buffer
+// assumption (jbMs). R ∈ [0, 100].
+func computeRFactorWithJB(codec string, lossRate, jitterMs, jbMs float64) float64 {
 	p := codecParams(codec)
-	effLoss := lossRate + jitterDiscardRate(jitterMs)
+	effLoss := lossRate + jitterDiscardRate(jitterMs, jbMs)
 	if effLoss > 1 {
 		effLoss = 1
 	} else if effLoss < 0 {
 		effLoss = 0
 	}
 	r := r0Factor - ieEff(p, effLoss)
-	return mosFromR(r)
+	if r < 0 {
+		r = 0
+	} else if r > rFactorMax {
+		r = rFactorMax
+	}
+	return r
+}
+
+// ComputeRFactor estimates the E-model R-factor (ITU-T G.107) from codec,
+// measured loss rate (fraction 0..1) and jitter (ms). R ∈ [0, 100].
+func ComputeRFactor(codec string, lossRate, jitterMs float64) float64 {
+	return computeRFactorWithJB(codec, lossRate, jitterMs, jbMsDefault)
+}
+
+// ComputeMOS estimates MOS-LQ from codec, measured loss rate (fraction) and jitter (ms).
+func ComputeMOS(codec string, lossRate, jitterMs float64) float64 {
+	return mosFromR(ComputeRFactor(codec, lossRate, jitterMs))
+}
+
+// ComputeMOSF1 estimates MOS-LQ with a strict jitter buffer (jbMs=50ms).
+func ComputeMOSF1(codec string, lossRate, jitterMs float64) float64 {
+	return mosFromR(computeRFactorWithJB(codec, lossRate, jitterMs, jbMsF1))
+}
+
+// ComputeMOSF2 estimates MOS-LQ with a generous jitter buffer (jbMs=200ms).
+func ComputeMOSF2(codec string, lossRate, jitterMs float64) float64 {
+	return mosFromR(computeRFactorWithJB(codec, lossRate, jitterMs, jbMsF2))
+}
+
+// ComputeMOSAdaptive estimates MOS-LQ with an adaptive jitter buffer (jbMs=500ms).
+func ComputeMOSAdaptive(codec string, lossRate, jitterMs float64) float64 {
+	return mosFromR(computeRFactorWithJB(codec, lossRate, jitterMs, jbMsAdapt))
 }
