@@ -1594,6 +1594,55 @@ func TestRegisterScanTracker_MultipleIPsIndependent(t *testing.T) {
 	require.Equal(t, 1, mm.registerScanCalls, "IP2 below threshold must not signal")
 }
 
+// ==================== S6-A.13: Wasted Event Fix ====================
+
+// TestRegisterScanTracker_NoWastedEventAfterExpiry verifies that the first
+// event after window expiry IS recorded (not silently dropped). Before the
+// fix, the event that reset `signaled` was gated by the old signaled value
+// and never entered the map.
+func TestRegisterScanTracker_NoWastedEventAfterExpiry(t *testing.T) {
+	mm := &mockMetricser{}
+	tracker := newRegisterScanTracker(3, 50*time.Millisecond)
+
+	for i := range 3 {
+		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", mm)
+	}
+	require.Equal(t, 1, mm.registerScanCalls, "at threshold must signal")
+
+	time.Sleep(80 * time.Millisecond)
+
+	// Eviction happens inside record(), NOT via cleanup().
+	tracker.record("1.2.3.4", "newuser@evil.com", "carrier", "RU", mm)
+
+	require.Len(t, tracker.entries["1.2.3.4"], 1,
+		"first event after window expiry must be recorded, not wasted")
+}
+
+// TestRegisterScanTracker_RetriggerAtExactThreshold verifies that after
+// window expiry, exactly `threshold` new events re-trigger the signal (not
+// threshold+1). Before the fix, the first event was wasted on resetting
+// signaled, so threshold+1 events were needed.
+func TestRegisterScanTracker_RetriggerAtExactThreshold(t *testing.T) {
+	mm := &mockMetricser{}
+	tracker := newRegisterScanTracker(3, 50*time.Millisecond)
+
+	for i := range 3 {
+		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", mm)
+	}
+	require.Equal(t, 1, mm.registerScanCalls, "first burst must signal")
+
+	time.Sleep(80 * time.Millisecond)
+
+	// Without cleanup(), eviction happens lazily inside record().
+	// Exactly threshold events must re-trigger — not threshold+1.
+	tracker.record("1.2.3.4", "new1@evil.com", "carrier", "RU", mm)
+	tracker.record("1.2.3.4", "new2@evil.com", "carrier", "RU", mm)
+	tracker.record("1.2.3.4", "new3@evil.com", "carrier", "RU", mm)
+
+	require.Equal(t, 2, mm.registerScanCalls,
+		"re-trigger after window expiry must fire at exactly threshold events")
+}
+
 // ==================== S6-9.3: INVITE Burst Detection ====================
 
 func TestInviteBurstTracker_SignalsAtThreshold(t *testing.T) {

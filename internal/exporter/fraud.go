@@ -51,18 +51,18 @@ func (t *registerScanTracker) record(
 		}
 	}
 
+	if len(t.entries[srcIP]) < t.threshold {
+		t.signaled[srcIP] = false
+	}
+
 	if !t.signaled[srcIP] {
 		t.entries[srcIP][aor] = now
 	}
 
 	count := len(t.entries[srcIP])
-	if count >= t.threshold {
-		if !t.signaled[srcIP] {
-			t.signaled[srcIP] = true
-			metricser.RegisterScan(carrier, sourceCountry)
-		}
-	} else {
-		t.signaled[srcIP] = false
+	if count >= t.threshold && !t.signaled[srcIP] {
+		t.signaled[srcIP] = true
+		metricser.RegisterScan(carrier, sourceCountry)
 	}
 }
 
