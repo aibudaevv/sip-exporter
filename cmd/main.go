@@ -68,12 +68,18 @@ func main() {
 
 	sessionsLimits := loadSessionsLimits(cfg.SessionsLimitsPath)
 
-	srv := server.NewServer(
-		resolver, classifier, geoipReader,
-		cfg.LocalCountryCode, cfg.HostLabels, sessionsLimits,
-		cfg.FraudRegScanThreshold, cfg.FraudRegScanWindow,
-		cfg.FraudInviteBurstThreshold, cfg.FraudInviteBurstWindow,
-	)
+	srv := server.NewServer(server.Config{
+		Resolver:                  resolver,
+		Classifier:                classifier,
+		GeoIPReader:               geoipReader,
+		LocalCountryCode:          cfg.LocalCountryCode,
+		HostLabels:                cfg.HostLabels,
+		SessionsLimits:            sessionsLimits,
+		FraudRegScanThreshold:     cfg.FraudRegScanThreshold,
+		FraudRegScanWindow:        cfg.FraudRegScanWindow,
+		FraudInviteBurstThreshold: cfg.FraudInviteBurstThreshold,
+		FraudInviteBurstWindow:    cfg.FraudInviteBurstWindow,
+	})
 
 	go telemetry.Run(context.Background(), telemetry.Config{
 		Enabled: cfg.Telemetry,

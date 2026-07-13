@@ -34,39 +34,40 @@ type (
 	Server interface {
 		Run(cfg *config.App) error
 	}
+	Config struct {
+		Resolver                  *carriers.Resolver
+		Classifier                *ua.Classifier
+		GeoIPReader               *geoip.Reader
+		LocalCountryCode          string
+		HostLabels                bool
+		SessionsLimits            map[string]int
+		FraudRegScanThreshold     int
+		FraudRegScanWindow        time.Duration
+		FraudInviteBurstThreshold int
+		FraudInviteBurstWindow    time.Duration
+	}
 )
 
-func NewServer(
-	resolver *carriers.Resolver,
-	classifier *ua.Classifier,
-	gr *geoip.Reader,
-	localCountryCode string,
-	hostLabels bool,
-	sessionsLimits map[string]int,
-	fraudRegScanThreshold int,
-	fraudRegScanWindow time.Duration,
-	fraudInviteBurstThreshold int,
-	fraudInviteBurstWindow time.Duration,
-) Server {
+func NewServer(cfg Config) Server {
 	m := service.NewMetricser()
-	if len(sessionsLimits) > 0 {
-		m.SetSessionsLimits(sessionsLimits)
+	if len(cfg.SessionsLimits) > 0 {
+		m.SetSessionsLimits(cfg.SessionsLimits)
 	}
 	return &server{
 		exporter: exporter.NewExporter(exporter.Deps{
 			Metricser:                 m,
 			Dialoger:                  service.NewDialoger(),
-			CarrierResolver:           resolver,
-			UAClassifier:              classifier,
-			GeoIPReader:               gr,
-			LocalCountryCode:          localCountryCode,
-			HostLabels:                hostLabels,
-			FraudRegScanThreshold:     fraudRegScanThreshold,
-			FraudRegScanWindow:        fraudRegScanWindow,
-			FraudInviteBurstThreshold: fraudInviteBurstThreshold,
-			FraudInviteBurstWindow:    fraudInviteBurstWindow,
+			CarrierResolver:           cfg.Resolver,
+			UAClassifier:              cfg.Classifier,
+			GeoIPReader:               cfg.GeoIPReader,
+			LocalCountryCode:          cfg.LocalCountryCode,
+			HostLabels:                cfg.HostLabels,
+			FraudRegScanThreshold:     cfg.FraudRegScanThreshold,
+			FraudRegScanWindow:        cfg.FraudRegScanWindow,
+			FraudInviteBurstThreshold: cfg.FraudInviteBurstThreshold,
+			FraudInviteBurstWindow:    cfg.FraudInviteBurstWindow,
 		}),
-		geoipReader: gr,
+		geoipReader: cfg.GeoIPReader,
 	}
 }
 
