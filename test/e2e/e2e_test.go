@@ -169,7 +169,7 @@ func newSharedTestEnvWithUAConfig(ctx context.Context, t *testing.T, uaYAMLFile 
 		},
 		exporterPort: exporterHTTPPort,
 	}
-	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, "", uaYAML, nil, "")
+	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, "", uaYAML, nil, "", "")
 	env.endpoint = endpoint
 	env.container = container
 	registerExporterCleanup(t, container, exporterHTTPPort)
@@ -189,7 +189,7 @@ func newSharedTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carrier
 		},
 		exporterPort: exporterHTTPPort,
 	}
-	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML, uaYAML, nil, "")
+	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML, uaYAML, nil, "", "")
 	env.endpoint = endpoint
 	env.container = container
 	registerExporterCleanup(t, container, exporterHTTPPort)
@@ -224,9 +224,14 @@ func loadCarriersYAML(t *testing.T, filename string) string {
 	return string(data)
 }
 
+var (
+	secondaryIPsMu  sync.Mutex
+	secondaryIPsRef int
+)
+
 // setupSecondaryIPs adds test IP addresses to loopback interface
 // using a privileged Docker container (avoids requiring root on the host).
-// Addresses are removed via t.Cleanup when the test finishes.
+// Uses reference counting so IPs persist until the last parallel test finishes.
 func setupSecondaryIPs(t *testing.T) {
 	t.Helper()
 	addrs := []string{
@@ -237,18 +242,21 @@ func setupSecondaryIPs(t *testing.T) {
 		"10.1.1.5/32",
 	}
 
-	script := "set -e"
-	for _, addr := range addrs {
-		script += " && ip addr add " + addr + " dev lo || true"
-	}
-
-	out, err := exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
-		"--entrypoint", "", "alpine",
-		"sh", "-c", script,
-	).CombinedOutput()
-	require.NoError(t, err, "failed to add secondary IPs: %s", string(out))
+	secondaryIPsMu.Lock()
+	secondaryIPsRef++
+	needAdd := secondaryIPsRef == 1
+	secondaryIPsMu.Unlock()
 
 	t.Cleanup(func() {
+		secondaryIPsMu.Lock()
+		secondaryIPsRef--
+		needRemove := secondaryIPsRef == 0
+		secondaryIPsMu.Unlock()
+
+		if !needRemove {
+			return
+		}
+
 		cleanScript := "set -e"
 		for _, addr := range addrs {
 			addrNoMask := strings.SplitN(addr, "/", 2)[0]
@@ -259,6 +267,19 @@ func setupSecondaryIPs(t *testing.T) {
 			"sh", "-c", cleanScript,
 		).Run()
 	})
+
+	if needAdd {
+		script := "set -e"
+		for _, addr := range addrs {
+			script += " && ip addr add " + addr + " dev lo || true"
+		}
+
+		out, err := exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
+			"--entrypoint", "", "alpine",
+			"sh", "-c", script,
+		).CombinedOutput()
+		require.NoError(t, err, "failed to add secondary IPs: %s", string(out))
+	}
 }
 
 // addLoopbackIP adds a single IP address to the loopback interface.
@@ -304,7 +325,7 @@ func newTestEnvWithExtraEnv(ctx context.Context, t *testing.T, carriersYAML stri
 		sippPort:       sippPort,
 		sippClientPort: sippClientPort,
 	}
-	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML, "", extraEnv, "")
+	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML, "", extraEnv, "", "")
 	env.endpoint = endpoint
 	registerExporterCleanup(t, container, exporterHTTPPort)
 	return env
@@ -320,7 +341,23 @@ func newTestEnvWithGeoIP(ctx context.Context, t *testing.T, geoipDBPath string) 
 		sippPort:       sippPort,
 		sippClientPort: sippClientPort,
 	}
-	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, "", "", nil, geoipDBPath)
+	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, "", "", nil, geoipDBPath, "")
+	env.endpoint = endpoint
+	registerExporterCleanup(t, container, exporterHTTPPort)
+	return env
+}
+
+// newTestEnvWithFraudConfig starts an exporter with carriers config, sessions
+// limits YAML, and extra env vars (e.g. fraud thresholds).
+func newTestEnvWithFraudConfig(ctx context.Context, t *testing.T, carriersYAML, sessionsLimitsYAML string, extraEnv map[string]string) *testEnv {
+	t.Helper()
+	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
+
+	env := &testEnv{
+		sippPort:       sippPort,
+		sippClientPort: sippClientPort,
+	}
+	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML, "", extraEnv, "", sessionsLimitsYAML)
 	env.endpoint = endpoint
 	registerExporterCleanup(t, container, exporterHTTPPort)
 	return env
@@ -368,10 +405,10 @@ type sippResult struct {
 
 func startExporterWithConfig(ctx context.Context, t *testing.T, exporterPort, sippPort, sippClientPort string, carriersYAML string) (string, testcontainers.Container) {
 	t.Helper()
-	return startExporterWithConfigAndUA(ctx, t, exporterPort, sippPort, sippClientPort, carriersYAML, "", nil, "")
+	return startExporterWithConfigAndUA(ctx, t, exporterPort, sippPort, sippClientPort, carriersYAML, "", nil, "", "")
 }
 
-func startExporterWithConfigAndUA(ctx context.Context, t *testing.T, exporterPort, sippPort, sippClientPort string, carriersYAML string, userAgentsYAML string, extraEnv map[string]string, geoipDBPath string) (string, testcontainers.Container) {
+func startExporterWithConfigAndUA(ctx context.Context, t *testing.T, exporterPort, sippPort, sippClientPort string, carriersYAML string, userAgentsYAML string, extraEnv map[string]string, geoipDBPath string, sessionsLimitsYAML string) (string, testcontainers.Container) {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -423,6 +460,18 @@ func startExporterWithConfigAndUA(ctx context.Context, t *testing.T, exporterPor
 	if geoipDBPath != "" {
 		mounts = append(mounts, testcontainers.BindMount(geoipDBPath, "/data/geoip.mmdb"))
 		envVars["SIP_EXPORTER_GEOIP_COUNTRY_DB"] = "/data/geoip.mmdb"
+	}
+
+	if sessionsLimitsYAML != "" {
+		tmpFile, err := os.CreateTemp("", "sessions-limits-*.yaml")
+		require.NoError(t, err)
+		_, err = tmpFile.WriteString(sessionsLimitsYAML)
+		require.NoError(t, err)
+		require.NoError(t, tmpFile.Close())
+		t.Cleanup(func() { os.Remove(tmpFile.Name()) })
+
+		mounts = append(mounts, testcontainers.BindMount(tmpFile.Name(), "/etc/sip-exporter/sessions_limits.yaml"))
+		envVars["SIP_EXPORTER_SESSIONS_LIMITS"] = "/etc/sip-exporter/sessions_limits.yaml"
 	}
 
 	req := testcontainers.ContainerRequest{
@@ -727,7 +776,7 @@ func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacS
 		Logger:           log.New(io.Discard, "", 0),
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = uasC.Terminate(ctx) })
+	t.Cleanup(func() { _ = uasC.Terminate(context.Background()) })
 
 	if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
 		logs, logErr := uasC.Logs(ctx)
@@ -765,7 +814,7 @@ func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacS
 		Logger:           log.New(io.Discard, "", 0),
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = uacC.Terminate(ctx) })
+	t.Cleanup(func() { _ = uacC.Terminate(context.Background()) })
 
 	if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
 		logs, logErr := uacC.Logs(ctx)
@@ -777,7 +826,17 @@ func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacS
 	}
 
 	waitForContainerExitLogless(t, uasC)
+
+	terminateCtx, terminateCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer terminateCancel()
+	_ = uacC.Terminate(terminateCtx)
+	_ = uasC.Terminate(terminateCtx)
+
 	waitForMetricStable(t, env.endpoint)
+
+	if dropped := getMetric(t, env.endpoint, "sip_exporter_socket_packets_dropped_total"); dropped > 0 {
+		t.Logf("WARNING: %v packets dropped during test — threshold-based assertions may be unreliable under -parallel", dropped)
+	}
 
 	return sippResult{totalCalls: callCount}
 }
