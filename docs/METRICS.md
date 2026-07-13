@@ -25,6 +25,8 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 > | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country` |
 > | **RTP dialog** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country` |
 > | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, destination_country, caller_host, called_host` |
+> | **Fraud** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country` |
+> | **Capacity** | `sessions_limit`, `sessions_utilization` | `carrier` |
 
 `carrier` and `ua_type` default to `"other"` when not configured or when no pattern matches. `source_country` defaults to `"unknown"` when neither carrier country nor GeoIP DB is available.
 
@@ -533,6 +535,90 @@ rate(sip_exporter_register_success_total[5m])
 
 # Top failing status codes
 topk(5, sum by (code) (rate(sip_exporter_register_failure_total[5m])))
+```
+
+## Fraud Detection
+
+Fraud signals detect suspicious patterns: registration scanning (one IP registering many accounts), geographic impossibility (same account from different countries), and INVITE flooding (one IP sending a burst of calls). All are scoped per `carrier,source_country` — `ua_type` is intentionally omitted because attackers vary their User-Agent.
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `sip_exporter_register_country_change_total` | counter | `carrier,source_country` | Times a user re-registered from a different country (account-takeover signal) |
+| `sip_exporter_register_scan_total` | counter | `carrier,source_country` | Registration scan signals (one IP registering N+ unique AORs within a time window) |
+| `sip_exporter_invite_burst_total` | counter | `carrier,source_country` | INVITE burst signals (one IP sending N+ INVITEs within a time window) |
+
+### register_country_change_total
+
+Incremented when a successful REGISTER 200 OK arrives from a **different source country** than the previous registration for the same AOR (Address-of-Record). The AOR is derived from the `From` header URI.
+
+- First registration of an AOR does **not** trigger a signal (no baseline)
+- Refresh from the same country does **not** trigger a signal
+- Empty previous country (GeoIP disabled at first registration) does **not** trigger a signal
+
+```promql
+# Account-takeover spikes
+rate(sip_exporter_register_country_change_total[5m])
+```
+
+### register_scan_total
+
+Incremented when a single source IP registers `threshold` or more **unique AORs** within the configured `window`. The signal fires **once per burst episode** (not once per registration) — it resets when the unique-AOR count drops below the threshold.
+
+| Config | Env var | Default |
+|--------|---------|---------|
+| Threshold | `SIP_EXPORTER_FRAUD_REGISTER_SCAN_THRESHOLD` | `10` |
+| Window | `SIP_EXPORTER_FRAUD_REGISTER_SCAN_WINDOW` | `60s` |
+
+```promql
+# Registration enumeration attacks
+rate(sip_exporter_register_scan_total[5m])
+```
+
+### invite_burst_total
+
+Incremented when a single source IP sends `threshold` or more **INVITE requests** (excluding re-INVITEs) within the configured `window`. Same signal-once dedup as registration scan.
+
+| Config | Env var | Default |
+|--------|---------|---------|
+| Threshold | `SIP_EXPORTER_FRAUD_INVITE_BURST_THRESHOLD` | `100` |
+| Window | `SIP_EXPORTER_FRAUD_INVITE_BURST_WINDOW` | `60s` |
+
+```promql
+# Toll-fraud or DDoS via INVITE flood
+rate(sip_exporter_invite_burst_total[5m])
+```
+
+## Capacity Monitoring
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `sip_exporter_sessions_limit` | gauge | `carrier` | Configured concurrent session limit per carrier (from YAML config) |
+| `sip_exporter_sessions_utilization` | gauge | `carrier` | Session utilization as percentage of configured limit (0–100, capped) |
+
+### Configuration
+
+Create a YAML file and set its path via `SIP_EXPORTER_SESSIONS_LIMITS`:
+
+```yaml
+sessions_limits:
+  - carrier: "beeline"
+    limit: 500
+  - carrier: "mts"
+    limit: 1000
+```
+
+- Utilization is computed on every scrape: `active_sessions(carrier) / limit × 100`
+- Capped at 100 (over-limit shown as 100, not >100) — this hides severity of oversubscription; use the raw `sip_exporter_sessions` gauge to detect extreme overage
+- Carriers without a configured limit are omitted (gauge not emitted)
+- Carriers with `limit: 0` are also omitted (treated as "no limit", not "0% / blocked")
+- Carriers with 0 active sessions show 0% utilization
+
+```promql
+# Capacity headroom per carrier
+100 - sip_exporter_sessions_utilization
+
+# Carriers at or near capacity
+sip_exporter_sessions_utilization > 90
 ```
 
 ## RTP media metrics

@@ -19,6 +19,10 @@ The SIP Exporter exposes metrics based on RFC 6076 (SIP Performance Metrics) and
 | `sip_exporter_rtp_mos_score` | RTP MOS (E-model G.107) | avg < 3.5 (warning), < 3.0 (critical) |
 | `sip_exporter_rtp_packets_lost_total` | RTP packet loss rate | > 5% (warning), > 10% (critical) |
 | `sip_exporter_rtp_jitter_milliseconds` | RTP interarrival jitter (RFC 3550) | p95 > 50ms (warning) |
+| `sip_exporter_register_country_change_total` | Registration country change | Any spike indicates compromised account |
+| `sip_exporter_register_scan_total` | Registration scan detection | Any signal indicates enumeration attack |
+| `sip_exporter_invite_burst_total` | INVITE burst detection | Any signal indicates toll fraud or DDoS |
+| `sip_exporter_sessions_utilization` | Session capacity utilization | > 90% indicates capacity exhaustion |
 
 ## Quick Start
 
@@ -147,6 +151,48 @@ groups:
 ```
 
 > **401 vs `register_failure_total{code="401"}`:** The generic `sip_exporter_401_total` counts 401s across **all** methods (INVITE auth challenges + REGISTER challenges). `sip_exporter_register_failure_total{code="401"}` is **REGISTER-only**, giving a cleaner brute-force signal. The success-ratio alert uses `register_success_ratio`, which excludes 401/407 from its denominator.
+
+### Fraud Detection Alerts
+
+These alerts detect suspicious SIP patterns: account takeover, registration enumeration, and INVITE flooding. See `docs/fraud-detection.md` for full configuration details.
+
+```yaml
+      - alert: SIPRegistrationCountryChange
+        expr: rate(sip_exporter_register_country_change_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Registration country change detected"
+          description: "A user re-registered from a different country on {{ $labels.carrier }}. Possible account takeover."
+
+      - alert: SIPRegistrationScan
+        expr: rate(sip_exporter_register_scan_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Registration scan attack detected"
+          description: "Single IP is registering many different accounts on {{ $labels.carrier }} from {{ $labels.source_country }}. Possible credential stuffing or enumeration."
+
+      - alert: SIPInviteBurst
+        expr: rate(sip_exporter_invite_burst_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "INVITE burst detected"
+          description: "Single IP is sending an unusually high rate of INVITEs on {{ $labels.carrier }} from {{ $labels.source_country }}. Possible toll fraud, DDoS, or traffic pump."
+
+      - alert: SIPSessionCapacityExhaustion
+        expr: sip_exporter_sessions_utilization > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Session capacity near exhaustion"
+          description: "Carrier {{ $labels.carrier }} is at {{ $value | printf \"%.0f\" }}% of its configured session limit. Plan capacity expansion or investigate traffic surge."
+```
 
 ### Voice Quality Alerts (RFC 6035)
 
