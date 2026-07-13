@@ -41,6 +41,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - 🌍 **Geo-enrichment** — `source_country` (GeoIP) and `destination_country` (E.164 prefix) labels on SIP metrics
 - 📞 **Voice quality (RFC 6035)** — MOS scores, jitter, packet loss from SIP PUBLISH/NOTIFY
 - 🎧 **RTP media analysis** — jitter, packet loss, and MOS (E-model G.107) from RTP streams correlated with SIP dialogs, with no voice payload captured (header-only)
+- 🛡️ **Fraud detection** — registration scan, INVITE burst, and account-takeover (country change) signals
 
 ## Quick Start
 
@@ -387,26 +388,35 @@ Load testing results: **0% packet loss at 2,000 CPS (28,000 PPS)**.
 See [BENCHMARK.md](./docs/BENCHMARK.md) for detailed results, methodology, and optimization notes.
 
 ## Integration
-
 ### Alerting
 
-Pre-configured alerting examples are available in [ALERTING.md](./docs/ALERTING.md):
+Pre-configured alert rules and Grafana dashboard are included in the repository — monitoring works out-of-the-box.
 
-- **Prometheus alert rules** — Critical, warning, and info alerts for SER, ISA, RRD, and more
-- **Grafana dashboard** — Ready-to-import JSON with carrier-filtered panels
-- **Alertmanager examples** — Slack, PagerDuty, and Email integrations
-- **Best practices** — Scrape intervals, retention, threshold tuning
+**One-command monitoring stack** (Prometheus + Grafana + alerts + dashboard):
 
-### Grafana Dashboard
-Import the pre-built dashboard into your Grafana instance:
+```bash
+cd test/remote_test/monitoring
+docker compose up -d
+# Grafana: http://localhost:3000 (admin/admin) — dashboard auto-provisioned
+# Prometheus alerts: http://localhost:9090/alerts
+```
 
-1. Open Grafana → Dashboards → Import
-2. Upload `examples/grafana-dashboard.json` or copy the JSON content
+This deploys:
+- **Prometheus** with pre-loaded alert rules (fraud detection, SIP health, voice quality)
+- **Grafana** with auto-provisioned "SIP Overview" dashboard (fraud detection panels, RTP quality, traffic, system health)
+- **Alert rules** — 13 alerts across 3 groups: fraud detection (critical), SIP health (critical/warning), voice quality (warning)
+
+**Production dashboard** (import manually):
+
+1. Grafana → Dashboards → Import
+2. Upload `examples/grafana-dashboard.json`
 3. Select your Prometheus or VictoriaMetrics datasource
 
-The dashboard includes all available metrics: traffic counters, SIP request/response breakdowns, active sessions, RFC 6076 performance metrics (SER, SEER, ISA, SCR, NER), RTP media analysis (active streams, packet rate, loss rate, MOS, jitter by codec), voice quality metrics (RFC 6035: MOS, jitter, packet loss), delay histograms (RRD, TTR, PDD, SPD, ORD, LRD), session quality metrics (ISS, ASR, SDC), and system errors.
+The production dashboard includes: traffic counters, SIP request/response breakdowns, active sessions, RFC 6076 performance metrics (SER, SEER, ISA, SCR, NER), RTP media analysis (active streams, packet rate, loss rate, MOS, jitter by codec), voice quality metrics (RFC 6035: MOS, jitter, packet loss), delay histograms (RRD, TTR, PDD, SPD, ORD, LRD), session quality metrics (ISS, ASR, SDC), and system errors.
 
 Dashboard file: [`examples/grafana-dashboard.json`](examples/grafana-dashboard.json)
+
+Full alerting guide with Prometheus rules, Alertmanager configs (Slack/PagerDuty/Email), and threshold tuning: [docs/ALERTING.md](docs/ALERTING.md)
 
 ### Metrics Storage Compatibility
 

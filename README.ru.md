@@ -40,6 +40,7 @@
 - 🌍 **Гео-обогащение** — лейблы `source_country` (GeoIP) и `destination_country` (E.164 prefix) в SIP-метриках
 - 📞 **Качество голоса (RFC 6035)** — MOS, джиттер, потери пакетов из SIP PUBLISH/NOTIFY
 - 🎧 **Анализ RTP-медиа** — джиттер, потери и MOS (E-model G.107) из RTP-потоков, скоррелированных с SIP-диалогами, без захвата голосового payload (только заголовок)
+- 🛡️ **Детекция фрода** — сигналы сканирования регистраций, всплесков INVITE и перехвата аккаунтов (смена страны)
 
 ## Быстрый старт
 
@@ -388,24 +389,33 @@ sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
 
 ### Алертинг
 
-Готовые примеры алертов в [ALERTING.md](./docs/ALERTING.md):
+Правила алертов и Grafana-дашборд включены в репозиторий — мониторинг работает "из коробки".
 
-- **Правила Prometheus** — critical, warning и info-алерты для SER, ISA, RRD и других метрик
-- **Grafana дашборд** — готовый к импорту JSON с фильтрацией по carrier
-- **Примеры Alertmanager** — интеграция со Slack, PagerDuty и Email
-- **Best practices** — интервалы скрейпинга, хранение данных, настройка порогов
+**Мониторинг-стек одной командой** (Prometheus + Grafana + алерты + дашборд):
 
-### Grafana дашборд
+```bash
+cd test/remote_test/monitoring
+docker compose up -d
+# Grafana: http://localhost:3000 (admin/admin) — дашборд автопровижин
+# Prometheus alerts: http://localhost:9090/alerts
+```
 
-Импортируйте готовый дашборд в Grafana:
+Развёртывает:
+- **Prometheus** с предзагруженными правилами алертов (фрод, здоровье SIP, качество голоса)
+- **Grafana** с автопровижин-дашбордом "SIP Overview" (панели фрод-детекции, RTP-качество, трафик, здоровье системы)
+- **Правила алертов** — 13 алертов в 3 группах: детекция фрода (critical), здоровье SIP (critical/warning), качество голоса (warning)
+
+**Продакшн-дашборд** (импорт вручную):
 
 1. Grafana → Dashboards → Import
 2. Загрузите `examples/grafana-dashboard.json` или вставьте JSON
 3. Выберите datasource Prometheus или VictoriaMetrics
 
-Дашборд содержит: счётчики трафика, разбивку SIP-запросов/ответов, активные сессии, метрики RFC 6076 (SER, SEER, ISA, SCR, NER), анализ RTP-медиа (активные потоки, rate пакетов, loss rate, MOS, jitter по кодекам), метрики качества голоса RFC 6035 (MOS, jitter, потери пакетов), гистограммы задержек (RRD, TTR, PDD, SPD, ORD, LRD), метрики качества (ISS, ASR, SDC) и системные ошибки.
+Продакшн-дашборд содержит: счётчики трафика, разбивку SIP-запросов/ответов, активные сессии, метрики RFC 6076 (SER, SEER, ISA, SCR, NER), анализ RTP-медиа (активные потоки, rate пакетов, loss rate, MOS, jitter по кодекам), метрики качества голоса RFC 6035 (MOS, jitter, потери пакетов), гистограммы задержек (RRD, TTR, PDD, SPD, ORD, LRD), метрики качества (ISS, ASR, SDC) и системные ошибки.
 
 Файл дашборда: [`examples/grafana-dashboard.json`](examples/grafana-dashboard.json)
+
+Полный гайд по алертингу: правила Prometheus, конфиги Alertmanager (Slack/PagerDuty/Email), настройка порогов — [`docs/ALERTING.md`](docs/ALERTING.md)
 
 ### Совместимость с хранилищами метрик
 

@@ -26,6 +26,26 @@ The SIP Exporter exposes metrics based on RFC 6076 (SIP Performance Metrics) and
 
 ## Quick Start
 
+### One-Command Monitoring Stack
+
+The repository includes a pre-configured monitoring stack — Prometheus + Grafana with alerts and dashboard auto-provisioned:
+
+```bash
+cd test/remote_test/monitoring
+docker compose up -d
+```
+
+- Grafana: `http://localhost:3000` (admin/admin) — dashboard in "SIP" folder
+- Prometheus alerts: `http://localhost:9090/alerts`
+- Alert rules file: [`test/remote_test/monitoring/alerts.yml`](../test/remote_test/monitoring/alerts.yml)
+
+This deploys 13 alert rules across 3 groups:
+- **Fraud detection** (4 alerts): registration scan, INVITE burst, country change, capacity exhaustion
+- **SIP health** (6 alerts): exporter down, DDoS, SER critical/low, slow registration, packet drops
+- **Voice quality** (3 alerts): low MOS, high packet loss, high jitter
+
+### Manual Setup
+
 1. Copy Prometheus alert rules to your Prometheus configuration
 2. Import Grafana dashboard JSON
 3. Configure Alertmanager receiver (Slack/PagerDuty/Email)

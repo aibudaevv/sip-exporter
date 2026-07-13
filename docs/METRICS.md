@@ -2,6 +2,39 @@
 
 All metrics are exposed at `/metrics` endpoint in Prometheus exposition format.
 
+## Contents
+
+- [Labels](#labels)
+  - [Carrier Label](#carrier-label)
+  - [User-Agent Type Label](#user-agent-type-label)
+  - [Geo-Enrichment Labels](#geo-enrichment-labels)
+- [System Metrics](#system-metrics) — `packets_total`, `system_error_total`
+- [Active Sessions](#active-sessions) — `sessions`
+- [SIP Request Metrics](#sip-request-metrics) — `invite_total`, `reinvite_total`, `register_total`, `bye_total`, etc.
+- [SIP Response Metrics](#sip-response-metrics-by-status-code) — `100_total`…`606_total`
+- [Registration Health](#registration-health) — `register_success_total`, `register_failure_total`, `register_success_ratio`, `active_registrations`
+- [Fraud Detection](#fraud-detection) — `register_scan_total`, `invite_burst_total`, `register_country_change_total`
+- [Capacity Monitoring](#capacity-monitoring) — `sessions_limit`, `sessions_utilization`
+- [RTP Media Metrics](#rtp-media-metrics) — `rtp_packets_total`, `rtp_mos_score`, `rtp_jitter_milliseconds`, etc.
+- [Self-Monitoring Metrics](#self-monitoring-metrics) — `socket_packets_*`, `channel_*`, `parse_errors_total`, `active_trackers`, `active_dialogs`, `build_info`
+- [RFC 6076 Performance Metrics](#rfc-6076-performance-metrics)
+  - [SER](#session-establishment-ratio-ser) — Session Establishment Ratio
+  - [SEER](#session-establishment-effectiveness-ratio-seer) — Session Establishment Effectiveness Ratio
+  - [ISA](#ineffective-session-attempts-isa) — Ineffective Session Attempts
+  - [SCR](#session-completion-ratio-scr) — Session Completion Ratio
+  - [ASR](#answer-seizure-ratio-asr) — Answer Seizure Ratio
+  - [NER](#network-effectiveness-ratio-ner) — Network Effectiveness Ratio
+  - [SDC](#session-duration-counter-sdc) — Session Duration Counter
+  - [ISS](#ineffective-session-severity-iss) — Ineffective Session Severity
+  - [RRD](#registration-request-delay-rrd) — Registration Request Delay
+  - [SPD](#session-process-duration-spd) — Session Process Duration
+  - [TTR](#time-to-first-response-ttr) — Time to First Response
+  - [PDD](#post-dial-delay-pdd) — Post Dial Delay
+  - [ORD](#options-response-delay-ord) — OPTIONS Response Delay
+  - [LRD](#location-registration-delay-lrd) — Location Registration Delay
+- [Voice Quality Metrics (RFC 6035)](#voice-quality-metrics-rfc-6035) — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
+- [Alerts](#alerts) — pre-configured alert rules and threshold recommendations
+
 ## Labels
 
 SIP metrics use a multi-layer label model. Most metrics include **three base labels**; INVITE-related raw counters add **three more**:
@@ -1491,3 +1524,73 @@ RERL=55.0
 ```
 
 Multiple metrics can appear on the same line (space-separated) or on separate lines. Header lines (containing `:` but not `=`) are ignored.
+
+---
+
+## Alerts
+
+The repository includes pre-configured alert rules and dashboards so monitoring works out-of-the-box.
+
+### What's Included
+
+| Component | File | Description |
+|-----------|------|-------------|
+| Prometheus alert rules | [`test/remote_test/monitoring/alerts.yml`](../test/remote_test/monitoring/alerts.yml) | Fraud, health, and voice quality alerts — ready to deploy |
+| Grafana dashboard | [`examples/grafana-dashboard.json`](../examples/grafana-dashboard.json) | Full production dashboard (variables, all metric types) |
+| Grafana dashboard | [`test/remote_test/monitoring/grafana/dashboards/sip-overview.json`](../test/remote_test/monitoring/grafana/dashboards/sip-overview.json) | Testing dashboard (fraud detection focus, auto-provisioned) |
+| Alerting guide | [`docs/ALERTING.md`](ALERTING.md) | Complete reference: rules, Alertmanager configs (Slack/PagerDuty/Email), threshold tuning |
+
+### Quick Deploy
+
+```bash
+cd test/remote_test/monitoring
+docker compose up -d    # Prometheus + Grafana with dashboard + alerts pre-loaded
+```
+
+Grafana: `http://localhost:3000` (admin/admin) — dashboard auto-provisioned in "SIP" folder.
+Prometheus alerts: `http://localhost:9090/alerts`
+
+### Alert Summary by Category
+
+#### Fraud Detection (Sprint 6)
+
+| Alert | Metric | Trigger | Severity |
+|-------|--------|---------|----------|
+| `SIPRegistrationScan` | `register_scan_total` | rate > 0 (one IP registering many accounts) | critical |
+| `SIPInviteBurst` | `invite_burst_total` | rate > 0 (one IP flooding INVITEs) | critical |
+| `SIPRegistrationCountryChange` | `register_country_change_total` | rate > 0 (account re-registered from new country) | warning |
+| `SIPSessionCapacityExhaustion` | `sessions_utilization` | > 90% for 5m | warning |
+
+#### SIP Health
+
+| Alert | Metric | Trigger | Severity |
+|-------|--------|---------|----------|
+| `SIPExporterDown` | `up` | == 0 for 1m | critical |
+| `SIPDDoSDetected` | `isa` | avg > 50% for 1m | critical |
+| `SIPSessionEstablishmentCritical` | `ser` | < 20% for 2m | critical |
+| `SIPSessionEstablishmentLow` | `ser` | < 50% for 5m | warning |
+| `SIPRegistrationSlow` | `rrd` | p95 > 500ms for 5m | warning |
+| `SIPPacketDropHigh` | `socket_packets_dropped_total` | > 10/s for 2m | warning |
+
+#### Voice Quality (RTP)
+
+| Alert | Metric | Trigger | Severity |
+|-------|--------|---------|----------|
+| `RTPMOSLow` | `rtp_mos_score` | avg < 3.5 for 5m | warning |
+| `RTPPacketLossHigh` | `rtp_packets_lost_total` / `rtp_packets_total` | > 5% for 5m | warning |
+| `RTPJitterHigh` | `rtp_jitter_milliseconds` | p95 > 50ms for 5m | warning |
+
+### Threshold Recommendations
+
+| Metric | Green | Yellow | Red |
+|--------|-------|--------|-----|
+| SER | ≥ 95% | 80–95% | < 80% |
+| SEER | ≥ 95% | 80–95% | < 80% |
+| ISA | < 5% | 5–15% | > 15% |
+| SCR | ≥ 80% | 60–80% | < 60% |
+| RRD p95 | < 100ms | 100–500ms | > 500ms |
+| RTP MOS | ≥ 4.0 | 3.5–4.0 | < 3.5 |
+| RTP Jitter p95 | < 30ms | 30–50ms | > 50ms |
+| RTP Packet Loss | < 2% | 2–5% | > 5% |
+
+Full alerting guide with Prometheus rules, Alertmanager configs, and best practices: [`docs/ALERTING.md`](ALERTING.md).
