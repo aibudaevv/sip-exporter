@@ -138,6 +138,10 @@ type (
 		hostLabels            bool
 		vqHandler             *vq.Handler
 		mediaTracker          *mediatracker.Tracker
+		// pktSrcIP is written in parseRawPacket and read in handleMessage.
+		// Both run synchronously in the readPackets goroutine — no mutex needed.
+		// If packet parsing becomes parallel (worker pool), thread srcIP as a
+		// parameter instead of using this shared field.
 		pktSrcIP              string
 		registerScanTracker   *registerScanTracker
 		inviteBurstTracker    *inviteBurstTracker

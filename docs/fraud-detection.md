@@ -83,6 +83,12 @@ accounts in 30 seconds. With default threshold=10, window=60s:
   `SIPRegistrationBruteForce` alert (see `ALERTING.md`).
 - SIP scanning with rotating source IPs (botnet) may not reach per-IP thresholds.
   Aggregate `register_scan_total` across all IPs in PromQL for network-wide detection.
+- **`IGNORE_OUTGOING=true` on the SIP server host:** Register scan detection
+  requires 200 OK responses to correlate with the original REGISTER request. With
+  `SIP_EXPORTER_IGNORE_OUTGOING=true` on the SIP server host (real NIC, not
+  SPAN/mirror), the kernel filters outgoing 200 OK responses, silently disabling
+  this signal. INVITE burst detection is unaffected (it processes requests only).
+  Use a SPAN/mirror port or set `IGNORE_OUTGOING=false` to enable register scan.
 
 ---
 
