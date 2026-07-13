@@ -42,16 +42,29 @@ func NewServer(
 	gr *geoip.Reader,
 	localCountryCode string,
 	hostLabels bool,
+	sessionsLimits map[string]int,
+	fraudRegScanThreshold int,
+	fraudRegScanWindow time.Duration,
+	fraudInviteBurstThreshold int,
+	fraudInviteBurstWindow time.Duration,
 ) Server {
+	m := service.NewMetricser()
+	if len(sessionsLimits) > 0 {
+		m.SetSessionsLimits(sessionsLimits)
+	}
 	return &server{
 		exporter: exporter.NewExporter(exporter.Deps{
-			Metricser:        service.NewMetricser(),
-			Dialoger:         service.NewDialoger(),
-			CarrierResolver:  resolver,
-			UAClassifier:     classifier,
-			GeoIPReader:      gr,
-			LocalCountryCode: localCountryCode,
-			HostLabels:       hostLabels,
+			Metricser:                 m,
+			Dialoger:                  service.NewDialoger(),
+			CarrierResolver:           resolver,
+			UAClassifier:              classifier,
+			GeoIPReader:               gr,
+			LocalCountryCode:          localCountryCode,
+			HostLabels:                hostLabels,
+			FraudRegScanThreshold:     fraudRegScanThreshold,
+			FraudRegScanWindow:        fraudRegScanWindow,
+			FraudInviteBurstThreshold: fraudInviteBurstThreshold,
+			FraudInviteBurstWindow:    fraudInviteBurstWindow,
 		}),
 		geoipReader: gr,
 	}

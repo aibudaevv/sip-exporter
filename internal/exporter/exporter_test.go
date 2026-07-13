@@ -42,6 +42,9 @@ type mockMetricser struct {
 	lrdDelay                  float64
 	registerSuccessCalls      int
 	registerFailureCodes      []string
+	registerCountryChange     []string
+	registerScanCalls         int
+	inviteBurstCalls          int
 	vqReportCalled            bool
 	vqCarrier                 string
 	vqUAType                  string
@@ -53,6 +56,8 @@ type mockMetricser struct {
 }
 
 func (m *mockMetricser) UpdateSessions(_ []service.LabeledCount) {}
+
+func (m *mockMetricser) SetSessionsLimits(_ map[string]int) {}
 
 func (m *mockMetricser) UpdateActiveRegistrations(_ []service.LabeledCount) {}
 
@@ -96,6 +101,18 @@ func (m *mockMetricser) RegisterSuccess(_, _, _ string) {
 
 func (m *mockMetricser) RegisterFailure(_, _, _, code string) {
 	m.registerFailureCodes = append(m.registerFailureCodes, code)
+}
+
+func (m *mockMetricser) RegisterCountryChange(_, sourceCountry string) {
+	m.registerCountryChange = append(m.registerCountryChange, sourceCountry)
+}
+
+func (m *mockMetricser) RegisterScan(_, _ string) {
+	m.registerScanCalls++
+}
+
+func (m *mockMetricser) InviteBurst(_, _ string) {
+	m.inviteBurstCalls++
 }
 
 func (m *mockMetricser) UpdateRRD(_, _, _ string, delayMs float64) {
@@ -1314,7 +1331,7 @@ func newExporterWithRegTracker() *exporter {
 func TestRegisterExpiryTracker_NewRegistration(t *testing.T) {
 	e := newExporterWithRegTracker()
 
-	e.storeRegistration("sip:user1@example.com", "c", "sip", "US", 3600)
+	e.storeRegistration("sip:user1@example.com", "c", "sip", "US", "", 3600)
 
 	counts := e.registrationCounts()
 	require.Len(t, counts, 1)
@@ -1325,9 +1342,9 @@ func TestRegisterExpiryTracker_RefreshNoDoubleCount(t *testing.T) {
 	e := newExporterWithRegTracker()
 	aor := "sip:user1@example.com"
 
-	e.storeRegistration(aor, "c", "sip", "US", 3600)
-	e.storeRegistration(aor, "c", "sip", "US", 3600)
-	e.storeRegistration(aor, "c", "sip", "US", 3600)
+	e.storeRegistration(aor, "c", "sip", "US", "", 3600)
+	e.storeRegistration(aor, "c", "sip", "US", "", 3600)
+	e.storeRegistration(aor, "c", "sip", "US", "", 3600)
 
 	counts := e.registrationCounts()
 	require.Len(t, counts, 1)
@@ -1337,8 +1354,8 @@ func TestRegisterExpiryTracker_RefreshNoDoubleCount(t *testing.T) {
 func TestRegisterExpiryTracker_DifferentAORs(t *testing.T) {
 	e := newExporterWithRegTracker()
 
-	e.storeRegistration("sip:user1@example.com", "c", "sip", "US", 3600)
-	e.storeRegistration("sip:user2@example.com", "c", "sip", "US", 3600)
+	e.storeRegistration("sip:user1@example.com", "c", "sip", "US", "", 3600)
+	e.storeRegistration("sip:user2@example.com", "c", "sip", "US", "", 3600)
 
 	counts := e.registrationCounts()
 	require.Len(t, counts, 1)
@@ -1348,9 +1365,9 @@ func TestRegisterExpiryTracker_DifferentAORs(t *testing.T) {
 func TestRegisterExpiryTracker_GroupsByLabels(t *testing.T) {
 	e := newExporterWithRegTracker()
 
-	e.storeRegistration("sip:u1@a", "carrier-A", "sip", "US", 3600)
-	e.storeRegistration("sip:u2@a", "carrier-A", "sip", "US", 3600)
-	e.storeRegistration("sip:u3@b", "carrier-B", "yealink", "DE", 3600)
+	e.storeRegistration("sip:u1@a", "carrier-A", "sip", "US", "", 3600)
+	e.storeRegistration("sip:u2@a", "carrier-A", "sip", "US", "", 3600)
+	e.storeRegistration("sip:u3@b", "carrier-B", "yealink", "DE", "", 3600)
 
 	counts := e.registrationCounts()
 	require.Len(t, counts, 2)
@@ -1365,7 +1382,7 @@ func TestRegisterExpiryTracker_GroupsByLabels(t *testing.T) {
 func TestRegisterExpiryTracker_CleanupExpired(t *testing.T) {
 	e := newExporterWithRegTracker()
 
-	e.storeRegistration("sip:user1@example.com", "c", "sip", "US", 1)
+	e.storeRegistration("sip:user1@example.com", "c", "sip", "US", "", 1)
 	// Force expiry by backdating the entry.
 	e.registerExpiryMutex.Lock()
 	for k := range e.registerExpiryTracker {
@@ -1385,7 +1402,7 @@ func TestRegisterExpiryTracker_RefreshKeepsActive(t *testing.T) {
 	e := newExporterWithRegTracker()
 	aor := "sip:user1@example.com"
 
-	e.storeRegistration(aor, "c", "sip", "US", 1)
+	e.storeRegistration(aor, "c", "sip", "US", "", 1)
 	// Backdate close to expiry.
 	e.registerExpiryMutex.Lock()
 	ent := e.registerExpiryTracker[aor]
@@ -1394,7 +1411,7 @@ func TestRegisterExpiryTracker_RefreshKeepsActive(t *testing.T) {
 	e.registerExpiryMutex.Unlock()
 
 	// Refresh before expiry.
-	e.storeRegistration(aor, "c", "sip", "US", 3600)
+	e.storeRegistration(aor, "c", "sip", "US", "", 3600)
 
 	// Even though the old expiry has passed, the refresh extended it.
 	time.Sleep(150 * time.Millisecond)
@@ -1402,6 +1419,254 @@ func TestRegisterExpiryTracker_RefreshKeepsActive(t *testing.T) {
 
 	counts := e.registrationCounts()
 	require.Len(t, counts, 1, "refreshed registration must survive old-expiry cleanup")
+}
+
+// ==================== S6-9.2: Registration Country Change ====================
+
+func TestRegisterCountryChange_DifferentCountry(t *testing.T) {
+	mm := &mockMetricser{}
+	e := &exporter{
+		services:              services{metricser: mm, dialoger: &mockDialoger{}},
+		registerExpiryTracker: make(map[string]registerExpiryEntry),
+	}
+	aor := "sip:alice@example.com"
+
+	e.storeRegistration(aor, "beeline", "sip", "RU", "", 3600)
+	require.Empty(t, mm.registerCountryChange, "first registration must not signal")
+
+	e.storeRegistration(aor, "beeline", "sip", "GE", "", 3600)
+	require.Len(t, mm.registerCountryChange, 1, "country change must signal")
+	require.Equal(t, "GE", mm.registerCountryChange[0])
+}
+
+func TestRegisterCountryChange_SameCountry(t *testing.T) {
+	mm := &mockMetricser{}
+	e := &exporter{
+		services:              services{metricser: mm, dialoger: &mockDialoger{}},
+		registerExpiryTracker: make(map[string]registerExpiryEntry),
+	}
+	aor := "sip:alice@example.com"
+
+	e.storeRegistration(aor, "beeline", "sip", "RU", "", 3600)
+	e.storeRegistration(aor, "beeline", "sip", "RU", "", 3600)
+
+	require.Empty(t, mm.registerCountryChange, "same country must not signal")
+}
+
+func TestRegisterCountryChange_FirstRegistration(t *testing.T) {
+	mm := &mockMetricser{}
+	e := &exporter{
+		services:              services{metricser: mm, dialoger: &mockDialoger{}},
+		registerExpiryTracker: make(map[string]registerExpiryEntry),
+	}
+
+	e.storeRegistration("sip:bob@example.com", "mts", "sip", "DE", "", 3600)
+
+	require.Empty(t, mm.registerCountryChange, "first registration has no baseline")
+}
+
+func TestRegisterCountryChange_EmptyPreviousCountry(t *testing.T) {
+	mm := &mockMetricser{}
+	e := &exporter{
+		services:              services{metricser: mm, dialoger: &mockDialoger{}},
+		registerExpiryTracker: make(map[string]registerExpiryEntry),
+	}
+	aor := "sip:alice@example.com"
+
+	// Manually insert an entry with empty sourceCountry (simulates GeoIP disabled).
+	e.registerExpiryTracker[aor] = registerExpiryEntry{
+		expiry:        time.Now().Add(3600 * time.Second),
+		carrier:       "beeline",
+		uaType:        "sip",
+		sourceCountry: "",
+	}
+
+	e.storeRegistration(aor, "beeline", "sip", "RU", "", 3600)
+
+	require.Empty(t, mm.registerCountryChange, "empty previous country must not signal")
+}
+
+// ==================== S6-9.1: Registration Scan Detection ====================
+
+func TestRegisterScanTracker_SignalsAtThreshold(t *testing.T) {
+	mm := &mockMetricser{}
+	tracker := newRegisterScanTracker(3, time.Minute)
+
+	for i := range 2 {
+		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", mm)
+	}
+	require.Zero(t, mm.registerScanCalls, "below threshold must not signal")
+
+	tracker.record("1.2.3.4", "user2@evil.com", "carrier", "RU", mm)
+	require.Equal(t, 1, mm.registerScanCalls, "at threshold must signal")
+}
+
+func TestRegisterScanTracker_DedupPerBurst(t *testing.T) {
+	mm := &mockMetricser{}
+	tracker := newRegisterScanTracker(3, time.Minute)
+
+	for i := range 5 {
+		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", mm)
+	}
+	require.Equal(t, 1, mm.registerScanCalls, "must signal once per burst episode")
+}
+
+func TestRegisterScanTracker_UniqueAORsOnly(t *testing.T) {
+	mm := &mockMetricser{}
+	tracker := newRegisterScanTracker(3, time.Minute)
+
+	tracker.record("1.2.3.4", "user@evil.com", "carrier", "RU", mm)
+	tracker.record("1.2.3.4", "user@evil.com", "carrier", "RU", mm)
+	tracker.record("1.2.3.4", "user@evil.com", "carrier", "RU", mm)
+
+	require.Zero(t, mm.registerScanCalls, "same AOR must not count as scan")
+}
+
+func TestRegisterScanTracker_NilTrackerSafe(t *testing.T) {
+	mm := &mockMetricser{}
+	var tracker *registerScanTracker
+
+	tracker.record("1.2.3.4", "user@evil.com", "carrier", "RU", mm)
+	require.Zero(t, mm.registerScanCalls, "nil tracker must be no-op")
+}
+
+func TestRegisterScanTracker_EmptySrcIPSkipped(t *testing.T) {
+	mm := &mockMetricser{}
+	tracker := newRegisterScanTracker(1, time.Minute)
+
+	tracker.record("", "user@evil.com", "carrier", "RU", mm)
+	require.Zero(t, mm.registerScanCalls, "empty srcIP must be skipped")
+}
+
+// ==================== S6-A.1: Memory Cap ====================
+
+func TestRegisterScanTracker_MemoryBoundedAfterSignal(t *testing.T) {
+	mm := &mockMetricser{}
+	tracker := newRegisterScanTracker(3, time.Minute)
+
+	for i := range 3 {
+		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", mm)
+	}
+	require.Equal(t, 1, mm.registerScanCalls, "at threshold must signal")
+
+	for i := range 20 {
+		tracker.record("1.2.3.4", fmt.Sprintf("extra%d@evil.com", i), "carrier", "RU", mm)
+	}
+
+	require.Equal(t, 1, mm.registerScanCalls, "dedup must still work")
+	require.LessOrEqual(t, len(tracker.entries["1.2.3.4"]), tracker.threshold,
+		"inner map must not exceed threshold after signal")
+}
+
+func TestRegisterScanTracker_EvictionWorksAfterCap(t *testing.T) {
+	mm := &mockMetricser{}
+	tracker := newRegisterScanTracker(3, 50*time.Millisecond)
+
+	for i := range 3 {
+		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", mm)
+	}
+	require.Equal(t, 1, mm.registerScanCalls)
+
+	time.Sleep(80 * time.Millisecond)
+
+	tracker.cleanup()
+	require.Empty(t, tracker.entries["1.2.3.4"], "entries must expire after window")
+
+	tracker.record("1.2.3.4", "newuser@evil.com", "carrier", "RU", mm)
+	require.Equal(t, 1, mm.registerScanCalls, "first AOR after reset must not re-signal")
+
+	tracker.record("1.2.3.4", "newuser2@evil.com", "carrier", "RU", mm)
+	tracker.record("1.2.3.4", "newuser3@evil.com", "carrier", "RU", mm)
+	require.Equal(t, 2, mm.registerScanCalls, "new burst after eviction must signal again")
+}
+
+func TestRegisterScanTracker_MultipleIPsIndependent(t *testing.T) {
+	mm := &mockMetricser{}
+	tracker := newRegisterScanTracker(3, time.Minute)
+
+	for i := range 3 {
+		tracker.record("10.0.0.1", fmt.Sprintf("user%d@a.com", i), "carrier", "RU", mm)
+	}
+	require.Equal(t, 1, mm.registerScanCalls, "IP1 at threshold must signal")
+
+	tracker.record("10.0.0.2", "user0@b.com", "carrier", "RU", mm)
+	tracker.record("10.0.0.2", "user1@b.com", "carrier", "RU", mm)
+	require.Equal(t, 1, mm.registerScanCalls, "IP2 below threshold must not signal")
+}
+
+// ==================== S6-9.3: INVITE Burst Detection ====================
+
+func TestInviteBurstTracker_SignalsAtThreshold(t *testing.T) {
+	mm := &mockMetricser{}
+	tracker := newInviteBurstTracker(5, time.Minute)
+
+	for range 4 {
+		tracker.record("1.2.3.4", "carrier", "RU", mm)
+	}
+	require.Zero(t, mm.inviteBurstCalls, "below threshold must not signal")
+
+	tracker.record("1.2.3.4", "carrier", "RU", mm)
+	require.Equal(t, 1, mm.inviteBurstCalls, "at threshold must signal")
+}
+
+func TestInviteBurstTracker_DedupPerBurst(t *testing.T) {
+	mm := &mockMetricser{}
+	tracker := newInviteBurstTracker(3, time.Minute)
+
+	for range 10 {
+		tracker.record("1.2.3.4", "carrier", "RU", mm)
+	}
+	require.Equal(t, 1, mm.inviteBurstCalls, "must signal once per burst episode")
+}
+
+func TestInviteBurstTracker_NilTrackerSafe(t *testing.T) {
+	mm := &mockMetricser{}
+	var tracker *inviteBurstTracker
+
+	tracker.record("1.2.3.4", "carrier", "RU", mm)
+	require.Zero(t, mm.inviteBurstCalls, "nil tracker must be no-op")
+}
+
+func TestInviteBurstTracker_EmptySrcIPSkipped(t *testing.T) {
+	mm := &mockMetricser{}
+	tracker := newInviteBurstTracker(1, time.Minute)
+
+	tracker.record("", "carrier", "RU", mm)
+	require.Zero(t, mm.inviteBurstCalls, "empty srcIP must be skipped")
+}
+
+func TestHandleMessage_ReINVITE_ExcludedFromBurst(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		inviteTracker:      make(map[string]inviteEntry),
+		inviteSDP:          make(map[string]inviteSDPEntity),
+		optionsTracker:     make(map[string]optionsEntry),
+		mediaTracker:       mediatracker.NewTracker(rtpStreamTTL),
+		inviteBurstTracker: newInviteBurstTracker(3, time.Minute),
+	}
+
+	md.Create("call-id:abc:xyz",
+		time.Now().Add(1*time.Hour), time.Now(), "", "", "", "call-id")
+
+	input := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: call-id\r\n" +
+		"CSeq: 2 INVITE\r\n")
+
+	err := e.handleMessage("carrier", "", input)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		return mm.reinviteCalled
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	require.Zero(t, mm.inviteBurstCalls, "re-INVITE must not trigger burst detection")
 }
 
 // End-to-end: REGISTER then 200 OK populates the expiry tracker from the
@@ -1904,7 +2169,7 @@ func TestExporter_RegisterTracker_StoreAndRemove(t *testing.T) {
 	callID := "test-call-id-123"
 
 	// Store
-	e.storeRegisterTime(callID, "other", "other", "")
+	e.storeRegisterTime(callID, "other", "other", "", "")
 
 	// Verify stored
 	_, exists := e.getRegisterTime(callID)
@@ -3245,10 +3510,11 @@ func TestHandleMessage_CarrierPropagation_MultiCarrierDialogs(t *testing.T) {
 // ==================== Carrier-tracking mock for MC/DC tests ====================
 
 type carrierCall struct {
-	carrier string
-	method  string
-	value   float64
-	uaType  string
+	carrier       string
+	method        string
+	value         float64
+	uaType        string
+	sourceCountry string
 }
 
 type carrierFailure struct {
@@ -3270,6 +3536,9 @@ type carrierTrackingMetricser struct {
 	vqReports              []carrierCall
 	registerSuccess        []string
 	registerFailure        []carrierFailure
+	registerCountryChange  []carrierCall
+	registerScan           []carrierCall
+	inviteBurst            []carrierCall
 	packetsTotal           int
 	systemErrors           int
 	sessionsByCarrierAndUA map[string]map[string]int
@@ -3321,6 +3590,21 @@ func (m *carrierTrackingMetricser) RegisterFailure(carrier, _, _, code string) {
 	m.registerFailure = append(m.registerFailure, carrierFailure{carrier: carrier, code: code})
 }
 
+func (m *carrierTrackingMetricser) RegisterCountryChange(carrier, sourceCountry string) {
+	m.registerCountryChange = append(m.registerCountryChange,
+		carrierCall{carrier: carrier, sourceCountry: sourceCountry})
+}
+
+func (m *carrierTrackingMetricser) RegisterScan(carrier, sourceCountry string) {
+	m.registerScan = append(m.registerScan,
+		carrierCall{carrier: carrier, sourceCountry: sourceCountry})
+}
+
+func (m *carrierTrackingMetricser) InviteBurst(carrier, sourceCountry string) {
+	m.inviteBurst = append(m.inviteBurst,
+		carrierCall{carrier: carrier, sourceCountry: sourceCountry})
+}
+
 func (m *carrierTrackingMetricser) UpdateRRD(carrier, _, _ string, delayMs float64) {
 	m.rrdCalls = append(m.rrdCalls, carrierCall{carrier: carrier, value: delayMs})
 }
@@ -3353,6 +3637,8 @@ func (m *carrierTrackingMetricser) UpdateSession(carrier, uaType, _ string, size
 }
 
 func (m *carrierTrackingMetricser) UpdateSessions(_ []service.LabeledCount) {}
+
+func (m *carrierTrackingMetricser) SetSessionsLimits(_ map[string]int) {}
 
 func (m *carrierTrackingMetricser) UpdateActiveRegistrations(_ []service.LabeledCount) {}
 

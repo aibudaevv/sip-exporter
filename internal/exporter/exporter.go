@@ -90,6 +90,7 @@ type (
 		carrier       string
 		uaType        string
 		sourceCountry string
+		srcIP         string
 	}
 
 	inviteEntry struct {
@@ -137,6 +138,9 @@ type (
 		hostLabels            bool
 		vqHandler             *vq.Handler
 		mediaTracker          *mediatracker.Tracker
+		pktSrcIP              string
+		registerScanTracker   *registerScanTracker
+		inviteBurstTracker    *inviteBurstTracker
 		registerTracker       map[string]registerEntry
 		registerMutex         sync.RWMutex
 		registerExpiryTracker map[string]registerExpiryEntry
@@ -154,13 +158,17 @@ type (
 		dialoger  service.Dialoger
 	}
 	Deps struct {
-		Metricser        service.Metricser
-		Dialoger         service.Dialoger
-		CarrierResolver  *carriers.Resolver
-		UAClassifier     *ua.Classifier
-		GeoIPReader      *geoip.Reader
-		LocalCountryCode string
-		HostLabels       bool
+		Metricser                 service.Metricser
+		Dialoger                  service.Dialoger
+		CarrierResolver           *carriers.Resolver
+		UAClassifier              *ua.Classifier
+		GeoIPReader               *geoip.Reader
+		LocalCountryCode          string
+		HostLabels                bool
+		FraudRegScanThreshold     int
+		FraudRegScanWindow        time.Duration
+		FraudInviteBurstThreshold int
+		FraudInviteBurstWindow    time.Duration
 	}
 	Exporter interface {
 		Initialize(
@@ -181,7 +189,7 @@ func (e optionsEntry) created() time.Time    { return e.timestamp }
 func (e inviteSDPEntity) created() time.Time { return e.timestamp }
 
 func NewExporter(deps Deps) Exporter {
-	return &exporter{
+	e := &exporter{
 		services: services{
 			metricser: deps.Metricser,
 			dialoger:  deps.Dialoger,
@@ -193,6 +201,8 @@ func NewExporter(deps Deps) Exporter {
 		hostLabels:            deps.HostLabels,
 		vqHandler:             vq.NewHandler(deps.Metricser),
 		mediaTracker:          mediatracker.NewTracker(rtpStreamTTL),
+		registerScanTracker:   newRegisterScanTracker(deps.FraudRegScanThreshold, deps.FraudRegScanWindow),
+		inviteBurstTracker:    newInviteBurstTracker(deps.FraudInviteBurstThreshold, deps.FraudInviteBurstWindow),
 		messages:              make(chan []byte, messagesChanSize),
 		done:                  make(chan struct{}),
 		registerTracker:       make(map[string]registerEntry),
@@ -201,6 +211,17 @@ func NewExporter(deps Deps) Exporter {
 		inviteSDP:             make(map[string]inviteSDPEntity),
 		optionsTracker:        make(map[string]optionsEntry),
 	}
+	if e.registerScanTracker == nil {
+		zap.L().Warn("fraud register scan detection disabled: threshold and window must be > 0",
+			zap.Int("threshold", deps.FraudRegScanThreshold),
+			zap.Duration("window", deps.FraudRegScanWindow))
+	}
+	if e.inviteBurstTracker == nil {
+		zap.L().Warn("fraud invite burst detection disabled: threshold and window must be > 0",
+			zap.Int("threshold", deps.FraudInviteBurstThreshold),
+			zap.Duration("window", deps.FraudInviteBurstWindow))
+	}
+	return e
 }
 
 func checkPrerequisites() error {
@@ -400,6 +421,8 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		results := e.services.dialoger.Cleanup()
 		e.cleanupRegisterTracker()
 		e.cleanupExpiredRegistrations()
+		e.registerScanTracker.cleanup()
+		e.inviteBurstTracker.cleanup()
 		e.cleanupInviteTracker()
 		e.cleanupInviteSDP()
 		e.cleanupOptionsTracker()
@@ -652,6 +675,7 @@ func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 
 	carrier, carrierCountry := e.resolveCarrier(ipHeader)
 	sourceCountry := e.resolveSourceCountry(carrierCountry, ipHeader)
+	e.pktSrcIP = net.IPv4(ipHeader[12], ipHeader[13], ipHeader[14], ipHeader[15]).String()
 
 	if ipHeader[9] != ipProtoUDP {
 		return parseErrTypeL4, errors.New("not UDP packet")
@@ -780,6 +804,8 @@ func (e *exporter) handleMessage(carrier string, sourceCountry string, rawPacket
 		return fmt.Errorf("parse SIP packet: %w", err)
 	}
 
+	packet.SourceIP = e.pktSrcIP
+
 	zap.L().Debug("parsed packet", zap.Any("packet", packet))
 
 	uaType := e.resolveUA(packet.UserAgent)
@@ -901,10 +927,11 @@ func (e *exporter) handleRequest(carrier string, uaType string, sourceCountry st
 
 	switch {
 	case bytes.Equal(packet.Method, []byte("REGISTER")):
-		e.storeRegisterTime(string(packet.CallID), carrier, uaType, sourceCountry)
+		e.storeRegisterTime(string(packet.CallID), carrier, uaType, sourceCountry, packet.SourceIP)
 	case bytes.Equal(packet.Method, []byte("INVITE")):
 		if !isReinvite {
 			e.storeInviteTime(string(packet.CallID), carrier, uaType, sourceCountry)
+			e.inviteBurstTracker.record(packet.SourceIP, carrier, sourceCountry, e.services.metricser)
 		}
 		if bytes.Contains(packet.ContentType, []byte("application/sdp")) {
 			e.storeInviteSDP(string(packet.CallID), packet.Body)
@@ -937,10 +964,11 @@ func (e *exporter) handleResponse(
 	}
 
 	if isRegisterResponse {
-		if regCarrier, regUAType, regSC, ok := e.getRegisterCarrier(string(packet.CallID)); ok {
+		if regCarrier, regUAType, regSC, regSrcIP, ok := e.getRegisterCarrier(string(packet.CallID)); ok {
 			carrier = regCarrier
 			uaType = regUAType
 			sourceCountry = regSC
+			packet.SourceIP = regSrcIP
 		}
 	}
 
@@ -1153,7 +1181,7 @@ func (e *exporter) handleRegister200OK(carrier string, uaType string, sourceCoun
 		expires = defaultRegisterExpiresSec
 	}
 	aor := string(packet.From.User) + "@" + string(packet.From.Addr)
-	e.storeRegistration(aor, carrier, uaType, sourceCountry, expires)
+	e.storeRegistration(aor, carrier, uaType, sourceCountry, packet.SourceIP, expires)
 
 	startTime, ok := e.getRegisterTime(string(packet.CallID))
 	if !ok {
@@ -1250,7 +1278,7 @@ func extractExpires(value []byte) int {
 	return n
 }
 
-func (e *exporter) storeRegisterTime(callID, carrier, uaType, sourceCountry string) {
+func (e *exporter) storeRegisterTime(callID, carrier, uaType, sourceCountry, srcIP string) {
 	e.registerMutex.Lock()
 	defer e.registerMutex.Unlock()
 	e.registerTracker[callID] = registerEntry{
@@ -1258,6 +1286,7 @@ func (e *exporter) storeRegisterTime(callID, carrier, uaType, sourceCountry stri
 		carrier:       carrier,
 		uaType:        uaType,
 		sourceCountry: sourceCountry,
+		srcIP:         srcIP,
 	}
 }
 
@@ -1277,12 +1306,16 @@ func (e *exporter) removeRegisterTime(callID string) {
 // storeRegistration records or refreshes an active registration keyed by its
 // Address-of-Record (the SIP URI). A refresh of an existing AOR overwrites the
 // entry (extending its TTL) instead of creating a duplicate.
-func (e *exporter) storeRegistration(aor, carrier, uaType, sourceCountry string, expiresSec int) {
+func (e *exporter) storeRegistration(aor, carrier, uaType, sourceCountry, srcIP string, expiresSec int) {
 	expiry := time.Now().Add(time.Duration(expiresSec) * time.Second)
+	countryChanged := false
 	e.registerExpiryMutex.Lock()
-	defer e.registerExpiryMutex.Unlock()
 	if e.registerExpiryTracker == nil {
 		e.registerExpiryTracker = make(map[string]registerExpiryEntry)
+	}
+	if prev, ok := e.registerExpiryTracker[aor]; ok && prev.sourceCountry != "" &&
+		prev.sourceCountry != sourceCountry {
+		countryChanged = true
 	}
 	e.registerExpiryTracker[aor] = registerExpiryEntry{
 		expiry:        expiry,
@@ -1290,6 +1323,12 @@ func (e *exporter) storeRegistration(aor, carrier, uaType, sourceCountry string,
 		uaType:        uaType,
 		sourceCountry: sourceCountry,
 	}
+	e.registerExpiryMutex.Unlock()
+
+	if countryChanged {
+		e.services.metricser.RegisterCountryChange(carrier, sourceCountry)
+	}
+	e.registerScanTracker.record(srcIP, aor, carrier, sourceCountry, e.services.metricser)
 }
 
 func (e *exporter) cleanupExpiredRegistrations() {
@@ -1406,14 +1445,14 @@ func (e *exporter) removeInviteTime(callID string) {
 	delete(e.inviteTracker, callID)
 }
 
-func (e *exporter) getRegisterCarrier(callID string) (string, string, string, bool) {
+func (e *exporter) getRegisterCarrier(callID string) (string, string, string, string, bool) {
 	e.registerMutex.RLock()
 	defer e.registerMutex.RUnlock()
 	entry, ok := e.registerTracker[callID]
 	if !ok {
-		return "", defaultUAType, defaultCountry, false
+		return "", defaultUAType, defaultCountry, "", false
 	}
-	return entry.carrier, entry.uaType, entry.sourceCountry, true
+	return entry.carrier, entry.uaType, entry.sourceCountry, entry.srcIP, true
 }
 
 func (e *exporter) getInviteCarrier(callID string) (string, string, string, bool) {

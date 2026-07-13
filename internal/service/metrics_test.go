@@ -1,6 +1,8 @@
 package service
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -428,6 +430,134 @@ func TestMetrics_UpdateSessions(t *testing.T) {
 	})
 	require.InDelta(t, 1.0, m.sessionsGauge("provider-a", "yealink"), 0.01)
 	require.InDelta(t, 0.0, m.sessionsGauge("provider-b", "cisco"), 0.01, "stale combo must reset")
+}
+
+func TestMetrics_SessionsUtilization_WithLimits(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.SetSessionsLimits(map[string]int{"carrier-a": 100})
+
+	m.UpdateSessions([]LabeledCount{
+		{Labels: map[string]string{"carrier": "carrier-a", "ua_type": "yealink", "source_country": ""}, Count: 50},
+	})
+
+	limitGauge, err := m.sessionsLimit.GetMetricWithLabelValues("carrier-a")
+	require.NoError(t, err)
+	utilGauge, err := m.sessionsUtilization.GetMetricWithLabelValues("carrier-a")
+	require.NoError(t, err)
+
+	var d dto.Metric
+	require.NoError(t, limitGauge.Write(&d))
+	require.InDelta(t, 100.0, d.GetGauge().GetValue(), 0.01)
+
+	require.NoError(t, utilGauge.Write(&d))
+	require.InDelta(t, 50.0, d.GetGauge().GetValue(), 0.01)
+}
+
+func TestMetrics_SessionsUtilization_CappedAt100(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.SetSessionsLimits(map[string]int{"carrier-a": 100})
+
+	m.UpdateSessions([]LabeledCount{
+		{Labels: map[string]string{"carrier": "carrier-a", "ua_type": "sip", "source_country": ""}, Count: 150},
+	})
+
+	utilGauge, err := m.sessionsUtilization.GetMetricWithLabelValues("carrier-a")
+	require.NoError(t, err)
+	var d dto.Metric
+	require.NoError(t, utilGauge.Write(&d))
+	require.InDelta(t, 100.0, d.GetGauge().GetValue(), 0.01, "utilization must be capped at 100")
+}
+
+func TestMetrics_SessionsUtilization_ZeroSessions(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.SetSessionsLimits(map[string]int{"carrier-a": 100})
+
+	m.UpdateSessions([]LabeledCount{})
+
+	utilGauge, err := m.sessionsUtilization.GetMetricWithLabelValues("carrier-a")
+	require.NoError(t, err)
+	var d dto.Metric
+	require.NoError(t, utilGauge.Write(&d))
+	require.InDelta(t, 0.0, d.GetGauge().GetValue(), 0.01, "zero sessions must show 0% utilization")
+}
+
+func TestMetrics_SessionsUtilization_NoLimits(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateSessions([]LabeledCount{
+		{Labels: map[string]string{"carrier": "carrier-a", "ua_type": "sip", "source_country": ""}, Count: 50},
+	})
+
+	_, err := m.sessionsUtilization.GetMetricWithLabelValues("carrier-a")
+	require.NoError(t, err, "gauge must exist even if no limits set (just not updated)")
+}
+
+func TestMetrics_SessionsUtilization_MultiCarrierSummed(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.SetSessionsLimits(map[string]int{
+		"carrier-a": 100,
+		"carrier-b": 200,
+	})
+
+	m.UpdateSessions([]LabeledCount{
+		{Labels: map[string]string{"carrier": "carrier-a", "ua_type": "yealink", "source_country": ""}, Count: 30},
+		{Labels: map[string]string{"carrier": "carrier-a", "ua_type": "cisco", "source_country": ""}, Count: 20},
+		{Labels: map[string]string{"carrier": "carrier-b", "ua_type": "sip", "source_country": ""}, Count: 100},
+	})
+
+	var d dto.Metric
+
+	utilA, err := m.sessionsUtilization.GetMetricWithLabelValues("carrier-a")
+	require.NoError(t, err)
+	require.NoError(t, utilA.Write(&d))
+	require.InDelta(t, 50.0, d.GetGauge().GetValue(), 0.01, "carrier-a: (30+20)/100")
+
+	utilB, err := m.sessionsUtilization.GetMetricWithLabelValues("carrier-b")
+	require.NoError(t, err)
+	require.NoError(t, utilB.Write(&d))
+	require.InDelta(t, 50.0, d.GetGauge().GetValue(), 0.01, "carrier-b: 100/200")
+}
+
+func TestLoadSessionsLimits_ValidYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "limits.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+sessions_limits:
+  - carrier: "beeline"
+    limit: 500
+  - carrier: "mts"
+    limit: 1000
+`), 0o644))
+
+	limits, err := LoadSessionsLimits(path)
+	require.NoError(t, err)
+	require.Len(t, limits, 2)
+	require.Equal(t, 500, limits["beeline"])
+	require.Equal(t, 1000, limits["mts"])
+}
+
+func TestLoadSessionsLimits_MissingFile(t *testing.T) {
+	_, err := LoadSessionsLimits("/nonexistent/path/limits.yaml")
+	require.Error(t, err)
+}
+
+func TestLoadSessionsLimits_EmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(""), 0o644))
+
+	limits, err := LoadSessionsLimits(path)
+	require.NoError(t, err)
+	require.Empty(t, limits)
+}
+
+func TestLoadSessionsLimits_InvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("{{{invalid"), 0o644))
+
+	_, err := LoadSessionsLimits(path)
+	require.Error(t, err)
 }
 
 func TestMetrics_UpdateActiveRegistrations(t *testing.T) {
@@ -2177,6 +2307,42 @@ func TestMetrics_RegisterFailure_IncrementsCodeCounter(t *testing.T) {
 	m.RegisterFailure("carrier-a", "sip", "US", "403")
 
 	counter, err := m.registerFailureTotal.GetMetricWithLabelValues("carrier-a", "sip", "US", "403")
+	require.NoError(t, err)
+	var d dto.Metric
+	require.NoError(t, counter.Write(&d))
+	require.InDelta(t, 1.0, d.GetCounter().GetValue(), 0.01)
+}
+
+func TestMetrics_RegisterCountryChange_IncrementsCounter(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.RegisterCountryChange("carrier-a", "GE")
+
+	counter, err := m.registerCountryChange.GetMetricWithLabelValues("carrier-a", "GE")
+	require.NoError(t, err)
+	var d dto.Metric
+	require.NoError(t, counter.Write(&d))
+	require.InDelta(t, 1.0, d.GetCounter().GetValue(), 0.01)
+}
+
+func TestMetrics_RegisterScan_IncrementsCounter(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.RegisterScan("carrier-a", "RU")
+
+	counter, err := m.registerScanTotal.GetMetricWithLabelValues("carrier-a", "RU")
+	require.NoError(t, err)
+	var d dto.Metric
+	require.NoError(t, counter.Write(&d))
+	require.InDelta(t, 1.0, d.GetCounter().GetValue(), 0.01)
+}
+
+func TestMetrics_InviteBurst_IncrementsCounter(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.InviteBurst("carrier-a", "CN")
+
+	counter, err := m.inviteBurstTotal.GetMetricWithLabelValues("carrier-a", "CN")
 	require.NoError(t, err)
 	var d dto.Metric
 	require.NoError(t, counter.Write(&d))

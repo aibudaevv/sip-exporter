@@ -18,7 +18,7 @@ test/e2e/load/load_result.json
 test/remote_test/
 
 # Session notes
-session*
+session*.md
 docs/superpowers/
 docs/internalwiki/posts/habr-article.md
 docs/internalwiki/

@@ -27,6 +27,7 @@ import (
 	"github.com/aibudaevv/sip-exporter/internal/config"
 	"github.com/aibudaevv/sip-exporter/internal/geoip"
 	"github.com/aibudaevv/sip-exporter/internal/server"
+	"github.com/aibudaevv/sip-exporter/internal/service"
 	"github.com/aibudaevv/sip-exporter/internal/telemetry"
 	"github.com/aibudaevv/sip-exporter/internal/ua"
 	pkgLog "github.com/aibudaevv/sip-exporter/pkg/log"
@@ -65,7 +66,14 @@ func main() {
 		log.Fatal(err)
 	}
 
-	srv := server.NewServer(resolver, classifier, geoipReader, cfg.LocalCountryCode, cfg.HostLabels)
+	sessionsLimits := loadSessionsLimits(cfg.SessionsLimitsPath)
+
+	srv := server.NewServer(
+		resolver, classifier, geoipReader,
+		cfg.LocalCountryCode, cfg.HostLabels, sessionsLimits,
+		cfg.FraudRegScanThreshold, cfg.FraudRegScanWindow,
+		cfg.FraudInviteBurstThreshold, cfg.FraudInviteBurstWindow,
+	)
 
 	go telemetry.Run(context.Background(), telemetry.Config{
 		Enabled: cfg.Telemetry,
@@ -78,4 +86,18 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func loadSessionsLimits(path string) map[string]int {
+	if path == "" {
+		return nil
+	}
+	limits, err := service.LoadSessionsLimits(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	zap.L().Info("sessions limits loaded",
+		zap.String("path", path),
+		zap.Int("carriers", len(limits)))
+	return limits
 }

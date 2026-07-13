@@ -15,6 +15,8 @@ import (
 	"github.com/aibudaevv/sip-exporter/internal/vq"
 )
 
+const maxUtilizationPercent = 100.0
+
 type (
 	carrierAtomicCounters struct {
 		inviteTotal            atomic.Int64
@@ -62,6 +64,10 @@ type (
 		registerSuccessTotal *prometheus.CounterVec
 		registerFailureTotal *prometheus.CounterVec
 
+		registerCountryChange *prometheus.CounterVec
+		registerScanTotal     *prometheus.CounterVec
+		inviteBurstTotal      *prometheus.CounterVec
+
 		activeRegistrations *prometheus.GaugeVec
 		prevActiveRegKeys   map[string][]string
 
@@ -72,6 +78,11 @@ type (
 
 		sessions        *prometheus.GaugeVec
 		prevSessionKeys map[string][]string
+
+		sessionsLimit       *prometheus.GaugeVec
+		sessionsUtilization *prometheus.GaugeVec
+		sessionsLimits      map[string]int
+		sessionsLimitsMu    sync.RWMutex
 
 		rrd *prometheus.HistogramVec
 		spd *prometheus.HistogramVec
@@ -138,8 +149,12 @@ type (
 		UpdateLRD(carrier, uaType, sourceCountry string, delayMs float64)
 		UpdateSession(carrier, uaType, sourceCountry string, size int)
 		UpdateSessions(counts []LabeledCount)
+		SetSessionsLimits(limits map[string]int)
 		RegisterSuccess(carrier, uaType, sourceCountry string)
 		RegisterFailure(carrier, uaType, sourceCountry, code string)
+		RegisterCountryChange(carrier, sourceCountry string)
+		RegisterScan(carrier, sourceCountry string)
+		InviteBurst(carrier, sourceCountry string)
 		UpdateActiveRegistrations(counts []LabeledCount)
 		UpdateVQReport(carrier, uaType, sourceCountry string, report *vq.SessionReport)
 		UpdateRTPPackets(carrier, uaType, codec, sourceCountry string)
@@ -343,6 +358,14 @@ func (m *metrics) initSessionMetrics(reg *prometheus.Registry) {
 	m.sessions = newGaugeVecWithRegistry(
 		"sip_exporter_sessions",
 		"Number of active SIP dialogs", cl, reg)
+	m.sessionsLimit = newGaugeVecWithRegistry(
+		"sip_exporter_sessions_limit",
+		"Configured concurrent session limit per carrier",
+		[]string{"carrier"}, reg)
+	m.sessionsUtilization = newGaugeVecWithRegistry(
+		"sip_exporter_sessions_utilization",
+		"Session utilization as percentage of configured limit (0-100)",
+		[]string{"carrier"}, reg)
 }
 
 func (m *metrics) initRegistrationMetrics(reg *prometheus.Registry) {
@@ -357,6 +380,18 @@ func (m *metrics) initRegistrationMetrics(reg *prometheus.Registry) {
 	m.activeRegistrations = newGaugeVecWithRegistry(
 		"sip_exporter_active_registrations",
 		"Number of active SIP registrations tracked by Expires-TTL", cl, reg)
+	m.registerCountryChange = newCounterVecWithRegistry(
+		"sip_exporter_register_country_change_total",
+		"Number of times a SIP user re-registered from a different source country (account takeover signal)",
+		[]string{"carrier", "source_country"}, reg)
+	m.registerScanTotal = newCounterVecWithRegistry(
+		"sip_exporter_register_scan_total",
+		"Number of registration scan signals (single IP registering many different AORs within a time window)",
+		[]string{"carrier", "source_country"}, reg)
+	m.inviteBurstTotal = newCounterVecWithRegistry(
+		"sip_exporter_invite_burst_total",
+		"Number of INVITE burst signals (single IP sending many INVITEs within a time window)",
+		[]string{"carrier", "source_country"}, reg)
 }
 
 func (m *metrics) initHistograms(reg *prometheus.Registry) {
@@ -826,6 +861,18 @@ func (m *metrics) RegisterFailure(carrier, uaType, sourceCountry, code string) {
 	m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).registerFailureTotal.Add(1)
 }
 
+func (m *metrics) RegisterCountryChange(carrier, sourceCountry string) {
+	m.registerCountryChange.WithLabelValues(carrier, sourceCountry).Inc()
+}
+
+func (m *metrics) RegisterScan(carrier, sourceCountry string) {
+	m.registerScanTotal.WithLabelValues(carrier, sourceCountry).Inc()
+}
+
+func (m *metrics) InviteBurst(carrier, sourceCountry string) {
+	m.inviteBurstTotal.WithLabelValues(carrier, sourceCountry).Inc()
+}
+
 func isRegisterChallenge(code string) bool {
 	return code == "401" || code == "407"
 }
@@ -892,6 +939,38 @@ func setGaugeFromCounts(
 func (m *metrics) UpdateSessions(counts []LabeledCount) {
 	setGaugeFromCounts(m.sessions, &m.prevSessionKeys, counts,
 		[]string{"carrier", "ua_type", "source_country"})
+
+	m.sessionsLimitsMu.RLock()
+	limits := m.sessionsLimits
+	m.sessionsLimitsMu.RUnlock()
+
+	if len(limits) == 0 {
+		return
+	}
+
+	carrierTotals := make(map[string]float64)
+	for _, lc := range counts {
+		carrierTotals[lc.Labels["carrier"]] += float64(lc.Count)
+	}
+
+	for carrier, limit := range limits {
+		if limit <= 0 {
+			continue
+		}
+		active := carrierTotals[carrier]
+		util := active / float64(limit) * maxUtilizationPercent
+		if util > maxUtilizationPercent {
+			util = maxUtilizationPercent
+		}
+		m.sessionsLimit.WithLabelValues(carrier).Set(float64(limit))
+		m.sessionsUtilization.WithLabelValues(carrier).Set(util)
+	}
+}
+
+func (m *metrics) SetSessionsLimits(limits map[string]int) {
+	m.sessionsLimitsMu.Lock()
+	defer m.sessionsLimitsMu.Unlock()
+	m.sessionsLimits = limits
 }
 
 func (m *metrics) UpdateActiveRegistrations(counts []LabeledCount) {
