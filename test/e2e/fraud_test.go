@@ -111,6 +111,50 @@ func TestFraud_RegisterScan_HighVolumeDedup(t *testing.T) {
 		"register_scan_total must be exactly 1 even with 50 unique AORs (10x threshold)")
 }
 
+// TestFraud_RegisterScan_MultipleIPsNoTrigger verifies that registrations
+// from multiple IPs (each below threshold) do NOT aggregate into a false
+// positive. This is a regression guard for per-IP source IP threading: if
+// the threading broke (all AORs attributed to one server IP), 6 unique AORs
+// would exceed threshold=5 and falsely signal.
+func TestFraud_RegisterScan_MultipleIPsNoTrigger(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	setupSecondaryIPs(t)
+
+	env := fraudEnv(ctx, t, carriersFraudYAML, map[string]string{
+		"SIP_EXPORTER_FRAUD_REGISTER_SCAN_THRESHOLD": "5",
+		"SIP_EXPORTER_FRAUD_REGISTER_SCAN_WINDOW":    fraudScanWindow,
+	})
+
+	runSippScenarioWithIPs(ctx, t, "reg_uas.xml", "reg_uac_multi.xml", 3, env, "10.1.0.1", "10.1.0.1")
+	runSippScenarioWithIPs(ctx, t, "reg_uas.xml", "reg_uac_multi.xml", 3, env, "10.2.0.1", "10.2.0.1")
+
+	require.False(t, metricExists(t, env.endpoint, "sip_exporter_register_scan_total"),
+		"no IP crossed threshold — metric must be absent")
+}
+
+// TestFraud_RegisterScan_PerIPCrossThreshold verifies that when one IP crosses
+// the threshold and another does not, only the crossing IP's carrier signals.
+func TestFraud_RegisterScan_PerIPCrossThreshold(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	setupSecondaryIPs(t)
+
+	env := fraudEnv(ctx, t, carriersFraudYAML, map[string]string{
+		"SIP_EXPORTER_FRAUD_REGISTER_SCAN_THRESHOLD": "5",
+		"SIP_EXPORTER_FRAUD_REGISTER_SCAN_WINDOW":    fraudScanWindow,
+	})
+
+	runSippScenarioWithIPs(ctx, t, "reg_uas.xml", "reg_uac_multi.xml", 5, env, "10.1.0.1", "10.1.0.1")
+	runSippScenarioWithIPs(ctx, t, "reg_uas.xml", "reg_uac_multi.xml", 3, env, "10.2.0.1", "10.2.0.1")
+
+	scanA := getMetricWithCarrier(t, env.endpoint, "sip_exporter_register_scan_total", "carrier-A")
+	require.Equal(t, 1.0, scanA, "carrier-A crossed threshold — exactly 1 signal (dedup)")
+
+	scanB := getMetricWithCarrier(t, env.endpoint, "sip_exporter_register_scan_total", "carrier-B")
+	require.Zero(t, scanB, "carrier-B below threshold — no signal (counter child absent, returns 0)")
+}
+
 // ---------------------------------------------------------------------------
 // Country Change (S6-9.2)
 // ---------------------------------------------------------------------------
