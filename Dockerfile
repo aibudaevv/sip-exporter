@@ -12,6 +12,7 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 COPY . .
+ENV GOTOOLCHAIN=auto
 RUN make build
 RUN ls -la /app/bin
 ENTRYPOINT ["/app/bin/main"]
