@@ -1341,7 +1341,7 @@ func normalizeDialogID(callID, fromTag, toTag []byte) (string, error) {
 		maxTag = fromTag
 	}
 
-	return fmt.Sprintf("%s:%s:%s", callID, minTag, maxTag), nil
+	return string(callID) + ":" + string(minTag) + ":" + string(maxTag), nil
 }
 
 func htons(i uint16) uint16 {
