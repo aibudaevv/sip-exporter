@@ -936,6 +936,7 @@ func (e *exporter) handleRTPDialogResult(
 func (e *exporter) handleRequest(carrier string, uaType string, sourceCountry string, packet dto.Packet) {
 	var destinationCountry, callerHost, calledHost string
 	isReinvite := false
+	isRetransmission := false
 	if bytes.Equal(packet.Method, []byte("INVITE")) {
 		destinationCountry = e.resolveDestinationCountry(packet.To.User)
 		if e.hostLabels {
@@ -946,11 +947,14 @@ func (e *exporter) handleRequest(carrier string, uaType string, sourceCountry st
 			e.services.dialoger.HasActiveDialog(dialogID) {
 			isReinvite = true
 		}
+		if !isReinvite && e.hasInviteTracker(string(packet.CallID)) {
+			isRetransmission = true
+		}
 	}
 
 	if isReinvite {
 		e.services.metricser.Reinvite(carrier, uaType, sourceCountry)
-	} else {
+	} else if !isRetransmission {
 		e.services.metricser.Request(
 			carrier, uaType, sourceCountry, destinationCountry,
 			callerHost, calledHost, packet.Method,
@@ -961,7 +965,7 @@ func (e *exporter) handleRequest(carrier string, uaType string, sourceCountry st
 	case bytes.Equal(packet.Method, []byte("REGISTER")):
 		e.storeRegisterTime(string(packet.CallID), carrier, uaType, sourceCountry, packet.SourceIP)
 	case bytes.Equal(packet.Method, []byte("INVITE")):
-		if !isReinvite {
+		if !isReinvite && !isRetransmission {
 			e.storeInviteTime(string(packet.CallID), carrier, uaType, sourceCountry)
 			e.inviteBurstTracker.record(packet.SourceIP, carrier, sourceCountry, e.services.metricser)
 		}
@@ -1514,6 +1518,13 @@ func (e *exporter) removeInviteTime(callID string) {
 	e.inviteMutex.Lock()
 	defer e.inviteMutex.Unlock()
 	delete(e.inviteTracker, callID)
+}
+
+func (e *exporter) hasInviteTracker(callID string) bool {
+	e.inviteMutex.RLock()
+	defer e.inviteMutex.RUnlock()
+	_, ok := e.inviteTracker[callID]
+	return ok
 }
 
 func (e *exporter) getRegisterCarrier(callID string) (string, string, string, string, bool) {

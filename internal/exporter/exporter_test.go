@@ -19,6 +19,7 @@ import (
 // Mock services for testing.
 type mockMetricser struct {
 	requestCalled             []byte
+	requestCount              int
 	reinviteCalled            bool
 	responseCalled            []byte
 	responseIsInvite          bool
@@ -63,6 +64,7 @@ func (m *mockMetricser) UpdateActiveRegistrations(_ []service.LabeledCount) {}
 
 func (m *mockMetricser) Request(_, _, _, _, _, _ string, in []byte) {
 	m.requestCalled = in
+	m.requestCount++
 	m.packetsIncremented++
 }
 
@@ -1176,6 +1178,59 @@ func TestHandleMessage_Request(t *testing.T) {
 		return len(mm.requestCalled) > 0
 	}, 100*time.Millisecond, 10*time.Millisecond)
 	require.Equal(t, []byte("INVITE"), mm.requestCalled)
+}
+
+func TestHandleMessage_INVITE_Retransmission_Dedup(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		inviteTracker:  make(map[string]inviteEntry),
+		inviteSDP:      make(map[string]inviteSDPEntity),
+		optionsTracker: make(map[string]optionsEntry),
+		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
+	}
+
+	invite := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: retrans-call\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	// First INVITE — counted
+	err := e.handleMessage("carrier", "", invite)
+	require.NoError(t, err)
+	require.Equal(t, 1, mm.requestCount)
+
+	// Tracker entry exists
+	e.inviteMutex.RLock()
+	_, exists := e.inviteTracker["retrans-call"]
+	e.inviteMutex.RUnlock()
+	require.True(t, exists)
+
+	// Retransmission #1 — must NOT increment
+	err = e.handleMessage("carrier", "", invite)
+	require.NoError(t, err)
+	require.Equal(t, 1, mm.requestCount, "first retransmission must not call Request()")
+
+	// Retransmission #2 — must NOT increment
+	err = e.handleMessage("carrier", "", invite)
+	require.NoError(t, err)
+	require.Equal(t, 1, mm.requestCount, "second retransmission must not call Request()")
+
+	// Different Call-ID — new call, must be counted
+	invite2 := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=def\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: new-call\r\n" +
+		"CSeq: 1 INVITE\r\n")
+	err = e.handleMessage("carrier", "", invite2)
+	require.NoError(t, err)
+	require.Equal(t, 2, mm.requestCount, "different Call-ID must be counted as new INVITE")
 }
 
 func TestHandleMessage_Response200_INVITE(t *testing.T) {
@@ -4335,7 +4390,7 @@ func TestMCDC_TC18_TrackerTTLExpired_FallbackToPacketCarrier(t *testing.T) {
 		"when tracker entry expired, should fall back to packet carrier")
 }
 
-func TestMCDC_TC19_Retransmit_OverwritesCarrier(t *testing.T) {
+func TestMCDC_TC19_Retransmit_PreservesOriginalCarrier(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -4345,8 +4400,8 @@ func TestMCDC_TC19_Retransmit_OverwritesCarrier(t *testing.T) {
 	e.handleMessage("carrier-C", "", makeInvite200OK("tc19", "ft19", "tt19"))
 
 	require.Eventually(t, func() bool { return len(md.created) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
-	require.Equal(t, "carrier-B", md.created["tc19:ft19:tt19"].carrier,
-		"retransmitted INVITE should overwrite carrier in tracker")
+	require.Equal(t, "carrier-A", md.created["tc19:ft19:tt19"].carrier,
+		"retransmitted INVITE must not overwrite original carrier in tracker")
 }
 
 func TestMCDC_TC20_OtherCarrier_20Known_10Other(t *testing.T) {
