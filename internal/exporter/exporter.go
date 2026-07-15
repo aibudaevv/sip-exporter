@@ -1257,7 +1257,7 @@ func htons(i uint16) uint16 {
 }
 
 func extractCSeq(value []byte) ([]byte, []byte) {
-	arr := bytes.Split(value, []byte(" "))
+	arr := bytes.Fields(value)
 	if len(arr) < minSIPParts {
 		return nil, nil
 	}

@@ -946,6 +946,33 @@ func TestSIPPacketParse_NoCSeqMethod(t *testing.T) {
 	require.Contains(t, err.Error(), "fail extract CSeq from")
 }
 
+func TestSIPPacketParse_CSeqMultipleSpaces(t *testing.T) {
+	e := exporter{}
+
+	tests := []struct {
+		name string
+		cseq string
+	}{
+		{name: "double space", cseq: "1  INVITE"},
+		{name: "tab separator", cseq: "1\tINVITE"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := []byte("SIP/2.0 200 OK\r\n" +
+				"From: <sip:user@domain>;tag=abc\r\n" +
+				"To: <sip:other@domain>;tag=xyz\r\n" +
+				"Call-ID: test\r\n" +
+				"CSeq: " + tt.cseq + "\r\n")
+
+			p, err := e.sipPacketParse(input)
+			require.NoError(t, err)
+			require.Equal(t, []byte("INVITE"), p.CSeq.Method)
+			require.Equal(t, []byte("1"), p.CSeq.ID)
+		})
+	}
+}
+
 func TestSIPPacketParse_TruncatedStatusLine(t *testing.T) {
 	e := exporter{}
 
