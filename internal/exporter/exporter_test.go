@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1672,6 +1673,41 @@ func TestRegisterExpiryTracker_RefreshKeepsActive(t *testing.T) {
 
 	counts := e.registrationCounts()
 	require.Len(t, counts, 1, "refreshed registration must survive old-expiry cleanup")
+}
+
+func TestRegisterExpiryTracker_ConcurrentAccess(t *testing.T) {
+	e := newExporterWithRegTracker()
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := range 100 {
+			aor := "sip:user" + strconv.Itoa(i%10) + "@example.com"
+			e.storeRegistration(aor, "c", "sip", "US", "", 3600)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range 100 {
+			e.cleanupExpiredRegistrations()
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range 100 {
+			_ = e.registrationCounts()
+		}
+	}()
+
+	wg.Wait()
+
+	counts := e.registrationCounts()
+	require.NotEmpty(t, counts, "should have active registrations after concurrent stores")
 }
 
 // ==================== S6-9.2: Registration Country Change ====================
