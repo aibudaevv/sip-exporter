@@ -747,6 +747,8 @@ func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
 		return dto.Packet{}, fmt.Errorf("split return empty result, raw: %q", raw)
 	}
 
+	lines = unfoldHeaders(lines)
+
 	p := dto.Packet{}
 	if bytes.HasPrefix(lines[0], []byte("SIP/2.0")) {
 		p.IsResponse = true
@@ -1249,6 +1251,20 @@ func normalizeHeaderName(header []byte) []byte {
 		return []byte("Content-Type")
 	}
 	return header
+}
+
+func unfoldHeaders(lines [][]byte) [][]byte {
+	var result [][]byte
+	for _, line := range lines {
+		if len(line) > 0 && (line[0] == ' ' || line[0] == '\t') {
+			if len(result) > 0 {
+				result[len(result)-1] = append(result[len(result)-1], bytes.TrimLeft(line, " \t")...)
+			}
+			continue
+		}
+		result = append(result, line)
+	}
+	return result
 }
 
 func extractTag(value []byte) []byte {

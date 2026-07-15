@@ -1057,6 +1057,22 @@ func TestSIPPacketParse_CompactHeaders(t *testing.T) {
 	}
 }
 
+func TestSIPPacketParse_FoldedHeader(t *testing.T) {
+	e := exporter{}
+
+	input := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;\r\n" +
+		" tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: test\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	p, err := e.sipPacketParse(input)
+	require.NoError(t, err)
+	require.Equal(t, []byte("abc"), p.From.Tag)
+	require.Equal(t, []byte("xyz"), p.To.Tag)
+}
+
 func TestSIPPacketParse_CaseInsensitiveTag(t *testing.T) {
 	e := exporter{}
 
