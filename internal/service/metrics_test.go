@@ -243,35 +243,80 @@ func (m *metrics) getISSFromCounter() float64 {
 	return dtoMetric.GetCounter().GetValue()
 }
 
-func TestMetricser_Request_AllMethodsSingleRun(t *testing.T) {
-	m := NewTestMetricser()
-	require.NotNil(t, m)
+func requestVecValue(cv *prometheus.CounterVec, labels ...string) float64 {
+	var d dto.Metric
+	if err := cv.WithLabelValues(labels...).Write(&d); err != nil {
+		return 0
+	}
+	return d.GetCounter().GetValue()
+}
 
+func TestMetricser_Request_AllMethodsSingleRun(t *testing.T) {
 	methods := []struct {
-		name string
-		data []byte
+		name    string
+		data    []byte
+		counter func(m *metrics) float64
 	}{
-		{"INVITE", []byte("INVITE")},
-		{"ACK", []byte("ACK")},
-		{"BYE", []byte("BYE")},
-		{"CANCEL", []byte("CANCEL")},
-		{"OPTIONS", []byte("OPTIONS")},
-		{"REGISTER", []byte("REGISTER")},
-		{"UPDATE", []byte("UPDATE")},
-		{"INFO", []byte("INFO")},
-		{"REFER", []byte("REFER")},
-		{"SUBSCRIBE", []byte("SUBSCRIBE")},
-		{"NOTIFY", []byte("NOTIFY")},
-		{"PRACK", []byte("PRACK")},
-		{"PUBLISH", []byte("PUBLISH")},
-		{"MESSAGE", []byte("MESSAGE")},
-		{"UNKNOWN", []byte("UNKNOWN_METHOD")},
-		{"EMPTY", []byte("")},
+		{"INVITE", []byte("INVITE"), func(m *metrics) float64 {
+			return requestVecValue(m.requestInviteTotal, "", "", "", "", "", "")
+		}},
+		{"ACK", []byte("ACK"), func(m *metrics) float64 {
+			return requestVecValue(m.requestACKTotal, "", "", "")
+		}},
+		{"BYE", []byte("BYE"), func(m *metrics) float64 {
+			return requestVecValue(m.requestByeTotal, "", "", "")
+		}},
+		{"CANCEL", []byte("CANCEL"), func(m *metrics) float64 {
+			return requestVecValue(m.requestCancelTotal, "", "", "")
+		}},
+		{"OPTIONS", []byte("OPTIONS"), func(m *metrics) float64 {
+			return requestVecValue(m.requestOptionsTotal, "", "", "")
+		}},
+		{"REGISTER", []byte("REGISTER"), func(m *metrics) float64 {
+			return requestVecValue(m.requestRegisterTotal, "", "", "")
+		}},
+		{"UPDATE", []byte("UPDATE"), func(m *metrics) float64 {
+			return requestVecValue(m.requestUpdateTotal, "", "", "")
+		}},
+		{"INFO", []byte("INFO"), func(m *metrics) float64 {
+			return requestVecValue(m.requestInfoTotal, "", "", "")
+		}},
+		{"REFER", []byte("REFER"), func(m *metrics) float64 {
+			return requestVecValue(m.requestReferTotal, "", "", "")
+		}},
+		{"SUBSCRIBE", []byte("SUBSCRIBE"), func(m *metrics) float64 {
+			return requestVecValue(m.requestSubscribeTotal, "", "", "")
+		}},
+		{"NOTIFY", []byte("NOTIFY"), func(m *metrics) float64 {
+			return requestVecValue(m.requestNotifyTotal, "", "", "")
+		}},
+		{"PRACK", []byte("PRACK"), func(m *metrics) float64 {
+			return requestVecValue(m.requestPrackTotal, "", "", "")
+		}},
+		{"PUBLISH", []byte("PUBLISH"), func(m *metrics) float64 {
+			return requestVecValue(m.requestPublishTotal, "", "", "")
+		}},
+		{"MESSAGE", []byte("MESSAGE"), func(m *metrics) float64 {
+			return requestVecValue(m.requestMessageTotal, "", "", "")
+		}},
+		{"UNKNOWN", []byte("UNKNOWN_METHOD"), nil},
+		{"EMPTY", []byte(""), nil},
 	}
 
 	for _, method := range methods {
-		t.Run(method.name, func(_ *testing.T) {
+		t.Run(method.name, func(t *testing.T) {
+			m := NewTestMetricser().(*metrics)
 			m.Request("", "", "", "", "", "", method.data)
+
+			var d dto.Metric
+			require.NoError(t, m.sipPacketsTotal.Write(&d))
+			require.InDelta(t, 1.0, d.GetCounter().GetValue(), 0.01,
+				"sipPacketsTotal must increment for every Request call")
+
+			if method.counter != nil {
+				require.InDelta(t, 1.0, method.counter(m), 0.01,
+					"method-specific counter must increment")
+			}
 		})
 	}
 }
@@ -323,9 +368,6 @@ func TestMetrics_Invite200OK_HostLabels(t *testing.T) {
 }
 
 func TestMetricser_Response_AllCodesSingleRun(t *testing.T) {
-	m := NewTestMetricser()
-	require.NotNil(t, m)
-
 	codes := []struct {
 		name             string
 		data             []byte
@@ -365,16 +407,24 @@ func TestMetricser_Response_AllCodesSingleRun(t *testing.T) {
 	}
 
 	for _, code := range codes {
-		t.Run(code.name, func(_ *testing.T) {
+		t.Run(code.name, func(t *testing.T) {
+			m := NewTestMetricser().(*metrics)
 			m.Response("", "", "", code.data, code.isInviteResponse)
+
+			var d dto.Metric
+			require.NoError(t, m.sipPacketsTotal.Write(&d))
+			require.InDelta(t, 1.0, d.GetCounter().GetValue(), 0.01,
+				"sipPacketsTotal must increment for every Response call")
+
+			if cv, ok := m.statusCounters[code.name]; ok {
+				require.InDelta(t, 1.0, requestVecValue(cv, "", "", ""), 0.01,
+					"status counter %s must increment", code.name)
+			}
 		})
 	}
 }
 
 func TestMetricser_UpdateSession_VariousValues(t *testing.T) {
-	m := NewTestMetricser()
-	require.NotNil(t, m)
-
 	testCases := []struct {
 		name string
 		size int
@@ -386,8 +436,10 @@ func TestMetricser_UpdateSession_VariousValues(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		t.Run(tc.name, func(_ *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewTestMetricser().(*metrics)
 			m.UpdateSession("", "", "", tc.size)
+			require.InDelta(t, float64(tc.size), m.sessionsGauge("", ""), 0.01)
 		})
 	}
 }
@@ -575,14 +627,16 @@ func TestMetrics_UpdateActiveRegistrations(t *testing.T) {
 }
 
 func TestMetricser_SystemError_Multiple(t *testing.T) {
-	m := NewTestMetricser()
-	require.NotNil(t, m)
+	m := NewTestMetricser().(*metrics)
 
-	for i := range 5 {
-		t.Run(string(rune('0'+i)), func(_ *testing.T) {
-			m.SystemError()
-		})
+	for range 5 {
+		m.SystemError()
 	}
+
+	var d dto.Metric
+	require.NoError(t, m.systemErrorTotal.Write(&d))
+	require.InDelta(t, 5.0, d.GetCounter().GetValue(), 0.01,
+		"systemErrorTotal must reflect 5 calls")
 }
 
 func TestMetricser_Combined(t *testing.T) {
