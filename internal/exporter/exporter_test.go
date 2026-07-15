@@ -4671,6 +4671,45 @@ func TestIsSIPMethod(t *testing.T) {
 	}
 }
 
+func TestIsSDPContentType(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType []byte
+		want        bool
+	}{
+		{"lowercase", []byte("application/sdp"), true},
+		{"uppercase", []byte("APPLICATION/SDP"), true},
+		{"mixed-case", []byte("Application/SDP"), true},
+		{"with charset", []byte("application/sdp; charset=utf-8"), true},
+		{"not sdp", []byte("text/plain"), false},
+		{"empty", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, isSDPContentType(tt.contentType))
+		})
+	}
+}
+
+func TestIsVQContentType(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType []byte
+		want        bool
+	}{
+		{"lowercase", []byte("application/vq-rtcpxr"), true},
+		{"uppercase", []byte("APPLICATION/VQ-RTCPXR"), true},
+		{"mixed-case", []byte("Application/VQ-RTCPXR"), true},
+		{"not vq", []byte("application/sdp"), false},
+		{"empty", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, isVQContentType(tt.contentType))
+		})
+	}
+}
+
 func TestIsSIPPacket(t *testing.T) {
 	e := &exporter{sipPort: 5060, sipsPort: 5061}
 

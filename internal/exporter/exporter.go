@@ -669,6 +669,14 @@ func hasMethodPrefix(data, method []byte) bool {
 		data[len(method)] == ' '
 }
 
+func isSDPContentType(contentType []byte) bool {
+	return bytes.Contains(bytes.ToLower(contentType), []byte("application/sdp"))
+}
+
+func isVQContentType(contentType []byte) bool {
+	return bytes.Contains(bytes.ToLower(contentType), []byte("application/vq-rtcpxr"))
+}
+
 // parseRawPacket parses raw L2 packet. Returns error type (l2, l3, l4, sip) and error.
 func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 	ipOffset, ethType, err := parseEthernet(packet)
@@ -949,7 +957,7 @@ func (e *exporter) handleRequest(carrier string, uaType string, sourceCountry st
 			e.storeInviteTime(string(packet.CallID), carrier, uaType, sourceCountry)
 			e.inviteBurstTracker.record(packet.SourceIP, carrier, sourceCountry, e.services.metricser)
 		}
-		if bytes.Contains(packet.ContentType, []byte("application/sdp")) {
+		if isSDPContentType(packet.ContentType) {
 			e.storeInviteSDP(string(packet.CallID), packet.Body)
 		}
 	case bytes.Equal(packet.Method, []byte("CANCEL")):
@@ -958,7 +966,7 @@ func (e *exporter) handleRequest(carrier string, uaType string, sourceCountry st
 		e.storeOptionsTime(string(packet.CallID), carrier, uaType, sourceCountry)
 	}
 
-	if bytes.Contains(packet.ContentType, []byte("application/vq-rtcpxr")) {
+	if isVQContentType(packet.ContentType) {
 		e.vqHandler.HandleVQReport(packet.Body, carrier, uaType, sourceCountry)
 	}
 }
@@ -1166,7 +1174,7 @@ func (e *exporter) handleInvite200OK(
 	if offerSDP, ok := e.takeInviteSDP(callID); ok {
 		e.registerMediaEndpoints(offerSDP, labels)
 	}
-	if bytes.Contains(packet.ContentType, []byte("application/sdp")) {
+	if isSDPContentType(packet.ContentType) {
 		e.registerMediaEndpoints(packet.Body, labels)
 	}
 	return nil
