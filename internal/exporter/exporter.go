@@ -771,7 +771,7 @@ func (e *exporter) parseHeaders(lines [][]byte, p *dto.Packet) error {
 		case bytes.EqualFold(header, []byte("From")):
 			tag := extractTag(value)
 			if tag == nil {
-				return fmt.Errorf("fail extract tag from '%b'", value)
+				return fmt.Errorf("fail extract tag from '%s'", value)
 			}
 
 			p.From.Tag = tag

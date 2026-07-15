@@ -856,6 +856,7 @@ func TestSIPPacketParse_NoFromTag(t *testing.T) {
 	_, err := e.sipPacketParse(input)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "fail extract tag from")
+	require.Contains(t, err.Error(), "<sip:user@domain>")
 }
 
 func TestSIPPacketParse_WithSessionExpires(t *testing.T) {
