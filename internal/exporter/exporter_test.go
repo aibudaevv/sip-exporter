@@ -4718,9 +4718,11 @@ func TestExporter_GracefulShutdown(t *testing.T) {
 		optionsTracker:  make(map[string]optionsEntry),
 	}
 
+	e.wg.Add(1)
 	go e.readPackets()
 	e.wg.Add(1)
 	go e.readSocket()
+	e.wg.Add(1)
 	go e.sipDialogMetricsUpdate()
 
 	time.Sleep(100 * time.Millisecond)

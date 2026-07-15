@@ -333,10 +333,7 @@ func (e *exporter) Initialize(
 		zap.Int("sip_port", sipPort),
 		zap.Int("sips_port", sipsPort))
 
-	go e.readPackets()
-	e.wg.Add(1)
-	go e.readSocket()
-	go e.sipDialogMetricsUpdate()
+	e.startWorkers()
 
 	e.initialized.Store(true)
 
@@ -412,7 +409,17 @@ func (e *exporter) resolveUA(userAgent []byte) string {
 	return e.uaClassifier.Classify(userAgent)
 }
 
+func (e *exporter) startWorkers() {
+	e.wg.Add(1)
+	go e.readPackets()
+	e.wg.Add(1)
+	go e.readSocket()
+	e.wg.Add(1)
+	go e.sipDialogMetricsUpdate()
+}
+
 func (e *exporter) sipDialogMetricsUpdate() {
+	defer e.wg.Done()
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
@@ -511,11 +518,20 @@ func (e *exporter) readSocketStats() (uint32, uint32) {
 }
 
 func (e *exporter) readPackets() {
-	for packet := range e.messages {
-		if errType, err := e.parseRawPacket(packet); err != nil {
-			e.services.metricser.SystemError()
-			e.services.metricser.ParseError(errType)
-			zap.L().Error("parse err", zap.Error(err))
+	defer e.wg.Done()
+	for {
+		select {
+		case <-e.done:
+			return
+		case packet, ok := <-e.messages:
+			if !ok {
+				return
+			}
+			if errType, err := e.parseRawPacket(packet); err != nil {
+				e.services.metricser.SystemError()
+				e.services.metricser.ParseError(errType)
+				zap.L().Error("parse err", zap.Error(err))
+			}
 		}
 	}
 }
