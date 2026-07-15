@@ -768,6 +768,10 @@ func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
 		return dto.Packet{}, err
 	}
 
+	if p.CallID == nil {
+		return dto.Packet{}, errors.New("missing Call-ID header")
+	}
+
 	if idx := bytes.Index(raw, []byte("\r\n\r\n")); idx != -1 {
 		p.Body = raw[idx+4:]
 	}

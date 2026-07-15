@@ -618,7 +618,7 @@ func TestParseRawPacket_VLAN_Tagged(t *testing.T) {
 	packet[17] = 0x00
 	packet[18] = 0x45
 	packet[27] = 17
-	copy(packet[46:], []byte("INVITE sip:test SIP/2.0\r\n"))
+	copy(packet[46:], []byte("INVITE sip:test SIP/2.0\r\nCall-ID: test\r\n"))
 
 	_, err := e.parseRawPacket(packet)
 	require.NoError(t, err)
@@ -826,7 +826,7 @@ func TestParseRawPacket_SuccessReturnsEmptyType(t *testing.T) {
 	packet[13] = 0x00
 	packet[14] = 0x45
 	packet[23] = 17
-	copy(packet[42:], []byte("INVITE sip:test SIP/2.0\r\n"))
+	copy(packet[42:], []byte("INVITE sip:test SIP/2.0\r\nCall-ID: test\r\n"))
 
 	errType, err := e.parseRawPacket(packet)
 	require.NoError(t, err)
@@ -864,6 +864,19 @@ func TestSIPPacketParse_NoFromTag(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "fail extract tag from")
 	require.Contains(t, err.Error(), "<sip:user@domain>")
+}
+
+func TestSIPPacketParse_MissingCallID(t *testing.T) {
+	e := exporter{}
+
+	input := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	_, err := e.sipPacketParse(input)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing Call-ID")
 }
 
 func TestSIPPacketParse_WithSessionExpires(t *testing.T) {
@@ -2219,7 +2232,8 @@ func TestSIPPacketParse_Response401(t *testing.T) {
 	e := exporter{}
 
 	input := []byte("SIP/2.0 401 Unauthorized\r\n" +
-		"Via: SIP/2.0/UDP 192.168.0.89:55147;rport=55147;branch=z9hG4bKPjda81fdbda2a5464898d03d02ed894a2d\r\n")
+		"Via: SIP/2.0/UDP 192.168.0.89:55147;rport=55147;branch=z9hG4bKPjda81fdbda2a5464898d03d02ed894a2d\r\n" +
+		"Call-ID: test\r\n")
 
 	p, err := e.sipPacketParse(input)
 	require.NoError(t, err)
