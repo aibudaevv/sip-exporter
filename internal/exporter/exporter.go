@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -1337,8 +1338,8 @@ func extractSessionExpires(value []byte) int {
 	if len(parts) == 0 {
 		return 0
 	}
-	var n int
-	if _, err := fmt.Sscanf(string(parts[0]), "%d", &n); err != nil {
+	n, err := strconv.Atoi(string(bytes.TrimSpace(parts[0])))
+	if err != nil {
 		return 0
 	}
 	return n
@@ -1346,8 +1347,8 @@ func extractSessionExpires(value []byte) int {
 
 func extractExpires(value []byte) int {
 	// "3600" -> 3600 (RFC 3261 §20.19 delta-seconds; no params unlike Session-Expires)
-	var n int
-	if _, err := fmt.Sscanf(string(value), "%d", &n); err != nil {
+	n, err := strconv.Atoi(string(bytes.TrimSpace(value)))
+	if err != nil {
 		return 0
 	}
 	return n
