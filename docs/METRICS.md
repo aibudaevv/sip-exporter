@@ -595,7 +595,7 @@ sip_exporter_register_country_change_total > 0 unless on (carrier, source_countr
 
 ### register_scan_total
 
-Incremented for each new **unique AOR** registered from a single source IP when the count of unique AORs within the configured `window` is at or above `threshold`. The counter increases continuously during a scan attack, making `rate()` effective for alerting.
+Incremented for each registration event from a single source IP when the count of unique AORs (Address of Record) within the configured `window` reaches or exceeds `threshold`. The counter increases continuously during a scan attack, making `rate()` effective for alerting.
 
 | Config | Env var | Default |
 |--------|---------|---------|
@@ -723,6 +723,7 @@ Self-monitoring metrics provide visibility into the exporter's internal health. 
 |--------|------|-------------|
 | `sip_exporter_socket_packets_received_total` | Counter | Total packets received from kernel AF_PACKET socket |
 | `sip_exporter_socket_packets_dropped_total` | Counter | Total packets dropped by kernel due to socket receive buffer overflow |
+| `sip_exporter_rtp_dropped_total` | Counter | Total RTP packets dropped in userspace when the internal messages channel is full |
 | `sip_exporter_channel_length` | Gauge | Current number of packets in the internal messages channel buffer |
 | `sip_exporter_channel_capacity` | Gauge | Capacity of the internal messages channel buffer (constant: 10000) |
 | `sip_exporter_parse_errors_total{type="..."}` | CounterVec | Total packet parse errors by type |
