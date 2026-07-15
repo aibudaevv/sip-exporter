@@ -1054,6 +1054,24 @@ func TestSIPPacketParse_CaseInsensitiveTag(t *testing.T) {
 	}
 }
 
+func TestExtractTag_QuotedDisplayName(t *testing.T) {
+	tests := []struct {
+		name  string
+		value []byte
+		want  []byte
+	}{
+		{name: "tag inside quoted name", value: []byte(`"Joe;tag=evil" <sip:joe@h>;tag=real`), want: []byte("real")},
+		{name: "tag after angle brackets", value: []byte("<sip:joe@h>;tag=real"), want: []byte("real")},
+		{name: "no tag", value: []byte("<sip:joe@h>"), want: nil},
+		{name: "bare URI with tag", value: []byte("sip:joe@h;tag=real"), want: []byte("real")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, extractTag(tt.value))
+		})
+	}
+}
+
 func TestSIPPacketParse_TruncatedStatusLine(t *testing.T) {
 	e := exporter{}
 

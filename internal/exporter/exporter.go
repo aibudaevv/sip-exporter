@@ -1234,10 +1234,18 @@ func splitHeader(line []byte) ([]byte, []byte) {
 }
 
 func extractTag(value []byte) []byte {
-	tagIdx := bytes.Index(bytes.ToLower(value), []byte(";tag="))
+	searchStart := 0
+	if ltIdx := bytes.IndexByte(value, '<'); ltIdx != -1 {
+		if gtIdx := bytes.IndexByte(value[ltIdx:], '>'); gtIdx != -1 {
+			searchStart = ltIdx + gtIdx
+		}
+	}
+
+	tagIdx := bytes.Index(bytes.ToLower(value[searchStart:]), []byte(";tag="))
 	if tagIdx == -1 {
 		return nil
 	}
+	tagIdx += searchStart
 
 	start := tagIdx + tagPrefixLen
 	end := start
