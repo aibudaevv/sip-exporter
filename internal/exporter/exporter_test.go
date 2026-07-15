@@ -1027,6 +1027,36 @@ func TestSIPPacketParse_CaseInsensitiveHeaders(t *testing.T) {
 	}
 }
 
+func TestSIPPacketParse_CompactHeaders(t *testing.T) {
+	e := exporter{}
+
+	tests := []struct {
+		name string
+		from string
+		to   string
+		cid  string
+	}{
+		{name: "compact f/t/i", from: "f", to: "t", cid: "i"},
+		{name: "uppercase F/T/I", from: "F", to: "T", cid: "I"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := []byte("SIP/2.0 200 OK\r\n" +
+				tt.from + ": <sip:user@domain>;tag=abc\r\n" +
+				tt.to + ": <sip:other@domain>;tag=xyz\r\n" +
+				tt.cid + ": test\r\n" +
+				"cSeq: 1 INVITE\r\n")
+
+			p, err := e.sipPacketParse(input)
+			require.NoError(t, err)
+			require.Equal(t, []byte("abc"), p.From.Tag)
+			require.Equal(t, []byte("xyz"), p.To.Tag)
+			require.Equal(t, []byte("test"), p.CallID)
+		})
+	}
+}
+
 func TestSIPPacketParse_CaseInsensitiveTag(t *testing.T) {
 	e := exporter{}
 

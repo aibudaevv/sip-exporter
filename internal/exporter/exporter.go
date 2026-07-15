@@ -786,6 +786,7 @@ func (e *exporter) parseHeaders(lines [][]byte, p *dto.Packet) error {
 		}
 
 		header, value := splitHeader(line)
+		header = normalizeHeaderName(header)
 
 		switch {
 		case bytes.EqualFold(header, []byte("From")):
@@ -1231,6 +1232,23 @@ func splitHeader(line []byte) ([]byte, []byte) {
 		return nil, nil
 	}
 	return bytes.TrimSpace(line[:i]), bytes.TrimSpace(line[i+1:])
+}
+
+func normalizeHeaderName(header []byte) []byte {
+	if len(header) != 1 {
+		return header
+	}
+	switch header[0] {
+	case 'f', 'F':
+		return []byte("From")
+	case 't', 'T':
+		return []byte("To")
+	case 'i', 'I':
+		return []byte("Call-ID")
+	case 'c', 'C':
+		return []byte("Content-Type")
+	}
+	return header
 }
 
 func extractTag(value []byte) []byte {
