@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -2083,47 +2084,42 @@ func TestHandleMessage_SER_Integration(t *testing.T) {
 		input := []byte("INVITE sip:test SIP/2.0\r\n" +
 			"From: <sip:user@domain>;tag=abc\r\n" +
 			"To: <sip:other@domain>\r\n" +
-			"Call-ID: test-" + string(rune('0'+i)) + "\r\n" +
+			"Call-ID: test-" + strconv.Itoa(i) + "\r\n" +
 			"CSeq: 1 INVITE\r\n")
 		err := e.handleMessage("other", "", input)
 		require.NoError(t, err)
 	}
 
-	// 5 200 OK responses to INVITE
+	// 5 200 OK responses to INVITE (test-0..test-4)
 	for i := range 5 {
 		input := []byte("SIP/2.0 200 OK\r\n" +
 			"From: <sip:user@domain>;tag=abc\r\n" +
-			"To: <sip:other@domain>;tag=xyz" + string(rune('0'+i)) + "\r\n" +
-			"Call-ID: test-" + string(rune('0'+i)) + "\r\n" +
+			"To: <sip:other@domain>;tag=xyz" + strconv.Itoa(i) + "\r\n" +
+			"Call-ID: test-" + strconv.Itoa(i) + "\r\n" +
 			"CSeq: 1 INVITE\r\n")
 		err := e.handleMessage("other", "", input)
 		require.NoError(t, err)
 	}
 
-	// 2 302 responses to INVITE
+	// 2 302 responses to INVITE (test-5, test-6 — matching Call-IDs)
 	for i := range 2 {
 		input := []byte("SIP/2.0 302 Moved Temporarily\r\n" +
 			"From: <sip:user@domain>;tag=abc\r\n" +
-			"To: <sip:other@domain>;tag=xyz" + string(rune('0'+i)) + "\r\n" +
-			"Call-ID: test-302-" + string(rune('0'+i)) + "\r\n" +
+			"To: <sip:other@domain>;tag=xyz" + strconv.Itoa(5+i) + "\r\n" +
+			"Call-ID: test-" + strconv.Itoa(5+i) + "\r\n" +
 			"CSeq: 1 INVITE\r\n")
 		err := e.handleMessage("other", "", input)
 		require.NoError(t, err)
 	}
 
-	// Wait for all goroutines to complete
-	time.Sleep(50 * time.Millisecond)
+	// 10 INVITE requests → requestCount must be 10
+	require.Equal(t, 10, m.requestCount, "all 10 INVITEs must be counted")
 
-	// Verify Invite200OK was called 5 times
-	invite200OKCount := 0
-	for range 5 {
-		if m.invite200OKCalled {
-			invite200OKCount++
-		}
-	}
+	// 200 OK to INVITE → invite200OKCalled
+	require.True(t, m.invite200OKCalled, "Invite200OK must be called for 200 OK responses")
 
-	// Verify response was called with isInviteResponse=true for INVITE
-	require.True(t, m.responseIsInvite)
+	// INVITE responses → responseIsInvite
+	require.True(t, m.responseIsInvite, "Response must be flagged as INVITE response")
 }
 
 func TestHandleMessage_ParseError(t *testing.T) {
