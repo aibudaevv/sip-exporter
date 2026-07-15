@@ -12,6 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 
+	"github.com/aibudaevv/sip-exporter/internal/carriers"
+	"github.com/aibudaevv/sip-exporter/internal/geoip"
 	"github.com/aibudaevv/sip-exporter/internal/mediatracker"
 	"github.com/aibudaevv/sip-exporter/internal/service"
 	"github.com/aibudaevv/sip-exporter/internal/vq"
@@ -4946,4 +4948,114 @@ func TestSendPacket_SuccessPaths(t *testing.T) {
 		rtpPkt := buildUDPPacket(12345, 5004)
 		require.False(t, e.sendPacket(rtpPkt), "RTP sendPacket should return false on done")
 	})
+}
+
+func buildIPHeader(srcIP, dstIP [4]byte) []byte {
+	hdr := make([]byte, 20)
+	hdr[12] = srcIP[0]
+	hdr[13] = srcIP[1]
+	hdr[14] = srcIP[2]
+	hdr[15] = srcIP[3]
+	hdr[16] = dstIP[0]
+	hdr[17] = dstIP[1]
+	hdr[18] = dstIP[2]
+	hdr[19] = dstIP[3]
+	return hdr
+}
+
+func TestResolveCarrier(t *testing.T) {
+	resolver, err := carriers.NewResolver([]carriers.Carrier{
+		{Name: "provider-a", Country: "US", CIDRs: []string{"10.1.0.0/16"}},
+		{Name: "provider-b", Country: "DE", CIDRs: []string{"10.2.0.0/16"}},
+	})
+	require.NoError(t, err)
+
+	tests := []struct {
+		name        string
+		resolver    *carriers.Resolver
+		srcIP       [4]byte
+		dstIP       [4]byte
+		wantCarrier string
+		wantCountry string
+	}{
+		{
+			name:        "nil_resolver_returns_default",
+			resolver:    nil,
+			wantCarrier: "other",
+			wantCountry: "",
+		},
+		{
+			name:        "srcIP_matches",
+			resolver:    resolver,
+			srcIP:       [4]byte{10, 1, 0, 1},
+			dstIP:       [4]byte{10, 3, 0, 1},
+			wantCarrier: "provider-a",
+			wantCountry: "US",
+		},
+		{
+			name:        "srcIP_no_match_dstIP_matches",
+			resolver:    resolver,
+			srcIP:       [4]byte{10, 9, 0, 1},
+			dstIP:       [4]byte{10, 2, 0, 1},
+			wantCarrier: "provider-b",
+			wantCountry: "DE",
+		},
+		{
+			name:        "neither_matches",
+			resolver:    resolver,
+			srcIP:       [4]byte{10, 9, 0, 1},
+			dstIP:       [4]byte{10, 9, 0, 2},
+			wantCarrier: "other",
+			wantCountry: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &exporter{carrierResolver: tc.resolver}
+			ipHdr := buildIPHeader(tc.srcIP, tc.dstIP)
+			carrier, country := e.resolveCarrier(ipHdr)
+			require.Equal(t, tc.wantCarrier, carrier)
+			require.Equal(t, tc.wantCountry, country)
+		})
+	}
+}
+
+func TestResolveSourceCountry(t *testing.T) {
+	geoipReader := &geoip.Reader{}
+
+	tests := []struct {
+		name           string
+		carrierCountry string
+		geoip          *geoip.Reader
+		want           string
+	}{
+		{
+			name:           "carrierCountry_non_empty",
+			carrierCountry: "FR",
+			geoip:          geoipReader,
+			want:           "FR",
+		},
+		{
+			name:           "carrierCountry_empty_geoip_nil",
+			carrierCountry: "",
+			geoip:          nil,
+			want:           "unknown",
+		},
+		{
+			name:           "carrierCountry_empty_geoip_no_db",
+			carrierCountry: "",
+			geoip:          geoipReader,
+			want:           "unknown",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &exporter{geoip: tc.geoip}
+			ipHdr := buildIPHeader([4]byte{10, 1, 0, 1}, [4]byte{10, 2, 0, 1})
+			got := e.resolveSourceCountry(tc.carrierCountry, ipHdr)
+			require.Equal(t, tc.want, got)
+		})
+	}
 }
