@@ -1214,7 +1214,7 @@ func splitHeader(line []byte) ([]byte, []byte) {
 }
 
 func extractTag(value []byte) []byte {
-	tagIdx := bytes.Index(value, []byte(";tag="))
+	tagIdx := bytes.Index(bytes.ToLower(value), []byte(";tag="))
 	if tagIdx == -1 {
 		return nil
 	}

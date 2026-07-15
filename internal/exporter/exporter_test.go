@@ -1006,6 +1006,33 @@ func TestSIPPacketParse_CaseInsensitiveHeaders(t *testing.T) {
 	}
 }
 
+func TestSIPPacketParse_CaseInsensitiveTag(t *testing.T) {
+	e := exporter{}
+
+	tests := []struct {
+		name string
+		tag  string
+	}{
+		{name: "uppercase TAG", tag: ";TAG=abc"},
+		{name: "mixed-case Tag", tag: ";Tag=abc"},
+		{name: "mixed-case tAg", tag: ";tAg=abc"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := []byte("SIP/2.0 200 OK\r\n" +
+				"From: <sip:user@domain>" + tt.tag + "\r\n" +
+				"To: <sip:other@domain>;tag=xyz\r\n" +
+				"Call-ID: test\r\n" +
+				"CSeq: 1 INVITE\r\n")
+
+			p, err := e.sipPacketParse(input)
+			require.NoError(t, err)
+			require.Equal(t, []byte("abc"), p.From.Tag)
+		})
+	}
+}
+
 func TestSIPPacketParse_TruncatedStatusLine(t *testing.T) {
 	e := exporter{}
 
