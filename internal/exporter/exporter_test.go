@@ -838,10 +838,17 @@ func TestParseRawPacket_SuccessReturnsEmptyType(t *testing.T) {
 func TestSIPPacketParse_EmptyInput(t *testing.T) {
 	e := exporter{}
 
-	p, err := e.sipPacketParse([]byte(""))
-	require.NoError(t, err)
-	require.False(t, p.IsResponse)
-	require.Nil(t, p.Method)
+	_, err := e.sipPacketParse([]byte(""))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "malformed request line")
+}
+
+func TestSIPPacketParse_GarbageInput(t *testing.T) {
+	e := exporter{}
+
+	_, err := e.sipPacketParse([]byte("GARBAGE\r\n"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "malformed request line")
 }
 
 func TestSIPPacketParse_NoFromTag(t *testing.T) {
@@ -2000,11 +2007,11 @@ func TestHandleMessage_ParseError(t *testing.T) {
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
 
-	// Invalid SIP packet - "invalid" is too short and won't be recognized
-	// handleMessage may not return error for some invalid packets
-	// Main thing is systemError metric will be incremented
+	// Invalid SIP packet - "invalid" is not a valid SIP request line.
+	// handleMessage returns parse error for malformed packets.
 	err := e.handleMessage("other", "", []byte("invalid"))
-	require.NoError(t, err)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "malformed request line")
 }
 
 func TestHandleMessage_Response200_InvalidDialogID(t *testing.T) {

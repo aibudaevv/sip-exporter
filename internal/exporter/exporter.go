@@ -757,10 +757,11 @@ func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
 		p.ResponseStatus = rest[:minResponseStatusLen]
 	} else {
 		parts := bytes.SplitN(lines[0], []byte(" "), sipPartsCount)
-		if len(parts) >= minSIPParts {
-			p.IsResponse = false
-			p.Method = bytes.TrimSpace(parts[0])
+		if len(parts) < minSIPParts {
+			return dto.Packet{}, fmt.Errorf("malformed request line: %q", lines[0])
 		}
+		p.IsResponse = false
+		p.Method = bytes.TrimSpace(parts[0])
 	}
 
 	if err := e.parseHeaders(lines, &p); err != nil {
