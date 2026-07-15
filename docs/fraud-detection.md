@@ -53,10 +53,11 @@ for mass account takeover.
 2. The AOR (`user@host`) is recorded for that source IP in a sliding window.
    Duplicate AORs (same user re-registering) do not increment the count.
 3. When the number of **unique AORs** from one IP reaches the threshold, the
-   counter increments **once** (signal deduplication).
-4. Further registrations from the same IP do not increment the counter again.
-5. When all AORs age out of the window, the signal resets — a new burst can
-   trigger a new increment.
+   counter increments for that AOR and for every subsequent new AOR.
+4. The counter increases continuously during the scan, making `rate()` effective
+   for alerting.
+5. When all AORs age out of the window, the count drops below threshold and the
+   counter stops incrementing.
 
 **Configuration:**
 
@@ -69,8 +70,8 @@ for mass account takeover.
 accounts in 30 seconds. With default threshold=10, window=60s:
 - Registrations 1–9 → no signal (below threshold)
 - At the 10th unique AOR → counter increments (+1)
-- Registrations 11–15 → no additional increment (dedup)
-- After 60 seconds with no new registrations → entries expire, signal resets
+- Registrations 11–15 → counter increments for each new AOR (+5)
+- After 60 seconds with no new registrations → entries expire, counter stops
 - If a new burst of 10+ unique AORs arrives → counter increments again
 
 **Limitations:**
@@ -144,8 +145,12 @@ SIP flood DDoS.
 1. Every initial INVITE request (not re-INVITE within an existing dialog) from a
    source IP is tracked in a sliding window (same algorithm as registration
    scan).
-2. When the count in the window exceeds the threshold → counter increments once.
-3. Signal resets when the window clears.
+2. When the count in the window reaches the threshold → counter increments for
+   that INVITE and for every subsequent INVITE.
+3. The counter increases continuously during the burst, making `rate()`
+   effective for alerting.
+4. When the window clears, the count drops below threshold and the counter
+   stops incrementing.
 
 **Configuration:**
 
@@ -161,9 +166,10 @@ centers that frequently use re-INVITEs.
 
 **Example scenario:** A compromised PBX at 198.51.100.10 starts making 150
 calls/minute to premium-rate international numbers. With threshold=100:
+- INVITEs 1–99 → no signal (below threshold)
 - At the 100th INVITE → counter increments (+1)
-- Further INVITEs in the same window → no additional increment
-- After the window clears → a new burst triggers again
+- INVITEs 101–150 → counter increments for each (+50)
+- After the window clears → counter stops; a new burst triggers again
 
 **SBC / high-volume sources:** A Session Border Controller, SIP gateway, or
 large call center that multiplexes many subscribers through a single source IP
@@ -330,8 +336,8 @@ source is ALERTING.md — any divergence should be resolved there.
 
 # Registration country change → account takeover
 - alert: SIPRegistrationCountryChange
-  expr: rate(sip_exporter_register_country_change_total[5m]) > 0
-  for: 1m
+  expr: sip_exporter_register_country_change_total > 0 unless on (carrier, source_country) (sip_exporter_register_country_change_total offset 5m > 0)
+  for: 0m
   labels:
     severity: warning
   annotations:

@@ -1529,14 +1529,14 @@ func TestRegisterScanTracker_SignalsAtThreshold(t *testing.T) {
 	require.Equal(t, 1, mm.registerScanCalls, "at threshold must signal")
 }
 
-func TestRegisterScanTracker_DedupPerBurst(t *testing.T) {
+func TestRegisterScanTracker_IncrementsPerAORAboveThreshold(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newRegisterScanTracker(3, time.Minute)
 
 	for i := range 5 {
 		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", mm)
 	}
-	require.Equal(t, 1, mm.registerScanCalls, "must signal once per burst episode")
+	require.Equal(t, 3, mm.registerScanCalls, "must increment for each AOR at or above threshold (5-3+1=3)")
 }
 
 func TestRegisterScanTracker_UniqueAORsOnly(t *testing.T) {
@@ -1568,22 +1568,17 @@ func TestRegisterScanTracker_EmptySrcIPSkipped(t *testing.T) {
 
 // ==================== S6-A.1: Memory Cap ====================
 
-func TestRegisterScanTracker_MemoryBoundedAfterSignal(t *testing.T) {
+func TestRegisterScanTracker_MemoryBoundedAtMaxEntries(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newRegisterScanTracker(3, time.Minute)
 
-	for i := range 3 {
+	for i := range registerScanMaxEntriesPerIP + 10 {
 		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", mm)
 	}
-	require.Equal(t, 1, mm.registerScanCalls, "at threshold must signal")
 
-	for i := range 20 {
-		tracker.record("1.2.3.4", fmt.Sprintf("extra%d@evil.com", i), "carrier", "RU", mm)
-	}
-
-	require.Equal(t, 1, mm.registerScanCalls, "dedup must still work")
-	require.LessOrEqual(t, len(tracker.entries["1.2.3.4"]), tracker.threshold,
-		"inner map must not exceed threshold after signal")
+	require.LessOrEqual(t, len(tracker.entries["1.2.3.4"]), registerScanMaxEntriesPerIP,
+		"inner map must not exceed registerScanMaxEntriesPerIP")
+	require.Positive(t, mm.registerScanCalls, "must have signalled above threshold")
 }
 
 func TestRegisterScanTracker_EvictionWorksAfterCap(t *testing.T) {
@@ -1625,9 +1620,7 @@ func TestRegisterScanTracker_MultipleIPsIndependent(t *testing.T) {
 // ==================== S6-A.13: Wasted Event Fix ====================
 
 // TestRegisterScanTracker_NoWastedEventAfterExpiry verifies that the first
-// event after window expiry IS recorded (not silently dropped). Before the
-// fix, the event that reset `signaled` was gated by the old signaled value
-// and never entered the map.
+// event after window expiry IS recorded (not silently dropped).
 func TestRegisterScanTracker_NoWastedEventAfterExpiry(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newRegisterScanTracker(3, 50*time.Millisecond)
@@ -1647,9 +1640,7 @@ func TestRegisterScanTracker_NoWastedEventAfterExpiry(t *testing.T) {
 }
 
 // TestRegisterScanTracker_RetriggerAtExactThreshold verifies that after
-// window expiry, exactly `threshold` new events re-trigger the signal (not
-// threshold+1). Before the fix, the first event was wasted on resetting
-// signaled, so threshold+1 events were needed.
+// window expiry, exactly `threshold` new events re-trigger the signal.
 func TestRegisterScanTracker_RetriggerAtExactThreshold(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newRegisterScanTracker(3, 50*time.Millisecond)
@@ -1686,14 +1677,14 @@ func TestInviteBurstTracker_SignalsAtThreshold(t *testing.T) {
 	require.Equal(t, 1, mm.inviteBurstCalls, "at threshold must signal")
 }
 
-func TestInviteBurstTracker_DedupPerBurst(t *testing.T) {
+func TestInviteBurstTracker_IncrementsPerInviteAboveThreshold(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newInviteBurstTracker(3, time.Minute)
 
 	for range 10 {
 		tracker.record("1.2.3.4", "carrier", "RU", mm)
 	}
-	require.Equal(t, 1, mm.inviteBurstCalls, "must signal once per burst episode")
+	require.Equal(t, 8, mm.inviteBurstCalls, "must increment for each INVITE at or above threshold (10-3+1=8)")
 }
 
 func TestInviteBurstTracker_NilTrackerSafe(t *testing.T) {

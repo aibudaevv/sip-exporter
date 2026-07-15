@@ -7,12 +7,13 @@ import (
 	"github.com/aibudaevv/sip-exporter/internal/service"
 )
 
+const registerScanMaxEntriesPerIP = 10000
+
 type registerScanTracker struct {
 	mu        sync.Mutex
 	threshold int
 	window    time.Duration
 	entries   map[string]map[string]time.Time
-	signaled  map[string]bool
 }
 
 func newRegisterScanTracker(threshold int, window time.Duration) *registerScanTracker {
@@ -23,7 +24,6 @@ func newRegisterScanTracker(threshold int, window time.Duration) *registerScanTr
 		threshold: threshold,
 		window:    window,
 		entries:   make(map[string]map[string]time.Time),
-		signaled:  make(map[string]bool),
 	}
 }
 
@@ -51,17 +51,11 @@ func (t *registerScanTracker) record(
 		}
 	}
 
-	if len(t.entries[srcIP]) < t.threshold {
-		t.signaled[srcIP] = false
-	}
-
-	if !t.signaled[srcIP] {
+	if len(t.entries[srcIP]) < registerScanMaxEntriesPerIP {
 		t.entries[srcIP][aor] = now
 	}
 
-	count := len(t.entries[srcIP])
-	if count >= t.threshold && !t.signaled[srcIP] {
-		t.signaled[srcIP] = true
+	if len(t.entries[srcIP]) >= t.threshold {
 		metricser.RegisterScan(carrier, sourceCountry)
 	}
 }
@@ -83,7 +77,6 @@ func (t *registerScanTracker) cleanup() {
 		}
 		if len(aors) == 0 {
 			delete(t.entries, ip)
-			delete(t.signaled, ip)
 		}
 	}
 }
@@ -93,7 +86,6 @@ type inviteBurstTracker struct {
 	threshold int
 	window    time.Duration
 	entries   map[string][]time.Time
-	signaled  map[string]bool
 }
 
 func newInviteBurstTracker(threshold int, window time.Duration) *inviteBurstTracker {
@@ -104,7 +96,6 @@ func newInviteBurstTracker(threshold int, window time.Duration) *inviteBurstTrac
 		threshold: threshold,
 		window:    window,
 		entries:   make(map[string][]time.Time),
-		signaled:  make(map[string]bool),
 	}
 }
 
@@ -137,12 +128,7 @@ func (t *inviteBurstTracker) record(
 	t.entries[srcIP] = entries
 
 	if len(entries) >= t.threshold {
-		if !t.signaled[srcIP] {
-			t.signaled[srcIP] = true
-			metricser.InviteBurst(carrier, sourceCountry)
-		}
-	} else {
-		t.signaled[srcIP] = false
+		metricser.InviteBurst(carrier, sourceCountry)
 	}
 }
 
@@ -163,7 +149,6 @@ func (t *inviteBurstTracker) cleanup() {
 		entries = entries[i:]
 		if len(entries) == 0 {
 			delete(t.entries, ip)
-			delete(t.signaled, ip)
 		} else {
 			t.entries[ip] = entries
 		}
