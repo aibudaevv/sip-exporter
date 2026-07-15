@@ -43,5 +43,23 @@ func GetConfig() (*App, error) {
 		return nil, fmt.Errorf("err: %s, info: %s", err.Error(), help)
 	}
 
+	if err := cfg.validatePorts(); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+func (c *App) validatePorts() error {
+	const minPort, maxPort = 1, 65535
+	if c.SIPPort < minPort || c.SIPPort > maxPort {
+		return fmt.Errorf("invalid SIP_EXPORTER_SIP_PORT: %d (must be %d-%d)", c.SIPPort, minPort, maxPort)
+	}
+	if c.SIPSPort < minPort || c.SIPSPort > maxPort {
+		return fmt.Errorf("invalid SIP_EXPORTER_SIPS_PORT: %d (must be %d-%d)", c.SIPSPort, minPort, maxPort)
+	}
+	if c.SIPPort == c.SIPSPort {
+		return fmt.Errorf("SIP_EXPORTER_SIP_PORT and SIP_EXPORTER_SIPS_PORT must differ, both: %d", c.SIPPort)
+	}
+	return nil
 }

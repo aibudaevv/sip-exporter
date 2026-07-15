@@ -248,3 +248,52 @@ func TestGetConfig_HostLabelsEnabled(t *testing.T) {
 	require.NotNil(t, cfg)
 	require.True(t, cfg.HostLabels, "host labels must be enabled when env is true")
 }
+
+func TestGetConfig_SIPPortTooLow(t *testing.T) {
+	unsetConfigEnv(t)
+	t.Setenv("SIP_EXPORTER_INTERFACE", "eth0")
+	t.Setenv("SIP_EXPORTER_SIP_PORT", "0")
+
+	cfg, err := GetConfig()
+
+	require.Error(t, err)
+	require.Nil(t, cfg)
+	require.Contains(t, err.Error(), "SIP_EXPORTER_SIP_PORT")
+}
+
+func TestGetConfig_SIPPortTooHigh(t *testing.T) {
+	unsetConfigEnv(t)
+	t.Setenv("SIP_EXPORTER_INTERFACE", "eth0")
+	t.Setenv("SIP_EXPORTER_SIP_PORT", "70000")
+
+	cfg, err := GetConfig()
+
+	require.Error(t, err)
+	require.Nil(t, cfg)
+	require.Contains(t, err.Error(), "SIP_EXPORTER_SIP_PORT")
+}
+
+func TestGetConfig_SIPSPortTooLow(t *testing.T) {
+	unsetConfigEnv(t)
+	t.Setenv("SIP_EXPORTER_INTERFACE", "eth0")
+	t.Setenv("SIP_EXPORTER_SIPS_PORT", "0")
+
+	cfg, err := GetConfig()
+
+	require.Error(t, err)
+	require.Nil(t, cfg)
+	require.Contains(t, err.Error(), "SIP_EXPORTER_SIPS_PORT")
+}
+
+func TestGetConfig_PortsEqual(t *testing.T) {
+	unsetConfigEnv(t)
+	t.Setenv("SIP_EXPORTER_INTERFACE", "eth0")
+	t.Setenv("SIP_EXPORTER_SIP_PORT", "5060")
+	t.Setenv("SIP_EXPORTER_SIPS_PORT", "5060")
+
+	cfg, err := GetConfig()
+
+	require.Error(t, err)
+	require.Nil(t, cfg)
+	require.Contains(t, err.Error(), "must differ")
+}
