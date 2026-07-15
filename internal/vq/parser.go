@@ -34,6 +34,7 @@ func ParseReport(body []byte) (*SessionReport, error) {
 	for _, line := range lines[1:] {
 		line = strings.TrimSpace(line)
 		if line == "" {
+			inRemoteMetrics = false
 			continue
 		}
 

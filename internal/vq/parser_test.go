@@ -264,6 +264,22 @@ func TestParseReport_RemoteMetricsNoLocal(t *testing.T) {
 	require.Empty(t, report.Present)
 }
 
+func TestParseReport_LocalMetricsAfterRemote(t *testing.T) {
+	body := []byte("VQSessionReport: CallTerm\r\n" +
+		"LocalMetrics:\r\n" +
+		"NLR=5.0\r\n" +
+		"RemoteMetrics:\r\n" +
+		"NLR=3.0\r\n" +
+		"\r\n" +
+		"MOSLQ=4.2\r\n")
+	report, err := ParseReport(body)
+	require.NoError(t, err)
+	require.InDelta(t, 5.0, report.NLR, 0.01)
+	require.InDelta(t, 4.2, report.MOSLQ, 0.01)
+	require.True(t, report.Present["NLR"])
+	require.True(t, report.Present["MOSLQ"])
+}
+
 func TestParseReport_InvalidPrefix(t *testing.T) {
 	_, err := ParseReport([]byte("XVQSessionReport: CallTerm\nNLR=1.0\n"))
 	require.ErrorIs(t, err, ErrInvalidReport)
