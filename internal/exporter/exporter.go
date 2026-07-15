@@ -53,6 +53,8 @@ const (
 	ethTypeIPv4Hi    = 0x08
 	ethTypeIPv4Lo    = 0x00
 	ipV4MinHeaderLen = 20
+	ipV4MinIHL       = 5
+	ipV4MaxIHL       = 15
 	ipV4HdrLenMask   = 0x0F
 	ipV4HdrLenShift  = 4
 	ipProtoUDP       = 17
@@ -611,8 +613,11 @@ func (e *exporter) isSIPPacket(packet []byte) bool {
 	if packet[12] == vlanEthTypeHi && packet[13] == vlanEthTypeLo {
 		offset = vlanHeaderLen
 	}
-	ihl := int(packet[offset]&ipV4HdrLenMask) * ipV4HdrLenShift
-	udpOff := offset + ihl
+	ihl := int(packet[offset] & ipV4HdrLenMask)
+	if ihl < ipV4MinIHL || ihl > ipV4MaxIHL {
+		return true
+	}
+	udpOff := offset + ihl*ipV4HdrLenShift
 	if len(packet) < udpOff+udpHeaderLen {
 		return true
 	}
@@ -648,6 +653,9 @@ func parseIPv4Header(packet []byte, ipOffset int) ([]byte, int, error) {
 	}
 	ipHeader := packet[ipOffset : ipOffset+ipV4MinHeaderLen]
 	ihl := ipHeader[0] & ipV4HdrLenMask
+	if ihl < ipV4MinIHL || ihl > ipV4MaxIHL {
+		return nil, 0, fmt.Errorf("invalid IHL: %d", ihl)
+	}
 	headerLen := int(ihl) * ipV4HdrLenShift
 	return ipHeader, headerLen, nil
 }

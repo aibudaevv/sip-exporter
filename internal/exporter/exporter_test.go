@@ -4795,6 +4795,15 @@ func buildLargeIHLPacket(srcPort, dstPort uint16) []byte {
 	return pkt
 }
 
+func buildZeroIHLPacket() []byte {
+	pkt := make([]byte, 42)
+	pkt[12] = 0x08
+	pkt[13] = 0x00
+	pkt[14] = 0x40 // version=4, IHL=0
+	pkt[23] = 17
+	return pkt
+}
+
 func TestIsSIPMethod(t *testing.T) {
 	tests := []struct {
 		name string
@@ -4872,6 +4881,7 @@ func TestIsSIPPacket(t *testing.T) {
 		{"VLAN SIP", buildVLANUDPPacket(12345, 5060), true},
 		{"VLAN RTP", buildVLANUDPPacket(12345, 5004), false},
 		{"large IHL too short", buildLargeIHLPacket(12345, 5060), true},
+		{"zero IHL", buildZeroIHLPacket(), true},
 		{"too short", make([]byte, 10), true},
 		{"empty", nil, true},
 	}
