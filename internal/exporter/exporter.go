@@ -643,23 +643,30 @@ func parseUDPOffset(packet []byte, ipOffset, ipHeaderLen int) (int, error) {
 	return udpOffset, nil
 }
 
-// isSIPMethod checks if data starts with a known SIP method or SIP/2.0.
+// isSIPMethod checks if data starts with a known SIP method or SIP/2.0,
+// followed by a space delimiter (prevents prefix collisions like INFORMATIONAL).
 func isSIPMethod(data []byte) bool {
-	return bytes.HasPrefix(data, []byte("INVITE")) ||
-		bytes.HasPrefix(data, []byte("ACK")) ||
-		bytes.HasPrefix(data, []byte("BYE")) ||
-		bytes.HasPrefix(data, []byte("CANCEL")) ||
-		bytes.HasPrefix(data, []byte("OPTIONS")) ||
-		bytes.HasPrefix(data, []byte("REGISTER")) ||
-		bytes.HasPrefix(data, []byte("SUBSCRIBE")) ||
-		bytes.HasPrefix(data, []byte("NOTIFY")) ||
-		bytes.HasPrefix(data, []byte("PUBLISH")) ||
-		bytes.HasPrefix(data, []byte("INFO")) ||
-		bytes.HasPrefix(data, []byte("PRACK")) ||
-		bytes.HasPrefix(data, []byte("UPDATE")) ||
-		bytes.HasPrefix(data, []byte("MESSAGE")) ||
-		bytes.HasPrefix(data, []byte("REFER")) ||
-		bytes.HasPrefix(data, []byte("SIP/2.0"))
+	return hasMethodPrefix(data, []byte("INVITE")) ||
+		hasMethodPrefix(data, []byte("ACK")) ||
+		hasMethodPrefix(data, []byte("BYE")) ||
+		hasMethodPrefix(data, []byte("CANCEL")) ||
+		hasMethodPrefix(data, []byte("OPTIONS")) ||
+		hasMethodPrefix(data, []byte("REGISTER")) ||
+		hasMethodPrefix(data, []byte("SUBSCRIBE")) ||
+		hasMethodPrefix(data, []byte("NOTIFY")) ||
+		hasMethodPrefix(data, []byte("PUBLISH")) ||
+		hasMethodPrefix(data, []byte("INFO")) ||
+		hasMethodPrefix(data, []byte("PRACK")) ||
+		hasMethodPrefix(data, []byte("UPDATE")) ||
+		hasMethodPrefix(data, []byte("MESSAGE")) ||
+		hasMethodPrefix(data, []byte("REFER")) ||
+		hasMethodPrefix(data, []byte("SIP/2.0"))
+}
+
+func hasMethodPrefix(data, method []byte) bool {
+	return bytes.HasPrefix(data, method) &&
+		len(data) > len(method) &&
+		data[len(method)] == ' '
 }
 
 // parseRawPacket parses raw L2 packet. Returns error type (l2, l3, l4, sip) and error.

@@ -4650,6 +4650,27 @@ func buildLargeIHLPacket(srcPort, dstPort uint16) []byte {
 	return pkt
 }
 
+func TestIsSIPMethod(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+		want bool
+	}{
+		{"INVITE", []byte("INVITE sip:test SIP/2.0"), true},
+		{"ACK", []byte("ACK sip:test SIP/2.0"), true},
+		{"SIP response", []byte("SIP/2.0 200 OK"), true},
+		{"INFORMATIONAL", []byte("INFORMATIONAL sip:test SIP/2.0"), false},
+		{"OPTIONS-long", []byte("OPTIONScustom sip:test"), false},
+		{"garbage", []byte("GARBAGE data"), false},
+		{"empty", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, isSIPMethod(tt.data))
+		})
+	}
+}
+
 func TestIsSIPPacket(t *testing.T) {
 	e := &exporter{sipPort: 5060, sipsPort: 5061}
 
