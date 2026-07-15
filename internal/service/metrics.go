@@ -386,8 +386,10 @@ func (m *metrics) initRegistrationMetrics(reg *prometheus.Registry) {
 		[]string{"carrier", "source_country"}, reg)
 	m.registerScanTotal = newCounterVecWithRegistry(
 		"sip_exporter_register_scan_total",
-		"Registrations from a single IP exceeding the unique-AOR scan threshold (per AOR at or above threshold)",
-		[]string{"carrier", "source_country"}, reg)
+		"Total registration events where unique-AOR count from a single source IP reached or exceeded the scan threshold",
+		[]string{"carrier", "source_country"},
+		reg,
+	)
 	m.inviteBurstTotal = newCounterVecWithRegistry(
 		"sip_exporter_invite_burst_total",
 		"INVITEs from a single IP exceeding the burst threshold (per INVITE at or above threshold, excludes re-INVITEs)",
