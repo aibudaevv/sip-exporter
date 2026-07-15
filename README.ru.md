@@ -25,7 +25,7 @@
 - [Безопасность](docs/SECURITY.ru.md)
 - [Разработка](#разработка)
 - [Нагрузочное тестирование](#нагрузочное-тестирование)
-- [Интеграция](#интеграция)
+- [Алертинг](#алертинг)
 - [Лицензия](#лицензия)
 - [Changelog](#changelog)
 
@@ -133,7 +133,7 @@ docker pull frzq/sip-exporter:latest
 - **Метрики RTP-медиа** — `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_active_streams` (лейблы: `carrier,ua_type,codec`)
 - **Расширенные метрики** — ISS, SDC, ORD, LRD
 
-Полный справочник с формулами, примерами и привязкой к RFC: [docs/METRICS.md](docs/METRICS.md)
+Полный справочник с формулами, примерами и привязкой к RFC: [docs/METRICS.ru.md](docs/METRICS.ru.md)
 
 ### Метрики по операторам (Carrier)
 
@@ -313,7 +313,7 @@ services:
       - ./GeoLite2-Country.mmdb:/data/GeoLite2-Country.mmdb:ro
 ```
 
-Полный справочник с формулами и примерами PromQL: [docs/METRICS.md > Geo-Enrichment Labels](docs/METRICS.md#geo-enrichment-labels)
+Полный справочник с формулами и примерами PromQL: [docs/METRICS.ru.md > Лейблы геообогащения](docs/METRICS.ru.md#лейблы-геообогащения)
 
 Пошаговая настройка (как получить и подключить базу MaxMind): [`docs/geoip.ru.md`](docs/geoip.ru.md)
 
@@ -354,7 +354,7 @@ sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
   / sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m]))
 ```
 
-Полный справочник по RTP-метрикам, формулы и разрешение лейблов — в [docs/METRICS.md](docs/METRICS.md).
+Полный справочник по RTP-метрикам, формулы и разрешение лейблов — в [docs/METRICS.ru.md](docs/METRICS.ru.md).
 
 ## Разработка
 
@@ -385,39 +385,21 @@ sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
 
 Подробности в [BENCHMARK.md](./docs/BENCHMARK.md) — результаты, методология и заметки по оптимизации.
 
-## Интеграция
+## Алертинг
 
-### Алертинг
+Grafana-дашборд и правила алертов Prometheus включены в репозиторий.
 
-Правила алертов и Grafana-дашборд включены в репозиторий — мониторинг работает "из коробки".
-
-**Мониторинг-стек одной командой** (Prometheus + Grafana + алерты + дашборд):
-
-```bash
-cd test/remote_test/monitoring
-docker compose up -d
-# Grafana: http://localhost:3000 (admin/admin) — дашборд автопровижин
-# Prometheus alerts: http://localhost:9090/alerts
-```
-
-Развёртывает:
-- **Prometheus** с предзагруженными правилами алертов (фрод, здоровье SIP, качество голоса)
-- **Grafana** с автопровижин-дашбордом "SIP Overview" (панели фрод-детекции, RTP-качество, трафик, здоровье системы)
-- **Правила алертов** — 13 алертов в 3 группах: детекция фрода (critical), здоровье SIP (critical/warning), качество голоса (warning)
-
-**Продакшн-дашборд** (импорт вручную):
+**Grafana-дашборд** — импорт вручную:
 
 1. Grafana → Dashboards → Import
-2. Загрузите `examples/grafana-dashboard.json` или вставьте JSON
+2. Загрузите [`examples/grafana-dashboard.json`](examples/grafana-dashboard.json)
 3. Выберите datasource Prometheus или VictoriaMetrics
 
-Продакшн-дашборд содержит: счётчики трафика, разбивку SIP-запросов/ответов, активные сессии, метрики RFC 6076 (SER, SEER, ISA, SCR, NER), анализ RTP-медиа (активные потоки, rate пакетов, loss rate, MOS, jitter по кодекам), метрики качества голоса RFC 6035 (MOS, jitter, потери пакетов), гистограммы задержек (RRD, TTR, PDD, SPD, ORD, LRD), метрики качества (ISS, ASR, SDC) и системные ошибки.
+Дашборд содержит: счётчики трафика, разбивку SIP-запросов/ответов, активные сессии, метрики RFC 6076 (SER, SEER, ISA, SCR, NER), регистрации (активные, success ratio, ошибки по кодам, фрод-сигналы), анализ RTP-медиа (активные потоки, rate пакетов, loss rate, MOS, jitter по кодекам), метрики качества голоса RFC 6035 (MOS, jitter, потери пакетов), гистограммы задержек (RRD, TTR, PDD, SPD, ORD, LRD), метрики качества (ISS, ASR, SDC) и системные ошибки.
 
-Файл дашборда: [`examples/grafana-dashboard.json`](examples/grafana-dashboard.json)
+Полный гайд по алертингу: правила Prometheus, конфиги Alertmanager (Slack/PagerDuty/Email), настройка порогов — [`docs/ALERTING.ru.md`](docs/ALERTING.ru.md)
 
-Полный гайд по алертингу: правила Prometheus, конфиги Alertmanager (Slack/PagerDuty/Email), настройка порогов — [`docs/ALERTING.md`](docs/ALERTING.md)
-
-### Совместимость с хранилищами метрик
+## Совместимость с хранилищами метрик
 
 SIP-Exporter экспортирует метрики в формате Prometheus exposition, совместимом с:
 

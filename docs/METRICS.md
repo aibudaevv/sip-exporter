@@ -590,12 +590,12 @@ Incremented when a successful REGISTER 200 OK arrives from a **different source 
 
 ```promql
 # Account-takeover spikes
-rate(sip_exporter_register_country_change_total[5m])
+sip_exporter_register_country_change_total > 0 unless on (carrier, source_country) (sip_exporter_register_country_change_total offset 5m > 0)
 ```
 
 ### register_scan_total
 
-Incremented when a single source IP registers `threshold` or more **unique AORs** within the configured `window`. The signal fires **once per burst episode** (not once per registration) — it resets when the unique-AOR count drops below the threshold.
+Incremented for each new **unique AOR** registered from a single source IP when the count of unique AORs within the configured `window` is at or above `threshold`. The counter increases continuously during a scan attack, making `rate()` effective for alerting.
 
 | Config | Env var | Default |
 |--------|---------|---------|
@@ -609,7 +609,7 @@ rate(sip_exporter_register_scan_total[5m])
 
 ### invite_burst_total
 
-Incremented when a single source IP sends `threshold` or more **INVITE requests** (excluding re-INVITEs) within the configured `window`. Same signal-once dedup as registration scan.
+Incremented for each **INVITE request** (excluding re-INVITEs) from a single source IP when the count of INVITEs within the configured `window` is at or above `threshold`. The counter increases continuously during a burst, making `rate()` effective for alerting.
 
 | Config | Env var | Default |
 |--------|---------|---------|
@@ -665,16 +665,27 @@ counted; RTP without a correlated dialog is dropped.
 `{carrier="...",ua_type="...",codec="...",source_country="..."}` — `codec` is the RTP payload-type name resolved from SDP `a=rtpmap` (e.g. `PCMU`, `PCMA`, `opus`) with a static fallback table (RFC 3551). `source_country` is inherited from the SIP dialog (resolved at INVITE time).
 
 `sip_exporter_rtp_packets_total{carrier,ua_type,codec,source_country}` *(counter)*: total number of RTP packets observed.
+
 `sip_exporter_rtp_packets_lost_total{carrier,ua_type,codec,source_country}` *(counter)*: packets detected as lost via RTP sequence-number gaps.
+
 `sip_exporter_rtp_duplicate_packets_total{carrier,ua_type,codec,source_country}` *(counter)*: duplicate RTP packets detected (same sequence number as the previous packet, indicating retransmission or media loop).
+
 `sip_exporter_rtp_jitter_milliseconds{carrier,ua_type,codec,source_country}` *(histogram, buckets 0.1..500 ms)*: smoothed interarrival jitter (RFC 3550 A.8).
+
 `sip_exporter_rtp_mos_score{carrier,ua_type,codec,source_country}` *(histogram, buckets 1.0..5.0)*: MOS-LQ estimated via the ITU-T G.107 E-model with a 60 ms jitter buffer assumption.
+
 `sip_exporter_rtp_mos_f1{carrier,ua_type,codec,source_country}` *(histogram, buckets 1.0..5.0)*: MOS-LQ with a strict jitter buffer (50 ms) — models low-latency endpoints that tolerate less jitter.
+
 `sip_exporter_rtp_mos_f2{carrier,ua_type,codec,source_country}` *(histogram, buckets 1.0..5.0)*: MOS-LQ with a generous jitter buffer (200 ms) — models managed endpoints with deeper buffers.
+
 `sip_exporter_rtp_mos_adaptive{carrier,ua_type,codec,source_country}` *(histogram, buckets 1.0..5.0)*: MOS-LQ with an adaptive jitter buffer (500 ms) — models adaptive endpoints that absorb significant jitter.
+
 `sip_exporter_rtp_r_factor{carrier,ua_type,codec,source_country}` *(histogram, buckets 10..100)*: E-model R-factor (ITU-T G.107), range 0–100. Underlying quality score before the R→MOS transform.
+
 `sip_exporter_rtp_burst_loss_density{carrier,ua_type,codec,source_country}` *(histogram, buckets 10..100)*: percentage of lost packets that occurred in burst runs (≥ 3 consecutive losses), range 0–100.
+
 `sip_exporter_rtp_gap_loss_density{carrier,ua_type,codec,source_country}` *(histogram, buckets 10..100)*: percentage of lost packets that occurred in isolated gaps (< 3 consecutive losses), range 0–100.
+
 `sip_exporter_rtp_active_streams{carrier,ua_type,codec,source_country}` *(gauge)*: number of active RTP streams. Sampled once per second; idle streams expire after 30 s.
 
 > MOS and R-factor are sampled per stream once per second; the E-model uses G.113 codec Ie/Bpl
@@ -694,6 +705,7 @@ counted; RTP without a correlated dialog is dropped.
 These counters are evaluated at dialog teardown (BYE 200 OK or Session-Expires expiry) and carry only `carrier, ua_type, source_country` (no `codec` label — they describe the dialog, not a single stream).
 
 `sip_exporter_rtp_oneway_calls_total{carrier,ua_type,source_country}` *(counter)*: dialogs where 2+ media endpoints were registered (SDP from both parties) but RTP was observed in only one direction.
+
 `sip_exporter_sessions_missing_rtp_total{carrier,ua_type,source_country}` *(counter)*: dialogs with SDP media endpoints but no RTP observed at all.
 
 > Both metrics rely on a persistent per-dialog RTP record that survives stream TTL expiry,
@@ -1535,30 +1547,18 @@ The repository includes pre-configured alert rules and dashboards so monitoring 
 
 | Component | File | Description |
 |-----------|------|-------------|
-| Prometheus alert rules | [`test/remote_test/monitoring/alerts.yml`](../test/remote_test/monitoring/alerts.yml) | Fraud, health, and voice quality alerts — ready to deploy |
 | Grafana dashboard | [`examples/grafana-dashboard.json`](../examples/grafana-dashboard.json) | Full production dashboard (variables, all metric types) |
-| Grafana dashboard | [`test/remote_test/monitoring/grafana/dashboards/sip-overview.json`](../test/remote_test/monitoring/grafana/dashboards/sip-overview.json) | Testing dashboard (fraud detection focus, auto-provisioned) |
 | Alerting guide | [`docs/ALERTING.md`](ALERTING.md) | Complete reference: rules, Alertmanager configs (Slack/PagerDuty/Email), threshold tuning |
-
-### Quick Deploy
-
-```bash
-cd test/remote_test/monitoring
-docker compose up -d    # Prometheus + Grafana with dashboard + alerts pre-loaded
-```
-
-Grafana: `http://localhost:3000` (admin/admin) — dashboard auto-provisioned in "SIP" folder.
-Prometheus alerts: `http://localhost:9090/alerts`
 
 ### Alert Summary by Category
 
-#### Fraud Detection (Sprint 6)
+#### Fraud Detection
 
 | Alert | Metric | Trigger | Severity |
 |-------|--------|---------|----------|
 | `SIPRegistrationScan` | `register_scan_total` | rate > 0 (one IP registering many accounts) | critical |
 | `SIPInviteBurst` | `invite_burst_total` | rate > 0 (one IP flooding INVITEs) | critical |
-| `SIPRegistrationCountryChange` | `register_country_change_total` | rate > 0 (account re-registered from new country) | warning |
+| `SIPRegistrationCountryChange` | `register_country_change_total` | counter > 0 and was 0/absent 5m ago | warning |
 | `SIPSessionCapacityExhaustion` | `sessions_utilization` | > 90% for 5m | warning |
 
 #### SIP Health
@@ -1566,7 +1566,7 @@ Prometheus alerts: `http://localhost:9090/alerts`
 | Alert | Metric | Trigger | Severity |
 |-------|--------|---------|----------|
 | `SIPExporterDown` | `up` | == 0 for 1m | critical |
-| `SIPDDoSDetected` | `isa` | avg > 50% for 1m | critical |
+| `SIPHighServerErrorRate` | `isa` | avg > 50% for 1m | critical |
 | `SIPSessionEstablishmentCritical` | `ser` | < 20% for 2m | critical |
 | `SIPSessionEstablishmentLow` | `ser` | < 50% for 5m | warning |
 | `SIPRegistrationSlow` | `rrd` | p95 > 500ms for 5m | warning |

@@ -26,7 +26,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - [Security](docs/SECURITY.md)
 - [Development](#development)
 - [Benchmark](#benchmark)
-- [Integration](#integration)
+- [Alerting](#alerting)
 - [License](#license)
 - [Changelog](#changelog)
 
@@ -387,38 +387,21 @@ Load testing results: **0% packet loss at 2,000 CPS (28,000 PPS)**.
 
 See [BENCHMARK.md](./docs/BENCHMARK.md) for detailed results, methodology, and optimization notes.
 
-## Integration
-### Alerting
+## Alerting
 
-Pre-configured alert rules and Grafana dashboard are included in the repository — monitoring works out-of-the-box.
+Pre-configured Grafana dashboard and Prometheus alert rules are included in the repository.
 
-**One-command monitoring stack** (Prometheus + Grafana + alerts + dashboard):
-
-```bash
-cd test/remote_test/monitoring
-docker compose up -d
-# Grafana: http://localhost:3000 (admin/admin) — dashboard auto-provisioned
-# Prometheus alerts: http://localhost:9090/alerts
-```
-
-This deploys:
-- **Prometheus** with pre-loaded alert rules (fraud detection, SIP health, voice quality)
-- **Grafana** with auto-provisioned "SIP Overview" dashboard (fraud detection panels, RTP quality, traffic, system health)
-- **Alert rules** — 13 alerts across 3 groups: fraud detection (critical), SIP health (critical/warning), voice quality (warning)
-
-**Production dashboard** (import manually):
+**Grafana dashboard** — import manually:
 
 1. Grafana → Dashboards → Import
-2. Upload `examples/grafana-dashboard.json`
+2. Upload [`examples/grafana-dashboard.json`](examples/grafana-dashboard.json)
 3. Select your Prometheus or VictoriaMetrics datasource
 
-The production dashboard includes: traffic counters, SIP request/response breakdowns, active sessions, RFC 6076 performance metrics (SER, SEER, ISA, SCR, NER), RTP media analysis (active streams, packet rate, loss rate, MOS, jitter by codec), voice quality metrics (RFC 6035: MOS, jitter, packet loss), delay histograms (RRD, TTR, PDD, SPD, ORD, LRD), session quality metrics (ISS, ASR, SDC), and system errors.
-
-Dashboard file: [`examples/grafana-dashboard.json`](examples/grafana-dashboard.json)
+The dashboard includes: traffic counters, SIP request/response breakdowns, active sessions, RFC 6076 performance metrics (SER, SEER, ISA, SCR, NER), registrations (active count, success ratio, failures by code, fraud signals), RTP media analysis (active streams, packet rate, loss rate, MOS, jitter by codec), voice quality metrics (RFC 6035: MOS, jitter, packet loss), delay histograms (RRD, TTR, PDD, SPD, ORD, LRD), session quality metrics (ISS, ASR, SDC), and system errors.
 
 Full alerting guide with Prometheus rules, Alertmanager configs (Slack/PagerDuty/Email), and threshold tuning: [docs/ALERTING.md](docs/ALERTING.md)
 
-### Metrics Storage Compatibility
+## Metrics Storage Compatibility
 
 SIP-Exporter exports metrics in Prometheus exposition format, compatible with:
 
