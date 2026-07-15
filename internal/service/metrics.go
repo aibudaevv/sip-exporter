@@ -69,14 +69,16 @@ type (
 		inviteBurstTotal      *prometheus.CounterVec
 
 		activeRegistrations *prometheus.GaugeVec
-		prevActiveRegKeys   map[string][]string
+		// Single-writer: read+written only from sipDialogMetricsUpdate goroutine.
+		prevActiveRegKeys map[string][]string
 
 		statusCounters map[string]*prometheus.CounterVec
 
 		sdc *prometheus.CounterVec
 		iss *prometheus.CounterVec
 
-		sessions        *prometheus.GaugeVec
+		sessions *prometheus.GaugeVec
+		// Single-writer: read+written only from sipDialogMetricsUpdate goroutine.
 		prevSessionKeys map[string][]string
 
 		sessionsLimit       *prometheus.GaugeVec
@@ -121,7 +123,8 @@ type (
 		rtpOneWayCalls     *prometheus.CounterVec
 		sessionsMissingRTP *prometheus.CounterVec
 		rtpActiveStreams   *prometheus.GaugeVec
-		prevRTPKeys        map[string][]string
+		// Single-writer: read+written only from sipDialogMetricsUpdate goroutine.
+		prevRTPKeys map[string][]string
 
 		carrierCounters sync.Map
 
