@@ -175,36 +175,34 @@ func (m *metrics) getPDDFromHistogram() (float64, uint64) {
 	return h.GetSampleSum(), h.GetSampleCount()
 }
 
-func (m *metrics) getORDFromHistogram() (float64, uint64) {
+func (m *metrics) getORDFromHistogram() uint64 {
 	if m.ord == nil {
-		return 0, 0
+		return 0
 	}
 	hist, ok := m.ord.WithLabelValues("", "", "").(prometheus.Histogram)
 	if !ok {
-		return 0, 0
+		return 0
 	}
 	var dtoMetric dto.Metric
 	if err := hist.Write(&dtoMetric); err != nil {
-		return 0, 0
+		return 0
 	}
-	h := dtoMetric.GetHistogram()
-	return h.GetSampleSum(), h.GetSampleCount()
+	return dtoMetric.GetHistogram().GetSampleCount()
 }
 
-func (m *metrics) getLRDFromHistogram() (float64, uint64) {
+func (m *metrics) getLRDFromHistogram() uint64 {
 	if m.lrd == nil {
-		return 0, 0
+		return 0
 	}
 	hist, ok := m.lrd.WithLabelValues("", "", "").(prometheus.Histogram)
 	if !ok {
-		return 0, 0
+		return 0
 	}
 	var dtoMetric dto.Metric
 	if err := hist.Write(&dtoMetric); err != nil {
-		return 0, 0
+		return 0
 	}
-	h := dtoMetric.GetHistogram()
-	return h.GetSampleSum(), h.GetSampleCount()
+	return dtoMetric.GetHistogram().GetSampleCount()
 }
 
 func (m *metrics) getSPDFromHistogram() (float64, uint64) {
@@ -1926,7 +1924,7 @@ func TestMetrics_ORD_Observe(t *testing.T) {
 
 	m.UpdateORD("", "", "", 25.0)
 
-	_, count := m.getORDFromHistogram()
+	count := m.getORDFromHistogram()
 	require.Equal(t, uint64(2), count)
 }
 
@@ -1936,8 +1934,30 @@ func TestMetrics_LRD_Observe(t *testing.T) {
 
 	m.UpdateLRD("", "", "", 15.0)
 
-	_, count := m.getLRDFromHistogram()
+	count := m.getLRDFromHistogram()
 	require.Equal(t, uint64(2), count)
+}
+
+func TestMetrics_UpdateDelay_NegativeGuard(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateRRD("", "", "", -1.0)
+	m.UpdateTTR("", "", "", -1.0)
+	m.UpdatePDD("", "", "", -1.0)
+	m.UpdateORD("", "", "", -1.0)
+	m.UpdateLRD("", "", "", -1.0)
+
+	_, rrdCount := m.getRRDFromHistogram()
+	_, ttrCount := m.getTTRFromHistogram()
+	_, pddCount := m.getPDDFromHistogram()
+	ordCount := m.getORDFromHistogram()
+	lrdCount := m.getLRDFromHistogram()
+
+	require.Equal(t, uint64(0), rrdCount, "RRD must reject negative delay")
+	require.Equal(t, uint64(0), ttrCount, "TTR must reject negative delay")
+	require.Equal(t, uint64(0), pddCount, "PDD must reject negative delay")
+	require.Equal(t, uint64(0), ordCount, "ORD must reject negative delay")
+	require.Equal(t, uint64(0), lrdCount, "LRD must reject negative delay")
 }
 
 func getCounterValue(cv *prometheus.CounterVec, carrier string) float64 {

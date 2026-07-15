@@ -891,22 +891,37 @@ func (m *metrics) UpdateSPD(carrier, uaType, sourceCountry string, duration time
 }
 
 func (m *metrics) UpdateRRD(carrier, uaType, sourceCountry string, delayMs float64) {
+	if delayMs < 0 {
+		return
+	}
 	m.rrd.WithLabelValues(carrier, uaType, sourceCountry).Observe(delayMs)
 }
 
 func (m *metrics) UpdateTTR(carrier, uaType, sourceCountry string, delayMs float64) {
+	if delayMs < 0 {
+		return
+	}
 	m.ttr.WithLabelValues(carrier, uaType, sourceCountry).Observe(delayMs)
 }
 
 func (m *metrics) UpdatePDD(carrier, uaType, sourceCountry string, delayMs float64) {
+	if delayMs < 0 {
+		return
+	}
 	m.pdd.WithLabelValues(carrier, uaType, sourceCountry).Observe(delayMs)
 }
 
 func (m *metrics) UpdateORD(carrier, uaType, sourceCountry string, delayMs float64) {
+	if delayMs < 0 {
+		return
+	}
 	m.ord.WithLabelValues(carrier, uaType, sourceCountry).Observe(delayMs)
 }
 
 func (m *metrics) UpdateLRD(carrier, uaType, sourceCountry string, delayMs float64) {
+	if delayMs < 0 {
+		return
+	}
 	m.lrd.WithLabelValues(carrier, uaType, sourceCountry).Observe(delayMs)
 }
 
