@@ -2375,6 +2375,53 @@ func TestRatioCollector_StructKeyLabelEmission(t *testing.T) {
 	require.True(t, found["carrier-b/yealink/DE"], "missing carrier-b/yealink/DE series")
 }
 
+func gatherRatioValue(t *testing.T, reg *prometheus.Registry, metricName string) float64 {
+	t.Helper()
+	gathered, err := reg.Gather()
+	require.NoError(t, err)
+	for _, fam := range gathered {
+		if fam.GetName() == metricName {
+			require.NotEmpty(t, fam.GetMetric(), "%s has no series", metricName)
+			return fam.GetMetric()[0].GetGauge().GetValue()
+		}
+	}
+	t.Fatalf("metric %s not found in Gather output", metricName)
+	return 0
+}
+
+func TestRatioCollector_Gather_AllMetrics(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newMetricserWithRegistry(reg).(*metrics)
+
+	c := m.getOrCreateCarrierCounters("carrier-a", "sip", "US")
+	c.inviteTotal.Store(100)
+	c.invite200OKTotal.Store(60)
+	c.invite3xxTotal.Store(10)
+	c.inviteEffectiveTotal.Store(70)
+	c.inviteIneffectiveTotal.Store(30)
+	c.sessionCompletedTotal.Store(50)
+
+	tests := []struct {
+		name   string
+		metric string
+		want   float64
+	}{
+		{"SER", "sip_exporter_ser", 60.0 / 90.0 * 100},
+		{"SEER", "sip_exporter_seer", 70.0 / 90.0 * 100},
+		{"ISA", "sip_exporter_isa", 30.0},
+		{"SCR", "sip_exporter_scr", 50.0},
+		{"ASR", "sip_exporter_asr", 60.0},
+		{"NER", "sip_exporter_ner", 70.0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			val := gatherRatioValue(t, reg, tc.metric)
+			require.InDelta(t, tc.want, val, 0.01)
+		})
+	}
+}
+
 // ==================== Registration success/failure + ratio (S4-2.1) ====================
 
 func TestMetrics_RegisterSuccess_IncrementsCounter(t *testing.T) {
