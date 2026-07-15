@@ -973,6 +973,39 @@ func TestSIPPacketParse_CSeqMultipleSpaces(t *testing.T) {
 	}
 }
 
+func TestSIPPacketParse_CaseInsensitiveHeaders(t *testing.T) {
+	e := exporter{}
+
+	tests := []struct {
+		name string
+		from string
+		to   string
+		cid  string
+		cseq string
+	}{
+		{name: "lowercase", from: "from", to: "to", cid: "call-id", cseq: "cseq"},
+		{name: "uppercase", from: "FROM", to: "TO", cid: "CALL-ID", cseq: "CSEQ"},
+		{name: "mixed-case", from: "FrOm", to: "To", cid: "Call-ID", cseq: "CsEq"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := []byte("SIP/2.0 200 OK\r\n" +
+				tt.from + ": <sip:user@domain>;tag=abc\r\n" +
+				tt.to + ": <sip:other@domain>;tag=xyz\r\n" +
+				tt.cid + ": test\r\n" +
+				tt.cseq + ": 1 INVITE\r\n")
+
+			p, err := e.sipPacketParse(input)
+			require.NoError(t, err)
+			require.Equal(t, []byte("abc"), p.From.Tag)
+			require.Equal(t, []byte("xyz"), p.To.Tag)
+			require.Equal(t, []byte("test"), p.CallID)
+			require.Equal(t, []byte("INVITE"), p.CSeq.Method)
+		})
+	}
+}
+
 func TestSIPPacketParse_TruncatedStatusLine(t *testing.T) {
 	e := exporter{}
 

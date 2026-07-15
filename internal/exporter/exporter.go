@@ -768,7 +768,7 @@ func (e *exporter) parseHeaders(lines [][]byte, p *dto.Packet) error {
 		header, value := splitHeader(line)
 
 		switch {
-		case bytes.Equal(header, []byte("From")):
+		case bytes.EqualFold(header, []byte("From")):
 			tag := extractTag(value)
 			if tag == nil {
 				return fmt.Errorf("fail extract tag from '%b'", value)
@@ -776,12 +776,12 @@ func (e *exporter) parseHeaders(lines [][]byte, p *dto.Packet) error {
 
 			p.From.Tag = tag
 			p.From.User, p.From.Addr = ParseURI(value)
-		case bytes.Equal(header, []byte("To")):
+		case bytes.EqualFold(header, []byte("To")):
 			p.To.Tag = extractTag(value)
 			p.To.User, p.To.Addr = ParseURI(value)
-		case bytes.Equal(header, []byte("Call-ID")):
+		case bytes.EqualFold(header, []byte("Call-ID")):
 			p.CallID = value
-		case bytes.Equal(header, []byte("CSeq")):
+		case bytes.EqualFold(header, []byte("CSeq")):
 			id, method := extractCSeq(value)
 			if id == nil || method == nil {
 				return fmt.Errorf("fail extract CSeq from '%s'", value)
@@ -789,15 +789,15 @@ func (e *exporter) parseHeaders(lines [][]byte, p *dto.Packet) error {
 
 			p.CSeq.Method = method
 			p.CSeq.ID = id
-		case bytes.Equal(header, []byte("Session-Expires")):
+		case bytes.EqualFold(header, []byte("Session-Expires")):
 			p.SessionExpires = extractSessionExpires(value)
-		case bytes.Equal(header, []byte("Expires")):
+		case bytes.EqualFold(header, []byte("Expires")):
 			p.Expires = extractExpires(value)
-		case bytes.Equal(header, []byte("User-Agent")):
+		case bytes.EqualFold(header, []byte("User-Agent")):
 			if p.UserAgent == nil {
 				p.UserAgent = value
 			}
-		case bytes.Equal(header, []byte("Content-Type")):
+		case bytes.EqualFold(header, []byte("Content-Type")):
 			if p.ContentType == nil {
 				p.ContentType = value
 			}
