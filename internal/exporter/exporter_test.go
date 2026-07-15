@@ -946,6 +946,34 @@ func TestSIPPacketParse_NoCSeqMethod(t *testing.T) {
 	require.Contains(t, err.Error(), "fail extract CSeq from")
 }
 
+func TestSIPPacketParse_TruncatedStatusLine(t *testing.T) {
+	e := exporter{}
+
+	tests := []struct {
+		name  string
+		line0 string
+	}{
+		{name: "space only", line0: "SIP/2.0 "},
+		{name: "one digit", line0: "SIP/2.0 2"},
+		{name: "two digits", line0: "SIP/2.0 20"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := []byte(tt.line0 + "\r\n" +
+				"From: <sip:user@domain>;tag=abc\r\n" +
+				"To: <sip:other@domain>;tag=xyz\r\n" +
+				"Call-ID: test\r\n" +
+				"CSeq: 1 INVITE\r\n" +
+				"X-Pad: 1234567890123456789012345678901234567890\r\n")
+
+			_, err := e.sipPacketParse(input)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "malformed status line")
+		})
+	}
+}
+
 // ==================== handleMessage tests ====================
 
 func TestHandleMessage_Request(t *testing.T) {

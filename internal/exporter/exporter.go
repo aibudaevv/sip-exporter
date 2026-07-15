@@ -68,16 +68,17 @@ const (
 	rtpVersionMask    = 0xC0
 	rtpVersion2Prefix = 0x80
 
-	sipPartsCount          = 3
-	minSIPParts            = 2
-	tagPrefixLen           = 5
-	nanosPerMs     float64 = 1e6
-	htonsShift             = 8
-	htonsMask      uint16  = 0xFF00
-	miB                    = 1024 * 1024
-	defaultUAType          = "other"
-	defaultCarrier         = "other"
-	defaultCountry         = "unknown"
+	sipPartsCount                = 3
+	minSIPParts                  = 2
+	minResponseStatusLen         = 3
+	tagPrefixLen                 = 5
+	nanosPerMs           float64 = 1e6
+	htonsShift                   = 8
+	htonsMask            uint16  = 0xFF00
+	miB                          = 1024 * 1024
+	defaultUAType                = "other"
+	defaultCarrier               = "other"
+	defaultCountry               = "unknown"
 )
 
 type (
@@ -122,22 +123,22 @@ type (
 	}
 
 	exporter struct {
-		collection            *ebpf.Collection
-		sock                  int
-		messages              chan []byte
-		done                  chan struct{}
-		wg                    sync.WaitGroup
-		closeOnce             sync.Once
-		sipPort               uint16
-		sipsPort              uint16
-		services              services
-		carrierResolver       *carriers.Resolver
-		uaClassifier          *ua.Classifier
-		geoip                 *geoip.Reader
-		localCountryCode      string
-		hostLabels            bool
-		vqHandler             *vq.Handler
-		mediaTracker          *mediatracker.Tracker
+		collection       *ebpf.Collection
+		sock             int
+		messages         chan []byte
+		done             chan struct{}
+		wg               sync.WaitGroup
+		closeOnce        sync.Once
+		sipPort          uint16
+		sipsPort         uint16
+		services         services
+		carrierResolver  *carriers.Resolver
+		uaClassifier     *ua.Classifier
+		geoip            *geoip.Reader
+		localCountryCode string
+		hostLabels       bool
+		vqHandler        *vq.Handler
+		mediaTracker     *mediatracker.Tracker
 		// pktSrcIP is written in parseRawPacket and read in handleMessage.
 		// Both run synchronously in the readPackets goroutine — no mutex needed.
 		// If packet parsing becomes parallel (worker pool), thread srcIP as a
@@ -734,7 +735,11 @@ func (e *exporter) sipPacketParse(raw []byte) (dto.Packet, error) {
 	p := dto.Packet{}
 	if bytes.HasPrefix(lines[0], []byte("SIP/2.0")) {
 		p.IsResponse = true
-		p.ResponseStatus = bytes.TrimPrefix(lines[0], []byte("SIP/2.0 "))[:3]
+		rest := bytes.TrimPrefix(lines[0], []byte("SIP/2.0 "))
+		if len(rest) < minResponseStatusLen {
+			return dto.Packet{}, fmt.Errorf("malformed status line: %q", lines[0])
+		}
+		p.ResponseStatus = rest[:minResponseStatusLen]
 	} else {
 		parts := bytes.SplitN(lines[0], []byte(" "), sipPartsCount)
 		if len(parts) >= minSIPParts {
