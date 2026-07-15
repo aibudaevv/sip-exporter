@@ -243,15 +243,14 @@ func (t *Tracker) Observe(
 }
 
 // Snapshot returns the current statistics of all active RTP streams.
+// Raw counters and cheap divisions are copied under the lock; expensive
+// MOS/R-factor computation is deferred outside to minimize contention
+// with Observe.
 func (t *Tracker) Snapshot() []StreamStats {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	out := make([]StreamStats, 0, len(t.streams))
 	for _, e := range t.streams {
 		s := e.state
-		jitter := s.JitterMs()
-		lossRate := s.LossRate()
-		r := ComputeRFactor(e.codec, lossRate, jitter)
 		s.classifyLossRun()
 		out = append(out, StreamStats{
 			SSRC:             s.SSRC,
@@ -263,16 +262,27 @@ func (t *Tracker) Snapshot() []StreamStats {
 			PacketsTotal:     s.packetsTotal,
 			PacketsLost:      s.packetsLost,
 			PacketsDuplicate: s.packetsDuplicate,
-			JitterMs:         jitter,
-			MOS:              mosFromR(r),
-			MOSF1:            ComputeMOSF1(e.codec, lossRate, jitter),
-			MOSF2:            ComputeMOSF2(e.codec, lossRate, jitter),
-			MOSAdaptive:      ComputeMOSAdaptive(e.codec, lossRate, jitter),
-			RFactor:          r,
+			JitterMs:         s.JitterMs(),
 			BurstLossDensity: s.BurstLossDensity(),
 			GapLossDensity:   s.GapLossDensity(),
 			LastSeen:         s.lastArrival,
 		})
+	}
+	t.mu.Unlock()
+
+	for i := range out {
+		st := &out[i]
+		expected := st.PacketsTotal + st.PacketsLost
+		var lossRate float64
+		if expected > 0 {
+			lossRate = float64(st.PacketsLost) / float64(expected)
+		}
+		r := ComputeRFactor(st.Codec, lossRate, st.JitterMs)
+		st.RFactor = r
+		st.MOS = mosFromR(r)
+		st.MOSF1 = ComputeMOSF1(st.Codec, lossRate, st.JitterMs)
+		st.MOSF2 = ComputeMOSF2(st.Codec, lossRate, st.JitterMs)
+		st.MOSAdaptive = ComputeMOSAdaptive(st.Codec, lossRate, st.JitterMs)
 	}
 	return out
 }
