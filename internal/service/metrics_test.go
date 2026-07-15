@@ -30,7 +30,7 @@ func (m *metrics) getSER() float64 {
 	}
 	threeXX := counters.invite3xxTotal.Load()
 	denominator := total - threeXX
-	if denominator == 0 {
+	if denominator <= 0 {
 		return 0
 	}
 	ok200 := counters.invite200OKTotal.Load()
@@ -49,7 +49,7 @@ func (m *metrics) getSEER() float64 {
 	}
 	threeXX := counters.invite3xxTotal.Load()
 	denominator := total - threeXX
-	if denominator == 0 {
+	if denominator <= 0 {
 		return 0
 	}
 	effective := counters.inviteEffectiveTotal.Load()
@@ -737,6 +737,13 @@ func TestMetrics_SER_Values(t *testing.T) {
 			invite3xx:   20,
 			wantSER:     25,
 		},
+		{
+			name:        "negative_denominator_mid_capture",
+			invites:     3,
+			invite200OK: 1,
+			invite3xx:   5,
+			wantSER:     0,
+		},
 	}
 
 	for _, tt := range tests {
@@ -942,6 +949,13 @@ func TestMetrics_SEER_EachCodeIndependent(t *testing.T) {
 			effective603: 5,
 			threeXX:      10,
 			wantSEER:     77.78,
+		},
+		{
+			name:         "negative_denominator_mid_capture",
+			invites:      3,
+			effective200: 1,
+			threeXX:      5,
+			wantSEER:     0,
 		},
 	}
 

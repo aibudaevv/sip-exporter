@@ -602,7 +602,7 @@ func registerRatioCollectors(m *metrics, reg *prometheus.Registry) {
 			}
 			threeXX := c.invite3xxTotal.Load()
 			denominator := total - threeXX
-			if denominator == 0 {
+			if denominator <= 0 {
 				return 0
 			}
 			return float64(c.invite200OKTotal.Load()) / float64(denominator) * 100 //nolint:mnd // percentage formula
@@ -617,7 +617,7 @@ func registerRatioCollectors(m *metrics, reg *prometheus.Registry) {
 			}
 			threeXX := c.invite3xxTotal.Load()
 			denominator := total - threeXX
-			if denominator == 0 {
+			if denominator <= 0 {
 				return 0
 			}
 			effective := float64(c.inviteEffectiveTotal.Load())
