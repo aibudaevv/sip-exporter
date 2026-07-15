@@ -1463,8 +1463,6 @@ func TestHandleMessage_RRD_FullCycle(t *testing.T) {
 		return bytes.Equal(mm.requestCalled, []byte("REGISTER"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
 
-	time.Sleep(10 * time.Millisecond)
-
 	registerResp := []byte("SIP/2.0 200 OK\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
 		"To: <sip:other@domain>;tag=xyz\r\n" +
@@ -1494,7 +1492,6 @@ func TestHandleMessage_Register200OK_CallsRegisterSuccess(t *testing.T) {
 	}
 
 	require.NoError(t, e.handleMessage("c", "US", makeRegister("ok1", "ft")))
-	time.Sleep(5 * time.Millisecond)
 	require.NoError(t, e.handleMessage("c", "US", makeRegister200OK("ok1", "ft", "tt")))
 
 	require.Eventually(t, func() bool { return mm.registerSuccessCalls == 1 },
@@ -1516,7 +1513,6 @@ func TestHandleMessage_Register403_CallsRegisterFailure(t *testing.T) {
 	}
 
 	require.NoError(t, e.handleMessage("c", "US", makeRegister("f403", "ft")))
-	time.Sleep(5 * time.Millisecond)
 	require.NoError(t, e.handleMessage("c", "US", makeRegisterStatus("403 Forbidden", "f403", "ft", "tt")))
 
 	require.Eventually(t, func() bool { return len(mm.registerFailureCodes) == 1 },
@@ -1541,7 +1537,6 @@ func TestHandleMessage_Register401Challenge_CallsRegisterFailure(t *testing.T) {
 	}
 
 	require.NoError(t, e.handleMessage("c", "US", makeRegister("ch1", "ft")))
-	time.Sleep(5 * time.Millisecond)
 	require.NoError(t, e.handleMessage("c", "US", makeRegisterStatus("401 Unauthorized", "ch1", "ft", "tt")))
 
 	require.Eventually(t, func() bool { return len(mm.registerFailureCodes) == 1 },
@@ -1564,10 +1559,8 @@ func TestHandleMessage_Register100Trying_NotAFailure(t *testing.T) {
 	}
 
 	require.NoError(t, e.handleMessage("c", "US", makeRegister("t100", "ft")))
-	time.Sleep(5 * time.Millisecond)
 	require.NoError(t, e.handleMessage("c", "US", makeRegisterStatus("100 Trying", "t100", "ft", "tt")))
 
-	time.Sleep(20 * time.Millisecond)
 	require.Empty(t, mm.registerFailureCodes)
 	require.Zero(t, mm.registerSuccessCalls)
 }
@@ -1985,7 +1978,6 @@ func TestHandleMessage_Register200OK_PopulatesExpiryTracker(t *testing.T) {
 	}
 
 	require.NoError(t, e.handleMessage("carrier-A", "US", makeRegister("e2e1", "ft")))
-	time.Sleep(5 * time.Millisecond)
 	require.NoError(t, e.handleMessage("carrier-A", "US", makeRegister200OK("e2e1", "ft", "tt")))
 
 	require.Eventually(t, func() bool { return len(e.registrationCounts()) == 1 },
@@ -2027,9 +2019,6 @@ func TestHandleMessage_Response401(t *testing.T) {
 	err := e.handleMessage("other", "", input)
 	require.NoError(t, err)
 
-	// Response is called in goroutine, wait for completion
-	time.Sleep(10 * time.Millisecond)
-
 	require.Equal(t, []byte("401"), mm.responseCalled)
 	require.False(t, mm.responseIsInvite)
 }
@@ -2057,9 +2046,6 @@ func TestHandleMessage_Response302_INVITE(t *testing.T) {
 
 	err := e.handleMessage("other", "", input)
 	require.NoError(t, err)
-
-	// Response is called in goroutine, wait for completion
-	time.Sleep(10 * time.Millisecond)
 
 	require.Equal(t, []byte("302"), mm.responseCalled)
 	require.True(t, mm.responseIsInvite)
@@ -2687,14 +2673,8 @@ func TestExporter_RegisterTracker_Retransmit200OK(t *testing.T) {
 
 	e.handleMessage("other", "", registerReq)
 
-	// Wait a bit
-	time.Sleep(20 * time.Millisecond)
-
 	// Retransmit REGISTER (same Call-ID)
 	e.handleMessage("other", "", registerReq)
-
-	// Wait a bit more
-	time.Sleep(10 * time.Millisecond)
 
 	// 200 OK arrives
 	registerResp := []byte("SIP/2.0 200 OK\r\n" +
@@ -2742,7 +2722,6 @@ func TestExporter_RegisterTracker_Retransmit401(t *testing.T) {
 		"CSeq: 1 REGISTER\r\n")
 
 	e.handleMessage("other", "", registerReq)
-	time.Sleep(20 * time.Millisecond)
 
 	// Retransmit REGISTER (same Call-ID)
 	e.handleMessage("other", "", registerReq)
@@ -2879,8 +2858,6 @@ func TestExporter_InviteTracker_StoreAndMeasure(t *testing.T) {
 	callID := "test-call-id-123"
 
 	e.storeInviteTime(callID, "other", "other", "")
-
-	time.Sleep(10 * time.Millisecond)
 
 	delayMs, carrier, _, _, ok := e.readInviteEntry(callID)
 	require.True(t, ok, "readInviteEntry should return true for existing entry")
@@ -3052,8 +3029,6 @@ func TestHandleMessage_TTR_100Trying(t *testing.T) {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
 
-	time.Sleep(10 * time.Millisecond)
-
 	tryingResp := []byte("SIP/2.0 100 Trying\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
 		"To: <sip:other@domain>;tag=xyz\r\n" +
@@ -3095,8 +3070,6 @@ func TestHandleMessage_TTR_180Ringing(t *testing.T) {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
 
-	time.Sleep(10 * time.Millisecond)
-
 	ringingResp := []byte("SIP/2.0 180 Ringing\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
 		"To: <sip:other@domain>;tag=xyz\r\n" +
@@ -3135,8 +3108,6 @@ func TestHandleMessage_TTR_183SessionProgress(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
-
-	time.Sleep(10 * time.Millisecond)
 
 	progressResp := []byte("SIP/2.0 183 Session Progress\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
@@ -3185,7 +3156,6 @@ func TestHandleMessage_TTR_NoProvisionalResponse(t *testing.T) {
 		"Session-Expires: 3600\r\n")
 
 	e.handleMessage("other", "", okResp)
-	time.Sleep(20 * time.Millisecond)
 
 	require.False(t, mm.ttrUpdated, "TTR should NOT be measured when no 1xx received")
 }
@@ -3216,8 +3186,6 @@ func TestHandleMessage_TTR_OnlyFirstProvisionalMeasured(t *testing.T) {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
 
-	time.Sleep(10 * time.Millisecond)
-
 	tryingResp := []byte("SIP/2.0 100 Trying\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
 		"To: <sip:other@domain>;tag=xyz\r\n" +
@@ -3232,8 +3200,6 @@ func TestHandleMessage_TTR_OnlyFirstProvisionalMeasured(t *testing.T) {
 	firstTTR := mm.ttrDelay
 	require.Greater(t, firstTTR, 0.0)
 
-	time.Sleep(10 * time.Millisecond)
-
 	ringingResp := []byte("SIP/2.0 180 Ringing\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
 		"To: <sip:other@domain>;tag=xyz\r\n" +
@@ -3241,7 +3207,6 @@ func TestHandleMessage_TTR_OnlyFirstProvisionalMeasured(t *testing.T) {
 		"CSeq: 1 INVITE\r\n")
 
 	e.handleMessage("other", "", ringingResp)
-	time.Sleep(10 * time.Millisecond)
 
 	require.InDelta(t, firstTTR, mm.ttrDelay, 0.01, "TTR should NOT be measured again on second 1xx")
 }
@@ -3272,11 +3237,7 @@ func TestHandleMessage_TTR_RetransmitOverwrites(t *testing.T) {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
 
-	time.Sleep(20 * time.Millisecond)
-
 	e.handleMessage("other", "", inviteReq)
-
-	time.Sleep(10 * time.Millisecond)
 
 	tryingResp := []byte("SIP/2.0 100 Trying\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
@@ -3326,7 +3287,6 @@ func TestHandleMessage_TTR_FinalResponseRemovesTracker(t *testing.T) {
 		"CSeq: 1 INVITE\r\n")
 
 	e.handleMessage("other", "", busyResp)
-	time.Sleep(10 * time.Millisecond)
 
 	require.False(t, mm.ttrUpdated, "TTR should NOT be measured for non-1xx response")
 
@@ -3367,7 +3327,6 @@ func TestHandleMessage_TTR_NonInviteResponse_Ignored(t *testing.T) {
 		"CSeq: 1 REGISTER\r\n")
 
 	e.handleMessage("other", "", tryingResp)
-	time.Sleep(10 * time.Millisecond)
 
 	require.False(t, mm.ttrUpdated, "TTR should NOT be measured for REGISTER 100 Trying")
 }
@@ -3397,8 +3356,6 @@ func TestHandleMessage_TTR_FullCallFlow(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
-
-	time.Sleep(10 * time.Millisecond)
 
 	tryingResp := []byte("SIP/2.0 100 Trying\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
@@ -3431,7 +3388,6 @@ func TestHandleMessage_TTR_FullCallFlow(t *testing.T) {
 		"CSeq: 2 BYE\r\n")
 
 	e.handleMessage("other", "", byeReq)
-	time.Sleep(10 * time.Millisecond)
 
 	byeOkResp := []byte("SIP/2.0 200 OK\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
@@ -3440,7 +3396,6 @@ func TestHandleMessage_TTR_FullCallFlow(t *testing.T) {
 		"CSeq: 2 BYE\r\n")
 
 	e.handleMessage("other", "", byeOkResp)
-	time.Sleep(10 * time.Millisecond)
 
 	require.True(t, mm.ttrUpdated, "TTR should be measured during full call flow")
 	require.True(t, mm.sessionCompletedFlag, "session should be completed")
@@ -3473,8 +3428,6 @@ func TestHandleMessage_PDD_180Ringing(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
-
-	time.Sleep(10 * time.Millisecond)
 
 	ringingResp := []byte("SIP/2.0 180 Ringing\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
@@ -3517,8 +3470,6 @@ func TestHandleMessage_PDD_100TryingThen180Ringing(t *testing.T) {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
 
-	time.Sleep(5 * time.Millisecond)
-
 	tryingResp := []byte("SIP/2.0 100 Trying\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
 		"To: <sip:other@domain>;tag=xyz\r\n" +
@@ -3530,8 +3481,6 @@ func TestHandleMessage_PDD_100TryingThen180Ringing(t *testing.T) {
 		return mm.ttrUpdated
 	}, 100*time.Millisecond, 10*time.Millisecond)
 	require.False(t, mm.pddUpdated, "PDD should NOT be measured on 100 Trying")
-
-	time.Sleep(10 * time.Millisecond)
 
 	ringingResp := []byte("SIP/2.0 180 Ringing\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
@@ -3572,8 +3521,6 @@ func TestHandleMessage_PDD_183NoPDD(t *testing.T) {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
 
-	time.Sleep(10 * time.Millisecond)
-
 	progressResp := []byte("SIP/2.0 183 Session Progress\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
 		"To: <sip:other@domain>;tag=xyz\r\n" +
@@ -3613,8 +3560,6 @@ func TestHandleMessage_PDD_No180NoPDD(t *testing.T) {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
 
-	time.Sleep(10 * time.Millisecond)
-
 	okResp := []byte("SIP/2.0 200 OK\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
 		"To: <sip:other@domain>;tag=xyz\r\n" +
@@ -3623,7 +3568,6 @@ func TestHandleMessage_PDD_No180NoPDD(t *testing.T) {
 		"Session-Expires: 3600\r\n")
 
 	e.handleMessage("other", "", okResp)
-	time.Sleep(10 * time.Millisecond)
 
 	require.False(t, mm.pddUpdated, "PDD should NOT be measured when no 180 received")
 	require.False(t, mm.ttrUpdated, "TTR should NOT be measured when no 1xx received")
@@ -3651,7 +3595,6 @@ func TestHandleMessage_PDD_NonInviteResponse_Ignored(t *testing.T) {
 		"CSeq: 1 REGISTER\r\n")
 
 	e.handleMessage("other", "", regReq)
-	time.Sleep(10 * time.Millisecond)
 
 	tryingResp := []byte("SIP/2.0 180 Ringing\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
@@ -3660,7 +3603,6 @@ func TestHandleMessage_PDD_NonInviteResponse_Ignored(t *testing.T) {
 		"CSeq: 1 REGISTER\r\n")
 
 	e.handleMessage("other", "", tryingResp)
-	time.Sleep(10 * time.Millisecond)
 
 	require.False(t, mm.pddUpdated, "PDD should NOT be measured for REGISTER 180 Ringing")
 }
@@ -3692,8 +3634,6 @@ func TestHandleMessage_CarrierPropagation_FullDialog(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return bytes.Equal(mm.requestCalled, []byte("INVITE"))
 	}, 100*time.Millisecond, 10*time.Millisecond)
-
-	time.Sleep(10 * time.Millisecond)
 
 	okResp := []byte("SIP/2.0 200 OK\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
@@ -4120,7 +4060,6 @@ func TestMCDC_TC3_RegisterResponse_CarrierFromTracker(t *testing.T) {
 	e := newTestExporter(mm, md)
 
 	e.handleMessage("carrier-A", "", makeRegister("tc3", "ft3"))
-	time.Sleep(5 * time.Millisecond)
 	e.handleMessage("carrier-B", "", makeRegister200OK("tc3", "ft3", "tt3"))
 
 	require.Eventually(t, func() bool { return len(mm.rrdCalls) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
@@ -4149,7 +4088,6 @@ func TestMCDC_TC5_TTR_1xxResponse_CarrierFromTracker(t *testing.T) {
 	e := newTestExporter(mm, md)
 
 	e.handleMessage("carrier-A", "", makeInvite("tc5", "ft5"))
-	time.Sleep(5 * time.Millisecond)
 	e.handleMessage("carrier-B", "", makeTrying("tc5", "ft5", "tt5"))
 
 	require.Eventually(t, func() bool { return len(mm.ttrCalls) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
@@ -4176,7 +4114,6 @@ func TestMCDC_TC7_TTR_NonInviteResponse_Ignored(t *testing.T) {
 	e := newTestExporter(mm, md)
 
 	e.handleMessage("carrier-A", "", makeRegister("tc7", "ft7"))
-	time.Sleep(5 * time.Millisecond)
 	e.handleMessage("carrier-B", "", makeRegister200OK("tc7", "ft7", "tt7"))
 
 	require.Eventually(t, func() bool { return len(mm.rrdCalls) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
@@ -4294,7 +4231,6 @@ func TestMCDC_TC14_Register200OK_RRDCarrierFromTracker(t *testing.T) {
 	e := newTestExporter(mm, md)
 
 	e.handleMessage("carrier-A", "", makeRegister("tc14", "ft14"))
-	time.Sleep(5 * time.Millisecond)
 	e.handleMessage("carrier-B", "", makeRegister200OK("tc14", "ft14", "tt14"))
 
 	require.Eventually(t, func() bool { return len(mm.rrdCalls) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
@@ -4308,7 +4244,6 @@ func TestMCDC_TC15_Register3xx_LRDCarrierFromTracker(t *testing.T) {
 	e := newTestExporter(mm, md)
 
 	e.handleMessage("carrier-A", "", makeRegister("tc15", "ft15"))
-	time.Sleep(5 * time.Millisecond)
 	e.handleMessage("carrier-B", "", makeRegister3xx("tc15", "ft15", "tt15"))
 
 	require.Eventually(t, func() bool { return len(mm.lrdCalls) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
@@ -4321,7 +4256,6 @@ func TestMCDC_TC16_OptionsResponse_ORDCarrierFromTracker(t *testing.T) {
 	e := newTestExporter(mm, md)
 
 	e.handleMessage("carrier-A", "", makeOptions("tc16", "ft16"))
-	time.Sleep(5 * time.Millisecond)
 	e.handleMessage("carrier-B", "", makeOptions200OK("tc16", "ft16", "tt16"))
 
 	require.Eventually(t, func() bool { return len(mm.ordCalls) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
