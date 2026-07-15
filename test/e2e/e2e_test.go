@@ -529,15 +529,15 @@ func registerExporterCleanup(t *testing.T, container testcontainers.Container, e
 	})
 }
 
-// waitForSessionsZero polls sip_exporter_sessions until it reaches 0 (or ≤2 under
+// waitForSessionsZero polls sip_exporter_sessions until it reaches 0 (or ≤1 under
 // parallel packet-capture contention on lo, where a missed BYE/200 OK can leave
 // a dialog stuck for the 1800s default TTL).
 func waitForSessionsZero(t *testing.T, endpoint string) {
 	t.Helper()
 	require.Eventually(t, func() bool {
-		return getMetric(t, endpoint, "sip_exporter_sessions") <= 2
+		return getMetric(t, endpoint, "sip_exporter_sessions") <= 1
 	}, 15*time.Second, 300*time.Millisecond,
-		"sessions should reach ≤2 after all calls terminated (packet-capture contention tolerance)")
+		"sessions should reach ≤1 after all calls terminated (packet-capture contention tolerance)")
 
 	assertSelfMonitoringHealthy(t, endpoint)
 }
@@ -1090,9 +1090,9 @@ func (e *testEnv) getLRDByCarrier(t *testing.T) float64 {
 func (e *testEnv) waitForSessionsZeroByCarrier(t *testing.T) {
 	t.Helper()
 	require.Eventually(t, func() bool {
-		return getMetricWithCarrier(t, e.endpoint, "sip_exporter_sessions", e.carrier) <= 2
+		return getMetricWithCarrier(t, e.endpoint, "sip_exporter_sessions", e.carrier) <= 1
 	}, 10*time.Second, 300*time.Millisecond,
-		"sessions should reach ≤2 after all calls terminated (packet-capture contention tolerance)")
+		"sessions should reach ≤1 after all calls terminated (packet-capture contention tolerance)")
 
 	assertSelfMonitoringHealthy(t, e.endpoint)
 }
