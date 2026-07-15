@@ -127,6 +127,7 @@ type (
 
 		socketPacketsReceived prometheus.Counter
 		socketPacketsDropped  prometheus.Counter
+		rtpDropped            prometheus.Counter
 		parseErrorsTotal      *prometheus.CounterVec
 		channelLength         prometheus.Gauge
 		channelCapacity       prometheus.Gauge
@@ -171,6 +172,7 @@ type (
 		SystemError()
 		ParseError(errorType string)
 		SocketStats(received, dropped uint32)
+		RTPDropped()
 		UpdateChannelLength(length int)
 		UpdateChannelCapacity(capacity int)
 		UpdateTrackerSize(trackerType string, size int)

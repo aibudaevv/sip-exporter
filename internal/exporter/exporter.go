@@ -595,6 +595,7 @@ func (e *exporter) sendPacket(packet []byte) bool {
 	case <-e.done:
 		return false
 	default:
+		e.services.metricser.RTPDropped()
 	}
 	return true
 }

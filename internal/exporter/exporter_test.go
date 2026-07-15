@@ -54,6 +54,7 @@ type mockMetricser struct {
 	rtpLossCalls              int
 	rtpLossValue              uint64
 	rtpDuplicateCalls         int
+	rtpDroppedCount           int
 }
 
 func (m *mockMetricser) UpdateSessions(_ []service.LabeledCount) {}
@@ -157,6 +158,7 @@ func (m *mockMetricser) SystemError() {
 
 func (m *mockMetricser) ParseError(string)             {}
 func (m *mockMetricser) SocketStats(_, _ uint32)       {}
+func (m *mockMetricser) RTPDropped()                   { m.rtpDroppedCount++ }
 func (m *mockMetricser) UpdateChannelLength(int)       {}
 func (m *mockMetricser) UpdateChannelCapacity(int)     {}
 func (m *mockMetricser) UpdateTrackerSize(string, int) {}
@@ -3944,6 +3946,7 @@ func (m *carrierTrackingMetricser) SystemError() {
 
 func (m *carrierTrackingMetricser) ParseError(string)             {}
 func (m *carrierTrackingMetricser) SocketStats(_, _ uint32)       {}
+func (m *carrierTrackingMetricser) RTPDropped()                   {}
 func (m *carrierTrackingMetricser) UpdateChannelLength(int)       {}
 func (m *carrierTrackingMetricser) UpdateChannelCapacity(int)     {}
 func (m *carrierTrackingMetricser) UpdateTrackerSize(string, int) {}
@@ -4880,17 +4883,20 @@ func TestIsSIPPacket(t *testing.T) {
 }
 
 func TestSendPacket_RTPDropWhenFull(t *testing.T) {
+	mm := &mockMetricser{}
 	e := &exporter{
 		messages: make(chan []byte, 1),
 		done:     make(chan struct{}),
 		sipPort:  5060,
 		sipsPort: 5061,
+		services: services{metricser: mm},
 	}
 	e.messages <- make([]byte, 1) // fill the channel
 
 	// RTP packet (non-blocking) → dropped, sendPacket returns true
 	rtpPkt := buildUDPPacket(12345, 5004)
 	require.True(t, e.sendPacket(rtpPkt), "RTP sendPacket should not block")
+	require.Equal(t, 1, mm.rtpDroppedCount, "RTPDropped should be called when channel is full")
 
 	// SIP packet (blocking) → would block, but we signal done to unblock
 	go func() {
