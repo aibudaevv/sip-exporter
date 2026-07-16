@@ -16,6 +16,11 @@ func (m *metrics) initSelfMetrics(reg *prometheus.Registry) {
 		"Total number of packets dropped by kernel due to socket receive buffer overflow.",
 		reg,
 	)
+	m.rtpDropped = newCounterWithRegistry(
+		"sip_exporter_rtp_dropped_total",
+		"RTP packets dropped in userspace due to full internal channel buffer.",
+		reg,
+	)
 	m.parseErrorsTotal = newCounterVecWithRegistry(
 		"sip_exporter_parse_errors_total",
 		"Total number of packet parse errors by type.",
@@ -56,6 +61,10 @@ func (m *metrics) SocketStats(received, dropped uint32) {
 	if dropped > 0 {
 		m.socketPacketsDropped.Add(float64(dropped))
 	}
+}
+
+func (m *metrics) RTPDropped() {
+	m.rtpDropped.Inc()
 }
 
 func (m *metrics) UpdateChannelLength(length int) {

@@ -1,6 +1,8 @@
 package service
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -28,7 +30,7 @@ func (m *metrics) getSER() float64 {
 	}
 	threeXX := counters.invite3xxTotal.Load()
 	denominator := total - threeXX
-	if denominator == 0 {
+	if denominator <= 0 {
 		return 0
 	}
 	ok200 := counters.invite200OKTotal.Load()
@@ -47,7 +49,7 @@ func (m *metrics) getSEER() float64 {
 	}
 	threeXX := counters.invite3xxTotal.Load()
 	denominator := total - threeXX
-	if denominator == 0 {
+	if denominator <= 0 {
 		return 0
 	}
 	effective := counters.inviteEffectiveTotal.Load()
@@ -173,36 +175,34 @@ func (m *metrics) getPDDFromHistogram() (float64, uint64) {
 	return h.GetSampleSum(), h.GetSampleCount()
 }
 
-func (m *metrics) getORDFromHistogram() (float64, uint64) {
+func (m *metrics) getORDFromHistogram() uint64 {
 	if m.ord == nil {
-		return 0, 0
+		return 0
 	}
 	hist, ok := m.ord.WithLabelValues("", "", "").(prometheus.Histogram)
 	if !ok {
-		return 0, 0
+		return 0
 	}
 	var dtoMetric dto.Metric
 	if err := hist.Write(&dtoMetric); err != nil {
-		return 0, 0
+		return 0
 	}
-	h := dtoMetric.GetHistogram()
-	return h.GetSampleSum(), h.GetSampleCount()
+	return dtoMetric.GetHistogram().GetSampleCount()
 }
 
-func (m *metrics) getLRDFromHistogram() (float64, uint64) {
+func (m *metrics) getLRDFromHistogram() uint64 {
 	if m.lrd == nil {
-		return 0, 0
+		return 0
 	}
 	hist, ok := m.lrd.WithLabelValues("", "", "").(prometheus.Histogram)
 	if !ok {
-		return 0, 0
+		return 0
 	}
 	var dtoMetric dto.Metric
 	if err := hist.Write(&dtoMetric); err != nil {
-		return 0, 0
+		return 0
 	}
-	h := dtoMetric.GetHistogram()
-	return h.GetSampleSum(), h.GetSampleCount()
+	return dtoMetric.GetHistogram().GetSampleCount()
 }
 
 func (m *metrics) getSPDFromHistogram() (float64, uint64) {
@@ -243,35 +243,80 @@ func (m *metrics) getISSFromCounter() float64 {
 	return dtoMetric.GetCounter().GetValue()
 }
 
-func TestMetricser_Request_AllMethodsSingleRun(t *testing.T) {
-	m := NewTestMetricser()
-	require.NotNil(t, m)
+func requestVecValue(cv *prometheus.CounterVec, labels ...string) float64 {
+	var d dto.Metric
+	if err := cv.WithLabelValues(labels...).Write(&d); err != nil {
+		return 0
+	}
+	return d.GetCounter().GetValue()
+}
 
+func TestMetricser_Request_AllMethodsSingleRun(t *testing.T) {
 	methods := []struct {
-		name string
-		data []byte
+		name    string
+		data    []byte
+		counter func(m *metrics) float64
 	}{
-		{"INVITE", []byte("INVITE")},
-		{"ACK", []byte("ACK")},
-		{"BYE", []byte("BYE")},
-		{"CANCEL", []byte("CANCEL")},
-		{"OPTIONS", []byte("OPTIONS")},
-		{"REGISTER", []byte("REGISTER")},
-		{"UPDATE", []byte("UPDATE")},
-		{"INFO", []byte("INFO")},
-		{"REFER", []byte("REFER")},
-		{"SUBSCRIBE", []byte("SUBSCRIBE")},
-		{"NOTIFY", []byte("NOTIFY")},
-		{"PRACK", []byte("PRACK")},
-		{"PUBLISH", []byte("PUBLISH")},
-		{"MESSAGE", []byte("MESSAGE")},
-		{"UNKNOWN", []byte("UNKNOWN_METHOD")},
-		{"EMPTY", []byte("")},
+		{"INVITE", []byte("INVITE"), func(m *metrics) float64 {
+			return requestVecValue(m.requestInviteTotal, "", "", "", "", "", "")
+		}},
+		{"ACK", []byte("ACK"), func(m *metrics) float64 {
+			return requestVecValue(m.requestACKTotal, "", "", "")
+		}},
+		{"BYE", []byte("BYE"), func(m *metrics) float64 {
+			return requestVecValue(m.requestByeTotal, "", "", "")
+		}},
+		{"CANCEL", []byte("CANCEL"), func(m *metrics) float64 {
+			return requestVecValue(m.requestCancelTotal, "", "", "")
+		}},
+		{"OPTIONS", []byte("OPTIONS"), func(m *metrics) float64 {
+			return requestVecValue(m.requestOptionsTotal, "", "", "")
+		}},
+		{"REGISTER", []byte("REGISTER"), func(m *metrics) float64 {
+			return requestVecValue(m.requestRegisterTotal, "", "", "")
+		}},
+		{"UPDATE", []byte("UPDATE"), func(m *metrics) float64 {
+			return requestVecValue(m.requestUpdateTotal, "", "", "")
+		}},
+		{"INFO", []byte("INFO"), func(m *metrics) float64 {
+			return requestVecValue(m.requestInfoTotal, "", "", "")
+		}},
+		{"REFER", []byte("REFER"), func(m *metrics) float64 {
+			return requestVecValue(m.requestReferTotal, "", "", "")
+		}},
+		{"SUBSCRIBE", []byte("SUBSCRIBE"), func(m *metrics) float64 {
+			return requestVecValue(m.requestSubscribeTotal, "", "", "")
+		}},
+		{"NOTIFY", []byte("NOTIFY"), func(m *metrics) float64 {
+			return requestVecValue(m.requestNotifyTotal, "", "", "")
+		}},
+		{"PRACK", []byte("PRACK"), func(m *metrics) float64 {
+			return requestVecValue(m.requestPrackTotal, "", "", "")
+		}},
+		{"PUBLISH", []byte("PUBLISH"), func(m *metrics) float64 {
+			return requestVecValue(m.requestPublishTotal, "", "", "")
+		}},
+		{"MESSAGE", []byte("MESSAGE"), func(m *metrics) float64 {
+			return requestVecValue(m.requestMessageTotal, "", "", "")
+		}},
+		{"UNKNOWN", []byte("UNKNOWN_METHOD"), nil},
+		{"EMPTY", []byte(""), nil},
 	}
 
 	for _, method := range methods {
-		t.Run(method.name, func(_ *testing.T) {
+		t.Run(method.name, func(t *testing.T) {
+			m := NewTestMetricser().(*metrics)
 			m.Request("", "", "", "", "", "", method.data)
+
+			var d dto.Metric
+			require.NoError(t, m.sipPacketsTotal.Write(&d))
+			require.InDelta(t, 1.0, d.GetCounter().GetValue(), 0.01,
+				"sipPacketsTotal must increment for every Request call")
+
+			if method.counter != nil {
+				require.InDelta(t, 1.0, method.counter(m), 0.01,
+					"method-specific counter must increment")
+			}
 		})
 	}
 }
@@ -323,9 +368,6 @@ func TestMetrics_Invite200OK_HostLabels(t *testing.T) {
 }
 
 func TestMetricser_Response_AllCodesSingleRun(t *testing.T) {
-	m := NewTestMetricser()
-	require.NotNil(t, m)
-
 	codes := []struct {
 		name             string
 		data             []byte
@@ -365,16 +407,24 @@ func TestMetricser_Response_AllCodesSingleRun(t *testing.T) {
 	}
 
 	for _, code := range codes {
-		t.Run(code.name, func(_ *testing.T) {
+		t.Run(code.name, func(t *testing.T) {
+			m := NewTestMetricser().(*metrics)
 			m.Response("", "", "", code.data, code.isInviteResponse)
+
+			var d dto.Metric
+			require.NoError(t, m.sipPacketsTotal.Write(&d))
+			require.InDelta(t, 1.0, d.GetCounter().GetValue(), 0.01,
+				"sipPacketsTotal must increment for every Response call")
+
+			if cv, ok := m.statusCounters[code.name]; ok {
+				require.InDelta(t, 1.0, requestVecValue(cv, "", "", ""), 0.01,
+					"status counter %s must increment", code.name)
+			}
 		})
 	}
 }
 
 func TestMetricser_UpdateSession_VariousValues(t *testing.T) {
-	m := NewTestMetricser()
-	require.NotNil(t, m)
-
 	testCases := []struct {
 		name string
 		size int
@@ -386,8 +436,10 @@ func TestMetricser_UpdateSession_VariousValues(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		t.Run(tc.name, func(_ *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewTestMetricser().(*metrics)
 			m.UpdateSession("", "", "", tc.size)
+			require.InDelta(t, float64(tc.size), m.sessionsGauge("", ""), 0.01)
 		})
 	}
 }
@@ -430,6 +482,134 @@ func TestMetrics_UpdateSessions(t *testing.T) {
 	require.InDelta(t, 0.0, m.sessionsGauge("provider-b", "cisco"), 0.01, "stale combo must reset")
 }
 
+func TestMetrics_SessionsUtilization_WithLimits(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.SetSessionsLimits(map[string]int{"carrier-a": 100})
+
+	m.UpdateSessions([]LabeledCount{
+		{Labels: map[string]string{"carrier": "carrier-a", "ua_type": "yealink", "source_country": ""}, Count: 50},
+	})
+
+	limitGauge, err := m.sessionsLimit.GetMetricWithLabelValues("carrier-a")
+	require.NoError(t, err)
+	utilGauge, err := m.sessionsUtilization.GetMetricWithLabelValues("carrier-a")
+	require.NoError(t, err)
+
+	var d dto.Metric
+	require.NoError(t, limitGauge.Write(&d))
+	require.InDelta(t, 100.0, d.GetGauge().GetValue(), 0.01)
+
+	require.NoError(t, utilGauge.Write(&d))
+	require.InDelta(t, 50.0, d.GetGauge().GetValue(), 0.01)
+}
+
+func TestMetrics_SessionsUtilization_CappedAt100(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.SetSessionsLimits(map[string]int{"carrier-a": 100})
+
+	m.UpdateSessions([]LabeledCount{
+		{Labels: map[string]string{"carrier": "carrier-a", "ua_type": "sip", "source_country": ""}, Count: 150},
+	})
+
+	utilGauge, err := m.sessionsUtilization.GetMetricWithLabelValues("carrier-a")
+	require.NoError(t, err)
+	var d dto.Metric
+	require.NoError(t, utilGauge.Write(&d))
+	require.InDelta(t, 100.0, d.GetGauge().GetValue(), 0.01, "utilization must be capped at 100")
+}
+
+func TestMetrics_SessionsUtilization_ZeroSessions(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.SetSessionsLimits(map[string]int{"carrier-a": 100})
+
+	m.UpdateSessions([]LabeledCount{})
+
+	utilGauge, err := m.sessionsUtilization.GetMetricWithLabelValues("carrier-a")
+	require.NoError(t, err)
+	var d dto.Metric
+	require.NoError(t, utilGauge.Write(&d))
+	require.InDelta(t, 0.0, d.GetGauge().GetValue(), 0.01, "zero sessions must show 0% utilization")
+}
+
+func TestMetrics_SessionsUtilization_NoLimits(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateSessions([]LabeledCount{
+		{Labels: map[string]string{"carrier": "carrier-a", "ua_type": "sip", "source_country": ""}, Count: 50},
+	})
+
+	_, err := m.sessionsUtilization.GetMetricWithLabelValues("carrier-a")
+	require.NoError(t, err, "gauge must exist even if no limits set (just not updated)")
+}
+
+func TestMetrics_SessionsUtilization_MultiCarrierSummed(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.SetSessionsLimits(map[string]int{
+		"carrier-a": 100,
+		"carrier-b": 200,
+	})
+
+	m.UpdateSessions([]LabeledCount{
+		{Labels: map[string]string{"carrier": "carrier-a", "ua_type": "yealink", "source_country": ""}, Count: 30},
+		{Labels: map[string]string{"carrier": "carrier-a", "ua_type": "cisco", "source_country": ""}, Count: 20},
+		{Labels: map[string]string{"carrier": "carrier-b", "ua_type": "sip", "source_country": ""}, Count: 100},
+	})
+
+	var d dto.Metric
+
+	utilA, err := m.sessionsUtilization.GetMetricWithLabelValues("carrier-a")
+	require.NoError(t, err)
+	require.NoError(t, utilA.Write(&d))
+	require.InDelta(t, 50.0, d.GetGauge().GetValue(), 0.01, "carrier-a: (30+20)/100")
+
+	utilB, err := m.sessionsUtilization.GetMetricWithLabelValues("carrier-b")
+	require.NoError(t, err)
+	require.NoError(t, utilB.Write(&d))
+	require.InDelta(t, 50.0, d.GetGauge().GetValue(), 0.01, "carrier-b: 100/200")
+}
+
+func TestLoadSessionsLimits_ValidYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "limits.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+sessions_limits:
+  - carrier: "beeline"
+    limit: 500
+  - carrier: "mts"
+    limit: 1000
+`), 0o644))
+
+	limits, err := LoadSessionsLimits(path)
+	require.NoError(t, err)
+	require.Len(t, limits, 2)
+	require.Equal(t, 500, limits["beeline"])
+	require.Equal(t, 1000, limits["mts"])
+}
+
+func TestLoadSessionsLimits_MissingFile(t *testing.T) {
+	_, err := LoadSessionsLimits("/nonexistent/path/limits.yaml")
+	require.Error(t, err)
+}
+
+func TestLoadSessionsLimits_EmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(""), 0o644))
+
+	limits, err := LoadSessionsLimits(path)
+	require.NoError(t, err)
+	require.Empty(t, limits)
+}
+
+func TestLoadSessionsLimits_InvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("{{{invalid"), 0o644))
+
+	_, err := LoadSessionsLimits(path)
+	require.Error(t, err)
+}
+
 func TestMetrics_UpdateActiveRegistrations(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateActiveRegistrations([]LabeledCount{
@@ -447,14 +627,16 @@ func TestMetrics_UpdateActiveRegistrations(t *testing.T) {
 }
 
 func TestMetricser_SystemError_Multiple(t *testing.T) {
-	m := NewTestMetricser()
-	require.NotNil(t, m)
+	m := NewTestMetricser().(*metrics)
 
-	for i := range 5 {
-		t.Run(string(rune('0'+i)), func(_ *testing.T) {
-			m.SystemError()
-		})
+	for range 5 {
+		m.SystemError()
 	}
+
+	var d dto.Metric
+	require.NoError(t, m.systemErrorTotal.Write(&d))
+	require.InDelta(t, 5.0, d.GetCounter().GetValue(), 0.01,
+		"systemErrorTotal must reflect 5 calls")
 }
 
 func TestMetricser_Combined(t *testing.T) {
@@ -606,6 +788,13 @@ func TestMetrics_SER_Values(t *testing.T) {
 			invite200OK: 20,
 			invite3xx:   20,
 			wantSER:     25,
+		},
+		{
+			name:        "negative_denominator_mid_capture",
+			invites:     3,
+			invite200OK: 1,
+			invite3xx:   5,
+			wantSER:     0,
 		},
 	}
 
@@ -812,6 +1001,13 @@ func TestMetrics_SEER_EachCodeIndependent(t *testing.T) {
 			effective603: 5,
 			threeXX:      10,
 			wantSEER:     77.78,
+		},
+		{
+			name:         "negative_denominator_mid_capture",
+			invites:      3,
+			effective200: 1,
+			threeXX:      5,
+			wantSEER:     0,
 		},
 	}
 
@@ -1782,7 +1978,7 @@ func TestMetrics_ORD_Observe(t *testing.T) {
 
 	m.UpdateORD("", "", "", 25.0)
 
-	_, count := m.getORDFromHistogram()
+	count := m.getORDFromHistogram()
 	require.Equal(t, uint64(2), count)
 }
 
@@ -1792,8 +1988,30 @@ func TestMetrics_LRD_Observe(t *testing.T) {
 
 	m.UpdateLRD("", "", "", 15.0)
 
-	_, count := m.getLRDFromHistogram()
+	count := m.getLRDFromHistogram()
 	require.Equal(t, uint64(2), count)
+}
+
+func TestMetrics_UpdateDelay_NegativeGuard(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdateRRD("", "", "", -1.0)
+	m.UpdateTTR("", "", "", -1.0)
+	m.UpdatePDD("", "", "", -1.0)
+	m.UpdateORD("", "", "", -1.0)
+	m.UpdateLRD("", "", "", -1.0)
+
+	_, rrdCount := m.getRRDFromHistogram()
+	_, ttrCount := m.getTTRFromHistogram()
+	_, pddCount := m.getPDDFromHistogram()
+	ordCount := m.getORDFromHistogram()
+	lrdCount := m.getLRDFromHistogram()
+
+	require.Equal(t, uint64(0), rrdCount, "RRD must reject negative delay")
+	require.Equal(t, uint64(0), ttrCount, "TTR must reject negative delay")
+	require.Equal(t, uint64(0), pddCount, "PDD must reject negative delay")
+	require.Equal(t, uint64(0), ordCount, "ORD must reject negative delay")
+	require.Equal(t, uint64(0), lrdCount, "LRD must reject negative delay")
 }
 
 func getCounterValue(cv *prometheus.CounterVec, carrier string) float64 {
@@ -2157,6 +2375,53 @@ func TestRatioCollector_StructKeyLabelEmission(t *testing.T) {
 	require.True(t, found["carrier-b/yealink/DE"], "missing carrier-b/yealink/DE series")
 }
 
+func gatherRatioValue(t *testing.T, reg *prometheus.Registry, metricName string) float64 {
+	t.Helper()
+	gathered, err := reg.Gather()
+	require.NoError(t, err)
+	for _, fam := range gathered {
+		if fam.GetName() == metricName {
+			require.NotEmpty(t, fam.GetMetric(), "%s has no series", metricName)
+			return fam.GetMetric()[0].GetGauge().GetValue()
+		}
+	}
+	t.Fatalf("metric %s not found in Gather output", metricName)
+	return 0
+}
+
+func TestRatioCollector_Gather_AllMetrics(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newMetricserWithRegistry(reg).(*metrics)
+
+	c := m.getOrCreateCarrierCounters("carrier-a", "sip", "US")
+	c.inviteTotal.Store(100)
+	c.invite200OKTotal.Store(60)
+	c.invite3xxTotal.Store(10)
+	c.inviteEffectiveTotal.Store(70)
+	c.inviteIneffectiveTotal.Store(30)
+	c.sessionCompletedTotal.Store(50)
+
+	tests := []struct {
+		name   string
+		metric string
+		want   float64
+	}{
+		{"SER", "sip_exporter_ser", 60.0 / 90.0 * 100},
+		{"SEER", "sip_exporter_seer", 70.0 / 90.0 * 100},
+		{"ISA", "sip_exporter_isa", 30.0},
+		{"SCR", "sip_exporter_scr", 50.0},
+		{"ASR", "sip_exporter_asr", 60.0},
+		{"NER", "sip_exporter_ner", 70.0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			val := gatherRatioValue(t, reg, tc.metric)
+			require.InDelta(t, tc.want, val, 0.01)
+		})
+	}
+}
+
 // ==================== Registration success/failure + ratio (S4-2.1) ====================
 
 func TestMetrics_RegisterSuccess_IncrementsCounter(t *testing.T) {
@@ -2177,6 +2442,42 @@ func TestMetrics_RegisterFailure_IncrementsCodeCounter(t *testing.T) {
 	m.RegisterFailure("carrier-a", "sip", "US", "403")
 
 	counter, err := m.registerFailureTotal.GetMetricWithLabelValues("carrier-a", "sip", "US", "403")
+	require.NoError(t, err)
+	var d dto.Metric
+	require.NoError(t, counter.Write(&d))
+	require.InDelta(t, 1.0, d.GetCounter().GetValue(), 0.01)
+}
+
+func TestMetrics_RegisterCountryChange_IncrementsCounter(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.RegisterCountryChange("carrier-a", "GE")
+
+	counter, err := m.registerCountryChange.GetMetricWithLabelValues("carrier-a", "GE")
+	require.NoError(t, err)
+	var d dto.Metric
+	require.NoError(t, counter.Write(&d))
+	require.InDelta(t, 1.0, d.GetCounter().GetValue(), 0.01)
+}
+
+func TestMetrics_RegisterScan_IncrementsCounter(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.RegisterScan("carrier-a", "RU")
+
+	counter, err := m.registerScanTotal.GetMetricWithLabelValues("carrier-a", "RU")
+	require.NoError(t, err)
+	var d dto.Metric
+	require.NoError(t, counter.Write(&d))
+	require.InDelta(t, 1.0, d.GetCounter().GetValue(), 0.01)
+}
+
+func TestMetrics_InviteBurst_IncrementsCounter(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.InviteBurst("carrier-a", "CN")
+
+	counter, err := m.inviteBurstTotal.GetMetricWithLabelValues("carrier-a", "CN")
 	require.NoError(t, err)
 	var d dto.Metric
 	require.NoError(t, counter.Write(&d))

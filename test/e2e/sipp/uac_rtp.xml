@@ -43,7 +43,7 @@
             <exec rtp_stream="/build/pcap/g711a.pcap"/>
         </action>
     </nop>
-    <pause milliseconds="4000"/>
+    <pause milliseconds="8000"/>
     <send retrans="500">
         <![CDATA[
         BYE sip:[service]@[remote_ip]:[remote_port] SIP/2.0

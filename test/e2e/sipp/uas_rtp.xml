@@ -42,7 +42,7 @@
             <exec rtp_stream="/build/pcap/g711a.pcap"/>
         </action>
     </nop>
-    <pause milliseconds="4000"/>
+    <pause milliseconds="8000"/>
     <recv request="BYE" crlf="true"/>
     <send>
         <![CDATA[

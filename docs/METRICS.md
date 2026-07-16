@@ -2,6 +2,39 @@
 
 All metrics are exposed at `/metrics` endpoint in Prometheus exposition format.
 
+## Contents
+
+- [Labels](#labels)
+  - [Carrier Label](#carrier-label)
+  - [User-Agent Type Label](#user-agent-type-label)
+  - [Geo-Enrichment Labels](#geo-enrichment-labels)
+- [System Metrics](#system-metrics) — `packets_total`, `system_error_total`
+- [Active Sessions](#active-sessions) — `sessions`
+- [SIP Request Metrics](#sip-request-metrics) — `invite_total`, `reinvite_total`, `register_total`, `bye_total`, etc.
+- [SIP Response Metrics](#sip-response-metrics-by-status-code) — `100_total`…`606_total`
+- [Registration Health](#registration-health) — `register_success_total`, `register_failure_total`, `register_success_ratio`, `active_registrations`
+- [Fraud Detection](#fraud-detection) — `register_scan_total`, `invite_burst_total`, `register_country_change_total`
+- [Capacity Monitoring](#capacity-monitoring) — `sessions_limit`, `sessions_utilization`
+- [RTP Media Metrics](#rtp-media-metrics) — `rtp_packets_total`, `rtp_mos_score`, `rtp_jitter_milliseconds`, etc.
+- [Self-Monitoring Metrics](#self-monitoring-metrics) — `socket_packets_*`, `channel_*`, `parse_errors_total`, `active_trackers`, `active_dialogs`, `build_info`
+- [RFC 6076 Performance Metrics](#rfc-6076-performance-metrics)
+  - [SER](#session-establishment-ratio-ser) — Session Establishment Ratio
+  - [SEER](#session-establishment-effectiveness-ratio-seer) — Session Establishment Effectiveness Ratio
+  - [ISA](#ineffective-session-attempts-isa) — Ineffective Session Attempts
+  - [SCR](#session-completion-ratio-scr) — Session Completion Ratio
+  - [ASR](#answer-seizure-ratio-asr) — Answer Seizure Ratio
+  - [NER](#network-effectiveness-ratio-ner) — Network Effectiveness Ratio
+  - [SDC](#session-duration-counter-sdc) — Session Duration Counter
+  - [ISS](#ineffective-session-severity-iss) — Ineffective Session Severity
+  - [RRD](#registration-request-delay-rrd) — Registration Request Delay
+  - [SPD](#session-process-duration-spd) — Session Process Duration
+  - [TTR](#time-to-first-response-ttr) — Time to First Response
+  - [PDD](#post-dial-delay-pdd) — Post Dial Delay
+  - [ORD](#options-response-delay-ord) — OPTIONS Response Delay
+  - [LRD](#location-registration-delay-lrd) — Location Registration Delay
+- [Voice Quality Metrics (RFC 6035)](#voice-quality-metrics-rfc-6035) — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
+- [Alerts](#alerts) — pre-configured alert rules and threshold recommendations
+
 ## Labels
 
 SIP metrics use a multi-layer label model. Most metrics include **three base labels**; INVITE-related raw counters add **three more**:
@@ -25,6 +58,8 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 > | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country` |
 > | **RTP dialog** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country` |
 > | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, destination_country, caller_host, called_host` |
+> | **Fraud** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country` |
+> | **Capacity** | `sessions_limit`, `sessions_utilization` | `carrier` |
 
 `carrier` and `ua_type` default to `"other"` when not configured or when no pattern matches. `source_country` defaults to `"unknown"` when neither carrier country nor GeoIP DB is available.
 
@@ -535,6 +570,90 @@ rate(sip_exporter_register_success_total[5m])
 topk(5, sum by (code) (rate(sip_exporter_register_failure_total[5m])))
 ```
 
+## Fraud Detection
+
+Fraud signals detect suspicious patterns: registration scanning (one IP registering many accounts), geographic impossibility (same account from different countries), and INVITE flooding (one IP sending a burst of calls). All are scoped per `carrier,source_country` — `ua_type` is intentionally omitted because attackers vary their User-Agent.
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `sip_exporter_register_country_change_total` | counter | `carrier,source_country` | Times a user re-registered from a different country (account-takeover signal) |
+| `sip_exporter_register_scan_total` | counter | `carrier,source_country` | Registration scan signals (one IP registering N+ unique AORs within a time window) |
+| `sip_exporter_invite_burst_total` | counter | `carrier,source_country` | INVITE burst signals (one IP sending N+ INVITEs within a time window) |
+
+### register_country_change_total
+
+Incremented when a successful REGISTER 200 OK arrives from a **different source country** than the previous registration for the same AOR (Address-of-Record). The AOR is derived from the `From` header URI.
+
+- First registration of an AOR does **not** trigger a signal (no baseline)
+- Refresh from the same country does **not** trigger a signal
+- Empty previous country (GeoIP disabled at first registration) does **not** trigger a signal
+
+```promql
+# Account-takeover spikes
+sip_exporter_register_country_change_total > 0 unless on (carrier, source_country) (sip_exporter_register_country_change_total offset 5m > 0)
+```
+
+### register_scan_total
+
+Incremented for each registration event from a single source IP when the count of unique AORs (Address of Record) within the configured `window` reaches or exceeds `threshold`. The counter increases continuously during a scan attack, making `rate()` effective for alerting.
+
+| Config | Env var | Default |
+|--------|---------|---------|
+| Threshold | `SIP_EXPORTER_FRAUD_REGISTER_SCAN_THRESHOLD` | `10` |
+| Window | `SIP_EXPORTER_FRAUD_REGISTER_SCAN_WINDOW` | `60s` |
+
+```promql
+# Registration enumeration attacks
+rate(sip_exporter_register_scan_total[5m])
+```
+
+### invite_burst_total
+
+Incremented for each **INVITE request** (excluding re-INVITEs) from a single source IP when the count of INVITEs within the configured `window` is at or above `threshold`. The counter increases continuously during a burst, making `rate()` effective for alerting.
+
+| Config | Env var | Default |
+|--------|---------|---------|
+| Threshold | `SIP_EXPORTER_FRAUD_INVITE_BURST_THRESHOLD` | `100` |
+| Window | `SIP_EXPORTER_FRAUD_INVITE_BURST_WINDOW` | `60s` |
+
+```promql
+# Toll-fraud or DDoS via INVITE flood
+rate(sip_exporter_invite_burst_total[5m])
+```
+
+## Capacity Monitoring
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `sip_exporter_sessions_limit` | gauge | `carrier` | Configured concurrent session limit per carrier (from YAML config) |
+| `sip_exporter_sessions_utilization` | gauge | `carrier` | Session utilization as percentage of configured limit (0–100, capped) |
+
+### Configuration
+
+Create a YAML file and set its path via `SIP_EXPORTER_SESSIONS_LIMITS`:
+
+```yaml
+sessions_limits:
+  - carrier: "beeline"
+    limit: 500
+  - carrier: "mts"
+    limit: 1000
+```
+
+- Utilization is computed on every scrape: `active_sessions(carrier) / limit × 100`
+- Capped at 100 (over-limit shown as 100, not >100) — this hides severity of oversubscription; use the raw `sip_exporter_sessions` gauge to detect extreme overage
+- Carriers without a configured limit are omitted (gauge not emitted)
+- Carriers with `limit: 0` are also omitted (treated as "no limit", not "0% / blocked")
+- Carriers with 0 active sessions show 0% utilization
+
+```promql
+# Capacity headroom per carrier
+100 - sip_exporter_sessions_utilization
+
+# Carriers at or near capacity
+sip_exporter_sessions_utilization > 90
+```
+
 ## RTP media metrics
 
 RTP media metrics are derived from RTP packets captured by the eBPF filter and
@@ -546,16 +665,27 @@ counted; RTP without a correlated dialog is dropped.
 `{carrier="...",ua_type="...",codec="...",source_country="..."}` — `codec` is the RTP payload-type name resolved from SDP `a=rtpmap` (e.g. `PCMU`, `PCMA`, `opus`) with a static fallback table (RFC 3551). `source_country` is inherited from the SIP dialog (resolved at INVITE time).
 
 `sip_exporter_rtp_packets_total{carrier,ua_type,codec,source_country}` *(counter)*: total number of RTP packets observed.
+
 `sip_exporter_rtp_packets_lost_total{carrier,ua_type,codec,source_country}` *(counter)*: packets detected as lost via RTP sequence-number gaps.
+
 `sip_exporter_rtp_duplicate_packets_total{carrier,ua_type,codec,source_country}` *(counter)*: duplicate RTP packets detected (same sequence number as the previous packet, indicating retransmission or media loop).
+
 `sip_exporter_rtp_jitter_milliseconds{carrier,ua_type,codec,source_country}` *(histogram, buckets 0.1..500 ms)*: smoothed interarrival jitter (RFC 3550 A.8).
+
 `sip_exporter_rtp_mos_score{carrier,ua_type,codec,source_country}` *(histogram, buckets 1.0..5.0)*: MOS-LQ estimated via the ITU-T G.107 E-model with a 60 ms jitter buffer assumption.
+
 `sip_exporter_rtp_mos_f1{carrier,ua_type,codec,source_country}` *(histogram, buckets 1.0..5.0)*: MOS-LQ with a strict jitter buffer (50 ms) — models low-latency endpoints that tolerate less jitter.
+
 `sip_exporter_rtp_mos_f2{carrier,ua_type,codec,source_country}` *(histogram, buckets 1.0..5.0)*: MOS-LQ with a generous jitter buffer (200 ms) — models managed endpoints with deeper buffers.
+
 `sip_exporter_rtp_mos_adaptive{carrier,ua_type,codec,source_country}` *(histogram, buckets 1.0..5.0)*: MOS-LQ with an adaptive jitter buffer (500 ms) — models adaptive endpoints that absorb significant jitter.
+
 `sip_exporter_rtp_r_factor{carrier,ua_type,codec,source_country}` *(histogram, buckets 10..100)*: E-model R-factor (ITU-T G.107), range 0–100. Underlying quality score before the R→MOS transform.
+
 `sip_exporter_rtp_burst_loss_density{carrier,ua_type,codec,source_country}` *(histogram, buckets 10..100)*: percentage of lost packets that occurred in burst runs (≥ 3 consecutive losses), range 0–100.
+
 `sip_exporter_rtp_gap_loss_density{carrier,ua_type,codec,source_country}` *(histogram, buckets 10..100)*: percentage of lost packets that occurred in isolated gaps (< 3 consecutive losses), range 0–100.
+
 `sip_exporter_rtp_active_streams{carrier,ua_type,codec,source_country}` *(gauge)*: number of active RTP streams. Sampled once per second; idle streams expire after 30 s.
 
 > MOS and R-factor are sampled per stream once per second; the E-model uses G.113 codec Ie/Bpl
@@ -575,6 +705,7 @@ counted; RTP without a correlated dialog is dropped.
 These counters are evaluated at dialog teardown (BYE 200 OK or Session-Expires expiry) and carry only `carrier, ua_type, source_country` (no `codec` label — they describe the dialog, not a single stream).
 
 `sip_exporter_rtp_oneway_calls_total{carrier,ua_type,source_country}` *(counter)*: dialogs where 2+ media endpoints were registered (SDP from both parties) but RTP was observed in only one direction.
+
 `sip_exporter_sessions_missing_rtp_total{carrier,ua_type,source_country}` *(counter)*: dialogs with SDP media endpoints but no RTP observed at all.
 
 > Both metrics rely on a persistent per-dialog RTP record that survives stream TTL expiry,
@@ -592,6 +723,7 @@ Self-monitoring metrics provide visibility into the exporter's internal health. 
 |--------|------|-------------|
 | `sip_exporter_socket_packets_received_total` | Counter | Total packets received from kernel AF_PACKET socket |
 | `sip_exporter_socket_packets_dropped_total` | Counter | Total packets dropped by kernel due to socket receive buffer overflow |
+| `sip_exporter_rtp_dropped_total` | Counter | Total RTP packets dropped in userspace when the internal messages channel is full |
 | `sip_exporter_channel_length` | Gauge | Current number of packets in the internal messages channel buffer |
 | `sip_exporter_channel_capacity` | Gauge | Capacity of the internal messages channel buffer (constant: 10000) |
 | `sip_exporter_parse_errors_total{type="..."}` | CounterVec | Total packet parse errors by type |
@@ -1405,3 +1537,61 @@ RERL=55.0
 ```
 
 Multiple metrics can appear on the same line (space-separated) or on separate lines. Header lines (containing `:` but not `=`) are ignored.
+
+---
+
+## Alerts
+
+The repository includes pre-configured alert rules and dashboards so monitoring works out-of-the-box.
+
+### What's Included
+
+| Component | File | Description |
+|-----------|------|-------------|
+| Grafana dashboard | [`examples/grafana-dashboard.json`](../examples/grafana-dashboard.json) | Full production dashboard (variables, all metric types) |
+| Alerting guide | [`docs/ALERTING.md`](ALERTING.md) | Complete reference: rules, Alertmanager configs (Slack/PagerDuty/Email), threshold tuning |
+
+### Alert Summary by Category
+
+#### Fraud Detection
+
+| Alert | Metric | Trigger | Severity |
+|-------|--------|---------|----------|
+| `SIPRegistrationScan` | `register_scan_total` | rate > 0 (one IP registering many accounts) | critical |
+| `SIPInviteBurst` | `invite_burst_total` | rate > 0 (one IP flooding INVITEs) | critical |
+| `SIPRegistrationCountryChange` | `register_country_change_total` | counter > 0 and was 0/absent 5m ago | warning |
+| `SIPSessionCapacityExhaustion` | `sessions_utilization` | > 90% for 5m | warning |
+
+#### SIP Health
+
+| Alert | Metric | Trigger | Severity |
+|-------|--------|---------|----------|
+| `SIPExporterDown` | `up` | == 0 for 1m | critical |
+| `SIPHighServerErrorRate` | `isa` | avg > 50% for 1m | critical |
+| `SIPSessionEstablishmentCritical` | `ser` | < 20% for 2m | critical |
+| `SIPSessionEstablishmentLow` | `ser` | < 50% for 5m | warning |
+| `SIPRegistrationSlow` | `rrd` | p95 > 500ms for 5m | warning |
+| `SIPPacketDropHigh` | `socket_packets_dropped_total` | > 10/s for 2m | warning |
+
+#### Voice Quality (RTP)
+
+| Alert | Metric | Trigger | Severity |
+|-------|--------|---------|----------|
+| `RTPMOSLow` | `rtp_mos_score` | avg < 3.5 for 5m | warning |
+| `RTPPacketLossHigh` | `rtp_packets_lost_total` / `rtp_packets_total` | > 5% for 5m | warning |
+| `RTPJitterHigh` | `rtp_jitter_milliseconds` | p95 > 50ms for 5m | warning |
+
+### Threshold Recommendations
+
+| Metric | Green | Yellow | Red |
+|--------|-------|--------|-----|
+| SER | ≥ 95% | 80–95% | < 80% |
+| SEER | ≥ 95% | 80–95% | < 80% |
+| ISA | < 5% | 5–15% | > 15% |
+| SCR | ≥ 80% | 60–80% | < 60% |
+| RRD p95 | < 100ms | 100–500ms | > 500ms |
+| RTP MOS | ≥ 4.0 | 3.5–4.0 | < 3.5 |
+| RTP Jitter p95 | < 30ms | 30–50ms | > 50ms |
+| RTP Packet Loss | < 2% | 2–5% | > 5% |
+
+Full alerting guide with Prometheus rules, Alertmanager configs, and best practices: [`docs/ALERTING.md`](ALERTING.md).

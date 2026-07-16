@@ -117,3 +117,12 @@ func TestParse_EmptyBody(t *testing.T) {
 	require.Empty(t, Parse(nil))
 	require.Empty(t, Parse([]byte("")))
 }
+
+func TestParse_MulticastConnAddress(t *testing.T) {
+	body := []byte("c=IN IP4 224.2.1.1/127/3\r\n" +
+		"m=audio 5004 RTP/AVP 0\r\n" +
+		"a=rtpmap:0 PCMU/8000\r\n")
+	media := Parse(body)
+	require.Len(t, media, 1)
+	require.Equal(t, "224.2.1.1", media[0].IP, "multicast TTL/count suffix must be stripped")
+}

@@ -14,6 +14,7 @@ type (
 		UserAgent      []byte
 		ContentType    []byte
 		Body           []byte
+		SourceIP       string
 	}
 	From struct {
 		User []byte

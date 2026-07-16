@@ -147,7 +147,11 @@ func extractConnIP(line string) (string, string) {
 	if len(fields) < connFields {
 		return "", ""
 	}
-	return fields[2], fields[1] // addr, version (IN <ver> <addr>)
+	addr := fields[2]
+	if idx := strings.IndexByte(addr, '/'); idx != -1 {
+		addr = addr[:idx]
+	}
+	return addr, fields[1] // addr, version (IN <ver> <addr>)
 }
 
 // extractOriginIP parses "o=<user> <sess-id> <sess-ver> IN IP4 <addr>".

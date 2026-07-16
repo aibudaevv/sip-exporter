@@ -2,25 +2,9 @@
 
 This guide provides pre-configured alerting examples for monitoring SIP infrastructure with the SIP Exporter.
 
-## Overview
-
-The SIP Exporter exposes metrics based on RFC 6076 (SIP Performance Metrics) and RFC 6035 (Voice Quality Reporting). Key metrics to alert on:
-
-| Metric | Description | Alert When |
-|--------|-------------|------------|
-| `sip_exporter_ser` | Session Establishment Ratio | < 50% (warning), < 20% (critical) |
-| `sip_exporter_spd` | Session Process Duration (seconds) | p95 < 5s or p95 > 3600s |
-| `sip_exporter_isa` | Ineffective Sessions Attempts | High rate indicates DDoS or server issues |
-| `sip_exporter_rrd` | Registration Request Delay | p95 > 500ms indicates network/registrar issues |
-| `sip_exporter_401_total` | Authentication failures | High rate indicates brute-force attacks |
-| `sip_exporter_403_total` | Forbidden responses | High rate indicates authorization issues |
-| `sip_exporter_vq_mos_lq` | MOS Listening Quality (RFC 6035) | avg < 3.5 (warning), < 3.0 (critical) |
-| `sip_exporter_vq_nlr_percent` | Network Packet Loss Rate (RFC 6035) | avg > 2% (warning), > 5% (critical) |
-| `sip_exporter_rtp_mos_score` | RTP MOS (E-model G.107) | avg < 3.5 (warning), < 3.0 (critical) |
-| `sip_exporter_rtp_packets_lost_total` | RTP packet loss rate | > 5% (warning), > 10% (critical) |
-| `sip_exporter_rtp_jitter_milliseconds` | RTP interarrival jitter (RFC 3550) | p95 > 50ms (warning) |
-
 ## Quick Start
+
+### Manual Setup
 
 1. Copy Prometheus alert rules to your Prometheus configuration
 2. Import Grafana dashboard JSON
@@ -45,15 +29,15 @@ groups:
           summary: "SIP Exporter is down"
           description: "SIP Exporter instance {{ $labels.instance }} has been down for more than 1 minute."
 
-      - alert: SIPDDoSDetected
+      - alert: SIPHighServerErrorRate
         expr: sip_exporter_isa > 50
         for: 1m
         labels:
           severity: critical
         annotations:
-          summary: "Possible DDoS attack detected"
-          description: "ISA is {{ $value | printf \"%.2f\" }}%. High share of ineffective sessions (408/500/503/504) indicates server overload or DDoS attack."
-          runbook_url: "https://wiki.example.com/runbooks/sip-ddos"
+          summary: "High SIP server error rate"
+          description: "ISA is {{ $value | printf \"%.2f\" }}%. Over half of INVITEs result in server errors (408/500/503/504). Possible causes: server overload, downstream failure, misconfiguration, or DDoS."
+          runbook_url: "https://wiki.example.com/runbooks/sip-high-server-error-rate"
 
       - alert: SIPSessionEstablishmentCritical
         expr: sip_exporter_ser < 20
@@ -113,6 +97,20 @@ groups:
         annotations:
           summary: "High server error rate"
           description: "500 Server Error rate is {{ $value | printf \"%.2f\" }}/s. SIP server may be overloaded or misconfigured."
+
+      - alert: SIPStaleDialogsHigh
+        expr: |
+          (
+            sum by (carrier) (sip_exporter_sessions)
+            / on (carrier)
+              clamp_min(sum by (carrier) (increase(sip_exporter_invite_200_total[30m])), 1)
+          ) * 100 > 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High ratio of stale SIP dialogs"
+          description: "More than half of sessions established in the last 30 minutes are still active on carrier {{ $labels.carrier }}. Possible Session-Expires timeout issues or missing BYE messages."
       ```
 
 ### Registration Health Alerts
@@ -137,7 +135,7 @@ groups:
           description: "REGISTER 401 Unauthorized rate is {{ $value | printf \"%.2f\" }}/s. A flood of failed authentications against the registrar — consider fail2ban or rate-limiting. (REGISTER-specific; distinct from the generic 401 alert.)"
 
       - alert: SIPRegistrationDrop
-        expr: sip_exporter_active_registrations < 5
+        expr: sum(sip_exporter_active_registrations) < 5
         for: 10m
         labels:
           severity: warning
@@ -147,6 +145,48 @@ groups:
 ```
 
 > **401 vs `register_failure_total{code="401"}`:** The generic `sip_exporter_401_total` counts 401s across **all** methods (INVITE auth challenges + REGISTER challenges). `sip_exporter_register_failure_total{code="401"}` is **REGISTER-only**, giving a cleaner brute-force signal. The success-ratio alert uses `register_success_ratio`, which excludes 401/407 from its denominator.
+
+### Fraud Detection Alerts
+
+These alerts detect suspicious SIP patterns: account takeover, registration enumeration, and INVITE flooding. See `docs/fraud-detection.md` for full configuration details.
+
+```yaml
+      - alert: SIPRegistrationCountryChange
+        expr: sip_exporter_register_country_change_total > 0 unless on (carrier, source_country) (sip_exporter_register_country_change_total offset 5m > 0)
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Registration country change detected"
+          description: "A user re-registered from a different country on {{ $labels.carrier }}. Possible account takeover."
+
+      - alert: SIPRegistrationScan
+        expr: rate(sip_exporter_register_scan_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Registration scan attack detected"
+          description: "Single IP is registering many different accounts on {{ $labels.carrier }} from {{ $labels.source_country }}. Possible credential stuffing or enumeration."
+
+      - alert: SIPInviteBurst
+        expr: rate(sip_exporter_invite_burst_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "INVITE burst detected"
+          description: "Single IP is sending an unusually high rate of INVITEs on {{ $labels.carrier }} from {{ $labels.source_country }}. Possible toll fraud, DDoS, or traffic pump."
+
+      - alert: SIPSessionCapacityExhaustion
+        expr: sip_exporter_sessions_utilization > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Session capacity near exhaustion"
+          description: "Carrier {{ $labels.carrier }} is at {{ $value | printf \"%.0f\" }}% of its configured session limit. Plan capacity expansion or investigate traffic surge."
+```
 
 ### Voice Quality Alerts (RFC 6035)
 
@@ -274,19 +314,6 @@ These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) mea
           summary: "Low session completion ratio"
           description: "SCR is {{ $value | printf \"%.1f\" }}%. Many sessions are not completing normally (INVITE without BYE)."
 
-      - alert: SIPStaleDialogsHigh
-        expr: |
-          sip_exporter_sessions
-            / on (carrier, ua_type, source_country)
-              sum by (carrier, ua_type, source_country) (sip_exporter_invite_total)
-            * 100 > 10
-        for: 10m
-        labels:
-          severity: warning
-        annotations:
-          summary: "High ratio of active SIP dialogs"
-          description: "{{ $value | printf \"%.1f\" }}% of INVITEs have active dialogs. Possible Session-Expires timeout issues or missing BYE messages. Check downstream servers."
-
       - alert: SIPSessionDurationTooShort
         expr: histogram_quantile(0.95, sum(rate(sip_exporter_spd_bucket[5m])) by (le)) > 0 and histogram_quantile(0.95, sum(rate(sip_exporter_spd_bucket[5m])) by (le)) < 5
         for: 10m
@@ -313,6 +340,7 @@ The dashboard includes `$carrier`, `$source_country`, and `$destination_country`
 - **Voice Quality (RFC 6035)** — MOS Listening/Conversational Quality, packet loss (NLR), jitter (IAJ), round trip delay (RTD), R-factor (RLQ/RCQ)
 - **RTP Media Analysis** — Active RTP streams, packet rate, packet loss rate, MOS (E-model), jitter p95 — all by codec
 - **SIP Traffic** — Request/response rate breakdown by method and status code
+- **Registrations** — Active registrations, success ratio, failures by code, fraud signals
 - **System Health** — Error rate, ISS rate
 - **Geographic Distribution** — Top source/destination countries by INVITE rate (GeoIP-enriched)
 
@@ -431,7 +459,7 @@ receivers:
 Use alert silences during maintenance windows:
 
 ```bash
-amtool silence add alertname=SIPDDoSDetected duration=2h comment="Planned maintenance"
+amtool silence add alertname=SIPHighServerErrorRate duration=2h comment="Planned maintenance"
 ```
 
 ### Threshold Tuning

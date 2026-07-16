@@ -3667,6 +3667,96 @@
           ],
           "title": "Parse Errors by Type",
           "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisGridShow": true,
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 17
+          },
+          "id": 307,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "rate(sip_exporter_rtp_dropped_total[5m])",
+              "legendFormat": "RTP userspace drops",
+              "refId": "A"
+            }
+          ],
+          "title": "RTP Packets Dropped (Userspace)",
+          "type": "timeseries"
         }
       ],
       "title": "System Health",
@@ -4343,6 +4433,558 @@
       ],
       "title": "Geographic Distribution",
       "type": "row"
+    },
+    {
+      "collapsed": true,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 62
+      },
+      "id": 90,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 5
+                  },
+                  {
+                    "color": "green",
+                    "value": 20
+                  }
+                ]
+              },
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 63
+          },
+          "id": 300,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(sip_exporter_active_registrations{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"})",
+              "legendFormat": "registrations",
+              "refId": "A"
+            }
+          ],
+          "title": "Active Registrations",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 50
+                  },
+                  {
+                    "color": "green",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 6,
+            "y": 63
+          },
+          "id": 301,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "avg(sip_exporter_register_success_ratio{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"})",
+              "legendFormat": "success ratio",
+              "refId": "A"
+            }
+          ],
+          "title": "REGISTER Success %",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              },
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 12,
+            "y": 63
+          },
+          "id": 302,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(sip_exporter_register_scan_total{carrier=~\"$carrier\",source_country=~\"$source_country\"})",
+              "legendFormat": "register_scan",
+              "refId": "A"
+            }
+          ],
+          "title": "Register Scan",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1
+                  }
+                ]
+              },
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 18,
+            "y": 63
+          },
+          "id": 303,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(sip_exporter_register_country_change_total{carrier=~\"$carrier\",source_country=~\"$source_country\"})",
+              "legendFormat": "country_change",
+              "refId": "A"
+            }
+          ],
+          "title": "Country Change",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisGridShow": true,
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 68
+          },
+          "id": 304,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (carrier) (rate(sip_exporter_register_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m]))",
+              "legendFormat": "{{carrier}}",
+              "refId": "A"
+            }
+          ],
+          "title": "REGISTER Rate (by carrier)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisGridShow": true,
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 68
+          },
+          "id": 305,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (carrier) (sip_exporter_active_registrations{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"})",
+              "legendFormat": "{{carrier}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Active Registrations (by carrier)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisGridShow": true,
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 76
+          },
+          "id": 306,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (code) (rate(sip_exporter_register_failure_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m]))",
+              "legendFormat": "code {{code}}",
+              "refId": "A"
+            }
+          ],
+          "title": "REGISTER Failures by Code",
+          "type": "timeseries"
+        }
+      ],
+      "title": "Registrations",
+      "type": "row"
     }
   ],
   "refresh": "5s",
@@ -4390,7 +5032,7 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(sip_exporter_invite_total, carrier)",
+        "definition": "label_values({__name__=~\"sip_exporter_(invite|register)_total\"}, carrier)",
         "hide": 0,
         "includeAll": true,
         "label": "Carrier",
@@ -4399,7 +5041,7 @@
         "options": [],
         "query": {
           "qryType": 1,
-          "query": "label_values(sip_exporter_invite_total, carrier)",
+          "query": "label_values({__name__=~\"sip_exporter_(invite|register)_total\"}, carrier)",
           "refId": "VariableQuery"
         },
         "refresh": 2,
@@ -4422,7 +5064,7 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(sip_exporter_invite_total, ua_type)",
+        "definition": "label_values({__name__=~\"sip_exporter_(invite|register)_total\"}, ua_type)",
         "hide": 0,
         "includeAll": true,
         "label": "UA Type",
@@ -4431,7 +5073,7 @@
         "options": [],
         "query": {
           "qryType": 1,
-          "query": "label_values(sip_exporter_invite_total, ua_type)",
+          "query": "label_values({__name__=~\"sip_exporter_(invite|register)_total\"}, ua_type)",
           "refId": "VariableQuery"
         },
         "refresh": 2,
@@ -4454,7 +5096,7 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(sip_exporter_invite_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}, source_country)",
+        "definition": "label_values({__name__=~\"sip_exporter_(invite|register)_total\",carrier=~\"$carrier\",ua_type=~\"$ua_type\"}, source_country)",
         "hide": 0,
         "includeAll": true,
         "label": "Source Country",
@@ -4463,7 +5105,7 @@
         "options": [],
         "query": {
           "qryType": 1,
-          "query": "label_values(sip_exporter_invite_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\"}, source_country)",
+          "query": "label_values({__name__=~\"sip_exporter_(invite|register)_total\",carrier=~\"$carrier\",ua_type=~\"$ua_type\"}, source_country)",
           "refId": "VariableQuery"
         },
         "refresh": 2,
@@ -4486,7 +5128,7 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(sip_exporter_invite_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}, destination_country)",
+        "definition": "label_values({__name__=~\"sip_exporter_(invite|register)_total\",carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}, destination_country)",
         "hide": 0,
         "includeAll": true,
         "label": "Destination Country",
@@ -4495,7 +5137,7 @@
         "options": [],
         "query": {
           "qryType": 1,
-          "query": "label_values(sip_exporter_invite_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}, destination_country)",
+          "query": "label_values({__name__=~\"sip_exporter_(invite|register)_total\",carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}, destination_country)",
           "refId": "VariableQuery"
         },
         "refresh": 2,
