@@ -76,7 +76,15 @@ func (s *server) Run(cfg *config.App) error {
 	if ifaceErr != nil {
 		return fmt.Errorf("invalid interface config: %w", ifaceErr)
 	}
-	if err := s.exporter.Initialize(ifaces, cfg.BPFBinaryPath, cfg.SIPPort, cfg.SIPSPort, cfg.IgnoreOutgoing, cfg.RTPCapture, cfg.RTPStreamTTL); err != nil {
+	if err := s.exporter.Initialize(exporter.InitConfig{
+		Interfaces:     ifaces,
+		BPFPath:        cfg.BPFBinaryPath,
+		SIPPort:        cfg.SIPPort,
+		SIPSPort:       cfg.SIPSPort,
+		IgnoreOutgoing: cfg.IgnoreOutgoing,
+		RTPCapture:     cfg.RTPCapture,
+		RTPStreamTTL:   cfg.RTPStreamTTL,
+	}); err != nil {
 		return fmt.Errorf("failed initialized exporter: %w", err)
 	}
 

@@ -23,7 +23,7 @@ type mockExporter struct {
 	isAlive          bool
 }
 
-func (m *mockExporter) Initialize(_ []string, _ string, _, _ int, _, _ bool, _ time.Duration) error {
+func (m *mockExporter) Initialize(_ exporter.InitConfig) error {
 	m.initializeCalled = true
 	m.isAlive = true
 	return m.initializeErr

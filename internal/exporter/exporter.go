@@ -179,14 +179,17 @@ type (
 		FraudInviteBurstThreshold int
 		FraudInviteBurstWindow    time.Duration
 	}
+	InitConfig struct {
+		Interfaces     []string
+		BPFPath        string
+		SIPPort        int
+		SIPSPort       int
+		IgnoreOutgoing bool
+		RTPCapture     bool
+		RTPStreamTTL   time.Duration
+	}
 	Exporter interface {
-		Initialize(
-			interfaces []string,
-			path string,
-			sipPort, sipsPort int,
-			ignoreOutgoing, rtpCapture bool,
-			rtpStreamTTL time.Duration,
-		) error
+		Initialize(cfg InitConfig) error
 		IsAlive() bool
 		Close()
 	}
@@ -249,13 +252,8 @@ func checkPrerequisites() error {
 	return nil
 }
 
-func (e *exporter) Initialize(
-	interfaces []string, path string,
-	sipPort, sipsPort int,
-	ignoreOutgoing, rtpCapture bool,
-	rtpStreamTTL time.Duration,
-) error {
-	if len(interfaces) == 0 {
+func (e *exporter) Initialize(cfg InitConfig) error {
+	if len(cfg.Interfaces) == 0 {
 		return errors.New("at least one interface is required")
 	}
 
@@ -264,14 +262,14 @@ func (e *exporter) Initialize(
 	}
 
 	// Apply the config-driven RTP stream expiry (RFC 3550 §6.3.5 idle-timeout).
-	e.mediaTracker.SetTTL(rtpStreamTTL)
+	e.mediaTracker.SetTTL(cfg.RTPStreamTTL)
 
-	collection, err := ebpf.LoadCollection(path)
+	collection, err := ebpf.LoadCollection(cfg.BPFPath)
 	if err != nil {
 		return fmt.Errorf("failed to load BPF collection: %w", err)
 	}
 
-	e.collection, e.sipPort, e.sipsPort = collection, uint16(sipPort), uint16(sipsPort)
+	e.collection, e.sipPort, e.sipsPort = collection, uint16(cfg.SIPPort), uint16(cfg.SIPSPort)
 
 	prog := collection.Programs["bpf_socket_filter"]
 	if prog == nil {
@@ -279,21 +277,57 @@ func (e *exporter) Initialize(
 	}
 
 	// Configure eBPF maps (SIP ports + RTP capture flag)
-	if err = e.configureEBPFMaps(collection, sipPort, sipsPort, rtpCapture); err != nil {
+	if err = e.configureEBPFMaps(collection, cfg.SIPPort, cfg.SIPSPort, cfg.RTPCapture); err != nil {
 		return err
 	}
 
-	// Create AF_PACKET socket with SOCK_RAW
+	progFD := prog.FD()
+
+	createdSocks := make([]int, 0, len(cfg.Interfaces))
+	for _, ifaceName := range cfg.Interfaces {
+		sock, sockErr := createSocketForInterface(ifaceName, progFD, cfg.IgnoreOutgoing)
+		if sockErr != nil {
+			for _, s := range createdSocks {
+				_ = unix.Close(s)
+			}
+			e.collection.Close()
+			e.collection = nil
+			return fmt.Errorf("interface %s: %w", ifaceName, sockErr)
+		}
+		createdSocks = append(createdSocks, sock)
+	}
+	e.socks = createdSocks
+
+	zap.L().Info("all interfaces initialized",
+		zap.Int("interfaces_count", len(e.socks)))
+
+	e.startWorkers()
+
+	e.initialized.Store(true)
+
+	return nil
+}
+
+// createSocketForInterface creates an AF_PACKET socket, binds it to the named
+// interface, applies receive-buffer and timeout options, optionally enables
+// PACKET_IGNORE_OUTGOING, attaches the BPF filter and drains the buffer.
+// On error the socket is closed so no FD leaks.
+func createSocketForInterface(ifaceName string, progFD int, ignoreOutgoing bool) (int, error) {
 	sock, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW, int(htons(ethPAll)))
 	if err != nil {
-		return fmt.Errorf("failed to create AF_PACKET socket: %w", err)
+		return 0, fmt.Errorf("failed to create AF_PACKET socket: %w", err)
 	}
-	e.socks = []int{sock}
+	ok := false
+	defer func() {
+		if !ok {
+			_ = unix.Close(sock)
+		}
+	}()
 
 	socketRecvBufSize := socketRecvBufMB * miB
 	if setErr := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUFFORCE, socketRecvBufSize); setErr != nil {
 		if setErrFallback := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUF, socketRecvBufSize); setErrFallback != nil {
-			return fmt.Errorf("failed to set SO_RCVBUF: %w", setErrFallback)
+			return 0, fmt.Errorf("failed to set SO_RCVBUF: %w", setErrFallback)
 		}
 		zap.L().Warn("SO_RCVBUFFORCE failed, using SO_RCVBUF (buffer capped by rmem_max)", zap.Error(setErr))
 	}
@@ -301,21 +335,22 @@ func (e *exporter) Initialize(
 	var actualBufSize int
 	actualBufSize, err = unix.GetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUF)
 	if err != nil {
-		return fmt.Errorf("failed to get SO_RCVBUF: %w", err)
+		return 0, fmt.Errorf("failed to get SO_RCVBUF: %w", err)
 	}
 	zap.L().Info("socket receive buffer configured",
+		zap.String("interface", ifaceName),
 		zap.Int("requested_bytes", socketRecvBufSize),
 		zap.Int("actual_bytes", actualBufSize))
 
 	if setErr := unix.SetsockoptTimeval(sock, unix.SOL_SOCKET, unix.SO_RCVTIMEO,
 		&unix.Timeval{Sec: int64(socketRcvTimeo / time.Second), Usec: int64(socketRcvTimeo % time.Second / time.Microsecond)}); setErr != nil {
-		return fmt.Errorf("failed to set SO_RCVTIMEO: %w", setErr)
+		return 0, fmt.Errorf("failed to set SO_RCVTIMEO: %w", setErr)
 	}
 
-	ifaceName := interfaces[0]
-	iface, err := net.InterfaceByName(ifaceName)
+	var iface *net.Interface
+	iface, err = net.InterfaceByName(ifaceName)
 	if err != nil {
-		return fmt.Errorf("interface %s not found: %w", ifaceName, err)
+		return 0, fmt.Errorf("interface %s not found: %w", ifaceName, err)
 	}
 
 	sa := &unix.SockaddrLinklayer{
@@ -323,36 +358,28 @@ func (e *exporter) Initialize(
 		Ifindex:  iface.Index,
 	}
 
-	err = unix.Bind(sock, sa)
-	if err != nil {
-		return fmt.Errorf("failed to bind AF_PACKET socket to %s: %w", ifaceName, err)
+	if err = unix.Bind(sock, sa); err != nil {
+		return 0, fmt.Errorf("failed to bind AF_PACKET socket to %s: %w", ifaceName, err)
 	}
 
 	if ignoreOutgoing {
 		if setErr := unix.SetsockoptInt(sock, unix.SOL_PACKET, unix.PACKET_IGNORE_OUTGOING, 1); setErr != nil {
-			return fmt.Errorf("failed to set PACKET_IGNORE_OUTGOING: %w", setErr)
+			return 0, fmt.Errorf("failed to set PACKET_IGNORE_OUTGOING: %w", setErr)
 		}
 		zap.L().Info("PACKET_IGNORE_OUTGOING enabled", zap.String("interface", ifaceName))
 	}
 
-	// Attach eBPF filter
-	progFD := prog.FD()
 	if err = unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_ATTACH_BPF, progFD); err != nil {
-		return fmt.Errorf("failed to attach BPF program: %w", err)
+		return 0, fmt.Errorf("failed to attach BPF program: %w", err)
 	}
 
 	zap.L().Info("eBPF program attached to AF_PACKET socket",
-		zap.String("interface", ifaceName),
-		zap.Int("sip_port", sipPort),
-		zap.Int("sips_port", sipsPort))
+		zap.String("interface", ifaceName))
 
 	drainSocketBuffer(sock)
 
-	e.startWorkers()
-
-	e.initialized.Store(true)
-
-	return nil
+	ok = true
+	return sock, nil
 }
 
 // configureEBPFMaps populates the eBPF SIP-ports map and the RTP-capture flag map.
