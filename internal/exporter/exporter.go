@@ -563,12 +563,17 @@ func (e *exporter) readSocketStats() (uint32, uint32) {
 		return 0, 0
 	}
 
-	stats, err := unix.GetsockoptTpacketStats(e.socks[0], unix.SOL_PACKET, unix.PACKET_STATISTICS)
-	if err != nil {
-		zap.L().Debug("failed to read AF_PACKET stats", zap.Error(err))
-		return 0, 0
+	var totalPackets, totalDrops uint32
+	for _, sock := range e.socks {
+		stats, err := unix.GetsockoptTpacketStats(sock, unix.SOL_PACKET, unix.PACKET_STATISTICS)
+		if err != nil {
+			zap.L().Debug("failed to read AF_PACKET stats", zap.Error(err))
+			continue
+		}
+		totalPackets += stats.Packets
+		totalDrops += stats.Drops
 	}
-	return stats.Packets, stats.Drops
+	return totalPackets, totalDrops
 }
 
 func (e *exporter) readPackets() {
