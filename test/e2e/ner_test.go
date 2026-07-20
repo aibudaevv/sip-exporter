@@ -11,7 +11,7 @@ import (
 
 // TestNER_AllScenarios tests NER metric with various scenarios.
 // NER = (Total INVITE - ineffective) / Total INVITE × 100 (GSMA IR.42)
-// On loopback both numerator and denominator double → NER unchanged (like SER).
+// IGNORE_OUTGOING=true on lo → each packet seen once → NER matches theoretical.
 
 func TestNER_AllScenarios(t *testing.T) {
 	t.Parallel()

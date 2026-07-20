@@ -116,7 +116,7 @@ Environment variables:
 * `SIP_EXPORTER_USER_AGENTS_CONFIG` - path to user-agents YAML config (optional, see [`examples/user_agents.yaml`](examples/user_agents.yaml))
 * `SIP_EXPORTER_RTP_CAPTURE` - enable RTP media capture and analysis (default true)
 * `SIP_EXPORTER_RTP_STREAM_TTL` - idle RTP stream expiry, RFC 3550 §6.3.5 timeout (default 30s)
-* `SIP_EXPORTER_IGNORE_OUTGOING` - ignore outgoing packets, count incoming only (default false)
+* `SIP_EXPORTER_IGNORE_OUTGOING` - loopback/test only: suppress duplicate TX packets on `lo` (default false, do NOT enable in production)
 * `SIP_EXPORTER_GEOIP_COUNTRY_DB` - path to MaxMind GeoLite2-Country.mmdb for `source_country` label (optional)
 * `SIP_EXPORTER_LOCAL_COUNTRY_CODE` - ISO alpha-2 country code for domestic phone-number fallback in `destination_country` (optional, e.g. `RU`)
 * `SIP_EXPORTER_HOST_LABELS` - enable `caller_host`/`called_host` labels on INVITE metrics (default `false`; opt-in — unbounded cardinality, enable only on trusted/bounded deployments)

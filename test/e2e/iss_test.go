@@ -11,7 +11,7 @@ import (
 
 // TestISS_AllScenarios tests ISS counter with various scenarios.
 // ISS counts INVITE responses with 408, 500, 503, 504 status codes.
-// On loopback each response is seen twice → ISS doubles.
+// IGNORE_OUTGOING=true on lo → each packet seen once → ISS matches call count exactly.
 
 func TestISS_AllScenarios(t *testing.T) {
 	t.Parallel()
