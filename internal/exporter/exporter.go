@@ -466,8 +466,10 @@ func drainSocketBuffer(sock int) {
 func (e *exporter) startWorkers() {
 	e.wg.Add(1)
 	go e.readPackets()
-	e.wg.Add(1)
-	go e.readSocket(e.socks[0])
+	for _, sock := range e.socks {
+		e.wg.Add(1)
+		go e.readSocket(sock)
+	}
 	e.wg.Add(1)
 	go e.sipDialogMetricsUpdate()
 }
