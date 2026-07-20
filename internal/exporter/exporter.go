@@ -467,7 +467,7 @@ func (e *exporter) startWorkers() {
 	e.wg.Add(1)
 	go e.readPackets()
 	e.wg.Add(1)
-	go e.readSocket()
+	go e.readSocket(e.socks[0])
 	e.wg.Add(1)
 	go e.sipDialogMetricsUpdate()
 }
@@ -599,12 +599,12 @@ func (e *exporter) acquireBuf() *[]byte {
 	return b
 }
 
-func (e *exporter) readSocket() {
+func (e *exporter) readSocket(sock int) {
 	defer e.wg.Done()
 	buf := make([]byte, readBufSize)
 
 	for {
-		n, err := unix.Read(e.socks[0], buf)
+		n, err := unix.Read(sock, buf)
 		if err != nil {
 			if err == unix.EINTR {
 				continue

@@ -4692,7 +4692,7 @@ func TestExporter_GracefulShutdown(t *testing.T) {
 	e.wg.Add(1)
 	go e.readPackets()
 	e.wg.Add(1)
-	go e.readSocket()
+	go e.readSocket(fds[0])
 	e.wg.Add(1)
 	go e.sipDialogMetricsUpdate()
 
