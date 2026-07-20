@@ -106,7 +106,7 @@ docker pull frzq/sip-exporter:latest
 
 ### Configure
 Environment variables:
-* `SIP_EXPORTER_INTERFACE` - net interface (required)
+* `SIP_EXPORTER_INTERFACE` - one or more network interfaces, comma-separated (required). Examples: `eth0`, `eth0,eth1,eth2`.
 * `SIP_EXPORTER_HTTP_PORT` - http port for prometheus (default 2112)
 * `SIP_EXPORTER_LOGGER_LEVEL` - log level (default info)
 * `SIP_EXPORTER_SIP_PORT` - SIP port (default 5060)
@@ -123,6 +123,8 @@ Environment variables:
 * `SIP_EXPORTER_TELEMETRY` - anonymous usage telemetry, opt-out with `false` (default true)
 
 The container must run with `--privileged` and `--network host` (eBPF requires `CAP_BPF` and access to the network interface). See [Security](docs/SECURITY.md) for details on why this is safe.
+
+> ⚠️ **Multi-interface caveat:** do not specify interfaces that see the same traffic (bond parent + child, bridge + member, VLAN parent + subinterface, duplicate SPAN ports). Doing so will double-count metrics. When in doubt, list only physical NICs.
 
 ## Metrics
 

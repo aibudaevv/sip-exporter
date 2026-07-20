@@ -104,7 +104,7 @@ docker pull frzq/sip-exporter:latest
 ### Конфигурация
 
 Переменные окружения:
-* `SIP_EXPORTER_INTERFACE` — сетевой интерфейс (обязательно)
+* `SIP_EXPORTER_INTERFACE` — один или несколько сетевых интерфейсов через запятую (обязательно). Примеры: `eth0`, `eth0,eth1,eth2`.
 * `SIP_EXPORTER_HTTP_PORT` — HTTP-порт для Prometheus (по умолчанию 2112)
 * `SIP_EXPORTER_LOGGER_LEVEL` — уровень логирования (по умолчанию info)
 * `SIP_EXPORTER_SIP_PORT` — SIP-порт (по умолчанию 5060)
@@ -121,6 +121,8 @@ docker pull frzq/sip-exporter:latest
 * `SIP_EXPORTER_TELEMETRY` — анонимная телеметрия использования, отключается значением `false` (по умолчанию true)
 
 Контейнер должен запускаться с `--privileged` и `--network host` (eBPF требует `CAP_BPF` и доступ к сетевому интерфейсу). Подробнее о безопасности — в [Безопасность](docs/SECURITY.ru.md).
+
+> ⚠️ **Особенность мульти-интерфейса:** не указывайте интерфейсы, которые видят один и тот же трафик (bond parent + child, bridge + member, VLAN parent + subinterface, дублирующие SPAN-порты). Это приведёт к задвоению метрик. Если сомневаетесь — указывайте только физические NIC.
 
 ## Метрики
 
