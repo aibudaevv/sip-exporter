@@ -4675,7 +4675,7 @@ func TestExporter_GracefulShutdown(t *testing.T) {
 	require.NoError(t, unix.SetsockoptTimeval(fds[0], unix.SOL_SOCKET, unix.SO_RCVTIMEO, tv))
 
 	e := &exporter{
-		sock:     fds[0],
+		socks:    []int{fds[0]},
 		messages: make(chan *[]byte, 10),
 		done:     make(chan struct{}),
 		services: services{

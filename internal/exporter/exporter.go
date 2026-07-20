@@ -127,7 +127,7 @@ type (
 
 	exporter struct {
 		collection       *ebpf.Collection
-		sock             int
+		socks            []int
 		messages         chan *[]byte
 		done             chan struct{}
 		wg               sync.WaitGroup
@@ -288,7 +288,7 @@ func (e *exporter) Initialize(
 	if err != nil {
 		return fmt.Errorf("failed to create AF_PACKET socket: %w", err)
 	}
-	e.sock = sock
+	e.socks = []int{sock}
 
 	socketRecvBufSize := socketRecvBufMB * miB
 	if setErr := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUFFORCE, socketRecvBufSize); setErr != nil {
@@ -519,8 +519,8 @@ func (e *exporter) Close() {
 		if e.collection != nil {
 			e.collection.Close()
 		}
-		if e.sock != 0 {
-			_ = unix.Close(e.sock)
+		for _, s := range e.socks {
+			_ = unix.Close(s)
 		}
 		e.wg.Wait()
 		close(e.messages)
@@ -532,11 +532,11 @@ func (e *exporter) IsAlive() bool {
 }
 
 func (e *exporter) readSocketStats() (uint32, uint32) {
-	if e.sock == 0 {
+	if len(e.socks) == 0 {
 		return 0, 0
 	}
 
-	stats, err := unix.GetsockoptTpacketStats(e.sock, unix.SOL_PACKET, unix.PACKET_STATISTICS)
+	stats, err := unix.GetsockoptTpacketStats(e.socks[0], unix.SOL_PACKET, unix.PACKET_STATISTICS)
 	if err != nil {
 		zap.L().Debug("failed to read AF_PACKET stats", zap.Error(err))
 		return 0, 0
@@ -577,7 +577,7 @@ func (e *exporter) readSocket() {
 	buf := make([]byte, readBufSize)
 
 	for {
-		n, err := unix.Read(e.sock, buf)
+		n, err := unix.Read(e.socks[0], buf)
 		if err != nil {
 			if err == unix.EINTR {
 				continue
