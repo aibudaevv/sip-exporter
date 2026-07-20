@@ -181,7 +181,7 @@ type (
 	}
 	Exporter interface {
 		Initialize(
-			interfaceName string,
+			interfaces []string,
 			path string,
 			sipPort, sipsPort int,
 			ignoreOutgoing, rtpCapture bool,
@@ -250,11 +250,15 @@ func checkPrerequisites() error {
 }
 
 func (e *exporter) Initialize(
-	interfaceName string, path string,
+	interfaces []string, path string,
 	sipPort, sipsPort int,
 	ignoreOutgoing, rtpCapture bool,
 	rtpStreamTTL time.Duration,
 ) error {
+	if len(interfaces) == 0 {
+		return errors.New("at least one interface is required")
+	}
+
 	if err := checkPrerequisites(); err != nil {
 		return err
 	}
@@ -308,7 +312,7 @@ func (e *exporter) Initialize(
 		return fmt.Errorf("failed to set SO_RCVTIMEO: %w", setErr)
 	}
 
-	ifaceName := interfaceName
+	ifaceName := interfaces[0]
 	iface, err := net.InterfaceByName(ifaceName)
 	if err != nil {
 		return fmt.Errorf("interface %s not found: %w", ifaceName, err)
@@ -338,9 +342,11 @@ func (e *exporter) Initialize(
 	}
 
 	zap.L().Info("eBPF program attached to AF_PACKET socket",
-		zap.String("interface", interfaceName),
+		zap.String("interface", ifaceName),
 		zap.Int("sip_port", sipPort),
 		zap.Int("sips_port", sipsPort))
+
+	drainSocketBuffer(sock)
 
 	e.startWorkers()
 
@@ -416,6 +422,18 @@ func (e *exporter) resolveDestinationCountry(toUser []byte) string {
 
 func (e *exporter) resolveUA(userAgent []byte) string {
 	return e.uaClassifier.Classify(userAgent)
+}
+
+func drainSocketBuffer(sock int) {
+	drainBuf := make([]byte, readBufSize)
+	_ = unix.SetNonblock(sock, true)
+	for {
+		_, err := unix.Read(sock, drainBuf)
+		if err != nil {
+			break
+		}
+	}
+	_ = unix.SetNonblock(sock, false)
 }
 
 func (e *exporter) startWorkers() {
