@@ -56,7 +56,7 @@ func TestServer_Run_Success(t *testing.T) {
 	}
 
 	cfg := &config.App{
-		Interface:     "lo",
+		Interfaces:    "lo",
 		Port:          "2113",
 		BPFBinaryPath: "/tmp/nonexistent.o",
 		SIPPort:       5060,
@@ -96,8 +96,8 @@ func TestServer_Run_InitializeError(t *testing.T) {
 	}
 
 	cfg := &config.App{
-		Interface: "lo",
-		Port:      "2112",
+		Interfaces: "lo",
+		Port:       "2112",
 	}
 
 	err := s.Run(cfg)
@@ -119,8 +119,8 @@ func TestServer_Run_ContextDeadline(t *testing.T) {
 	}
 
 	cfg := &config.App{
-		Interface: "lo",
-		Port:      "2114",
+		Interfaces: "lo",
+		Port:       "2114",
 	}
 
 	done := make(chan struct{})

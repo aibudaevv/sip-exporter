@@ -72,7 +72,7 @@ func NewServer(cfg Config) Server {
 }
 
 func (s *server) Run(cfg *config.App) error {
-	if err := s.exporter.Initialize(cfg.Interface, cfg.BPFBinaryPath, cfg.SIPPort, cfg.SIPSPort, cfg.IgnoreOutgoing, cfg.RTPCapture, cfg.RTPStreamTTL); err != nil {
+	if err := s.exporter.Initialize(cfg.Interfaces, cfg.BPFBinaryPath, cfg.SIPPort, cfg.SIPSPort, cfg.IgnoreOutgoing, cfg.RTPCapture, cfg.RTPStreamTTL); err != nil {
 		return fmt.Errorf("failed initialized exporter: %w", err)
 	}
 

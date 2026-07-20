@@ -45,7 +45,7 @@ func TestGetConfig_Defaults(t *testing.T) {
 	require.NotNil(t, cfg)
 	require.Equal(t, "info", cfg.LogLevel)
 	require.Equal(t, "2112", cfg.Port)
-	require.Equal(t, "eth0", cfg.Interface)
+	require.Equal(t, "eth0", cfg.Interfaces)
 	require.Equal(t, "/usr/local/bin/sip.o", cfg.BPFBinaryPath)
 	require.Equal(t, 5060, cfg.SIPPort)
 	require.Equal(t, 5061, cfg.SIPSPort)
@@ -66,7 +66,7 @@ func TestGetConfig_CustomValues(t *testing.T) {
 	require.NotNil(t, cfg)
 	require.Equal(t, "debug", cfg.LogLevel)
 	require.Equal(t, "9090", cfg.Port)
-	require.Equal(t, "lo", cfg.Interface)
+	require.Equal(t, "lo", cfg.Interfaces)
 	require.Equal(t, "/custom/path/sip.o", cfg.BPFBinaryPath)
 	require.Equal(t, 6060, cfg.SIPPort)
 	require.Equal(t, 6061, cfg.SIPSPort)
@@ -296,4 +296,45 @@ func TestGetConfig_PortsEqual(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, cfg)
 	require.Contains(t, err.Error(), "must differ")
+}
+
+func TestApp_ParsedInterfaces(t *testing.T) {
+	cases := []struct {
+		name      string
+		input     string
+		want      []string
+		wantError bool
+	}{
+		{name: "single interface", input: "eth0", want: []string{"eth0"}},
+		{name: "two interfaces", input: "eth0,eth1", want: []string{"eth0", "eth1"}},
+		{name: "three interfaces", input: "eth0,eth1,eth2", want: []string{"eth0", "eth1", "eth2"}},
+		{name: "with whitespace around names", input: " eth0 , eth1 ", want: []string{"eth0", "eth1"}},
+		{name: "trailing comma", input: "eth0,", want: []string{"eth0"}},
+		{name: "leading comma", input: ",eth0", want: []string{"eth0"}},
+		{name: "empty element in middle", input: "eth0,,eth1", want: []string{"eth0", "eth1"}},
+		{name: "whitespace element in middle", input: "eth0, ,eth1", want: []string{"eth0", "eth1"}},
+		{name: "duplicate adjacent", input: "eth0,eth0", want: []string{"eth0"}},
+		{name: "duplicate three times", input: "eth0,eth0,eth0", want: []string{"eth0"}},
+		{name: "duplicate non-adjacent", input: "eth0,eth1,eth0", want: []string{"eth0", "eth1"}},
+		{name: "preserves order first occurrence", input: "eth1,eth0,eth1", want: []string{"eth1", "eth0"}},
+		{name: "empty string", input: "", want: nil, wantError: true},
+		{name: "only comma", input: ",", want: nil, wantError: true},
+		{name: "multiple commas", input: ",,,", want: nil, wantError: true},
+		{name: "whitespace and commas", input: " , , ", want: nil, wantError: true},
+		{name: "only spaces", input: "   ", want: nil, wantError: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &App{Interfaces: tc.input}
+			got, err := cfg.ParsedInterfaces()
+			if tc.wantError {
+				require.Error(t, err)
+				require.Nil(t, got)
+				require.Contains(t, err.Error(), "SIP_EXPORTER_INTERFACE")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
 }
