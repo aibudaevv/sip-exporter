@@ -138,3 +138,44 @@ func TestMultiInterface_RegisterOnBothNICs(t *testing.T) {
 
 	assertSelfMonitoringHealthy(t, env.endpoint)
 }
+
+// TestMultiInterface_InviteFlowOnBothNICs verifies INVITE dialog matching
+// across multiple interfaces: INVITE+100+200+ACK+BYE flows on lo and on a veth
+// pair, asserting aggregated INVITE metrics and SER.
+//
+// The veth flow exercises cross-NIC dialog correlation: INVITE and BYE are
+// captured on veth0a RX (UAC→UAS), 200 OK responses on veth0b RX (UAS→UAC).
+// The dialog tracker must correlate both halves by Call-ID regardless of
+// which NIC delivered them.
+func TestMultiInterface_InviteFlowOnBothNICs(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	setupVethPair(t)
+
+	extraEnv := map[string]string{
+		"SIP_EXPORTER_INTERFACE": "lo," + veth0aName + "," + veth0bName,
+	}
+	env := newTestEnvWithExtraEnv(ctx, t, "", extraEnv)
+
+	callCount := 10
+
+	// Flow 1: loopback. UAC and UAS both on 127.0.0.1.
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", callCount, env)
+
+	// Flow 2: veth pair. UAS binds veth0a, UAC binds veth0b.
+	runSippScenarioWithIPs(ctx, t, "uas_100.xml", "uac_100.xml", callCount, env, veth0aIP, veth0bIP)
+
+	inviteTotal := getMetric(t, env.endpoint, "sip_exporter_invite_total")
+	t.Logf("invite_total=%.0f (want >= %d)", inviteTotal, 2*callCount)
+	require.GreaterOrEqual(t, inviteTotal, 2.0*callCount,
+		"INVITE seen on both interfaces")
+
+	// SER should be 100% — uas_100.xml sends 200 OK for every call.
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"))
+	ser := getSER(t, env.endpoint)
+	t.Logf("SER = %.2f (want 100.0)", ser)
+	require.InDelta(t, 100.0, ser, ratioDelta,
+		"all calls successful on both NICs")
+
+	waitForSessionsZero(t, env.endpoint)
+}
