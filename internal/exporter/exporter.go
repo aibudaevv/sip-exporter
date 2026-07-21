@@ -513,9 +513,22 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		received, dropped := e.readSocketStats()
 		e.services.metricser.SocketStats(received, dropped)
 		e.services.metricser.UpdateChannelLength(len(e.messages))
-		e.services.metricser.UpdateTrackerSize("register", len(e.registerTracker))
-		e.services.metricser.UpdateTrackerSize("invite", len(e.inviteTracker))
-		e.services.metricser.UpdateTrackerSize("options", len(e.optionsTracker))
+
+		e.registerMutex.RLock()
+		registerCount := len(e.registerTracker)
+		e.registerMutex.RUnlock()
+
+		e.inviteMutex.RLock()
+		inviteCount := len(e.inviteTracker)
+		e.inviteMutex.RUnlock()
+
+		e.optionsMutex.RLock()
+		optionsCount := len(e.optionsTracker)
+		e.optionsMutex.RUnlock()
+
+		e.services.metricser.UpdateTrackerSize("register", registerCount)
+		e.services.metricser.UpdateTrackerSize("invite", inviteCount)
+		e.services.metricser.UpdateTrackerSize("options", optionsCount)
 		e.services.metricser.UpdateTrackerSize("rtp", e.mediaTracker.StreamCount())
 		e.updateRTPMetrics()
 		e.services.metricser.UpdateActiveDialogs(s)

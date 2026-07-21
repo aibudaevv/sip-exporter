@@ -5198,3 +5198,61 @@ func TestResolveSourceCountry(t *testing.T) {
 		})
 	}
 }
+
+// TestSipDialogMetricsUpdate_TrackerLenNoRace verifies that len() calls on
+// registerTracker, inviteTracker, and optionsTracker in sipDialogMetricsUpdate
+// do not race with concurrent writes from readPackets.
+//
+// Run with: go test -race -run TestSipDialogMetricsUpdate_TrackerLenNoRace
+//
+// Before S14-7.2 fix, the three len() calls at exporter.go:516-518 read map
+// headers without holding the matching mutex, while readPackets (simulated
+// here by a writer goroutine) mutates those maps under lock. Under -race this
+// produces "concurrent map read and map write" — a fatal runtime error.
+func TestSipDialogMetricsUpdate_TrackerLenNoRace(t *testing.T) {
+	e := newRollbackExporter()
+
+	// Writer goroutine: intensively writes/deletes tracker entries under locks,
+	// simulating the readPackets consumer mutating maps while the metrics
+	// goroutine tries to read len().
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		deadline := time.Now().Add(2 * time.Second)
+		i := 0
+		for time.Now().Before(deadline) {
+			key := fmt.Sprintf("k%d", i)
+			e.registerMutex.Lock()
+			e.registerTracker[key] = registerEntry{timestamp: time.Now()}
+			e.registerMutex.Unlock()
+
+			e.inviteMutex.Lock()
+			e.inviteTracker[key] = inviteEntry{timestamp: time.Now()}
+			e.inviteMutex.Unlock()
+
+			e.optionsMutex.Lock()
+			e.optionsTracker[key] = optionsEntry{timestamp: time.Now()}
+			e.optionsMutex.Unlock()
+
+			if i > 100 {
+				oldKey := fmt.Sprintf("k%d", i-100)
+				e.registerMutex.Lock()
+				delete(e.registerTracker, oldKey)
+				e.registerMutex.Unlock()
+			}
+			i++
+		}
+	}()
+
+	// Start metrics update goroutine (reads len() of trackers every 1s).
+	e.wg.Add(1)
+	go e.sipDialogMetricsUpdate()
+
+	select {
+	case <-writerDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("writer did not finish within 3s")
+	}
+
+	require.NotPanics(t, func() { e.Close() })
+}
