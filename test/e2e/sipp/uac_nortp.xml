@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="ISO-8859-1" ?>
-<scenario name="Sprint5 UAC (INVITE+SDP, no built-in RTP — test injects controlled RTP)">
+<scenario name="UAC no-RTP (INVITE+SDP, test injects controlled RTP)">
     <send retrans="500">
         <![CDATA[
         INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
