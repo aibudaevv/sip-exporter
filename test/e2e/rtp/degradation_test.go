@@ -138,7 +138,7 @@ func TestRTP_NetemDegradation(t *testing.T) {
 	ports := allocatePortsN(5)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, "0", true, "")
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, "0", testInterface, true, "")
 
 	applyNetem(t,
 		[]string{"delay", "30ms", "10ms", "loss", "50%"},
@@ -193,7 +193,7 @@ func TestRTP_NetemPacketLoss(t *testing.T) {
 	ports := allocatePortsN(5)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, "0", true, "")
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, "0", testInterface, true, "")
 
 	applyNetem(t,
 		[]string{"loss", "30%"},

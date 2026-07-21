@@ -66,9 +66,13 @@ func allocatePortsN(n int) []string {
 	return out
 }
 
-// startExporter brings up the exporter container on lo with the given RTP capture
-// setting and returns its /metrics endpoint.
-func startExporter(ctx context.Context, t *testing.T, httpPort, sipPort, sipsPort string, rtpCapture bool, ttl string) string {
+// startExporter brings up the exporter container on the given interface(s) with
+// the given RTP capture setting and returns its /metrics endpoint.
+func startExporter(
+	ctx context.Context, t *testing.T,
+	httpPort, sipPort, sipsPort, iface string,
+	rtpCapture bool, ttl string,
+) string {
 	t.Helper()
 
 	startCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
@@ -85,7 +89,7 @@ func startExporter(ctx context.Context, t *testing.T, httpPort, sipPort, sipsPor
 	}
 
 	env := map[string]string{
-		"SIP_EXPORTER_INTERFACE":       testInterface,
+		"SIP_EXPORTER_INTERFACE":       iface,
 		"SIP_EXPORTER_HTTP_PORT":       httpPort,
 		"SIP_EXPORTER_SIP_PORT":        sipPort,
 		"SIP_EXPORTER_SIPS_PORT":       sipsPort,
@@ -331,7 +335,7 @@ func TestRTP_ReachesApp_WithCapture(t *testing.T) {
 	rtpPortNum, err := strconv.Atoi(rtpPort)
 	require.NoError(t, err)
 
-	endpoint := startExporter(context.Background(), t, httpPort, sipPort, sipsPort, true, "")
+	endpoint := startExporter(context.Background(), t, httpPort, sipPort, sipsPort, testInterface, true, "")
 
 	// Baseline after the exporter settles.
 	require.Eventually(t, func() bool {
@@ -361,7 +365,7 @@ func TestRTP_Dropped_WhenCaptureOff(t *testing.T) {
 	rtpPortNum, err := strconv.Atoi(rtpPort)
 	require.NoError(t, err)
 
-	endpoint := startExporter(context.Background(), t, httpPort, sipPort, sipsPort, false, "")
+	endpoint := startExporter(context.Background(), t, httpPort, sipPort, sipsPort, testInterface, false, "")
 
 	time.Sleep(1500 * time.Millisecond)
 	before := getSocketPacketsReceived(t, endpoint)
@@ -389,7 +393,7 @@ func TestRTP_UncorrelatedDropped(t *testing.T) {
 	rtpPortNum, err := strconv.Atoi(rtpPort)
 	require.NoError(t, err)
 
-	endpoint := startExporter(context.Background(), t, httpPort, sipPort, sipsPort, true, "")
+	endpoint := startExporter(context.Background(), t, httpPort, sipPort, sipsPort, testInterface, true, "")
 
 	time.Sleep(1500 * time.Millisecond)
 	beforeSocket := getSocketPacketsReceived(t, endpoint)

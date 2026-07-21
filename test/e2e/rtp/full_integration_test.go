@@ -18,7 +18,7 @@ import (
 func TestRTP_BothDirections(t *testing.T) {
 	ports := allocatePortsN(5)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, "0", true, "")
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, "0", testInterface, true, "")
 
 	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 
@@ -117,7 +117,7 @@ func TestRTP_FullIntegration_MetricsVerified(t *testing.T) {
 func TestRTP_StreamExpiry(t *testing.T) {
 	ports := allocatePortsN(5)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, "0", true, "2s")
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, "0", testInterface, true, "2s")
 
 	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 
