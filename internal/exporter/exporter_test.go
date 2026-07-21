@@ -5256,3 +5256,48 @@ func TestSipDialogMetricsUpdate_TrackerLenNoRace(t *testing.T) {
 
 	require.NotPanics(t, func() { e.Close() })
 }
+
+// TestReadSocket_FailStopNoSystemError verifies that readSocket returns cleanly
+// without incrementing SystemError when the socket becomes invalid (EBADF).
+// This is the same return-path used for ENETDOWN/ENODEV hot-unplug (S14-7.1):
+// the goroutine stops silently rather than spamming Error+SystemError every
+// second on a dead NIC.
+//
+// A dedicated ENETDOWN test requires veth-pair infrastructure (root-gated)
+// and is deferred to S15 (S14-7.5 readSocket error-branch MC/DC tests).
+func TestReadSocket_FailStopNoSystemError(t *testing.T) {
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM, 0)
+	require.NoError(t, err)
+	defer unix.Close(fds[1])
+
+	tv := &unix.Timeval{Sec: 1}
+	require.NoError(t, unix.SetsockoptTimeval(fds[0], unix.SOL_SOCKET, unix.SO_RCVTIMEO, tv))
+
+	mm := &mockMetricser{}
+	e := &exporter{
+		messages: make(chan *[]byte, 10),
+		done:     make(chan struct{}),
+		services: services{metricser: mm, dialoger: &mockDialoger{}},
+	}
+
+	e.wg.Add(1)
+	go e.readSocket(fds[0])
+
+	// Close the FD → EBADF in readSocket → clean return, no SystemError.
+	unix.Close(fds[0])
+
+	done := make(chan struct{})
+	go func() {
+		e.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("readSocket did not exit within 3s after FD closed")
+	}
+
+	require.False(t, mm.systemErrorCalled,
+		"SystemError should not be called on fail-stop (EBADF/ENETDOWN/ENODEV)")
+}

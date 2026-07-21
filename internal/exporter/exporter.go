@@ -619,6 +619,29 @@ func (e *exporter) acquireBuf() *[]byte {
 	return b
 }
 
+// handleReadError classifies a unix.Read error from readSocket. Returns true
+// if the goroutine should stop (return); false to continue the read loop.
+// SystemError is incremented for unexpected transient errors.
+func (e *exporter) handleReadError(err error) bool {
+	if errors.Is(err, unix.EINTR) {
+		return false
+	}
+	if errors.Is(err, unix.EBADF) || errors.Is(err, unix.ENOTSOCK) {
+		zap.L().Info("socket closed, shutting down readSocket")
+		return true
+	}
+	if errors.Is(err, unix.ENETDOWN) || errors.Is(err, unix.ENODEV) {
+		zap.L().Warn("interface went down (hot-unplug), stopping readSocket for this NIC",
+			zap.Error(err))
+		return true
+	}
+	if !errors.Is(err, unix.EAGAIN) {
+		zap.L().Error("socket read error", zap.Error(err))
+		e.services.metricser.SystemError()
+	}
+	return false
+}
+
 func (e *exporter) readSocket(sock int) {
 	defer e.wg.Done()
 	buf := make([]byte, readBufSize)
@@ -626,16 +649,8 @@ func (e *exporter) readSocket(sock int) {
 	for {
 		n, err := unix.Read(sock, buf)
 		if err != nil {
-			if err == unix.EINTR {
-				continue
-			}
-			if errors.Is(err, unix.EBADF) || errors.Is(err, unix.ENOTSOCK) {
-				zap.L().Info("socket closed, shutting down readSocket")
+			if e.handleReadError(err) {
 				return
-			}
-			if err != unix.EAGAIN {
-				zap.L().Error("socket read error", zap.Error(err))
-				e.services.metricser.SystemError()
 			}
 			select {
 			case <-e.done:
