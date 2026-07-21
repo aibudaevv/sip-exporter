@@ -456,3 +456,241 @@ func TestMultiInterface_ASR(t *testing.T) {
 		})
 	}
 }
+
+// TestMultiInterface_SDC verifies SDC (Session Disconnect Count) with traffic on
+// BOTH lo and veth pair simultaneously. Each subtest starts a fresh exporter and
+// runs flows on both interfaces, then verifies per-host metrics to prove multi-NIC
+// capture.
+//
+// SDC counts completed sessions (BYE→200 OK). waitForSessionsZero is called
+// before the SDC assertion because SDC only increments when a session completes
+// (BYE processed). The critical multi-NIC assertion: invite_200_total{called_host=
+// "10.10.0.1"} >= 10 proves veth0b captured the 200 OK, and SDC reflects sessions
+// that completed via cross-NIC BYE→200 OK correlation.
+func TestMultiInterface_SDC(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	setupVethPair(t)
+
+	extraEnv := map[string]string{
+		"SIP_EXPORTER_INTERFACE":   "lo," + veth0aName + "," + veth0bName,
+		"SIP_EXPORTER_HOST_LABELS": "true",
+	}
+	callCount := 10
+
+	tests := []struct {
+		description    string
+		loUAS          string
+		loUAC          string
+		vethUAS        string
+		vethUAC        string
+		wantLoInvite   float64
+		wantLo200OK    float64
+		wantVethInvite float64
+		wantVeth200OK  float64
+		wantSDC        float64
+	}{
+		{
+			description:    "lo success + veth success → SDC = 20",
+			loUAS:          "uas_100.xml",
+			loUAC:          "uac_100.xml",
+			vethUAS:        "uas_100.xml",
+			vethUAC:        "uac_100.xml",
+			wantLoInvite:   float64(callCount),
+			wantLo200OK:    float64(callCount),
+			wantVethInvite: float64(callCount),
+			wantVeth200OK:  float64(callCount),
+			wantSDC:        2.0 * float64(callCount),
+		},
+		{
+			description:    "lo success + veth fail → SDC = 10",
+			loUAS:          "uas_100.xml",
+			loUAC:          "uac_100.xml",
+			vethUAS:        "uas_0.xml",
+			vethUAC:        "uac_0.xml",
+			wantLoInvite:   float64(callCount),
+			wantLo200OK:    float64(callCount),
+			wantVethInvite: float64(callCount),
+			wantVeth200OK:  0,
+			wantSDC:        float64(callCount),
+		},
+		{
+			description:    "lo fail + veth fail → SDC = 0",
+			loUAS:          "uas_0.xml",
+			loUAC:          "uac_0.xml",
+			vethUAS:        "uas_0.xml",
+			vethUAC:        "uac_0.xml",
+			wantLoInvite:   float64(callCount),
+			wantLo200OK:    0,
+			wantVethInvite: float64(callCount),
+			wantVeth200OK:  0,
+			wantSDC:        0.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.description, func(t *testing.T) {
+			t.Parallel()
+			env := newTestEnvWithExtraEnv(ctx, t, "", extraEnv)
+
+			runSippScenario(ctx, t, tt.loUAS, tt.loUAC, callCount, env)
+			runSippScenarioWithIPs(ctx, t, tt.vethUAS, tt.vethUAC, callCount, env, veth0aIP, veth0bIP)
+
+			loLabel := `called_host="127.0.0.1"`
+			gotLoInvite := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", loLabel)
+			gotLo200OK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", loLabel)
+
+			vethLabel := `called_host="10.10.0.1"`
+			gotVethInvite := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", vethLabel)
+			gotVeth200OK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel)
+
+			require.InDelta(t, tt.wantLoInvite, gotLoInvite, ratioDelta, "lo INVITE: %s", tt.description)
+			require.InDelta(t, tt.wantLo200OK, gotLo200OK, ratioDelta, "lo 200 OK: %s", tt.description)
+			require.InDelta(t, tt.wantVethInvite, gotVethInvite, ratioDelta, "veth INVITE: %s", tt.description)
+			require.InDelta(t, tt.wantVeth200OK, gotVeth200OK, ratioDelta, "veth 200 OK: %s", tt.description)
+
+			// SDC only increments when sessions complete (BYE→200 OK processed).
+			// Wait for all sessions to finish before checking SDC.
+			waitForSessionsZero(t, env.endpoint)
+
+			require.True(t, metricExists(t, env.endpoint, "sip_exporter_sdc_total"), "SDC metric must exist")
+			gotSDC := getSDC(t, env.endpoint)
+
+			t.Logf("lo: invite %.0f/%.0f, 200 OK %.0f/%.0f | veth: invite %.0f/%.0f, 200 OK %.0f/%.0f | SDC %.0f/%.0f",
+				gotLoInvite, tt.wantLoInvite, gotLo200OK, tt.wantLo200OK,
+				gotVethInvite, tt.wantVethInvite, gotVeth200OK, tt.wantVeth200OK,
+				gotSDC, tt.wantSDC)
+
+			require.InDelta(t, tt.wantSDC, gotSDC, ratioDelta, "SDC: %s", tt.description)
+		})
+	}
+}
+
+// TestMultiInterface_PDD verifies PDD (Post Dial Delay) measurement with traffic
+// on BOTH lo and veth pair simultaneously. Each subtest starts a fresh exporter
+// and runs flows on both interfaces, then verifies per-host metrics to prove
+// multi-NIC capture.
+//
+// PDD is measured when 180 Ringing is received for an INVITE. The INVITE arrives
+// on veth0a RX (UAC→UAS), the 180 Ringing arrives on veth0b RX (UAS→UAC). The
+// dialog tracker must correlate both halves by Call-ID to measure the delay.
+// uas_100.xml sends 180 Ringing; uas_0.xml (486 Busy) does not.
+//
+// The critical multi-NIC assertion in scenario 1: pdd_count >= 2*callCount proves
+// 180 Ringing was captured on BOTH lo and veth0b, and the dialog tracker measured
+// PDD from cross-NIC INVITE↔180 pairs.
+func TestMultiInterface_PDD(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	setupVethPair(t)
+
+	extraEnv := map[string]string{
+		"SIP_EXPORTER_INTERFACE":   "lo," + veth0aName + "," + veth0bName,
+		"SIP_EXPORTER_HOST_LABELS": "true",
+	}
+	callCount := 10
+
+	tests := []struct {
+		description    string
+		loUAS          string
+		loUAC          string
+		vethUAS        string
+		vethUAC        string
+		wantLoInvite   float64
+		wantLo200OK    float64
+		wantVethInvite float64
+		wantVeth200OK  float64
+		wantPDDCount   float64
+	}{
+		{
+			description:    "lo 180 + veth 180 → PDD from both NICs",
+			loUAS:          "uas_100.xml",
+			loUAC:          "uac_100.xml",
+			vethUAS:        "uas_100.xml",
+			vethUAC:        "uac_100.xml",
+			wantLoInvite:   float64(callCount),
+			wantLo200OK:    float64(callCount),
+			wantVethInvite: float64(callCount),
+			wantVeth200OK:  float64(callCount),
+			wantPDDCount:   2.0 * float64(callCount),
+		},
+		{
+			description:    "lo 180 + veth no 180 → PDD from lo only",
+			loUAS:          "uas_100.xml",
+			loUAC:          "uac_100.xml",
+			vethUAS:        "uas_0.xml",
+			vethUAC:        "uac_0.xml",
+			wantLoInvite:   float64(callCount),
+			wantLo200OK:    float64(callCount),
+			wantVethInvite: float64(callCount),
+			wantVeth200OK:  0,
+			wantPDDCount:   float64(callCount),
+		},
+		{
+			description:    "lo no 180 + veth no 180 → no PDD measured",
+			loUAS:          "uas_0.xml",
+			loUAC:          "uac_0.xml",
+			vethUAS:        "uas_0.xml",
+			vethUAC:        "uac_0.xml",
+			wantLoInvite:   float64(callCount),
+			wantLo200OK:    0,
+			wantVethInvite: float64(callCount),
+			wantVeth200OK:  0,
+			wantPDDCount:   0.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.description, func(t *testing.T) {
+			t.Parallel()
+			env := newTestEnvWithExtraEnv(ctx, t, "", extraEnv)
+
+			runSippScenario(ctx, t, tt.loUAS, tt.loUAC, callCount, env)
+			runSippScenarioWithIPs(ctx, t, tt.vethUAS, tt.vethUAC, callCount, env, veth0aIP, veth0bIP)
+
+			loLabel := `called_host="127.0.0.1"`
+			gotLoInvite := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", loLabel)
+			gotLo200OK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", loLabel)
+
+			vethLabel := `called_host="10.10.0.1"`
+			gotVethInvite := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", vethLabel)
+			gotVeth200OK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel)
+
+			require.InDelta(t, tt.wantLoInvite, gotLoInvite, ratioDelta, "lo INVITE: %s", tt.description)
+			require.InDelta(t, tt.wantLo200OK, gotLo200OK, ratioDelta, "lo 200 OK: %s", tt.description)
+			require.InDelta(t, tt.wantVethInvite, gotVethInvite, ratioDelta, "veth INVITE: %s", tt.description)
+			require.InDelta(t, tt.wantVeth200OK, gotVeth200OK, ratioDelta, "veth 200 OK: %s", tt.description)
+
+			// PDD histogram: no output lines if zero observations were made.
+			// For wantPDDCount > 0 the metric must exist; for 0 it may be absent.
+			if tt.wantPDDCount > 0 {
+				require.True(t, metricExists(t, env.endpoint, "sip_exporter_pdd_count"),
+					"PDD count metric must exist: %s", tt.description)
+				pddCount := getMetric(t, env.endpoint, "sip_exporter_pdd_count")
+				pdd := getPDD(t, env.endpoint)
+
+				t.Logf("lo: invite %.0f/%.0f, 200 OK %.0f/%.0f | veth: invite %.0f/%.0f, 200 OK %.0f/%.0f | PDD count %.0f (want >= %.0f) | PDD %.2f ms",
+					gotLoInvite, tt.wantLoInvite, gotLo200OK, tt.wantLo200OK,
+					gotVethInvite, tt.wantVethInvite, gotVeth200OK, tt.wantVeth200OK,
+					pddCount, tt.wantPDDCount, pdd)
+
+				require.GreaterOrEqual(t, pddCount, tt.wantPDDCount,
+					"PDD observations: %s", tt.description)
+				require.Greater(t, pdd, 0.0, "PDD should be > 0: %s", tt.description)
+			} else {
+				t.Logf("lo: invite %.0f/%.0f, 200 OK %.0f/%.0f | veth: invite %.0f/%.0f, 200 OK %.0f/%.0f | no PDD expected",
+					gotLoInvite, tt.wantLoInvite, gotLo200OK, tt.wantLo200OK,
+					gotVethInvite, tt.wantVethInvite, gotVeth200OK, tt.wantVeth200OK)
+
+				// No 180 Ringing → histogram may have zero observations.
+				if metricExists(t, env.endpoint, "sip_exporter_pdd_count") {
+					pddCount := getMetric(t, env.endpoint, "sip_exporter_pdd_count")
+					require.InDelta(t, tt.wantPDDCount, pddCount, ratioDelta,
+						"PDD count should be 0 when no 180: %s", tt.description)
+				}
+			}
+
+			waitForSessionsZero(t, env.endpoint)
+		})
+	}
+}
