@@ -133,8 +133,13 @@ type (
 		data  []byte
 		iface string
 	}
+	rtpEndpointKey struct {
+		IP   uint32
+		Port uint16
+	}
 	exporter struct {
 		collection       *ebpf.Collection
+		rtpEndpointsMap  *ebpf.Map
 		socks            []sockEntry
 		messages         chan *rawPacket
 		done             chan struct{}
@@ -414,6 +419,12 @@ func (e *exporter) configureEBPFMaps(collection *ebpf.Collection, sipPort, sipsP
 	if err := rtpConfigMap.Update(uint32(0), rtpValue, ebpf.UpdateAny); err != nil {
 		return fmt.Errorf("failed to set RTP capture config: %w", err)
 	}
+
+	e.rtpEndpointsMap = collection.Maps["rtp_endpoints"]
+	if e.rtpEndpointsMap == nil {
+		return errors.New("failed to find rtp_endpoints map")
+	}
+
 	zap.L().Info("RTP capture configured", zap.Bool("enabled", rtpCapture))
 	return nil
 }
@@ -1714,9 +1725,38 @@ func (e *exporter) registerMediaEndpoints(body []byte, labels mediatracker.Media
 		ml.SDPCodecs = m.Codecs
 		ml.ClockRates = m.ClockRates
 		e.mediaTracker.Register(m.IP, m.Port, ml)
+		e.rtpEndpointInsert(m.IP, m.Port)
 		zap.L().Debug("RTP media endpoint registered",
 			zap.String("ip", m.IP), zap.Uint16("port", m.Port),
 			zap.String("call_id", labels.CallID))
+	}
+}
+
+// ipPortToKey converts an IP address string and port to a BPF map key.
+// Returns false if the IP is invalid or not IPv4.
+func ipPortToKey(ipStr string, port uint16) (rtpEndpointKey, bool) {
+	ip := net.ParseIP(ipStr).To4()
+	if ip == nil {
+		return rtpEndpointKey{}, false
+	}
+	return rtpEndpointKey{
+		IP:   binary.BigEndian.Uint32(ip),
+		Port: port,
+	}, true
+}
+
+// rtpEndpointInsert adds a media endpoint to the BPF rtp_endpoints map.
+func (e *exporter) rtpEndpointInsert(ipStr string, port uint16) {
+	if e.rtpEndpointsMap == nil {
+		return
+	}
+	key, ok := ipPortToKey(ipStr, port)
+	if !ok {
+		return
+	}
+	if err := e.rtpEndpointsMap.Update(key, uint8(1), ebpf.UpdateAny); err != nil {
+		zap.L().Debug("failed to update rtp_endpoints BPF map",
+			zap.String("ip", ipStr), zap.Uint16("port", port), zap.Error(err))
 	}
 }
 
