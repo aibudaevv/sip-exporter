@@ -520,7 +520,10 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		for _, r := range results {
 			e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry)
 			e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
-			rtpResult := e.mediaTracker.Unregister(r.CallID)
+			rtpResult, deleted := e.mediaTracker.Unregister(r.CallID)
+			for _, ep := range deleted {
+				e.rtpEndpointDelete(ep.IP, ep.Port)
+			}
 			e.handleRTPDialogResult(rtpResult, r.Carrier, r.UAType, r.SourceCountry)
 		}
 
@@ -1346,7 +1349,10 @@ func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {
 
 	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
 	result := e.services.dialoger.Delete(dialogID)
-	rtpResult := e.mediaTracker.Unregister(string(packet.CallID))
+	rtpResult, deleted := e.mediaTracker.Unregister(string(packet.CallID))
+	for _, ep := range deleted {
+		e.rtpEndpointDelete(ep.IP, ep.Port)
+	}
 	e.handleRTPDialogResult(rtpResult, result.Carrier, result.UAType, result.SourceCountry)
 	if result.Duration > 0 {
 		e.services.metricser.UpdateSPD(result.Carrier, result.UAType, result.SourceCountry, result.Duration)
@@ -1756,6 +1762,21 @@ func (e *exporter) rtpEndpointInsert(ipStr string, port uint16) {
 	}
 	if err := e.rtpEndpointsMap.Update(key, uint8(1), ebpf.UpdateAny); err != nil {
 		zap.L().Debug("failed to update rtp_endpoints BPF map",
+			zap.String("ip", ipStr), zap.Uint16("port", port), zap.Error(err))
+	}
+}
+
+// rtpEndpointDelete removes a media endpoint from the BPF rtp_endpoints map.
+func (e *exporter) rtpEndpointDelete(ipStr string, port uint16) {
+	if e.rtpEndpointsMap == nil {
+		return
+	}
+	key, ok := ipPortToKey(ipStr, port)
+	if !ok {
+		return
+	}
+	if err := e.rtpEndpointsMap.Delete(key); err != nil {
+		zap.L().Debug("failed to delete from rtp_endpoints BPF map",
 			zap.String("ip", ipStr), zap.Uint16("port", port), zap.Error(err))
 	}
 }

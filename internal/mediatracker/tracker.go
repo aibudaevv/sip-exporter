@@ -60,6 +60,12 @@ type (
 		OneWay        bool // 2+ endpoints registered but only 1 has RTP
 	}
 
+	// MediaEndpoint identifies a registered RTP media endpoint (IP:port from SDP).
+	MediaEndpoint struct {
+		IP   string
+		Port uint16
+	}
+
 	endpointKey struct {
 		ip   string
 		port uint16
@@ -125,15 +131,18 @@ func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) {
 
 // Unregister removes all media endpoints and RTP streams belonging to a SIP
 // dialog (called on BYE 200 OK or Session-Expires cleanup) and returns a
-// summary of the RTP activity observed for that dialog.
-func (t *Tracker) Unregister(callID string) RTPDialogResult {
+// summary of the RTP activity observed for that dialog, plus the list of
+// deleted media endpoints (for BPF map cleanup).
+func (t *Tracker) Unregister(callID string) (RTPDialogResult, []MediaEndpoint) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	var deleted []MediaEndpoint
 	mediaCount := 0
 	for k, v := range t.media {
 		if v.CallID == callID {
 			mediaCount++
+			deleted = append(deleted, MediaEndpoint{IP: k.ip, Port: k.port})
 			delete(t.media, k)
 		}
 	}
@@ -154,7 +163,7 @@ func (t *Tracker) Unregister(callID string) RTPDialogResult {
 		MediaExpected: mediaCount > 0,
 		RTPObserved:   rtpEndpointCount > 0,
 		OneWay:        mediaCount >= 2 && rtpEndpointCount == 1,
-	}
+	}, deleted
 }
 
 // Lookup resolves a media endpoint to its labels.

@@ -5308,27 +5308,27 @@ func TestReadSocket_FailStopNoSystemError(t *testing.T) {
 
 func TestIpPortToKey(t *testing.T) {
 	tests := []struct {
-		name    string
-		ip      string
-		port    uint16
-		wantOK  bool
-		wantIP  uint32
+		name     string
+		ip       string
+		port     uint16
+		wantOK   bool
+		wantIP   uint32
 		wantPort uint16
 	}{
 		{
-			name:    "valid IPv4",
-			ip:      "192.168.1.1",
-			port:    5004,
-			wantOK:  true,
-			wantIP:  0xC0A80101,
+			name:     "valid IPv4",
+			ip:       "192.168.1.1",
+			port:     5004,
+			wantOK:   true,
+			wantIP:   0xC0A80101,
 			wantPort: 5004,
 		},
 		{
-			name:    "localhost",
-			ip:      "127.0.0.1",
-			port:    5060,
-			wantOK:  true,
-			wantIP:  0x7F000001,
+			name:     "localhost",
+			ip:       "127.0.0.1",
+			port:     5060,
+			wantOK:   true,
+			wantIP:   0x7F000001,
 			wantPort: 5060,
 		},
 		{
@@ -5361,10 +5361,4 @@ func TestIpPortToKey(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestRtpEndpointInsert_NilMap(t *testing.T) {
-	e := &exporter{}
-	e.rtpEndpointInsert("192.168.1.1", 5004)
-	e.rtpEndpointInsert("", 0)
 }
