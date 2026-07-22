@@ -136,6 +136,7 @@ type (
 	rtpEndpointKey struct {
 		IP   uint32
 		Port uint16
+		_    [2]byte // explicit padding — cilium/ebpf uses binary.Size, not unsafe.Sizeof
 	}
 	exporter struct {
 		collection       *ebpf.Collection
