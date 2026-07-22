@@ -4679,7 +4679,7 @@ func TestExporter_GracefulShutdown(t *testing.T) {
 	require.NoError(t, unix.SetsockoptTimeval(fds[0], unix.SOL_SOCKET, unix.SO_RCVTIMEO, tv))
 
 	e := &exporter{
-		socks:    []int{fds[0]},
+		socks:    []sockEntry{{fd: fds[0], iface: "test"}},
 		messages: make(chan *[]byte, 10),
 		done:     make(chan struct{}),
 		services: services{
@@ -4840,7 +4840,7 @@ func TestReadSocketStats_Aggregation(t *testing.T) {
 	require.NoError(t, err)
 	defer unix.Close(sock2)
 
-	e := &exporter{socks: []int{sock1, sock2}}
+	e := &exporter{socks: []sockEntry{{fd: sock1, iface: "lo"}, {fd: sock2, iface: "lo"}}}
 
 	// Drain any packets already queued on the fresh sockets so the baseline
 	// for PACKET_STATISTICS is clean.

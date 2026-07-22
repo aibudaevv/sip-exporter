@@ -125,9 +125,13 @@ type (
 		timestamp time.Time
 	}
 
+	sockEntry struct {
+		fd    int
+		iface string
+	}
 	exporter struct {
 		collection       *ebpf.Collection
-		socks            []int
+		socks            []sockEntry
 		messages         chan *[]byte
 		done             chan struct{}
 		wg               sync.WaitGroup
@@ -283,18 +287,18 @@ func (e *exporter) Initialize(cfg InitConfig) error {
 
 	progFD := prog.FD()
 
-	createdSocks := make([]int, 0, len(cfg.Interfaces))
+	createdSocks := make([]sockEntry, 0, len(cfg.Interfaces))
 	for _, ifaceName := range cfg.Interfaces {
 		sock, sockErr := createSocketForInterface(ifaceName, progFD, cfg.IgnoreOutgoing)
 		if sockErr != nil {
 			for _, s := range createdSocks {
-				_ = unix.Close(s)
+				_ = unix.Close(s.fd)
 			}
 			e.collection.Close()
 			e.collection = nil
 			return fmt.Errorf("interface %s: %w", ifaceName, sockErr)
 		}
-		createdSocks = append(createdSocks, sock)
+		createdSocks = append(createdSocks, sockEntry{fd: sock, iface: ifaceName})
 	}
 	e.socks = createdSocks
 
@@ -468,7 +472,7 @@ func (e *exporter) startWorkers() {
 	go e.readPackets()
 	for _, sock := range e.socks {
 		e.wg.Add(1)
-		go e.readSocket(sock)
+		go e.readSocket(sock.fd)
 	}
 	e.wg.Add(1)
 	go e.sipDialogMetricsUpdate()
@@ -562,7 +566,7 @@ func (e *exporter) Close() {
 			e.collection.Close()
 		}
 		for _, s := range e.socks {
-			_ = unix.Close(s)
+			_ = unix.Close(s.fd)
 		}
 		e.wg.Wait()
 		close(e.messages)
@@ -580,7 +584,7 @@ func (e *exporter) readSocketStats() (uint32, uint32) {
 
 	var totalPackets, totalDrops uint32
 	for _, sock := range e.socks {
-		stats, err := unix.GetsockoptTpacketStats(sock, unix.SOL_PACKET, unix.PACKET_STATISTICS)
+		stats, err := unix.GetsockoptTpacketStats(sock.fd, unix.SOL_PACKET, unix.PACKET_STATISTICS)
 		if err != nil {
 			zap.L().Debug("failed to read AF_PACKET stats", zap.Error(err))
 			continue
