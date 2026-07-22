@@ -145,11 +145,11 @@ type (
 	}
 
 	Metricser interface {
-		Request(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost string, in []byte)
+		Request(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface string, in []byte)
 		Reinvite(carrier, uaType, sourceCountry string)
 		Response(carrier, uaType, sourceCountry string, in []byte, isInviteResponse bool)
 		ResponseWithMetrics(carrier, uaType, sourceCountry string, status []byte, isInviteResponse, is200OK bool)
-		Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost string)
+		Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface string)
 		SessionCompleted(carrier, uaType, sourceCountry string)
 		UpdateRRD(carrier, uaType, sourceCountry string, delayMs float64)
 		UpdateSPD(carrier, uaType, sourceCountry string, duration time.Duration)
@@ -259,7 +259,7 @@ func (m *metrics) initRequestCounters(reg *prometheus.Registry) {
 	cl := []string{"carrier", "ua_type", "source_country"}
 	clInvite := []string{
 		"carrier", "ua_type", "source_country",
-		"destination_country", "caller_host", "called_host",
+		"destination_country", "caller_host", "called_host", "iface",
 	}
 	m.requestInviteTotal = newCounterVecWithRegistry(
 		"sip_exporter_invite_total",
@@ -767,7 +767,7 @@ func registerRatioCollector(
 
 func (m *metrics) Request(
 	carrier, uaType, sourceCountry, destinationCountry,
-	callerHost, calledHost string, in []byte,
+	callerHost, calledHost, iface string, in []byte,
 ) {
 	defer m.sipPacketsTotal.Inc()
 
@@ -798,7 +798,7 @@ func (m *metrics) Request(
 		m.requestACKTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 	case bytes.Equal(in, []byte("INVITE")):
 		m.requestInviteTotal.WithLabelValues(
-			carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost,
+			carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface,
 		).Inc()
 		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).inviteTotal.Add(1)
 	case bytes.Equal(in, []byte("MESSAGE")):
@@ -852,9 +852,9 @@ func (m *metrics) ResponseWithMetrics(
 	}
 }
 
-func (m *metrics) Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost string) {
+func (m *metrics) Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface string) {
 	m.requestInvite200OKTotal.WithLabelValues(
-		carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost,
+		carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface,
 	).Inc()
 }
 

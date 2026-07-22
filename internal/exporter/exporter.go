@@ -156,6 +156,7 @@ type (
 		// If packet parsing becomes parallel (worker pool), thread srcIP as a
 		// parameter instead of using this shared field.
 		pktSrcIP              string
+		pktIface              string
 		registerScanTracker   *registerScanTracker
 		inviteBurstTracker    *inviteBurstTracker
 		registerTracker       map[string]registerEntry
@@ -610,6 +611,7 @@ func (e *exporter) readPackets() {
 			if !ok {
 				return
 			}
+			e.pktIface = pkt.iface
 			if errType, err := e.parseRawPacket(pkt.data); err != nil {
 				e.services.metricser.SystemError()
 				e.services.metricser.ParseError(errType)
@@ -1090,7 +1092,7 @@ func (e *exporter) handleRequest(carrier string, uaType string, sourceCountry st
 	} else if !isRetransmission {
 		e.services.metricser.Request(
 			carrier, uaType, sourceCountry, destinationCountry,
-			callerHost, calledHost, packet.Method,
+			callerHost, calledHost, e.pktIface, packet.Method,
 		)
 	}
 
@@ -1265,7 +1267,7 @@ func (e *exporter) handle200OKResponse(
 				callerHost = string(packet.From.Addr)
 				calledHost = string(packet.To.Addr)
 			}
-			e.services.metricser.Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost)
+			e.services.metricser.Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, e.pktIface)
 		}
 		if err := e.handleInvite200OK(carrier, uaType, sourceCountry, packet, isReinvite); err != nil {
 			zap.L().Error("handle INVITE 200 OK", zap.Error(err))

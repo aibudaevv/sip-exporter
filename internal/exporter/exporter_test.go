@@ -71,7 +71,7 @@ func (m *mockMetricser) SetSessionsLimits(_ map[string]int) {}
 
 func (m *mockMetricser) UpdateActiveRegistrations(_ []service.LabeledCount) {}
 
-func (m *mockMetricser) Request(_, _, _, _, _, _ string, in []byte) {
+func (m *mockMetricser) Request(_, _, _, _, _, _, _ string, in []byte) {
 	m.requestCalled = in
 	m.requestCount++
 	m.packetsIncremented++
@@ -98,7 +98,7 @@ func (m *mockMetricser) ResponseWithMetrics(_, _, _ string, status []byte, isInv
 	}
 }
 
-func (m *mockMetricser) Invite200OK(_, _, _, _, _, _ string) {
+func (m *mockMetricser) Invite200OK(_, _, _, _, _, _, _ string) {
 	m.invite200OKCalled = true
 }
 
@@ -3826,7 +3826,7 @@ func newCarrierTrackingMetricser() *carrierTrackingMetricser {
 	}
 }
 
-func (m *carrierTrackingMetricser) Request(carrier, _, _, _, _, _ string, in []byte) {
+func (m *carrierTrackingMetricser) Request(carrier, _, _, _, _, _, _ string, in []byte) {
 	m.requests = append(m.requests, carrierCall{carrier: carrier, method: string(in)})
 	m.packetsTotal++
 }
@@ -3850,7 +3850,7 @@ func (m *carrierTrackingMetricser) ResponseWithMetrics(
 	}
 }
 
-func (m *carrierTrackingMetricser) Invite200OK(_, _, _, _, _, _ string) {
+func (m *carrierTrackingMetricser) Invite200OK(_, _, _, _, _, _, _ string) {
 	// Tracking is done via ResponseWithMetrics which receives the is200OK flag.
 }
 
