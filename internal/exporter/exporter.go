@@ -514,8 +514,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		e.services.metricser.UpdateSessions(e.services.dialoger.Counts())
 		e.services.metricser.UpdateActiveRegistrations(e.registrationCounts())
 
-		received, dropped := e.readSocketStats()
-		e.services.metricser.SocketStats(received, dropped)
+		e.services.metricser.SocketStats(e.readSocketStats())
 		e.services.metricser.UpdateChannelLength(len(e.messages))
 
 		e.registerMutex.RLock()
@@ -577,22 +576,25 @@ func (e *exporter) IsAlive() bool {
 	return e.initialized.Load()
 }
 
-func (e *exporter) readSocketStats() (uint32, uint32) {
+func (e *exporter) readSocketStats() []service.SocketStat {
 	if len(e.socks) == 0 {
-		return 0, 0
+		return nil
 	}
 
-	var totalPackets, totalDrops uint32
+	stats := make([]service.SocketStat, 0, len(e.socks))
 	for _, sock := range e.socks {
-		stats, err := unix.GetsockoptTpacketStats(sock.fd, unix.SOL_PACKET, unix.PACKET_STATISTICS)
+		st, err := unix.GetsockoptTpacketStats(sock.fd, unix.SOL_PACKET, unix.PACKET_STATISTICS)
 		if err != nil {
 			zap.L().Debug("failed to read AF_PACKET stats", zap.Error(err))
 			continue
 		}
-		totalPackets += stats.Packets
-		totalDrops += stats.Drops
+		stats = append(stats, service.SocketStat{
+			Iface:    sock.iface,
+			Received: st.Packets,
+			Dropped:  st.Drops,
+		})
 	}
-	return totalPackets, totalDrops
+	return stats
 }
 
 func (e *exporter) readPackets() {

@@ -164,13 +164,13 @@ func (m *mockMetricser) SystemError() {
 	m.systemErrorCalled = true
 }
 
-func (m *mockMetricser) ParseError(string)             {}
-func (m *mockMetricser) SocketStats(_, _ uint32)       {}
-func (m *mockMetricser) RTPDropped()                   { m.rtpDroppedCount++ }
-func (m *mockMetricser) UpdateChannelLength(int)       {}
-func (m *mockMetricser) UpdateChannelCapacity(int)     {}
-func (m *mockMetricser) UpdateTrackerSize(string, int) {}
-func (m *mockMetricser) UpdateActiveDialogs(int)       {}
+func (m *mockMetricser) ParseError(string)                  {}
+func (m *mockMetricser) SocketStats(_ []service.SocketStat) {}
+func (m *mockMetricser) RTPDropped()                        { m.rtpDroppedCount++ }
+func (m *mockMetricser) UpdateChannelLength(int)            {}
+func (m *mockMetricser) UpdateChannelCapacity(int)          {}
+func (m *mockMetricser) UpdateTrackerSize(string, int)      {}
+func (m *mockMetricser) UpdateActiveDialogs(int)            {}
 
 func (m *mockMetricser) UpdateVQReport(carrier string, uaType string, _ string, report *vq.SessionReport) {
 	m.vqReportCalled = true
@@ -3922,13 +3922,13 @@ func (m *carrierTrackingMetricser) SystemError() {
 	m.systemErrors++
 }
 
-func (m *carrierTrackingMetricser) ParseError(string)             {}
-func (m *carrierTrackingMetricser) SocketStats(_, _ uint32)       {}
-func (m *carrierTrackingMetricser) RTPDropped()                   {}
-func (m *carrierTrackingMetricser) UpdateChannelLength(int)       {}
-func (m *carrierTrackingMetricser) UpdateChannelCapacity(int)     {}
-func (m *carrierTrackingMetricser) UpdateTrackerSize(string, int) {}
-func (m *carrierTrackingMetricser) UpdateActiveDialogs(int)       {}
+func (m *carrierTrackingMetricser) ParseError(string)                  {}
+func (m *carrierTrackingMetricser) SocketStats(_ []service.SocketStat) {}
+func (m *carrierTrackingMetricser) RTPDropped()                        {}
+func (m *carrierTrackingMetricser) UpdateChannelLength(int)            {}
+func (m *carrierTrackingMetricser) UpdateChannelCapacity(int)          {}
+func (m *carrierTrackingMetricser) UpdateTrackerSize(string, int)      {}
+func (m *carrierTrackingMetricser) UpdateActiveDialogs(int)            {}
 
 func (m *carrierTrackingMetricser) UpdateVQReport(carrier, uaType, _ string, _ *vq.SessionReport) {
 	m.vqReports = append(m.vqReports, carrierCall{carrier: carrier, uaType: uaType})
@@ -4857,7 +4857,7 @@ func TestReadSocketStats_Aggregation(t *testing.T) {
 	drain(sock2)
 
 	// Reset stats counters by reading them once.
-	_, _ = e.readSocketStats()
+	_ = e.readSocketStats()
 
 	// Generate traffic: 5 SIP/UDP packets to 127.0.0.1:5060. No listener
 	// is needed — the packets still traverse lo and are captured.
@@ -4877,7 +4877,11 @@ func TestReadSocketStats_Aggregation(t *testing.T) {
 	drain(sock1)
 	drain(sock2)
 
-	totalPackets, _ := e.readSocketStats()
+	stats := e.readSocketStats()
+	var totalPackets uint32
+	for _, s := range stats {
+		totalPackets += s.Received
+	}
 	require.Positive(t, totalPackets,
 		"aggregated packet count must be > 0 across two sockets on lo")
 }

@@ -18,6 +18,12 @@ import (
 const maxUtilizationPercent = 100.0
 
 type (
+	SocketStat struct {
+		Iface    string
+		Received uint32
+		Dropped  uint32
+	}
+
 	carrierAtomicCounters struct {
 		inviteTotal            atomic.Int64
 		invite3xxTotal         atomic.Int64
@@ -128,8 +134,8 @@ type (
 
 		carrierCounters sync.Map
 
-		socketPacketsReceived prometheus.Counter
-		socketPacketsDropped  prometheus.Counter
+		socketPacketsReceived *prometheus.CounterVec
+		socketPacketsDropped  *prometheus.CounterVec
 		rtpDropped            prometheus.Counter
 		parseErrorsTotal      *prometheus.CounterVec
 		channelLength         prometheus.Gauge
@@ -174,7 +180,7 @@ type (
 		MissingRTP(carrier, uaType, sourceCountry string)
 		SystemError()
 		ParseError(errorType string)
-		SocketStats(received, dropped uint32)
+		SocketStats(stats []SocketStat)
 		RTPDropped()
 		UpdateChannelLength(length int)
 		UpdateChannelCapacity(capacity int)
