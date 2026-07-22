@@ -129,10 +129,14 @@ type (
 		fd    int
 		iface string
 	}
+	rawPacket struct {
+		data  []byte
+		iface string
+	}
 	exporter struct {
 		collection       *ebpf.Collection
 		socks            []sockEntry
-		messages         chan *[]byte
+		messages         chan *rawPacket
 		done             chan struct{}
 		wg               sync.WaitGroup
 		closeOnce        sync.Once
@@ -219,7 +223,7 @@ func NewExporter(deps Deps) Exporter {
 		mediaTracker:          mediatracker.NewTracker(rtpStreamTTL),
 		registerScanTracker:   newRegisterScanTracker(deps.FraudRegScanThreshold, deps.FraudRegScanWindow),
 		inviteBurstTracker:    newInviteBurstTracker(deps.FraudInviteBurstThreshold, deps.FraudInviteBurstWindow),
-		messages:              make(chan *[]byte, messagesChanSize),
+		messages:              make(chan *rawPacket, messagesChanSize),
 		done:                  make(chan struct{}),
 		registerTracker:       make(map[string]registerEntry),
 		registerExpiryTracker: make(map[string]registerExpiryEntry),
@@ -228,8 +232,7 @@ func NewExporter(deps Deps) Exporter {
 		optionsTracker:        make(map[string]optionsEntry),
 		packetPool: sync.Pool{
 			New: func() any {
-				b := make([]byte, 0, readBufSize)
-				return &b
+				return &rawPacket{data: make([]byte, 0, readBufSize)}
 			},
 		},
 	}
@@ -472,7 +475,7 @@ func (e *exporter) startWorkers() {
 	go e.readPackets()
 	for _, sock := range e.socks {
 		e.wg.Add(1)
-		go e.readSocket(sock.fd)
+		go e.readSocket(sock.fd, sock.iface)
 	}
 	e.wg.Add(1)
 	go e.sipDialogMetricsUpdate()
@@ -603,24 +606,24 @@ func (e *exporter) readPackets() {
 		select {
 		case <-e.done:
 			return
-		case bufp, ok := <-e.messages:
+		case pkt, ok := <-e.messages:
 			if !ok {
 				return
 			}
-			if errType, err := e.parseRawPacket(*bufp); err != nil {
+			if errType, err := e.parseRawPacket(pkt.data); err != nil {
 				e.services.metricser.SystemError()
 				e.services.metricser.ParseError(errType)
 				zap.L().Error("parse err", zap.Error(err))
 			}
-			e.packetPool.Put(bufp)
+			e.packetPool.Put(pkt)
 		}
 	}
 }
 
-func (e *exporter) acquireBuf() *[]byte {
-	b, ok := e.packetPool.Get().(*[]byte)
+func (e *exporter) acquireBuf() *rawPacket {
+	b, ok := e.packetPool.Get().(*rawPacket)
 	if !ok {
-		b = new([]byte)
+		b = &rawPacket{}
 	}
 	return b
 }
@@ -648,7 +651,7 @@ func (e *exporter) handleReadError(err error) bool {
 	return false
 }
 
-func (e *exporter) readSocket(sock int) {
+func (e *exporter) readSocket(sock int, iface string) {
 	defer e.wg.Done()
 	buf := make([]byte, readBufSize)
 
@@ -670,12 +673,13 @@ func (e *exporter) readSocket(sock int) {
 			continue
 		}
 
-		bufp := e.acquireBuf()
-		*bufp = append((*bufp)[:0], buf[:n]...)
+		pkt := e.acquireBuf()
+		pkt.data = append(pkt.data[:0], buf[:n]...)
+		pkt.iface = iface
 
 		zap.L().Debug("packet from socket", zap.Int("len", n))
 
-		if !e.sendPacket(bufp) {
+		if !e.sendPacket(pkt) {
 			return
 		}
 	}
@@ -685,22 +689,22 @@ func (e *exporter) readSocket(sock int) {
 // 5060/5061) use a blocking send — they must not be starved by RTP flood.
 // All other packets (RTP) use a non-blocking send — dropped when the channel
 // is full. Returns false if shutdown was signaled.
-func (e *exporter) sendPacket(bufp *[]byte) bool {
-	if e.isSIPPacket(*bufp) {
+func (e *exporter) sendPacket(pkt *rawPacket) bool {
+	if e.isSIPPacket(pkt.data) {
 		select {
-		case e.messages <- bufp:
+		case e.messages <- pkt:
 		case <-e.done:
 			return false
 		}
 		return true
 	}
 	select {
-	case e.messages <- bufp:
+	case e.messages <- pkt:
 	case <-e.done:
 		return false
 	default:
 		e.services.metricser.RTPDropped()
-		e.packetPool.Put(bufp)
+		e.packetPool.Put(pkt)
 	}
 	return true
 }

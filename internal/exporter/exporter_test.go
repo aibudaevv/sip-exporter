@@ -4680,7 +4680,7 @@ func TestExporter_GracefulShutdown(t *testing.T) {
 
 	e := &exporter{
 		socks:    []sockEntry{{fd: fds[0], iface: "test"}},
-		messages: make(chan *[]byte, 10),
+		messages: make(chan *rawPacket, 10),
 		done:     make(chan struct{}),
 		services: services{
 			metricser: &mockMetricser{},
@@ -4696,7 +4696,7 @@ func TestExporter_GracefulShutdown(t *testing.T) {
 	e.wg.Add(1)
 	go e.readPackets()
 	e.wg.Add(1)
-	go e.readSocket(fds[0])
+	go e.readSocket(fds[0], "test")
 	e.wg.Add(1)
 	go e.sipDialogMetricsUpdate()
 
@@ -4738,7 +4738,7 @@ func countOpenFDs(t *testing.T) int {
 // code path are allocated.
 func newRollbackExporter() *exporter {
 	return &exporter{
-		messages:        make(chan *[]byte, messagesChanSize),
+		messages:        make(chan *rawPacket, messagesChanSize),
 		done:            make(chan struct{}),
 		services:        services{metricser: &mockMetricser{}, dialoger: &mockDialoger{}},
 		mediaTracker:    mediatracker.NewTracker(30 * time.Second),
@@ -5035,18 +5035,18 @@ func TestIsSIPPacket(t *testing.T) {
 func TestSendPacket_RTPDropWhenFull(t *testing.T) {
 	mm := &mockMetricser{}
 	e := &exporter{
-		messages: make(chan *[]byte, 1),
+		messages: make(chan *rawPacket, 1),
 		done:     make(chan struct{}),
 		sipPort:  5060,
 		sipsPort: 5061,
 		services: services{metricser: mm},
 	}
-	fillPkt := make([]byte, 1)
+	fillPkt := rawPacket{}
 	e.messages <- &fillPkt // fill the channel
 
 	// RTP packet (non-blocking) → dropped, sendPacket returns true
 	rtpPkt := buildUDPPacket(12345, 5004)
-	require.True(t, e.sendPacket(&rtpPkt), "RTP sendPacket should not block")
+	require.True(t, e.sendPacket(&rawPacket{data: rtpPkt}), "RTP sendPacket should not block")
 	require.Equal(t, 1, mm.rtpDroppedCount, "RTPDropped should be called when channel is full")
 
 	// SIP packet (blocking) → would block, but we signal done to unblock
@@ -5055,41 +5055,41 @@ func TestSendPacket_RTPDropWhenFull(t *testing.T) {
 		close(e.done)
 	}()
 	sipPkt := buildUDPPacket(12345, 5060)
-	require.False(t, e.sendPacket(&sipPkt), "SIP sendPacket should return false on done")
+	require.False(t, e.sendPacket(&rawPacket{data: sipPkt}), "SIP sendPacket should return false on done")
 }
 
 func TestSendPacket_SuccessPaths(t *testing.T) {
 	t.Run("SIP success", func(t *testing.T) {
 		e := &exporter{
-			messages: make(chan *[]byte, 1),
+			messages: make(chan *rawPacket, 1),
 			done:     make(chan struct{}),
 			sipPort:  5060, sipsPort: 5061,
 		}
 		sipPkt := buildUDPPacket(12345, 5060)
-		require.True(t, e.sendPacket(&sipPkt))
+		require.True(t, e.sendPacket(&rawPacket{data: sipPkt}))
 		require.Len(t, e.messages, 1)
 	})
 
 	t.Run("RTP success", func(t *testing.T) {
 		e := &exporter{
-			messages: make(chan *[]byte, 1),
+			messages: make(chan *rawPacket, 1),
 			done:     make(chan struct{}),
 			sipPort:  5060, sipsPort: 5061,
 		}
 		rtpPkt := buildUDPPacket(12345, 5004)
-		require.True(t, e.sendPacket(&rtpPkt))
+		require.True(t, e.sendPacket(&rawPacket{data: rtpPkt}))
 		require.Len(t, e.messages, 1)
 	})
 
 	t.Run("RTP done signal", func(t *testing.T) {
 		e := &exporter{
-			messages: make(chan *[]byte), // zero-capacity → always full
+			messages: make(chan *rawPacket), // zero-capacity → always full
 			done:     make(chan struct{}),
 			sipPort:  5060, sipsPort: 5061,
 		}
 		close(e.done)
 		rtpPkt := buildUDPPacket(12345, 5004)
-		require.False(t, e.sendPacket(&rtpPkt), "RTP sendPacket should return false on done")
+		require.False(t, e.sendPacket(&rawPacket{data: rtpPkt}), "RTP sendPacket should return false on done")
 	})
 }
 
@@ -5279,13 +5279,13 @@ func TestReadSocket_FailStopNoSystemError(t *testing.T) {
 
 	mm := &mockMetricser{}
 	e := &exporter{
-		messages: make(chan *[]byte, 10),
+		messages: make(chan *rawPacket, 10),
 		done:     make(chan struct{}),
 		services: services{metricser: mm, dialoger: &mockDialoger{}},
 	}
 
 	e.wg.Add(1)
-	go e.readSocket(fds[0])
+	go e.readSocket(fds[0], "")
 
 	// Close the FD → EBADF in readSocket → clean return, no SystemError.
 	unix.Close(fds[0])
