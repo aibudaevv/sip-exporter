@@ -23,6 +23,20 @@ struct {
 	__type(value, __u8);
 } rtp_config SEC(".maps");
 
+// SDP-driven RTP endpoint map (populated from userspace via SDP parsing)
+struct rtp_endpoint_key {
+	__u32 ip;     // IPv4 in host byte order (byte[0]<<24 | byte[1]<<16 | ...)
+	__u16 port;   // Port in host byte order
+	__u16 _pad;   // Alignment to 8 bytes
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 65536);
+	__type(key, struct rtp_endpoint_key);
+	__type(value, __u8);
+} rtp_endpoints SEC(".maps");
+
 SEC("socket")
 int bpf_socket_filter(struct __sk_buff *skb) {
     if (skb->len < 14) {
@@ -109,13 +123,33 @@ int bpf_socket_filter(struct __sk_buff *skb) {
         return 0;
     }
 
-    // Payload offset (after 8-byte UDP header)
+    // SDP-driven lookup: check if endpoint is a known RTP media endpoint.
+    // dst first (local receive endpoint, NAT-robust), then src as fallback.
+    __u32 src_ip = (__u32)ip_header[12]<<24 | (__u32)ip_header[13]<<16
+                 | (__u32)ip_header[14]<<8  | (__u32)ip_header[15];
+    __u32 dst_ip = (__u32)ip_header[16]<<24 | (__u32)ip_header[17]<<16
+                 | (__u32)ip_header[18]<<8  | (__u32)ip_header[19];
+
+    struct rtp_endpoint_key dst_key = { .ip = dst_ip, .port = dest_port, ._pad = 0 };
+    if (bpf_map_lookup_elem(&rtp_endpoints, &dst_key)) {
+        __u32 snap = skb->len;
+        if (snap > 64) snap = 64;
+        return snap;
+    }
+
+    struct rtp_endpoint_key src_key = { .ip = src_ip, .port = src_port, ._pad = 0 };
+    if (bpf_map_lookup_elem(&rtp_endpoints, &src_key)) {
+        __u32 snap = skb->len;
+        if (snap > 64) snap = 64;
+        return snap;
+    }
+
+    // Pattern matching fallback: check first 2 bytes of payload for RTP signature.
     int payload_off = ip_offset + ip_header_len + 8;
     if (skb->len < payload_off + 2) {
         return 0;
     }
 
-    // RTP pattern detection: read first 2 bytes of payload.
     // Condition 1 (version=2): (byte[0] & 0xC0) == 0x80
     // Condition 2 (payload type): PT = byte[1] & 0x7F; PT <= 34 (static audio) || PT >= 96 (dynamic).
     // The second check eliminates false positives (e.g., DNS with matching high bit).
