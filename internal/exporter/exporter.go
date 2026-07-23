@@ -71,6 +71,9 @@ const (
 	rtpVersionMask    = 0xC0
 	rtpVersion2Prefix = 0x80
 
+	maxStaticRTPPayloadType  = 34
+	minDynamicRTPPayloadType = 96
+
 	sipPartsCount                = 3
 	minSIPParts                  = 2
 	minResponseStatusLen         = 3
@@ -133,8 +136,14 @@ type (
 		data  []byte
 		iface string
 	}
+	rtpEndpointKey struct {
+		IP   uint32
+		Port uint16
+		_    [2]byte // explicit padding — cilium/ebpf uses binary.Size, not unsafe.Sizeof
+	}
 	exporter struct {
 		collection       *ebpf.Collection
+		rtpEndpointsMap  *ebpf.Map
 		socks            []sockEntry
 		messages         chan *rawPacket
 		done             chan struct{}
@@ -414,6 +423,12 @@ func (e *exporter) configureEBPFMaps(collection *ebpf.Collection, sipPort, sipsP
 	if err := rtpConfigMap.Update(uint32(0), rtpValue, ebpf.UpdateAny); err != nil {
 		return fmt.Errorf("failed to set RTP capture config: %w", err)
 	}
+
+	e.rtpEndpointsMap = collection.Maps["rtp_endpoints"]
+	if e.rtpEndpointsMap == nil {
+		return errors.New("failed to find rtp_endpoints map")
+	}
+
 	zap.L().Info("RTP capture configured", zap.Bool("enabled", rtpCapture))
 	return nil
 }
@@ -509,7 +524,10 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		for _, r := range results {
 			e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry)
 			e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
-			rtpResult := e.mediaTracker.Unregister(r.CallID)
+			rtpResult, deleted := e.mediaTracker.Unregister(r.CallID)
+			for _, ep := range deleted {
+				e.rtpEndpointDelete(ep.IP, ep.Port)
+			}
 			e.handleRTPDialogResult(rtpResult, r.Carrier, r.UAType, r.SourceCountry)
 		}
 
@@ -848,9 +866,9 @@ func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 
 	sipData := packet[sipOffset:]
 
-	// RTP packets (passed by the eBPF filter with version=2) arrive truncated to
-	// the RTP header. SIP messages start with an ASCII letter and never with the
-	// 0x80-0xBF range, so the first payload byte unambiguously distinguishes RTP.
+	// The eBPF filter passes UDP to SDP-registered media endpoints (truncated to
+	// 64 bytes). The first payload byte distinguishes RTP (V=2, 0x80-0xBF) from
+	// non-RTP; SIP messages start with an ASCII letter and never with 0x80-0xBF.
 	if sipData[0]&rtpVersionMask == rtpVersion2Prefix {
 		srcPort := binary.BigEndian.Uint16(packet[udpOffset : udpOffset+2])
 		dstPort := binary.BigEndian.Uint16(packet[udpOffset+2 : udpOffset+4])
@@ -998,6 +1016,12 @@ func (e *exporter) handleRTP(
 	header, err := rtp.ParseHeader(payload)
 	if err != nil {
 		zap.L().Debug("RTP header parse skipped", zap.Error(err))
+		return "", nil
+	}
+	// Reject PT 35-95: not valid RTP audio. This range includes RTCP packet
+	// types (200-204 → masked 72-76) that share V=2 and arrive on the same
+	// port when rtcp-mux (RFC 5761) is active.
+	if header.PayloadType > maxStaticRTPPayloadType && header.PayloadType < minDynamicRTPPayloadType {
 		return "", nil
 	}
 	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, dstIP.String(), dstPort, header, time.Now())
@@ -1335,7 +1359,10 @@ func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {
 
 	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
 	result := e.services.dialoger.Delete(dialogID)
-	rtpResult := e.mediaTracker.Unregister(string(packet.CallID))
+	rtpResult, deleted := e.mediaTracker.Unregister(string(packet.CallID))
+	for _, ep := range deleted {
+		e.rtpEndpointDelete(ep.IP, ep.Port)
+	}
 	e.handleRTPDialogResult(rtpResult, result.Carrier, result.UAType, result.SourceCountry)
 	if result.Duration > 0 {
 		e.services.metricser.UpdateSPD(result.Carrier, result.UAType, result.SourceCountry, result.Duration)
@@ -1714,9 +1741,53 @@ func (e *exporter) registerMediaEndpoints(body []byte, labels mediatracker.Media
 		ml.SDPCodecs = m.Codecs
 		ml.ClockRates = m.ClockRates
 		e.mediaTracker.Register(m.IP, m.Port, ml)
+		e.rtpEndpointInsert(m.IP, m.Port)
 		zap.L().Debug("RTP media endpoint registered",
 			zap.String("ip", m.IP), zap.Uint16("port", m.Port),
 			zap.String("call_id", labels.CallID))
+	}
+}
+
+// ipPortToKey converts an IP address string and port to a BPF map key.
+// Returns false if the IP is invalid or not IPv4.
+func ipPortToKey(ipStr string, port uint16) (rtpEndpointKey, bool) {
+	ip := net.ParseIP(ipStr).To4()
+	if ip == nil {
+		return rtpEndpointKey{}, false
+	}
+	return rtpEndpointKey{
+		IP:   binary.BigEndian.Uint32(ip),
+		Port: port,
+	}, true
+}
+
+// rtpEndpointInsert adds a media endpoint to the BPF rtp_endpoints map.
+func (e *exporter) rtpEndpointInsert(ipStr string, port uint16) {
+	if e.rtpEndpointsMap == nil {
+		return
+	}
+	key, ok := ipPortToKey(ipStr, port)
+	if !ok {
+		return
+	}
+	if err := e.rtpEndpointsMap.Update(key, uint8(1), ebpf.UpdateAny); err != nil {
+		zap.L().Debug("failed to update rtp_endpoints BPF map",
+			zap.String("ip", ipStr), zap.Uint16("port", port), zap.Error(err))
+	}
+}
+
+// rtpEndpointDelete removes a media endpoint from the BPF rtp_endpoints map.
+func (e *exporter) rtpEndpointDelete(ipStr string, port uint16) {
+	if e.rtpEndpointsMap == nil {
+		return
+	}
+	key, ok := ipPortToKey(ipStr, port)
+	if !ok {
+		return
+	}
+	if err := e.rtpEndpointsMap.Delete(key); err != nil {
+		zap.L().Debug("failed to delete from rtp_endpoints BPF map",
+			zap.String("ip", ipStr), zap.Uint16("port", port), zap.Error(err))
 	}
 }
 

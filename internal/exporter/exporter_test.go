@@ -5305,3 +5305,60 @@ func TestReadSocket_FailStopNoSystemError(t *testing.T) {
 	require.False(t, mm.systemErrorCalled,
 		"SystemError should not be called on fail-stop (EBADF/ENETDOWN/ENODEV)")
 }
+
+func TestIpPortToKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		ip       string
+		port     uint16
+		wantOK   bool
+		wantIP   uint32
+		wantPort uint16
+	}{
+		{
+			name:     "valid IPv4",
+			ip:       "192.168.1.1",
+			port:     5004,
+			wantOK:   true,
+			wantIP:   0xC0A80101,
+			wantPort: 5004,
+		},
+		{
+			name:     "localhost",
+			ip:       "127.0.0.1",
+			port:     5060,
+			wantOK:   true,
+			wantIP:   0x7F000001,
+			wantPort: 5060,
+		},
+		{
+			name:   "invalid IP",
+			ip:     "not-an-ip",
+			port:   5004,
+			wantOK: false,
+		},
+		{
+			name:   "empty IP",
+			ip:     "",
+			port:   5004,
+			wantOK: false,
+		},
+		{
+			name:   "IPv6 not supported",
+			ip:     "::1",
+			port:   5004,
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key, ok := ipPortToKey(tt.ip, tt.port)
+			require.Equal(t, tt.wantOK, ok)
+			if tt.wantOK {
+				require.Equal(t, tt.wantIP, key.IP)
+				require.Equal(t, tt.wantPort, key.Port)
+			}
+		})
+	}
+}

@@ -57,7 +57,7 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 > | **Reg failure** | `register_failure_total` | `carrier, ua_type, source_country, code` |
 > | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country` |
 > | **RTP dialog** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country` |
-> | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, destination_country, caller_host, called_host` |
+> | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, destination_country, caller_host, called_host, iface` |
 > | **Fraud** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country` |
 > | **Capacity** | `sessions_limit`, `sessions_utilization` | `carrier` |
 
@@ -65,7 +65,7 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 
 **Example:**
 ```
-sip_exporter_invite_total{carrier="carrier-a",ua_type="yealink",source_country="RU",destination_country="US",caller_host="10.1.5.20",called_host="sip.example.com"} 1523
+sip_exporter_invite_total{carrier="carrier-a",ua_type="yealink",source_country="RU",destination_country="US",caller_host="10.1.5.20",called_host="sip.example.com",iface="ens3"} 1523
 sip_exporter_200_total{carrier="carrier-a",ua_type="yealink",source_country="RU"} 847
 sip_exporter_ser{carrier="carrier-a",ua_type="yealink",source_country="RU"} 95.2
 ```
@@ -436,6 +436,24 @@ The host part of the `From` and `To` SIP URIs, respectively. Extracted during pa
 |----------|---------|-------------|
 | `SIP_EXPORTER_HOST_LABELS` | `false` | Enable `caller_host`/`called_host` on `invite_total` / `invite_200_total`. Off by default (unbounded cardinality). |
 
+### iface
+
+The network interface name (e.g. `ens3`, `tun0`, `lo`) on which the packet was captured. Populated from `SIP_EXPORTER_INTERFACE` — each monitored NIC produces separate metric series.
+
+- **Metrics**: `invite_total`, `invite_200_total`, `socket_packets_received_total`, `socket_packets_dropped_total`
+- **Always on** (no config toggle): the label is populated whenever the exporter captures traffic, with an empty value only if no interface is configured
+- **Cardinality**: +1 series per NIC per metric (negligible — typically 1–3 NICs)
+- **Use case**: per-NIC anomaly detection (drop rate on one interface, INVITE flood on another), aggregation across IPs on the same NIC
+
+**PromQL examples:**
+```promql
+# INVITE rate by interface
+sum by (iface) (rate(sip_exporter_invite_total[5m]))
+
+# Drop rate on a specific NIC
+rate(sip_exporter_socket_packets_dropped_total{iface="ens3"}[5m])
+```
+
 ### SER by Destination (PromQL)
 
 Ratio metrics (SER, SEER, ISA, SCR) carry `source_country` but **not** `destination_country` (cardinality control). To calculate SER for a specific destination, use PromQL on the raw INVITE counters:
@@ -477,7 +495,7 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 
 ## SIP request metrics
 
-`sip_exporter_invite_total{carrier="...",ua_type="..."}`: total number of received SIP INVITE requests. Re-INVITEs (INVITE within an existing dialog) are **excluded** — see `reinvite_total` below.  
+`sip_exporter_invite_total{carrier="...",ua_type="...",...,iface="ens3"}`: total number of received SIP INVITE requests. Re-INVITEs (INVITE within an existing dialog) are **excluded** — see `reinvite_total` below. Carries the `iface` label (network interface name, e.g. `ens3`, `tun0`).
 `sip_exporter_reinvite_total{carrier="...",ua_type="..."}`: total number of re-INVITE requests (INVITE sent within an already established dialog, RFC 3261 §14). Re-INVITEs refresh the dialog's Session-Expires timer without creating a new dialog or contaminating SER/SCR/ASR ratios.  
 `sip_exporter_register_total{carrier="...",ua_type="..."}`: total number of received SIP REGISTER requests.  
 `sip_exporter_options_total{carrier="...",ua_type="..."}`: total number of received SIP OPTIONS requests.  
@@ -493,7 +511,7 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 `sip_exporter_update_total{carrier="...",ua_type="..."}`: total number of received SIP UPDATE requests.  
 `sip_exporter_message_total{carrier="...",ua_type="..."}`: total number of received SIP MESSAGE requests.
 
-`sip_exporter_invite_200_total{carrier,ua_type,source_country,destination_country,caller_host,called_host}`: total number of `200 OK` responses to INVITE requests (successful call establishments). This is the numerator for [SER-by-destination](#ser-by-destination-promql) PromQL calculations. Carries the full 6-label set — same as `invite_total`.
+`sip_exporter_invite_200_total{carrier,ua_type,source_country,destination_country,caller_host,called_host,iface}`: total number of `200 OK` responses to INVITE requests (successful call establishments). This is the numerator for [SER-by-destination](#ser-by-destination-promql) PromQL calculations. Carries the full 7-label set — same as `invite_total`, including `iface`.
 
 ## SIP response metrics (by status code)
 
@@ -662,6 +680,16 @@ All RTP metrics carry the `carrier`, `ua_type`, `codec`, and `source_country` la
 belongs to an established SIP dialog (after a 200 OK to INVITE with SDP) is
 counted; RTP without a correlated dialog is dropped.
 
+> **RTP capture (SDP-driven mode):** The eBPF filter passes UDP only from
+> endpoints learned via SDP signaling. Media endpoints (IP:port) from INVITE
+> 200 OK SDP are inserted into a BPF LRU hash map (`rtp_endpoints`, 65536
+> entries). UDP packets matching a registered endpoint (destination or source)
+> pass the filter; all other UDP is dropped at the kernel level.
+>
+> Entries are removed on BYE 200 OK or Session-Expires cleanup. On restart the
+> map starts empty — RTP is not captured until new SDP is learned from
+> subsequent calls.
+
 `{carrier="...",ua_type="...",codec="...",source_country="..."}` — `codec` is the RTP payload-type name resolved from SDP `a=rtpmap` (e.g. `PCMU`, `PCMA`, `opus`) with a static fallback table (RFC 3551). `source_country` is inherited from the SIP dialog (resolved at INVITE time).
 
 `sip_exporter_rtp_packets_total{carrier,ua_type,codec,source_country}` *(counter)*: total number of RTP packets observed.
@@ -721,8 +749,8 @@ Self-monitoring metrics provide visibility into the exporter's internal health. 
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `sip_exporter_socket_packets_received_total` | Counter | Total packets received from kernel AF_PACKET socket |
-| `sip_exporter_socket_packets_dropped_total` | Counter | Total packets dropped by kernel due to socket receive buffer overflow |
+| `sip_exporter_socket_packets_received_total{iface}` | CounterVec | Total packets received from kernel AF_PACKET socket per interface |
+| `sip_exporter_socket_packets_dropped_total{iface}` | CounterVec | Total packets dropped by kernel due to socket receive buffer overflow per interface |
 | `sip_exporter_rtp_dropped_total` | Counter | Total RTP packets dropped in userspace when the internal messages channel is full |
 | `sip_exporter_channel_length` | Gauge | Current number of packets in the internal messages channel buffer |
 | `sip_exporter_channel_capacity` | Gauge | Capacity of the internal messages channel buffer (constant: 10000) |
@@ -733,16 +761,19 @@ Self-monitoring metrics provide visibility into the exporter's internal health. 
 
 ### AF_PACKET Socket Statistics
 
-`sip_exporter_socket_packets_received_total` and `sip_exporter_socket_packets_dropped_total` are read from the kernel's `PACKET_STATISTICS` via `getsockopt()` every second. The kernel resets counters after each read, so values are accumulated in the exporter.
+`sip_exporter_socket_packets_received_total` and `sip_exporter_socket_packets_dropped_total` are read from the kernel's `PACKET_STATISTICS` via `getsockopt()` every second. The kernel resets counters after each read, so values are accumulated in the exporter. Both carry an `iface` label (network interface name) for per-NIC visibility.
 
 **PromQL examples:**
 ```promql
-# Packet drop rate (packets/sec)
-rate(sip_exporter_socket_packets_dropped_total[5m])
+# Packet drop rate per interface (packets/sec)
+rate(sip_exporter_socket_packets_dropped_total{iface="ens3"}[5m])
 
-# Drop ratio (percentage of received packets dropped)
-rate(sip_exporter_socket_packets_dropped_total[5m])
-  / rate(sip_exporter_socket_packets_received_total[5m]) * 100
+# Drop ratio across all interfaces (percentage of received packets dropped)
+sum(rate(sip_exporter_socket_packets_dropped_total[5m]))
+  / sum(rate(sip_exporter_socket_packets_received_total[5m])) * 100
+
+# Packets received by interface
+sum by (iface) (rate(sip_exporter_socket_packets_received_total[5m]))
 ```
 
 ### Parse Errors

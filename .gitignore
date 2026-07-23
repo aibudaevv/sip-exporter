@@ -17,6 +17,9 @@ test/e2e/load/load_result.json
 # Remote simulation harness (local-only, not committed)
 test/remote_test/
 
+# Worktrees
+.worktrees/
+
 # Session notes
 session*.md
 docs/superpowers/

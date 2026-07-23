@@ -58,12 +58,8 @@ func (m *metrics) ParseError(errorType string) {
 
 func (m *metrics) SocketStats(stats []SocketStat) {
 	for _, s := range stats {
-		if s.Received > 0 {
-			m.socketPacketsReceived.WithLabelValues(s.Iface).Add(float64(s.Received))
-		}
-		if s.Dropped > 0 {
-			m.socketPacketsDropped.WithLabelValues(s.Iface).Add(float64(s.Dropped))
-		}
+		m.socketPacketsReceived.WithLabelValues(s.Iface).Add(float64(s.Received))
+		m.socketPacketsDropped.WithLabelValues(s.Iface).Add(float64(s.Dropped))
 	}
 }
 

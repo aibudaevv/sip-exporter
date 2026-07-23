@@ -38,7 +38,7 @@ func TestCorrelator_UnregisterByCallID(t *testing.T) {
 	tr.Register("10.0.0.2", 5006, sampleLabels("call-1"))
 	tr.Register("10.0.0.3", 5008, sampleLabels("call-2"))
 
-	tr.Unregister("call-1")
+	_, _ = tr.Unregister("call-1")
 
 	_, ok1 := tr.Lookup("10.0.0.1", 5004)
 	_, ok2 := tr.Lookup("10.0.0.2", 5006)
@@ -46,6 +46,18 @@ func TestCorrelator_UnregisterByCallID(t *testing.T) {
 	require.False(t, ok1, "endpoint of call-1 must be removed")
 	require.False(t, ok2)
 	require.True(t, ok3, "endpoint of call-2 must remain")
+}
+
+func TestTracker_UnregisterReturnsDeletedEndpoints(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5006, sampleLabels("call-1"))
+	tr.Register("10.0.0.3", 5008, sampleLabels("call-2"))
+
+	_, deleted := tr.Unregister("call-1")
+	require.Len(t, deleted, 2)
+	ips := map[string]bool{deleted[0].IP: true, deleted[1].IP: true}
+	require.True(t, ips["10.0.0.1"] && ips["10.0.0.2"], "must return call-1 endpoints only")
 }
 
 func TestTracker_ObserveNoCorrelation_Drop(t *testing.T) {
@@ -314,7 +326,7 @@ func TestTracker_ZeroClockRateFallback(t *testing.T) {
 
 func TestTracker_UnregisterResult_NoMediaNoRTP(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
-	r := tr.Unregister("call-1")
+	r, _ := tr.Unregister("call-1")
 	require.False(t, r.MediaExpected)
 	require.False(t, r.RTPObserved)
 	require.False(t, r.OneWay)
@@ -324,7 +336,7 @@ func TestTracker_UnregisterResult_MediaExpectedNoRTP(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
 	tr.Register("10.0.0.2", 5006, sampleLabels("call-1"))
-	r := tr.Unregister("call-1")
+	r, _ := tr.Unregister("call-1")
 	require.True(t, r.MediaExpected)
 	require.False(t, r.RTPObserved)
 	require.False(t, r.OneWay)
@@ -341,7 +353,7 @@ func TestTracker_UnregisterResult_TwoWayRTP(t *testing.T) {
 	// RTP to endpoint 2 (dst=10.0.0.2:5006)
 	_, ok = tr.Observe("10.0.0.99", 9999, "10.0.0.2", 5006, newHeader(1, 160), t0)
 	require.True(t, ok)
-	r := tr.Unregister("call-1")
+	r, _ := tr.Unregister("call-1")
 	require.True(t, r.MediaExpected)
 	require.True(t, r.RTPObserved)
 	require.False(t, r.OneWay)
@@ -355,7 +367,7 @@ func TestTracker_UnregisterResult_OneWayRTP(t *testing.T) {
 	// RTP only to endpoint 1
 	_, ok := tr.Observe("10.0.0.99", 9999, "10.0.0.1", 5004, newHeader(1, 160), t0)
 	require.True(t, ok)
-	r := tr.Unregister("call-1")
+	r, _ := tr.Unregister("call-1")
 	require.True(t, r.MediaExpected)
 	require.True(t, r.RTPObserved)
 	require.True(t, r.OneWay, "2 endpoints registered, only 1 with RTP = one-way")
@@ -376,7 +388,7 @@ func TestTracker_UnregisterResult_SurvivesTTL(t *testing.T) {
 	tr.Cleanup()
 	require.Empty(t, tr.Snapshot(), "streams must be TTL-expired")
 
-	r := tr.Unregister("call-1")
+	r, _ := tr.Unregister("call-1")
 	require.True(t, r.MediaExpected, "media endpoints persist")
 	require.True(t, r.RTPObserved, "RTP fact must survive stream TTL")
 	require.False(t, r.OneWay, "two-way RTP was observed")
