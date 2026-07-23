@@ -348,7 +348,7 @@ Metrics produced:
 
 RTP capture is on by default and can be disabled with `SIP_EXPORTER_RTP_CAPTURE=false` (the eBPF filter then drops RTP at the kernel level). Note: RTP without a correlated SIP dialog (no SDP exchange seen) is dropped, so only media for monitored calls is counted.
 
-The eBPF filter uses a **hybrid two-stage RTP detection**: media endpoints learned from SDP are inserted into a BPF LRU hash map (SDP-driven lookup); if that misses, a 2-byte RTP header signature check acts as fallback. This reduces false positives from random UDP traffic on public IPs while remaining backward-compatible.
+The eBPF filter uses **SDP-driven RTP detection**: media endpoints (IP:port) learned from INVITE 200 OK SDP are inserted into a BPF LRU hash map. Only UDP packets matching a registered endpoint pass the kernel filter — all other UDP is dropped. This eliminates false positives from random UDP traffic on public IPs.
 
 ```PromQL
 # Average MOS over the last 5m (per codec)

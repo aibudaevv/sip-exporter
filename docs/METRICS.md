@@ -680,11 +680,15 @@ All RTP metrics carry the `carrier`, `ua_type`, `codec`, and `source_country` la
 belongs to an established SIP dialog (after a 200 OK to INVITE with SDP) is
 counted; RTP without a correlated dialog is dropped.
 
-> **RTP capture (hybrid mode):** The eBPF filter uses a two-stage approach:
-> 1. **SDP-driven lookup** — media endpoints (IP:port) learned from INVITE 200 OK SDP are inserted into a BPF LRU hash map (`rtp_endpoints`, 65536 entries). Packets matching a known endpoint pass immediately.
-> 2. **Pattern matching fallback** — if the SDP lookup misses, the filter checks the 2-byte RTP header signature (V=2, valid PT). This catches mid-call RTP after a restart (map starts empty) and early media from 183 responses.
+> **RTP capture (SDP-driven mode):** The eBPF filter passes UDP only from
+> endpoints learned via SDP signaling. Media endpoints (IP:port) from INVITE
+> 200 OK SDP are inserted into a BPF LRU hash map (`rtp_endpoints`, 65536
+> entries). UDP packets matching a registered endpoint (destination or source)
+> pass the filter; all other UDP is dropped at the kernel level.
 >
-> Entries are removed from the map on BYE 200 OK or Session-Expires cleanup. On restart/crash the map is empty; all RTP passes via pattern fallback until SDP is relearned.
+> Entries are removed on BYE 200 OK or Session-Expires cleanup. On restart the
+> map starts empty — RTP is not captured until new SDP is learned from
+> subsequent calls.
 
 `{carrier="...",ua_type="...",codec="...",source_country="..."}` — `codec` is the RTP payload-type name resolved from SDP `a=rtpmap` (e.g. `PCMU`, `PCMA`, `opus`) with a static fallback table (RFC 3551). `source_country` is inherited from the SIP dialog (resolved at INVITE time).
 

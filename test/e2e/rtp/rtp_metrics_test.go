@@ -200,9 +200,9 @@ func runSippRTPWithIPs(ctx context.Context, t *testing.T, uasSIP, uacSIP, uasMed
 // dialog (INVITE/200 OK with SDP) + real G.711a RTP streamed by SIPp produces the
 // labelled RTP metrics on /metrics. Closes review item I3.
 func TestRTP_MetricsFromSIPpStream(t *testing.T) {
-	ports := allocatePortsN(5)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, "0", testInterface, true, "")
+	ports := allocatePortsN(6)
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia, sipsPort := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, sipsPort, testInterface, true, "")
 
 	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 
