@@ -27,11 +27,13 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - [Development](#development)
 - [Benchmark](#benchmark)
 - [Alerting](#alerting)
+- [Metrics Storage Compatibility](#metrics-storage-compatibility)
 - [License](#license)
 - [Changelog](#changelog)
 
 ## Key Features
 
+- 🌐 **Multi-interface monitoring** — capture SIP/RTP from multiple NICs simultaneously, each tagged with an `iface` label
 - ⚡ **Low overhead** — eBPF packet filtering in kernel space
 - 🐳 **Single container deployment** — no external dependencies
 - 🔧 **Configurable SIP ports** — monitor custom ports via environment variables
@@ -128,14 +130,14 @@ The container must run with `--privileged` and `--network host` (eBPF requires `
 
 ## Metrics
 
-All metrics are exposed at `/metrics` in Prometheus exposition format. All SIP metrics include `carrier` and `ua_type` labels for multi-dimensional analysis. The exporter provides:
+All metrics are exposed at `/metrics` in Prometheus exposition format. All SIP metrics include `carrier`, `ua_type`, and `source_country` labels for multi-dimensional analysis. INVITE metrics additionally carry an `iface` label identifying the network interface that captured the traffic. The exporter provides:
 
 - **Traffic counters** — SIP request types (INVITE, re-INVITE, BYE, REGISTER, etc.) and response status codes (100–606)
 - **Active sessions** — real-time count of active SIP dialogs
 - **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, PDD, PBD
 - **RFC 6035 voice quality metrics** — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
-- **RTP media metrics** — `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_active_streams` (labels: `carrier,ua_type,codec`)
-- **Diagnostics** — SIP retransmissions (Timer A), out-of-order RTP, short call counters (20/60/180s thresholds)
+- **RTP media metrics** — `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_active_streams` (labels: `carrier,ua_type,codec,source_country`)
+- **Diagnostics** — `sip_retransmission_total` (SIP Timer A retransmissions), `rtp_out_of_order_total` (out-of-sequence RTP packets), `short_calls_total` (calls shorter than 20/60/180 seconds)
 
 Full reference with formulas, examples, and RFC section mapping: [docs/METRICS.md](docs/METRICS.md)
 
@@ -382,7 +384,7 @@ See [docs/METRICS.md](docs/METRICS.md) for the full RTP reference, formulas, and
 
 Test suite:
 - **Unit tests** — MC/DC standard, all business logic covered
-- **124 E2E tests** — real SIP traffic via SIPp + testcontainers-go, validates all RFC 6076, RFC 6035, and RTP metrics
+- **158 E2E tests** — real SIP traffic via SIPp + testcontainers-go, validates all RFC 6076, RFC 6035, and RTP metrics
 - **13 load tests** — PPS throughput, VQ reports, concurrent sessions, memory stability, GC pauses, scrape latency
 
 ## Benchmark
