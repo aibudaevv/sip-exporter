@@ -5406,7 +5406,7 @@ func TestIpPortToKey(t *testing.T) {
 
 // ==================== S10-R1: Exporter-layer wiring tests ====================
 
-func TestHandleRequest_RetrasmissionMetric(t *testing.T) {
+func TestHandleRequest_RetransmissionMetric(t *testing.T) {
 	mm := &mockMetricser{}
 	e := &exporter{
 		services: services{

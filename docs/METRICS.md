@@ -1167,7 +1167,7 @@ rate(sip_exporter_pdd_sum[5m]) / rate(sip_exporter_pdd_count[5m])
 
 ### Post Bye Delay (PBD)
 
-`sip_exporter_pbd{carrier="...",ua_type="..."}` *(histogram, buckets 1..5000 ms)*: delay in milliseconds between a BYE request and the corresponding `200 OK BYE` response. Measures how quickly the endpoint tears down the session after hang-up. High PBD indicates SBC/media gateway processing delays or resource contention.
+`sip_exporter_pbd{carrier="...",ua_type="...",source_country="..."}` *(histogram, buckets 1..5000 ms)*: delay in milliseconds between a BYE request and the corresponding `200 OK BYE` response. Measures how quickly the endpoint tears down the session after hang-up. High PBD indicates SBC/media gateway processing delays or resource contention.
 
 **Buckets:** 1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000 ms.
 

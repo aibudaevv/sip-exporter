@@ -205,19 +205,20 @@ func (m *metrics) getLRDFromHistogram() uint64 {
 	return dtoMetric.GetHistogram().GetSampleCount()
 }
 
-func (m *metrics) getPBDFromHistogram() uint64 {
+func (m *metrics) getPBDFromHistogram() (float64, uint64) {
 	if m.pbd == nil {
-		return 0
+		return 0, 0
 	}
 	hist, ok := m.pbd.WithLabelValues("", "", "").(prometheus.Histogram)
 	if !ok {
-		return 0
+		return 0, 0
 	}
 	var dtoMetric dto.Metric
 	if err := hist.Write(&dtoMetric); err != nil {
-		return 0
+		return 0, 0
 	}
-	return dtoMetric.GetHistogram().GetSampleCount()
+	h := dtoMetric.GetHistogram()
+	return h.GetSampleSum(), h.GetSampleCount()
 }
 
 func (m *metrics) getSPDFromHistogram() (float64, uint64) {
@@ -379,6 +380,28 @@ func TestMetrics_ShortCalls_ZeroDuration(t *testing.T) {
 	require.InDelta(t, 0.0, requestVecValue(m.shortCalls, "", "", "", "20"), 0.01)
 	require.InDelta(t, 0.0, requestVecValue(m.shortCalls, "", "", "", "60"), 0.01)
 	require.InDelta(t, 0.0, requestVecValue(m.shortCalls, "", "", "", "180"), 0.01)
+}
+
+func TestMetrics_ShortCalls_Boundaries(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	// exact 20s: strict < → "20" does NOT increment, "60" and "180" do
+	m.UpdateShortCalls("", "", "", 20*time.Second)
+	require.InDelta(t, 0.0, requestVecValue(m.shortCalls, "", "", "", "20"), 0.01)
+	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "60"), 0.01)
+	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "180"), 0.01)
+
+	// exact 60s: "20" and "60" do NOT increment, "180" does
+	m.UpdateShortCalls("", "", "", 60*time.Second)
+	require.InDelta(t, 0.0, requestVecValue(m.shortCalls, "", "", "", "20"), 0.01)
+	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "60"), 0.01)
+	require.InDelta(t, 2.0, requestVecValue(m.shortCalls, "", "", "", "180"), 0.01)
+
+	// exact 180s: no threshold increments
+	m.UpdateShortCalls("", "", "", 180*time.Second)
+	require.InDelta(t, 0.0, requestVecValue(m.shortCalls, "", "", "", "20"), 0.01)
+	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "60"), 0.01)
+	require.InDelta(t, 2.0, requestVecValue(m.shortCalls, "", "", "", "180"), 0.01)
 }
 
 func TestMetrics_Request_SourceCountryLabel(t *testing.T) {
@@ -2054,12 +2077,32 @@ func TestMetrics_LRD_Observe(t *testing.T) {
 
 func TestMetrics_PBD_Observe(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
+
+	sum, count := m.getPBDFromHistogram()
+	require.InDelta(t, 0.0, sum, 0.01)
+	require.Equal(t, uint64(0), count)
+
 	m.UpdatePBD("", "", "", 10.5)
+
+	sum, count = m.getPBDFromHistogram()
+	require.InDelta(t, 10.5, sum, 0.01)
+	require.Equal(t, uint64(1), count)
 
 	m.UpdatePBD("", "", "", 25.0)
 
-	count := m.getPBDFromHistogram()
+	sum, count = m.getPBDFromHistogram()
+	require.InDelta(t, 35.5, sum, 0.01)
 	require.Equal(t, uint64(2), count)
+}
+
+func TestMetrics_PBD_Histogram_ZeroValue(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.UpdatePBD("", "", "", 0.0)
+
+	sum, count := m.getPBDFromHistogram()
+	require.InDelta(t, 0.0, sum, 0.01)
+	require.Equal(t, uint64(1), count)
 }
 
 func TestMetrics_UpdateDelay_NegativeGuard(t *testing.T) {
@@ -2077,7 +2120,7 @@ func TestMetrics_UpdateDelay_NegativeGuard(t *testing.T) {
 	_, pddCount := m.getPDDFromHistogram()
 	ordCount := m.getORDFromHistogram()
 	lrdCount := m.getLRDFromHistogram()
-	pbdCount := m.getPBDFromHistogram()
+	_, pbdCount := m.getPBDFromHistogram()
 
 	require.Equal(t, uint64(0), rrdCount, "RRD must reject negative delay")
 	require.Equal(t, uint64(0), ttrCount, "TTR must reject negative delay")
