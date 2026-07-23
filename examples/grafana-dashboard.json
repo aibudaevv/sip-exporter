@@ -16,617 +16,618 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 1,
-        "w": 24,
         "x": 0,
-        "y": 0
+        "y": 0,
+        "w": 24,
+        "h": 1
       },
       "id": 1,
-      "panels": [],
-      "title": "Overview",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 0,
-        "y": 1
-      },
-      "id": 2,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
+      "panels": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sip_exporter_sessions{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}",
-          "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Active Sessions",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "ops"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 6,
-        "y": 1
-      },
-      "id": 3,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(rate(sip_exporter_packets_total[5m]))",
-          "legendFormat": "Packets/sec",
-          "refId": "A"
-        }
-      ],
-      "title": "SIP Packets Rate",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "ops"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 12,
-        "y": 1
-      },
-      "id": 4,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(rate(sip_exporter_invite_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\",destination_country=~\"$destination_country\"}[5m]))",
-          "legendFormat": "INVITE/sec",
-          "refId": "A"
-        }
-      ],
-      "title": "INVITE Rate",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "ops"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 18,
-        "y": 1
-      },
-      "id": 5,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(rate(sip_exporter_sdc_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m]))",
-          "legendFormat": "Completed/sec",
-          "refId": "A"
-        }
-      ],
-      "title": "Completed Sessions/sec",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisGridShow": true,
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "none"
             },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
+            "overrides": []
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 1,
+            "w": 6,
+            "h": 5
+          },
+          "id": 2,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
             },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sip_exporter_sessions{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}",
+              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Active Sessions",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "ops"
             },
-            "thresholdsStyle": {
-              "mode": "off"
+            "overrides": []
+          },
+          "gridPos": {
+            "x": 6,
+            "y": 1,
+            "w": 6,
+            "h": 5
+          },
+          "id": 3,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(rate(sip_exporter_packets_total[5m]))",
+              "legendFormat": "Packets/sec",
+              "refId": "A"
+            }
+          ],
+          "title": "SIP Packets Rate",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 1,
+            "w": 6,
+            "h": 5
+          },
+          "id": 4,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(rate(sip_exporter_invite_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\",destination_country=~\"$destination_country\"}[5m]))",
+              "legendFormat": "INVITE/sec",
+              "refId": "A"
+            }
+          ],
+          "title": "INVITE Rate",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "x": 18,
+            "y": 1,
+            "w": 6,
+            "h": 5
+          },
+          "id": 5,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(rate(sip_exporter_sdc_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m]))",
+              "legendFormat": "Completed/sec",
+              "refId": "A"
+            }
+          ],
+          "title": "Completed Sessions/sec",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 2000
+                  },
+                  {
+                    "color": "red",
+                    "value": 5000
+                  }
+                ]
+              },
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 6,
+            "w": 6,
+            "h": 5
+          },
+          "id": 6,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_pdd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])) by (le))",
+              "legendFormat": "PDD p95",
+              "refId": "A"
+            }
+          ],
+          "title": "PDD p95 (Post Dial Delay)",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 600
+                  },
+                  {
+                    "color": "red",
+                    "value": 1800
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "x": 6,
+            "y": 6,
+            "w": 6,
+            "h": 5
+          },
+          "id": 7,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "histogram_quantile(0.5, sum(rate(sip_exporter_spd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])) by (le))",
+              "legendFormat": "ACD median",
+              "refId": "A"
+            }
+          ],
+          "title": "ACD (Average Call Duration)",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 40
+                  },
+                  {
+                    "color": "green",
+                    "value": 70
+                  }
+                ]
+              },
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 6,
+            "w": 6,
+            "h": 5
+          },
+          "id": 8,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sip_exporter_asr{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}",
+              "legendFormat": "{{carrier}} / {{ua_type}}",
+              "refId": "A"
+            }
+          ],
+          "title": "ASR (Answer Seizure Ratio)",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 50
+                  },
+                  {
+                    "color": "green",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "x": 18,
+            "y": 6,
+            "w": 6,
+            "h": 5
+          },
+          "id": 9,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sip_exporter_ser{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}",
+              "legendFormat": "{{carrier}} / {{ua_type}}",
+              "refId": "A"
+            }
+          ],
+          "title": "SER (Session Establishment Ratio)",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisGridShow": true,
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 11,
+            "w": 24,
+            "h": 8
+          },
+          "id": 314,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
             }
           },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "ops"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 6
-      },
-      "id": 314,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (threshold) (rate(sip_exporter_short_calls_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m]))",
+              "legendFormat": "< {{threshold}}s",
+              "refId": "A"
+            }
           ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (threshold) (rate(sip_exporter_short_calls_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m]))",
-          "legendFormat": "< {{threshold}}s",
-          "refId": "A"
+          "title": "Short Calls Rate by Threshold",
+          "type": "timeseries"
         }
       ],
-      "title": "Short Calls Rate by Threshold",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 2000
-              },
-              {
-                "color": "red",
-                "value": 5000
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 0,
-        "y": 6
-      },
-      "id": 6,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_pdd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])) by (le))",
-          "legendFormat": "PDD p95",
-          "refId": "A"
-        }
-      ],
-      "title": "PDD p95 (Post Dial Delay)",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 600
-              },
-              {
-                "color": "red",
-                "value": 1800
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 6,
-        "y": 6
-      },
-      "id": 7,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "histogram_quantile(0.5, sum(rate(sip_exporter_spd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])) by (le))",
-          "legendFormat": "ACD median",
-          "refId": "A"
-        }
-      ],
-      "title": "ACD (Average Call Duration)",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 40
-              },
-              {
-                "color": "green",
-                "value": 70
-              }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 12,
-        "y": 6
-      },
-      "id": 8,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sip_exporter_asr{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}",
-          "legendFormat": "{{carrier}} / {{ua_type}}",
-          "refId": "A"
-        }
-      ],
-      "title": "ASR (Answer Seizure Ratio)",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 50
-              },
-              {
-                "color": "green",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 18,
-        "y": 6
-      },
-      "id": 9,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sip_exporter_ser{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}",
-          "legendFormat": "{{carrier}} / {{ua_type}}",
-          "refId": "A"
-        }
-      ],
-      "title": "SER (Session Establishment Ratio)",
-      "type": "stat"
+      "title": "Overview",
+      "type": "row"
     },
     {
       "collapsed": true,
@@ -635,10 +636,10 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 1,
-        "w": 24,
         "x": 0,
-        "y": 11
+        "y": 19,
+        "w": 24,
+        "h": 1
       },
       "id": 10,
       "panels": [
@@ -675,10 +676,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 4,
             "x": 0,
-            "y": 7
+            "y": 20,
+            "w": 4,
+            "h": 5
           },
           "id": 11,
           "options": {
@@ -743,10 +744,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 4,
             "x": 4,
-            "y": 7
+            "y": 20,
+            "w": 4,
+            "h": 5
           },
           "id": 12,
           "options": {
@@ -811,10 +812,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 4,
             "x": 8,
-            "y": 7
+            "y": 20,
+            "w": 4,
+            "h": 5
           },
           "id": 13,
           "options": {
@@ -879,10 +880,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 4,
             "x": 12,
-            "y": 7
+            "y": 20,
+            "w": 4,
+            "h": 5
           },
           "id": 14,
           "options": {
@@ -947,10 +948,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 4,
             "x": 16,
-            "y": 7
+            "y": 20,
+            "w": 4,
+            "h": 5
           },
           "id": 15,
           "options": {
@@ -1015,10 +1016,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 4,
             "x": 20,
-            "y": 7
+            "y": 20,
+            "w": 4,
+            "h": 5
           },
           "id": 16,
           "options": {
@@ -1105,10 +1106,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 24,
             "x": 0,
-            "y": 12
+            "y": 25,
+            "w": 24,
+            "h": 8
           },
           "id": 17,
           "options": {
@@ -1198,10 +1199,10 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 1,
-        "w": 24,
         "x": 0,
-        "y": 7
+        "y": 33,
+        "w": 24,
+        "h": 1
       },
       "id": 20,
       "panels": [
@@ -1238,10 +1239,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 6,
             "x": 0,
-            "y": 8
+            "y": 34,
+            "w": 6,
+            "h": 5
           },
           "id": 21,
           "options": {
@@ -1306,10 +1307,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 6,
             "x": 6,
-            "y": 8
+            "y": 34,
+            "w": 6,
+            "h": 5
           },
           "id": 22,
           "options": {
@@ -1374,10 +1375,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 6,
             "x": 12,
-            "y": 8
+            "y": 34,
+            "w": 6,
+            "h": 5
           },
           "id": 23,
           "options": {
@@ -1442,10 +1443,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 6,
             "x": 18,
-            "y": 8
+            "y": 34,
+            "w": 6,
+            "h": 5
           },
           "id": 24,
           "options": {
@@ -1475,6 +1476,74 @@
             }
           ],
           "title": "ORD p95 (OPTIONS Response Delay)",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 100
+                  },
+                  {
+                    "color": "red",
+                    "value": 500
+                  }
+                ]
+              },
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 39,
+            "w": 6,
+            "h": 5
+          },
+          "id": 60,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_pdd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])) by (le))",
+              "legendFormat": "PDD p95",
+              "refId": "A"
+            }
+          ],
+          "title": "PDD p95 (Post Dial Delay)",
           "type": "stat"
         },
         {
@@ -1532,10 +1601,118 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
+            "x": 6,
+            "y": 39,
+            "w": 18,
+            "h": 8
+          },
+          "id": 311,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "histogram_quantile(0.5, sum(rate(sip_exporter_pbd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])) by (le, carrier, ua_type, source_country))",
+              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - p50",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_pbd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])) by (le, carrier, ua_type, source_country))",
+              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - p95",
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "histogram_quantile(0.99, sum(rate(sip_exporter_pbd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])) by (le, carrier, ua_type, source_country))",
+              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - p99",
+              "refId": "C"
+            }
+          ],
+          "title": "PBD (Post Bye Delay)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisGridShow": true,
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": {
             "x": 0,
-            "y": 13
+            "y": 47,
+            "w": 12,
+            "h": 8
           },
           "id": 25,
           "options": {
@@ -1640,10 +1817,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
             "x": 12,
-            "y": 13
+            "y": 47,
+            "w": 12,
+            "h": 8
           },
           "id": 26,
           "options": {
@@ -1748,10 +1925,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
             "x": 0,
-            "y": 21
+            "y": 55,
+            "w": 12,
+            "h": 8
           },
           "id": 27,
           "options": {
@@ -1856,10 +2033,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
             "x": 12,
-            "y": 21
+            "y": 55,
+            "w": 12,
+            "h": 8
           },
           "id": 28,
           "options": {
@@ -1964,10 +2141,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
             "x": 0,
-            "y": 29
+            "y": 63,
+            "w": 12,
+            "h": 8
           },
           "id": 29,
           "options": {
@@ -2025,74 +2202,6 @@
           "fieldConfig": {
             "defaults": {
               "color": {
-                "mode": "thresholds"
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "yellow",
-                    "value": 100
-                  },
-                  {
-                    "color": "red",
-                    "value": 500
-                  }
-                ]
-              },
-              "unit": "ms"
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 5,
-            "w": 6,
-            "x": 0,
-            "y": 13
-          },
-          "id": 60,
-          "options": {
-            "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
-            "orientation": "auto",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "textMode": "auto"
-          },
-          "pluginVersion": "10.0.0",
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_pdd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])) by (le))",
-              "legendFormat": "PDD p95",
-              "refId": "A"
-            }
-          ],
-          "title": "PDD p95 (Post Dial Delay)",
-          "type": "stat"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
                 "mode": "palette-classic"
               },
               "custom": {
@@ -2140,10 +2249,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
+            "x": 12,
+            "y": 63,
             "w": 12,
-            "x": 0,
-            "y": 18
+            "h": 8
           },
           "id": 61,
           "options": {
@@ -2191,114 +2300,6 @@
           ],
           "title": "PDD (Post Dial Delay)",
           "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisCenteredZero": false,
-                "axisGridShow": true,
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "drawStyle": "line",
-                "fillOpacity": 10,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "never",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  }
-                ]
-              },
-              "unit": "ms"
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 12,
-            "y": 14
-          },
-          "id": 311,
-          "options": {
-            "legend": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          },
-          "pluginVersion": "10.0.0",
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "expr": "histogram_quantile(0.5, sum(rate(sip_exporter_pbd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])) by (le, carrier, ua_type, source_country))",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - p50",
-              "refId": "A"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_pbd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])) by (le, carrier, ua_type, source_country))",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - p95",
-              "refId": "B"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "expr": "histogram_quantile(0.99, sum(rate(sip_exporter_pbd_bucket{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])) by (le, carrier, ua_type, source_country))",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - p99",
-              "refId": "C"
-            }
-          ],
-          "title": "PBD (Post Bye Delay)",
-          "type": "timeseries"
         }
       ],
       "title": "Latency Histograms",
@@ -2311,10 +2312,10 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 1,
-        "w": 24,
         "x": 0,
-        "y": 8
+        "y": 71,
+        "w": 24,
+        "h": 1
       },
       "id": 30,
       "panels": [
@@ -2373,10 +2374,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
             "x": 0,
-            "y": 9
+            "y": 72,
+            "w": 12,
+            "h": 8
           },
           "id": 31,
           "options": {
@@ -2578,10 +2579,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
             "x": 12,
-            "y": 9
+            "y": 72,
+            "w": 12,
+            "h": 8
           },
           "id": 32,
           "options": {
@@ -2691,10 +2692,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 24,
             "x": 0,
-            "y": 17
+            "y": 80,
+            "w": 24,
+            "h": 8
           },
           "id": 33,
           "options": {
@@ -2862,10 +2863,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 24,
             "x": 0,
-            "y": 0
+            "y": 88,
+            "w": 24,
+            "h": 8
           },
           "id": 312,
           "options": {
@@ -2908,10 +2909,10 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 1,
-        "w": 24,
         "x": 0,
-        "y": 9
+        "y": 96,
+        "w": 24,
+        "h": 1
       },
       "id": 50,
       "panels": [
@@ -2953,10 +2954,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 6,
             "x": 0,
-            "y": 10
+            "y": 97,
+            "w": 6,
+            "h": 5
           },
           "id": 51,
           "options": {
@@ -3026,10 +3027,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 6,
             "x": 6,
-            "y": 10
+            "y": 97,
+            "w": 6,
+            "h": 5
           },
           "id": 52,
           "options": {
@@ -3095,10 +3096,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 6,
             "x": 12,
-            "y": 10
+            "y": 97,
+            "w": 6,
+            "h": 5
           },
           "id": 53,
           "options": {
@@ -3164,10 +3165,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 6,
             "x": 18,
-            "y": 10
+            "y": 97,
+            "w": 6,
+            "h": 5
           },
           "id": 54,
           "options": {
@@ -3255,10 +3256,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
             "x": 0,
-            "y": 15
+            "y": 102,
+            "w": 12,
+            "h": 8
           },
           "id": 55,
           "options": {
@@ -3357,10 +3358,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
             "x": 12,
-            "y": 15
+            "y": 102,
+            "w": 12,
+            "h": 8
           },
           "id": 56,
           "options": {
@@ -3458,10 +3459,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
             "x": 0,
-            "y": 23
+            "y": 110,
+            "w": 12,
+            "h": 8
           },
           "id": 57,
           "options": {
@@ -3557,10 +3558,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
             "x": 12,
-            "y": 23
+            "y": 110,
+            "w": 12,
+            "h": 8
           },
           "id": 58,
           "options": {
@@ -3612,10 +3613,10 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 1,
-        "w": 24,
         "x": 0,
-        "y": 9
+        "y": 118,
+        "w": 24,
+        "h": 1
       },
       "id": 40,
       "panels": [
@@ -3674,10 +3675,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 7,
-            "w": 12,
             "x": 0,
-            "y": 10
+            "y": 119,
+            "w": 12,
+            "h": 7
           },
           "id": 41,
           "options": {
@@ -3762,10 +3763,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 7,
-            "w": 12,
             "x": 12,
-            "y": 10
+            "y": 119,
+            "w": 12,
+            "h": 7
           },
           "id": 42,
           "options": {
@@ -3831,10 +3832,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 7,
-            "w": 12,
             "x": 0,
-            "y": 17
+            "y": 126,
+            "w": 12,
+            "h": 7
           },
           "id": 43,
           "options": {
@@ -3921,10 +3922,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 7,
-            "w": 12,
             "x": 12,
-            "y": 17
+            "y": 126,
+            "w": 12,
+            "h": 7
           },
           "id": 44,
           "options": {
@@ -4011,10 +4012,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 12,
-            "y": 17
+            "x": 0,
+            "y": 133,
+            "w": 24,
+            "h": 7
           },
           "id": 307,
           "options": {
@@ -4057,10 +4058,10 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 1,
-        "w": 24,
         "x": 0,
-        "y": 60
+        "y": 140,
+        "w": 24,
+        "h": 1
       },
       "id": 70,
       "panels": [
@@ -4089,10 +4090,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 6,
             "x": 0,
-            "y": 0
+            "y": 141,
+            "w": 8,
+            "h": 5
           },
           "id": 100,
           "options": {
@@ -4149,10 +4150,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 6,
-            "x": 6,
-            "y": 0
+            "x": 8,
+            "y": 141,
+            "w": 8,
+            "h": 5
           },
           "id": 101,
           "options": {
@@ -4213,10 +4214,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 6,
-            "x": 12,
-            "y": 0
+            "x": 16,
+            "y": 141,
+            "w": 8,
+            "h": 5
           },
           "id": 102,
           "options": {
@@ -4303,10 +4304,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
             "x": 0,
-            "y": 1
+            "y": 146,
+            "w": 12,
+            "h": 8
           },
           "id": 103,
           "options": {
@@ -4394,10 +4395,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
             "x": 12,
-            "y": 1
+            "y": 146,
+            "w": 12,
+            "h": 8
           },
           "id": 104,
           "options": {
@@ -4485,10 +4486,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 24,
             "x": 0,
-            "y": 2
+            "y": 154,
+            "w": 24,
+            "h": 8
           },
           "id": 105,
           "options": {
@@ -4575,10 +4576,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 24,
             "x": 0,
-            "y": 0
+            "y": 162,
+            "w": 24,
+            "h": 8
           },
           "id": 313,
           "options": {
@@ -4621,10 +4622,10 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 1,
-        "w": 24,
         "x": 0,
-        "y": 61
+        "y": 170,
+        "w": 24,
+        "h": 1
       },
       "id": 80,
       "panels": [
@@ -4683,10 +4684,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
             "x": 0,
-            "y": 1
+            "y": 171,
+            "w": 12,
+            "h": 8
           },
           "id": 200,
           "options": {
@@ -4773,10 +4774,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
             "x": 12,
-            "y": 1
+            "y": 171,
+            "w": 12,
+            "h": 8
           },
           "id": 201,
           "options": {
@@ -4819,10 +4820,10 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 1,
-        "w": 24,
         "x": 0,
-        "y": 62
+        "y": 179,
+        "w": 24,
+        "h": 1
       },
       "id": 90,
       "panels": [
@@ -4859,10 +4860,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 6,
             "x": 0,
-            "y": 63
+            "y": 180,
+            "w": 6,
+            "h": 5
           },
           "id": 300,
           "options": {
@@ -4927,10 +4928,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 6,
             "x": 6,
-            "y": 63
+            "y": 180,
+            "w": 6,
+            "h": 5
           },
           "id": 301,
           "options": {
@@ -4991,10 +4992,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 6,
             "x": 12,
-            "y": 63
+            "y": 180,
+            "w": 6,
+            "h": 5
           },
           "id": 302,
           "options": {
@@ -5055,10 +5056,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 5,
-            "w": 6,
             "x": 18,
-            "y": 63
+            "y": 180,
+            "w": 6,
+            "h": 5
           },
           "id": 303,
           "options": {
@@ -5145,10 +5146,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
             "x": 0,
-            "y": 68
+            "y": 185,
+            "w": 12,
+            "h": 8
           },
           "id": 304,
           "options": {
@@ -5235,10 +5236,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
             "x": 12,
-            "y": 68
+            "y": 185,
+            "w": 12,
+            "h": 8
           },
           "id": 305,
           "options": {
@@ -5325,10 +5326,10 @@
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 24,
             "x": 0,
-            "y": 76
+            "y": 193,
+            "w": 24,
+            "h": 8
           },
           "id": 306,
           "options": {
@@ -5371,195 +5372,196 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 1,
-        "w": 24,
         "x": 0,
-        "y": 63
+        "y": 201,
+        "w": 24,
+        "h": 1
       },
       "id": 308,
-      "panels": [],
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisGridShow": true,
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 202,
+            "w": 12,
+            "h": 8
+          },
+          "id": 309,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (iface) (rate(sip_exporter_invite_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\",destination_country=~\"$destination_country\",iface=~\"$iface\"}[5m]))",
+              "legendFormat": "{{iface}}",
+              "refId": "A"
+            }
+          ],
+          "title": "INVITE Rate by Interface",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisGridShow": true,
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "pps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 202,
+            "w": 12,
+            "h": 8
+          },
+          "id": 310,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "rate(sip_exporter_socket_packets_received_total{iface!=\"\"}[5m])",
+              "legendFormat": "{{iface}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Socket Packet Rate by Interface",
+          "type": "timeseries"
+        }
+      ],
       "title": "Multi-NIC",
       "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisGridShow": true,
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "ops"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 64
-      },
-      "id": 309,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (iface) (rate(sip_exporter_invite_total{carrier=~\"$carrier\",ua_type=~\"$ua_type\",source_country=~\"$source_country\",destination_country=~\"$destination_country\",iface=~\"$iface\"}[5m]))",
-          "legendFormat": "{{iface}}",
-          "refId": "A"
-        }
-      ],
-      "title": "INVITE Rate by Interface",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisGridShow": true,
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "pps"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 64
-      },
-      "id": 310,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "pluginVersion": "10.0.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "rate(sip_exporter_socket_packets_received_total{iface!=\"\"}[5m])",
-          "legendFormat": "{{iface}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Socket Packet Rate by Interface",
-      "type": "timeseries"
     }
   ],
   "refresh": "5s",
