@@ -46,6 +46,7 @@ type (
 	ObserveResult struct {
 		Counted       bool   // packet counted as received (not duplicate/reorder)
 		Duplicate     bool   // packet is a duplicate (same sequence number)
+		Reorder       bool   // packet is out-of-order (seq < maxSeq, not duplicate)
 		Lost          uint64 // packets newly marked lost by this observation
 		Codec         string // resolved codec name
 		Carrier       string // dialog carrier (for metric labels)
@@ -233,6 +234,7 @@ func (t *Tracker) Observe(
 	prevLost := entry.state.packetsLost
 	prevTotal := entry.state.packetsTotal
 	prevDup := entry.state.packetsDuplicate
+	prevReorder := entry.state.packetsReorder
 	entry.state.Observe(h, arrival)
 
 	var lostDelta uint64
@@ -243,6 +245,7 @@ func (t *Tracker) Observe(
 	return ObserveResult{
 		Counted:       entry.state.packetsTotal > prevTotal,
 		Duplicate:     entry.state.packetsDuplicate > prevDup,
+		Reorder:       entry.state.packetsReorder > prevReorder,
 		Lost:          lostDelta,
 		Codec:         codec,
 		Carrier:       labels.Carrier,

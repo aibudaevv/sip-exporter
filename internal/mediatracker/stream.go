@@ -28,6 +28,7 @@ type StreamState struct {
 	packetsTotal     uint64
 	packetsLost      uint64
 	packetsDuplicate uint64
+	packetsReorder   uint64
 	burstLoss        uint64 // packets lost in burst runs (≥ burstThreshold consecutive)
 	gapLoss          uint64 // packets lost in isolated gaps (< burstThreshold)
 	lossRun          int    // current consecutive loss count (classified on next good packet)
@@ -59,6 +60,7 @@ func (s *StreamState) Observe(h rtp.Header, arrival time.Time) {
 	switch {
 	case delta >= seqHalf:
 		// out-of-order (reorder): update timing, ignore for loss
+		s.packetsReorder++
 		s.updateJitter(h, arrival)
 	case delta > maxGap:
 		// forward but huge gap → stream restart (e.g. SSRC reuse): reset all
@@ -66,6 +68,7 @@ func (s *StreamState) Observe(h rtp.Header, arrival time.Time) {
 		s.jitterTicks = 0
 		s.packetsLost = 0
 		s.packetsDuplicate = 0
+		s.packetsReorder = 0
 		s.burstLoss = 0
 		s.gapLoss = 0
 		s.lossRun = 0

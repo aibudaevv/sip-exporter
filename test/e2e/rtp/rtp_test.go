@@ -331,6 +331,32 @@ func sendRTP(t *testing.T, port int, count int) {
 	}
 }
 
+// sendRTPOutOfOrder sends 3 RTP packets with sequence numbers 1, 5, 3 to the
+// given media port. This triggers reorder detection (seq=3 < maxSeq=5) in the
+// media tracker. Uses PT=8 (PCMA) to match SIPp's G.711a stream codec.
+func sendRTPOutOfOrder(t *testing.T, portStr string) {
+	t.Helper()
+
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	addr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port}
+	conn, err := net.DialUDP("udp4", nil, addr)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	pkt := make([]byte, 28)
+	pkt[0] = 0x80                             // V=2, P=0, X=0, CC=0
+	pkt[1] = 0x08                             // M=0, PT=8 (PCMA)
+	binary.BigEndian.PutUint32(pkt[4:8], 160) // timestamp
+
+	for _, seq := range []uint16{1, 5, 3} {
+		binary.BigEndian.PutUint16(pkt[2:4], seq)
+		_, _ = conn.Write(pkt)
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // TestRTP_ReachesApp_WithCapture verifies that when RTP capture is enabled and
 // a media endpoint is registered via SDP, RTP packets pass the eBPF filter and
 // reach the exporter's socket.

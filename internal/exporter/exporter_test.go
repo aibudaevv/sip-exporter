@@ -29,6 +29,8 @@ type mockMetricser struct {
 	requestCalled             []byte
 	requestCount              int
 	reinviteCalled            bool
+	sipRetransmissionCalls    int
+	sipRetransmissionMethod   string
 	responseCalled            []byte
 	responseIsInvite          bool
 	sessionUpdated            int
@@ -49,6 +51,10 @@ type mockMetricser struct {
 	ordDelay                  float64
 	lrdUpdated                bool
 	lrdDelay                  float64
+	pbdUpdated                bool
+	pbdDelay                  float64
+	shortCallsUpdated         bool
+	shortCallsDuration        time.Duration
 	registerSuccessCalls      int
 	registerFailureCodes      []string
 	registerCountryChange     []string
@@ -62,6 +68,7 @@ type mockMetricser struct {
 	rtpLossCalls              int
 	rtpLossValue              uint64
 	rtpDuplicateCalls         int
+	rtpOutOfOrderCalls        int
 	rtpDroppedCount           int
 }
 
@@ -80,6 +87,16 @@ func (m *mockMetricser) Request(_, _, _, _, _, _, _ string, in []byte) {
 func (m *mockMetricser) Reinvite(_, _, _ string) {
 	m.reinviteCalled = true
 	m.packetsIncremented++
+}
+
+func (m *mockMetricser) SIPRetransmission(_, _, _, method string) {
+	m.sipRetransmissionCalls++
+	m.sipRetransmissionMethod = method
+}
+
+func (m *mockMetricser) UpdateShortCalls(_, _ string, _ string, duration time.Duration) {
+	m.shortCallsUpdated = true
+	m.shortCallsDuration = duration
 }
 
 func (m *mockMetricser) Response(_, _, _ string, in []byte, isInviteResponse bool) {
@@ -160,6 +177,11 @@ func (m *mockMetricser) UpdateLRD(_, _, _ string, delayMs float64) {
 	m.lrdDelay = delayMs
 }
 
+func (m *mockMetricser) UpdatePBD(_, _, _ string, delayMs float64) {
+	m.pbdUpdated = true
+	m.pbdDelay = delayMs
+}
+
 func (m *mockMetricser) SystemError() {
 	m.systemErrorCalled = true
 }
@@ -188,6 +210,9 @@ func (m *mockMetricser) UpdateRTPLoss(_, _, _, _ string, lost uint64) {
 }
 func (m *mockMetricser) UpdateRTPDuplicates(_, _, _, _ string) {
 	m.rtpDuplicateCalls++
+}
+func (m *mockMetricser) UpdateRTPOutOfOrder(_, _, _, _ string) {
+	m.rtpOutOfOrderCalls++
 }
 func (m *mockMetricser) UpdateRTPJitter(string, string, string, string, float64) {}
 func (m *mockMetricser) UpdateRTPMOS(string, string, string, string, float64)    {}
@@ -2219,6 +2244,7 @@ func TestParseRawPacket_AllSIPMethods(t *testing.T) {
 				inviteTracker:   make(map[string]inviteEntry),
 				inviteSDP:       make(map[string]inviteSDPEntity),
 				optionsTracker:  make(map[string]optionsEntry),
+				byeTracker:      make(map[string]byeEntry),
 				mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 			}
 
@@ -3383,6 +3409,7 @@ func TestHandleMessage_TTR_FullCallFlow(t *testing.T) {
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
 		inviteSDP:       make(map[string]inviteSDPEntity),
+		byeTracker:      make(map[string]byeEntry),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -3806,6 +3833,7 @@ type carrierTrackingMetricser struct {
 	rrdCalls               []carrierCall
 	lrdCalls               []carrierCall
 	ordCalls               []carrierCall
+	pbdCalls               []carrierCall
 	spdCalls               []carrierCall
 	sessionCompleted       []carrierCall
 	invite200OK            []carrierCall
@@ -3815,6 +3843,7 @@ type carrierTrackingMetricser struct {
 	registerCountryChange  []carrierCall
 	registerScan           []carrierCall
 	inviteBurst            []carrierCall
+	retransmissionCalls    []carrierCall
 	packetsTotal           int
 	systemErrors           int
 	sessionsByCarrierAndUA map[string]map[string]int
@@ -3881,6 +3910,13 @@ func (m *carrierTrackingMetricser) InviteBurst(carrier, sourceCountry string) {
 		carrierCall{carrier: carrier, sourceCountry: sourceCountry})
 }
 
+func (m *carrierTrackingMetricser) SIPRetransmission(carrier, _, _, method string) {
+	m.retransmissionCalls = append(m.retransmissionCalls,
+		carrierCall{carrier: carrier, method: method})
+}
+
+func (m *carrierTrackingMetricser) UpdateShortCalls(string, string, string, time.Duration) {}
+
 func (m *carrierTrackingMetricser) UpdateRRD(carrier, _, _ string, delayMs float64) {
 	m.rrdCalls = append(m.rrdCalls, carrierCall{carrier: carrier, value: delayMs})
 }
@@ -3903,6 +3939,10 @@ func (m *carrierTrackingMetricser) UpdateORD(carrier, _, _ string, delayMs float
 
 func (m *carrierTrackingMetricser) UpdateLRD(carrier, _, _ string, delayMs float64) {
 	m.lrdCalls = append(m.lrdCalls, carrierCall{carrier: carrier, value: delayMs})
+}
+
+func (m *carrierTrackingMetricser) UpdatePBD(carrier, _, _ string, delayMs float64) {
+	m.pbdCalls = append(m.pbdCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
 func (m *carrierTrackingMetricser) UpdateSession(carrier, uaType, _ string, size int) {
@@ -3937,6 +3977,7 @@ func (m *carrierTrackingMetricser) UpdateVQReport(carrier, uaType, _ string, _ *
 func (m *carrierTrackingMetricser) UpdateRTPPackets(string, string, string, string)         {}
 func (m *carrierTrackingMetricser) UpdateRTPLoss(string, string, string, string, uint64)    {}
 func (m *carrierTrackingMetricser) UpdateRTPDuplicates(string, string, string, string)      {}
+func (m *carrierTrackingMetricser) UpdateRTPOutOfOrder(string, string, string, string)      {}
 func (m *carrierTrackingMetricser) UpdateRTPJitter(string, string, string, string, float64) {}
 func (m *carrierTrackingMetricser) UpdateRTPMOS(string, string, string, string, float64)    {}
 func (m *carrierTrackingMetricser) UpdateRTPMOSVariants(string, string, string, string, float64, float64, float64) {
@@ -5361,4 +5402,181 @@ func TestIpPortToKey(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ==================== S10-R1: Exporter-layer wiring tests ====================
+
+func TestHandleRequest_RetransmissionMetric(t *testing.T) {
+	mm := &mockMetricser{}
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  &mockDialoger{},
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+		inviteSDP:       make(map[string]inviteSDPEntity),
+		optionsTracker:  make(map[string]optionsEntry),
+		byeTracker:      make(map[string]byeEntry),
+		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
+	}
+
+	invite := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: retrans-1\r\n" +
+		"CSeq: 1 INVITE\r\n")
+
+	e.handleMessage("other", "", invite)
+	require.Equal(t, 1, mm.requestCount, "first INVITE should call Request")
+	require.Equal(t, 0, mm.sipRetransmissionCalls, "first INVITE should not trigger retransmission")
+
+	e.handleMessage("other", "", invite)
+	require.Equal(t, 1, mm.requestCount, "retransmitted INVITE should NOT call Request again")
+	require.Equal(t, 1, mm.sipRetransmissionCalls, "retransmitted INVITE should trigger SipRetransmission")
+}
+
+func TestRTP_HandleRTP_OutOfOrderMetric(t *testing.T) {
+	mm := &mockMetricser{}
+	e := &exporter{
+		services:       services{metricser: mm, dialoger: &mockDialoger{}},
+		inviteTracker:  make(map[string]inviteEntry),
+		inviteSDP:      make(map[string]inviteSDPEntity),
+		optionsTracker: make(map[string]optionsEntry),
+		byeTracker:     make(map[string]byeEntry),
+		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
+	}
+	e.mediaTracker.Register("10.0.0.1", 5004, mediatracker.MediaLabels{
+		Carrier:    "c",
+		UAType:     "u",
+		CallID:     "call-reorder",
+		SDPCodecs:  map[uint8]string{0: "PCMU"},
+		ClockRates: map[uint8]uint32{0: 8000},
+	})
+
+	e.handleRTP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(0, 0, 0, 0), 0, makeRTPPayloadSeq(0xAABB, 1))
+	e.handleRTP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(0, 0, 0, 0), 0, makeRTPPayloadSeq(0xAABB, 5))
+	e.handleRTP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(0, 0, 0, 0), 0, makeRTPPayloadSeq(0xAABB, 3))
+
+	require.Equal(t, 1, mm.rtpOutOfOrderCalls, "seq=3 after maxSeq=5 should trigger UpdateRTPOutOfOrder")
+}
+
+func TestHandleBye200OK_PBDMetric(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+		inviteSDP:       make(map[string]inviteSDPEntity),
+		byeTracker:      make(map[string]byeEntry),
+		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
+	}
+
+	invite := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: pbd-test\r\n" +
+		"CSeq: 1 INVITE\r\n")
+	e.handleMessage("other", "", invite)
+
+	ok200 := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: pbd-test\r\n" +
+		"CSeq: 1 INVITE\r\n" +
+		"Session-Expires: 3600\r\n")
+	e.handleMessage("other", "", ok200)
+
+	byeReq := []byte("BYE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: pbd-test\r\n" +
+		"CSeq: 2 BYE\r\n")
+	e.handleMessage("other", "", byeReq)
+
+	time.Sleep(10 * time.Millisecond)
+
+	byeOk := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: pbd-test\r\n" +
+		"CSeq: 2 BYE\r\n")
+	e.handleMessage("other", "", byeOk)
+
+	require.True(t, mm.pbdUpdated, "BYE → 200 OK BYE must trigger UpdatePBD")
+	require.Greater(t, mm.pbdDelay, 0.0, "PBD delay must be positive")
+}
+
+func TestHandleBye200OK_ShortCallsMetric(t *testing.T) {
+	mm := &mockMetricser{}
+	md := &mockDialoger{}
+
+	e := &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  md,
+		},
+		registerTracker: make(map[string]registerEntry),
+		inviteTracker:   make(map[string]inviteEntry),
+		inviteSDP:       make(map[string]inviteSDPEntity),
+		byeTracker:      make(map[string]byeEntry),
+		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
+	}
+
+	invite := []byte("INVITE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>\r\n" +
+		"Call-ID: shortcalls-test\r\n" +
+		"CSeq: 1 INVITE\r\n")
+	e.handleMessage("other", "", invite)
+
+	ok200 := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: shortcalls-test\r\n" +
+		"CSeq: 1 INVITE\r\n" +
+		"Session-Expires: 3600\r\n")
+	e.handleMessage("other", "", ok200)
+
+	byeReq := []byte("BYE sip:test SIP/2.0\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: shortcalls-test\r\n" +
+		"CSeq: 2 BYE\r\n")
+	e.handleMessage("other", "", byeReq)
+
+	byeOk := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:user@domain>;tag=abc\r\n" +
+		"To: <sip:other@domain>;tag=xyz\r\n" +
+		"Call-ID: shortcalls-test\r\n" +
+		"CSeq: 2 BYE\r\n")
+	e.handleMessage("other", "", byeOk)
+
+	require.True(t, mm.shortCallsUpdated, "BYE 200 OK with Duration > 0 must trigger UpdateShortCalls")
+	require.Greater(t, mm.shortCallsDuration, time.Duration(0), "duration must be positive")
+}
+
+func TestCleanupByeTracker_TTLExpiry(t *testing.T) {
+	e := &exporter{
+		byeTracker: make(map[string]byeEntry),
+	}
+
+	e.byeMutex.Lock()
+	e.byeTracker["expired"] = byeEntry{timestamp: time.Now().Add(-2 * time.Minute)}
+	e.byeTracker["fresh"] = byeEntry{timestamp: time.Now()}
+	e.byeMutex.Unlock()
+
+	e.cleanupByeTracker()
+
+	e.byeMutex.RLock()
+	defer e.byeMutex.RUnlock()
+	_, expiredGone := e.byeTracker["expired"]
+	_, freshKept := e.byeTracker["fresh"]
+	require.False(t, expiredGone, "expired entry must be cleaned up")
+	require.True(t, freshKept, "fresh entry must survive cleanup")
 }

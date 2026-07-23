@@ -111,6 +111,32 @@ groups:
         annotations:
           summary: "High ratio of stale SIP dialogs"
           description: "More than half of sessions established in the last 30 minutes are still active on carrier {{ $labels.carrier }}. Possible Session-Expires timeout issues or missing BYE messages."
+
+      - alert: SIPRetransmissionRateHigh
+        expr: |
+          sum by (carrier) (rate(sip_exporter_sip_retransmission_total[5m]))
+          / on (carrier)
+            clamp_min(sum by (carrier) (rate(sip_exporter_invite_total[5m])), 1)
+          * 100 > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High SIP retransmission rate"
+          description: "More than 10% of INVITE requests are retransmissions on carrier {{ $labels.carrier }}. Indicates packet loss on UDP transport or unresponsive SIP server."
+
+      - alert: ShortCallsSpike
+        expr: |
+          sum by (carrier) (rate(sip_exporter_short_calls_total{threshold="20"}[5m]))
+          / on (carrier)
+            clamp_min(sum by (carrier) (rate(sip_exporter_sdc_total[5m])), 1)
+          * 100 > 30
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Spike in short calls (< 20s)"
+          description: "More than 30% of completed sessions on carrier {{ $labels.carrier }} are shorter than 20 seconds. Possible call quality issues, abandoned calls, or toll fraud."
       ```
 
 ### Registration Health Alerts
