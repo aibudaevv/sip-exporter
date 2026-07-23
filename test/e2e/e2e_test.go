@@ -1046,6 +1046,16 @@ func getPDD(t *testing.T, endpoint string) float64 {
 	return sum / count
 }
 
+func getPBD(t *testing.T, endpoint string) float64 {
+	t.Helper()
+	sum := getMetric(t, endpoint, "sip_exporter_pbd_sum")
+	count := getMetric(t, endpoint, "sip_exporter_pbd_count")
+	if count == 0 {
+		return 0
+	}
+	return sum / count
+}
+
 func (e *testEnv) getSERByCarrier(t *testing.T) float64 {
 	t.Helper()
 	return getMetricWithCarrier(t, e.endpoint, "sip_exporter_ser", e.carrier)

@@ -53,12 +53,14 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 > | Tier | Metrics | Full label set |
 > |------|---------|----------------|
 > | **System** | `packets_total`, `system_error_total`, self-monitoring | *(none)* |
-> | **Base** | All SIP requests, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD, VQ reports, sessions, `reinvite_total`, registration health (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country` |
+> | **Base** | All SIP requests, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD/PBD, VQ reports, sessions, `reinvite_total`, registration health (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country` |
 > | **Reg failure** | `register_failure_total` | `carrier, ua_type, source_country, code` |
-> | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country` |
+> | **Retransmission** | `sip_retransmission_total` | `carrier, ua_type, source_country, method` |
+> | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_out_of_order_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country` |
 > | **RTP dialog** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country` |
 > | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, destination_country, caller_host, called_host, iface` |
 > | **Fraud** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country` |
+> | **Short calls** | `short_calls_total` | `carrier, ua_type, source_country, threshold` |
 > | **Capacity** | `sessions_limit`, `sessions_utilization` | `carrier` |
 
 `carrier` and `ua_type` default to `"other"` when not configured or when no pattern matches. `source_country` defaults to `"unknown"` when neither carrier country nor GeoIP DB is available.
@@ -511,6 +513,8 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 `sip_exporter_update_total{carrier="...",ua_type="..."}`: total number of received SIP UPDATE requests.  
 `sip_exporter_message_total{carrier="...",ua_type="..."}`: total number of received SIP MESSAGE requests.
 
+`sip_exporter_sip_retransmission_total{carrier="...",ua_type="...",method="INVITE"}` *(counter)*: total number of retransmitted SIP requests detected via Timer A (RFC 3261 §17.1.1.2). A retransmission is identified when a duplicate INVITE with the same Call-ID arrives within the invite tracker TTL window (60s) without an active dialog. Currently INVITE-only; the `method` label is reserved for future generalization to REGISTER/OPTIONS.
+
 `sip_exporter_invite_200_total{carrier,ua_type,source_country,destination_country,caller_host,called_host,iface}`: total number of `200 OK` responses to INVITE requests (successful call establishments). This is the numerator for [SER-by-destination](#ser-by-destination-promql) PromQL calculations. Carries the full 7-label set — same as `invite_total`, including `iface`.
 
 ## SIP response metrics (by status code)
@@ -672,6 +676,19 @@ sessions_limits:
 sip_exporter_sessions_utilization > 90
 ```
 
+## Short call counters
+
+`sip_exporter_short_calls_total{carrier="...",ua_type="...",threshold="20|60|180"}` *(counter)*: completed sessions with duration shorter than the threshold (20, 60, or 180 seconds). A single session can increment multiple thresholds (e.g., a 15-second call increments `threshold="20"`, `"60"`, and `"180"`). Short calls indicate abandoned calls, poor quality, or potential toll fraud.
+
+**PromQL examples:**
+```promql
+# Short call rate (< 20s) as percentage of completed sessions
+rate(sip_exporter_short_calls_total{threshold="20"}[5m]) / rate(sip_exporter_sdc_total[5m]) * 100
+
+# Absolute count of sub-60s calls per carrier
+sum by (carrier) (rate(sip_exporter_short_calls_total{threshold="60"}[1h]))
+```
+
 ## RTP media metrics
 
 RTP media metrics are derived from RTP packets captured by the eBPF filter and
@@ -693,6 +710,8 @@ counted; RTP without a correlated dialog is dropped.
 `sip_exporter_rtp_packets_lost_total{carrier,ua_type,codec,source_country}` *(counter)*: packets detected as lost via RTP sequence-number gaps.
 
 `sip_exporter_rtp_duplicate_packets_total{carrier,ua_type,codec,source_country}` *(counter)*: duplicate RTP packets detected (same sequence number as the previous packet, indicating retransmission or media loop).
+
+`sip_exporter_rtp_out_of_order_total{carrier,ua_type,codec,source_country}` *(counter)*: out-of-order RTP packets detected (sequence number less than maxSeq, not a duplicate). High values indicate network reordering that can overwhelm jitter buffers.
 
 `sip_exporter_rtp_jitter_milliseconds{carrier,ua_type,codec,source_country}` *(histogram, buckets 0.1..500 ms)*: smoothed interarrival jitter (RFC 3550 A.8).
 
@@ -1143,6 +1162,23 @@ rate(sip_exporter_pdd_sum[5m]) / rate(sip_exporter_pdd_count[5m])
 - `< 100 ms` — excellent (fast call setup)
 - `100-500 ms` — acceptable (typical for inter-carrier calls)
 - `> 3000 ms` — potential issues (routing delays, server overload)
+
+---
+
+### Post Bye Delay (PBD)
+
+`sip_exporter_pbd{carrier="...",ua_type="..."}` *(histogram, buckets 1..5000 ms)*: delay in milliseconds between a BYE request and the corresponding `200 OK BYE` response. Measures how quickly the endpoint tears down the session after hang-up. High PBD indicates SBC/media gateway processing delays or resource contention.
+
+**Buckets:** 1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000 ms.
+
+**PromQL examples:**
+```promql
+# Average PBD
+rate(sip_exporter_pbd_sum[5m]) / rate(sip_exporter_pbd_count[5m])
+
+# 95th percentile
+histogram_quantile(0.95, rate(sip_exporter_pbd_bucket[5m]))
+```
 
 ---
 

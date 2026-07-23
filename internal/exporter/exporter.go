@@ -38,6 +38,7 @@ const (
 	defaultRegisterTTL        = 60 * time.Second
 	defaultInviteTTL          = 60 * time.Second
 	defaultOptionsTTL         = 60 * time.Second
+	defaultByeTTL             = 60 * time.Second
 	rtpStreamTTL              = 30 * time.Second // idle RTP stream expiry
 	defaultSessionExpiresSec  = 1800             // RFC 4028 default Session-Expires (30 min)
 	defaultRegisterExpiresSec = 3600             // RFC 3261 §10.2 default registration expiry (1 hour)
@@ -113,6 +114,13 @@ type (
 		sourceCountry string
 	}
 
+	byeEntry struct {
+		timestamp     time.Time
+		carrier       string
+		uaType        string
+		sourceCountry string
+	}
+
 	registerExpiryEntry struct {
 		expiry        time.Time
 		carrier       string
@@ -175,6 +183,8 @@ type (
 		inviteSDPMutex        sync.Mutex
 		optionsTracker        map[string]optionsEntry
 		optionsMutex          sync.RWMutex
+		byeTracker            map[string]byeEntry
+		byeMutex              sync.RWMutex
 		initialized           atomic.Bool
 	}
 	services struct {
@@ -213,6 +223,7 @@ type (
 func (e registerEntry) created() time.Time   { return e.timestamp }
 func (e inviteEntry) created() time.Time     { return e.timestamp }
 func (e optionsEntry) created() time.Time    { return e.timestamp }
+func (e byeEntry) created() time.Time        { return e.timestamp }
 func (e inviteSDPEntity) created() time.Time { return e.timestamp }
 
 func NewExporter(deps Deps) Exporter {
@@ -237,6 +248,7 @@ func NewExporter(deps Deps) Exporter {
 		inviteTracker:         make(map[string]inviteEntry),
 		inviteSDP:             make(map[string]inviteSDPEntity),
 		optionsTracker:        make(map[string]optionsEntry),
+		byeTracker:            make(map[string]byeEntry),
 		packetPool: sync.Pool{
 			New: func() any {
 				return &rawPacket{data: make([]byte, 0, readBufSize)}
@@ -515,12 +527,14 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		e.cleanupInviteTracker()
 		e.cleanupInviteSDP()
 		e.cleanupOptionsTracker()
+		e.cleanupByeTracker()
 		e.mediaTracker.Cleanup()
 		s := e.services.dialoger.Size()
 
 		for _, r := range results {
 			e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry)
 			e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
+			e.services.metricser.UpdateShortCalls(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
 			rtpResult, deleted := e.mediaTracker.Unregister(r.CallID)
 			for _, ep := range deleted {
 				e.rtpEndpointDelete(ep.IP, ep.Port)
@@ -535,26 +549,34 @@ func (e *exporter) sipDialogMetricsUpdate() {
 
 		e.services.metricser.SocketStats(e.readSocketStats())
 		e.services.metricser.UpdateChannelLength(len(e.messages))
-
-		e.registerMutex.RLock()
-		registerCount := len(e.registerTracker)
-		e.registerMutex.RUnlock()
-
-		e.inviteMutex.RLock()
-		inviteCount := len(e.inviteTracker)
-		e.inviteMutex.RUnlock()
-
-		e.optionsMutex.RLock()
-		optionsCount := len(e.optionsTracker)
-		e.optionsMutex.RUnlock()
-
-		e.services.metricser.UpdateTrackerSize("register", registerCount)
-		e.services.metricser.UpdateTrackerSize("invite", inviteCount)
-		e.services.metricser.UpdateTrackerSize("options", optionsCount)
-		e.services.metricser.UpdateTrackerSize("rtp", e.mediaTracker.StreamCount())
+		e.updateTrackerSizes()
 		e.updateRTPMetrics()
 		e.services.metricser.UpdateActiveDialogs(s)
 	}
+}
+
+func (e *exporter) updateTrackerSizes() {
+	e.registerMutex.RLock()
+	registerCount := len(e.registerTracker)
+	e.registerMutex.RUnlock()
+
+	e.inviteMutex.RLock()
+	inviteCount := len(e.inviteTracker)
+	e.inviteMutex.RUnlock()
+
+	e.optionsMutex.RLock()
+	optionsCount := len(e.optionsTracker)
+	e.optionsMutex.RUnlock()
+
+	e.byeMutex.RLock()
+	byeCount := len(e.byeTracker)
+	e.byeMutex.RUnlock()
+
+	e.services.metricser.UpdateTrackerSize("register", registerCount)
+	e.services.metricser.UpdateTrackerSize("invite", inviteCount)
+	e.services.metricser.UpdateTrackerSize("options", optionsCount)
+	e.services.metricser.UpdateTrackerSize("bye", byeCount)
+	e.services.metricser.UpdateTrackerSize("rtp", e.mediaTracker.StreamCount())
 }
 
 func cleanupExpired[V timed](mu sync.Locker, m map[string]V, ttl time.Duration) {
@@ -1026,6 +1048,9 @@ func (e *exporter) handleRTP(
 	if res.Duplicate {
 		e.services.metricser.UpdateRTPDuplicates(res.Carrier, res.UAType, res.Codec, res.SourceCountry)
 	}
+	if res.Reorder {
+		e.services.metricser.UpdateRTPOutOfOrder(res.Carrier, res.UAType, res.Codec, res.SourceCountry)
+	}
 	if res.Lost > 0 {
 		e.services.metricser.UpdateRTPLoss(res.Carrier, res.UAType, res.Codec, res.SourceCountry, res.Lost)
 	}
@@ -1102,9 +1127,12 @@ func (e *exporter) handleRequest(carrier string, uaType string, sourceCountry st
 		}
 	}
 
-	if isReinvite {
+	switch {
+	case isReinvite:
 		e.services.metricser.Reinvite(carrier, uaType, sourceCountry)
-	} else if !isRetransmission {
+	case isRetransmission:
+		e.services.metricser.SIPRetransmission(carrier, uaType, sourceCountry, "INVITE")
+	default:
 		e.services.metricser.Request(
 			carrier, uaType, sourceCountry, destinationCountry,
 			callerHost, calledHost, e.pktIface, packet.Method,
@@ -1126,6 +1154,8 @@ func (e *exporter) handleRequest(carrier string, uaType string, sourceCountry st
 		e.removeInviteTime(string(packet.CallID))
 	case bytes.Equal(packet.Method, []byte("OPTIONS")):
 		e.storeOptionsTime(string(packet.CallID), carrier, uaType, sourceCountry)
+	case bytes.Equal(packet.Method, []byte("BYE")):
+		e.storeByeTime(string(packet.CallID), carrier, uaType, sourceCountry)
 	}
 
 	if isVQContentType(packet.ContentType) {
@@ -1348,6 +1378,10 @@ func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {
 		return fmt.Errorf("normalize dialog ID: %w", err)
 	}
 
+	if delayMs, byeCarrier, byeUAType, byeSC, ok := e.measureByeTime(string(packet.CallID)); ok {
+		e.services.metricser.UpdatePBD(byeCarrier, byeUAType, byeSC, delayMs)
+	}
+
 	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
 	result := e.services.dialoger.Delete(dialogID)
 	rtpResult, deleted := e.mediaTracker.Unregister(string(packet.CallID))
@@ -1357,6 +1391,7 @@ func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {
 	e.handleRTPDialogResult(rtpResult, result.Carrier, result.UAType, result.SourceCountry)
 	if result.Duration > 0 {
 		e.services.metricser.UpdateSPD(result.Carrier, result.UAType, result.SourceCountry, result.Duration)
+		e.services.metricser.UpdateShortCalls(result.Carrier, result.UAType, result.SourceCountry, result.Duration)
 		e.services.metricser.SessionCompleted(result.Carrier, result.UAType, result.SourceCountry)
 	}
 	return nil
@@ -1814,4 +1849,38 @@ func (e *exporter) measureOptionsTime(callID string) (float64, string, string, s
 
 func (e *exporter) cleanupOptionsTracker() {
 	cleanupExpired(&e.optionsMutex, e.optionsTracker, defaultOptionsTTL)
+}
+
+func (e *exporter) storeByeTime(callID, carrier, uaType, sourceCountry string) {
+	e.byeMutex.Lock()
+	defer e.byeMutex.Unlock()
+	e.byeTracker[callID] = byeEntry{
+		timestamp:     time.Now(),
+		carrier:       carrier,
+		uaType:        uaType,
+		sourceCountry: sourceCountry,
+	}
+}
+
+func (e *exporter) measureByeTime(callID string) (float64, string, string, string, bool) {
+	e.byeMutex.Lock()
+	defer e.byeMutex.Unlock()
+
+	entry, ok := e.byeTracker[callID]
+	if !ok {
+		return 0, "", defaultUAType, defaultCountry, false
+	}
+
+	delete(e.byeTracker, callID)
+	delayMs := float64(time.Since(entry.timestamp).Nanoseconds()) / nanosPerMs
+
+	zap.L().Debug("PBD measured",
+		zap.String("call_id", callID),
+		zap.Float64("delay_ms", delayMs))
+
+	return delayMs, entry.carrier, entry.uaType, entry.sourceCountry, true
+}
+
+func (e *exporter) cleanupByeTracker() {
+	cleanupExpired(&e.byeMutex, e.byeTracker, defaultByeTTL)
 }

@@ -56,6 +56,7 @@ func TestStreamState_ReorderNotLoss(t *testing.T) {
 	// total incremented only for forward packets (1, 5); reorder (3) ignored
 	require.Equal(t, uint64(2), s.packetsTotal)
 	require.Equal(t, uint64(3), s.packetsLost)
+	require.Equal(t, uint64(1), s.packetsReorder, "reorder packet must increment packetsReorder")
 }
 
 func TestStreamState_ReorderNoDoubleCountLoss(t *testing.T) {
