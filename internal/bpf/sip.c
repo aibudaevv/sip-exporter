@@ -144,33 +144,9 @@ int bpf_socket_filter(struct __sk_buff *skb) {
         return snap;
     }
 
-    // Pattern matching fallback: check first 2 bytes of payload for RTP signature.
-    int payload_off = ip_offset + ip_header_len + 8;
-    if (skb->len < payload_off + 2) {
-        return 0;
-    }
-
-    // Condition 1 (version=2): (byte[0] & 0xC0) == 0x80
-    // Condition 2 (payload type): PT = byte[1] & 0x7F; PT <= 34 (static audio) || PT >= 96 (dynamic).
-    // The second check eliminates false positives (e.g., DNS with matching high bit).
-    __u8 rtp_hdr[2];
-    if (bpf_skb_load_bytes(skb, payload_off, rtp_hdr, 2) < 0) {
-        return 0;
-    }
-    if ((rtp_hdr[0] & 0xC0) != 0x80) {
-        return 0;
-    }
-    __u8 pt = rtp_hdr[1] & 0x7F;
-    if (pt > 34 && pt < 96) {
-        return 0;
-    }
-
-    // Pass only the RTP header (privacy): truncate to 64 bytes
-    __u32 snap = skb->len;
-    if (snap > 64) {
-        snap = 64;
-    }
-    return snap;
+    // No SDP-driven match and no pattern fallback — drop.
+    // Only RTP from endpoints learned via SDP signaling is passed.
+    return 0;
 }
 
 char _license[] SEC("license") = "GPL";

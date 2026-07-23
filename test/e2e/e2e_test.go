@@ -42,23 +42,32 @@ type testEnv struct {
 }
 
 var (
-	portMu       sync.Mutex
-	nextBasePort = 20000
+	portMu sync.Mutex
 )
 
-// allocatePorts returns 3 guaranteed-unique port numbers within this process.
-// Uses a monotonic counter under a mutex so parallel tests never collide.
-// Ports start at 20000 to stay clear of the OS ephemeral range (32768–60999).
-// Gap layout: exporter=base, sippPort=base+1, [UAS media=base+3],
-// sippClientPort=base+5, [UAC media=base+7], next=base+10.
-// The wide gaps prevent SIPp's default media port (local_port+2) from
-// colliding with the other SIPp instance's signalling port.
+// allocatePorts returns 3 port numbers for exporter, SIPp server, and SIPp client.
+// Uses the kernel's ephemeral port allocator (net.Listen ":0") for each port,
+// ensuring they are free at allocation time.
+// Gap layout: exporter=port[0], sippPort=port[1], [UAS media=port[1]+2],
+// sippClientPort=port[2], [UAC media=port[2]+2].
 func allocatePorts() (exporter, sipp, sippClient string) {
 	portMu.Lock()
 	defer portMu.Unlock()
-	base := nextBasePort
-	nextBasePort += 10
-	return strconv.Itoa(base), strconv.Itoa(base + 1), strconv.Itoa(base + 5)
+	ports := make([]int, 3)
+	listeners := make([]net.Listener, 3)
+	for i := range 3 {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			panic(fmt.Sprintf("allocatePorts: failed to get free port: %v", err))
+		}
+		listeners[i] = l
+		ports[i] = l.Addr().(*net.TCPAddr).Port
+	}
+	// Close all listeners before returning so the ports are free for use.
+	for _, l := range listeners {
+		l.Close()
+	}
+	return strconv.Itoa(ports[0]), strconv.Itoa(ports[1]), strconv.Itoa(ports[2])
 }
 
 // newTestEnv allocates free ports and starts an exporter container for the test.

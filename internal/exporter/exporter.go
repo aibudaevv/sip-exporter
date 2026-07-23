@@ -72,6 +72,9 @@ const (
 	rtpVersionMask    = 0xC0
 	rtpVersion2Prefix = 0x80
 
+	maxStaticRTPPayloadType  = 34
+	minDynamicRTPPayloadType = 96
+
 	sipPartsCount                = 3
 	minSIPParts                  = 2
 	minResponseStatusLen         = 3
@@ -885,9 +888,9 @@ func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 
 	sipData := packet[sipOffset:]
 
-	// RTP packets (passed by the eBPF filter with version=2) arrive truncated to
-	// the RTP header. SIP messages start with an ASCII letter and never with the
-	// 0x80-0xBF range, so the first payload byte unambiguously distinguishes RTP.
+	// The eBPF filter passes UDP to SDP-registered media endpoints (truncated to
+	// 64 bytes). The first payload byte distinguishes RTP (V=2, 0x80-0xBF) from
+	// non-RTP; SIP messages start with an ASCII letter and never with 0x80-0xBF.
 	if sipData[0]&rtpVersionMask == rtpVersion2Prefix {
 		srcPort := binary.BigEndian.Uint16(packet[udpOffset : udpOffset+2])
 		dstPort := binary.BigEndian.Uint16(packet[udpOffset+2 : udpOffset+4])
@@ -1035,6 +1038,12 @@ func (e *exporter) handleRTP(
 	header, err := rtp.ParseHeader(payload)
 	if err != nil {
 		zap.L().Debug("RTP header parse skipped", zap.Error(err))
+		return "", nil
+	}
+	// Reject PT 35-95: not valid RTP audio. This range includes RTCP packet
+	// types (200-204 → masked 72-76) that share V=2 and arrive on the same
+	// port when rtcp-mux (RFC 5761) is active.
+	if header.PayloadType > maxStaticRTPPayloadType && header.PayloadType < minDynamicRTPPayloadType {
 		return "", nil
 	}
 	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, dstIP.String(), dstPort, header, time.Now())

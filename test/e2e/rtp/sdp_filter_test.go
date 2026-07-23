@@ -46,7 +46,7 @@ func sendNonRtpUDP(t *testing.T, port int, count int) {
 	defer sender.Close()
 
 	pkt := make([]byte, 28)
-	pkt[0] = 0x00 // V=0, not RTP V2 — pattern check must reject
+	pkt[0] = 0x00 // V=0, not RTP V2
 
 	for i := range count {
 		_, _ = sender.Write(pkt)
@@ -68,7 +68,7 @@ func sendNonRtpToSippPort(t *testing.T, port int, count int) {
 	defer sender.Close()
 
 	pkt := make([]byte, 28)
-	pkt[0] = 0x00 // V=0 — pattern check rejects, SDP-driven lookup passes
+	pkt[0] = 0x00 // V=0 — non-RTP, SDP-driven lookup passes
 	for i := range count {
 		binary.BigEndian.PutUint16(pkt[2:4], uint16(i+1))
 		_, _ = sender.Write(pkt)
@@ -78,14 +78,15 @@ func sendNonRtpToSippPort(t *testing.T, port int, count int) {
 	}
 }
 
-// TestSDPFilter verifies the SDP-driven BPF filter end-to-end.
+// TestSDPFilter verifies the strict SDP-driven BPF filter end-to-end.
 //
-// MC/DC table: the variable is condition C (endpoint in BPF map).
-// Condition D (valid RTP pattern) differs between cases to test both paths.
+// MC/DC table: condition C (endpoint in BPF map) × condition D (RTP pattern).
+// Pattern matching fallback was removed — only SDP-registered endpoints pass.
 //
 //	Case                        C (in map)  D (RTP pattern)  Expected
 //	sdp_port_non_rtp_passes     true        false (V=0)      BPF passes (SDP lookup)
 //	unregistered_port_non_rtp   false       false (V=0)      BPF drops
+//	unregistered_port_rtp_drops false       true (V=2)       BPF drops (no fallback)
 //	sdp_port_rtp_captured       true        true (V=2)       rtp_packets_total > 0
 func TestSDPFilter(t *testing.T) {
 	const pktCount = 20
@@ -94,11 +95,12 @@ func TestSDPFilter(t *testing.T) {
 		name            string
 		setupDialog     bool // establish SIP dialog with SDP before sending
 		sendRTP         bool // true: valid RTP (V=2), false: non-RTP UDP (V=0)
-		expectDropped   bool // expect BPF to drop (socket delta == 0)
+		expectDropped   bool // expect BPF to drop (socket delta ≈ 0)
 		expectRtpMetric bool // expect rtp_packets_total > 0
 	}{
 		{"sdp_port_non_rtp_passes", true, false, false, false},
 		{"unregistered_port_non_rtp_drops", false, false, true, false},
+		{"unregistered_port_rtp_drops", false, true, true, false},
 		{"sdp_port_rtp_captured", true, true, false, true},
 	}
 
@@ -157,8 +159,8 @@ func TestSDPFilter(t *testing.T) {
 				}, 10*time.Second, 500*time.Millisecond,
 					"valid RTP to SDP-registered port must be captured in rtp_packets_total")
 			case tt.expectDropped:
-				require.Equal(t, 0.0, delta,
-					"non-RTP UDP to unregistered port must be dropped by BPF")
+				require.Less(t, delta, 3.0,
+					"UDP to unregistered port must be dropped by BPF (no pattern fallback)")
 			default:
 				require.GreaterOrEqual(t, delta, float64(pktCount)*0.5,
 					"non-RTP UDP to SDP-registered port must pass BPF via SDP-driven lookup")
@@ -233,7 +235,7 @@ func TestSDPFilter_EntryLifecycle(t *testing.T) {
 				require.GreaterOrEqual(t, delta, float64(pktCount)*0.5,
 					"non-RTP UDP must pass BPF while entry is in map")
 			} else {
-				require.Equal(t, 0.0, delta,
+				require.Less(t, delta, 3.0,
 					"non-RTP UDP must be dropped after BYE deleted the BPF map entry")
 			}
 
