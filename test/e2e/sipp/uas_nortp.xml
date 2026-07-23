@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="ISO-8859-1" ?>
-<scenario name="Sprint5 UAS (200 OK + SDP, no built-in RTP — test injects controlled RTP)">
+<scenario name="UAS no-RTP (200 OK + SDP, test injects controlled RTP)">
     <recv request="INVITE" crlf="true"/>
     <send>
         <![CDATA[

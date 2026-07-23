@@ -72,6 +72,19 @@ func TestRTP_Duplicates(t *testing.T) {
 	require.InDelta(t, 1.0, m.rtpCounter(m.rtpDuplicate, "carrier-b", "cisco", "G.729"), 0.01)
 }
 
+func TestRTP_OutOfOrder(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateRTPOutOfOrder("carrier-a", "yealink", "PCMU", "")
+	m.UpdateRTPOutOfOrder("carrier-a", "yealink", "PCMU", "")
+	m.UpdateRTPOutOfOrder("carrier-a", "yealink", "PCMU", "")
+
+	require.InDelta(t, 3.0, m.rtpCounter(m.rtpOutOfOrder, "carrier-a", "yealink", "PCMU"), 0.01)
+
+	// distinct label set → separate counter
+	m.UpdateRTPOutOfOrder("carrier-b", "cisco", "G.729", "")
+	require.InDelta(t, 1.0, m.rtpCounter(m.rtpOutOfOrder, "carrier-b", "cisco", "G.729"), 0.01)
+}
+
 func TestRTP_JitterAndMOS(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTPJitter("carrier-a", "yealink", "PCMU", "", 5.5)

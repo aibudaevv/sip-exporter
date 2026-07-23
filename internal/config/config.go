@@ -1,8 +1,12 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/ilyakaznacheev/cleanenv"
 )
@@ -11,7 +15,7 @@ type (
 	App struct {
 		LogLevel                  string        `env:"SIP_EXPORTER_LOGGER_LEVEL"                  env-default:"info"`
 		Port                      string        `env:"SIP_EXPORTER_HTTP_PORT"                     env-default:"2112"`
-		Interface                 string        `env:"SIP_EXPORTER_INTERFACE"                                                                                env-required:"true"`
+		Interfaces                string        `env:"SIP_EXPORTER_INTERFACE"                                                                                env-required:"true"`
 		BPFBinaryPath             string        `env:"SIP_EXPORTER_OBJECT_FILE_PATH"              env-default:"/usr/local/bin/sip.o"`
 		SIPPort                   int           `env:"SIP_EXPORTER_SIP_PORT"                      env-default:"5060"`
 		SIPSPort                  int           `env:"SIP_EXPORTER_SIPS_PORT"                     env-default:"5061"`
@@ -48,6 +52,33 @@ func GetConfig() (*App, error) {
 	}
 
 	return cfg, nil
+}
+
+// ParsedInterfaces splits the SIP_EXPORTER_INTERFACE env value into a list of
+// interface names. Accepts comma-separated values with optional whitespace.
+// Empty elements are dropped; duplicates are removed with a warning. Returns
+// an error if no valid interface name remains after parsing.
+func (c *App) ParsedInterfaces() ([]string, error) {
+	raw := strings.Split(c.Interfaces, ",")
+	seen := make(map[string]struct{}, len(raw))
+	out := make([]string, 0, len(raw))
+	for _, name := range raw {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, dup := seen[name]; dup {
+			zap.L().Warn("duplicate interface in SIP_EXPORTER_INTERFACE, deduplicating",
+				zap.String("interface", name))
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	if len(out) == 0 {
+		return nil, errors.New("SIP_EXPORTER_INTERFACE has no valid interface names after parsing")
+	}
+	return out, nil
 }
 
 func (c *App) validatePorts() error {

@@ -106,7 +106,7 @@ docker pull frzq/sip-exporter:latest
 
 ### Configure
 Environment variables:
-* `SIP_EXPORTER_INTERFACE` - net interface (required)
+* `SIP_EXPORTER_INTERFACE` - one or more network interfaces, comma-separated (required). Examples: `eth0`, `eth0,eth1,eth2`.
 * `SIP_EXPORTER_HTTP_PORT` - http port for prometheus (default 2112)
 * `SIP_EXPORTER_LOGGER_LEVEL` - log level (default info)
 * `SIP_EXPORTER_SIP_PORT` - SIP port (default 5060)
@@ -116,7 +116,7 @@ Environment variables:
 * `SIP_EXPORTER_USER_AGENTS_CONFIG` - path to user-agents YAML config (optional, see [`examples/user_agents.yaml`](examples/user_agents.yaml))
 * `SIP_EXPORTER_RTP_CAPTURE` - enable RTP media capture and analysis (default true)
 * `SIP_EXPORTER_RTP_STREAM_TTL` - idle RTP stream expiry, RFC 3550 §6.3.5 timeout (default 30s)
-* `SIP_EXPORTER_IGNORE_OUTGOING` - ignore outgoing packets, count incoming only (default false)
+* `SIP_EXPORTER_IGNORE_OUTGOING` - loopback/test only: suppress duplicate TX packets on `lo` (default false, do NOT enable in production)
 * `SIP_EXPORTER_GEOIP_COUNTRY_DB` - path to MaxMind GeoLite2-Country.mmdb for `source_country` label (optional)
 * `SIP_EXPORTER_LOCAL_COUNTRY_CODE` - ISO alpha-2 country code for domestic phone-number fallback in `destination_country` (optional, e.g. `RU`)
 * `SIP_EXPORTER_HOST_LABELS` - enable `caller_host`/`called_host` labels on INVITE metrics (default `false`; opt-in — unbounded cardinality, enable only on trusted/bounded deployments)
@@ -124,16 +124,18 @@ Environment variables:
 
 The container must run with `--privileged` and `--network host` (eBPF requires `CAP_BPF` and access to the network interface). See [Security](docs/SECURITY.md) for details on why this is safe.
 
+> ⚠️ **Multi-interface caveat:** do not specify interfaces that see the same traffic (bond parent + child, bridge + member, VLAN parent + subinterface, duplicate SPAN ports). Doing so will double-count metrics. When in doubt, list only physical NICs.
+
 ## Metrics
 
 All metrics are exposed at `/metrics` in Prometheus exposition format. All SIP metrics include `carrier` and `ua_type` labels for multi-dimensional analysis. The exporter provides:
 
 - **Traffic counters** — SIP request types (INVITE, re-INVITE, BYE, REGISTER, etc.) and response status codes (100–606)
 - **Active sessions** — real-time count of active SIP dialogs
-- **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, PDD
+- **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, PDD, PBD
 - **RFC 6035 voice quality metrics** — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
 - **RTP media metrics** — `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_active_streams` (labels: `carrier,ua_type,codec`)
-- **Extended metrics** — ISS, SDC, ORD, LRD
+- **Diagnostics** — SIP retransmissions (Timer A), out-of-order RTP, short call counters (20/60/180s thresholds)
 
 Full reference with formulas, examples, and RFC section mapping: [docs/METRICS.md](docs/METRICS.md)
 
@@ -346,6 +348,8 @@ Metrics produced:
 
 RTP capture is on by default and can be disabled with `SIP_EXPORTER_RTP_CAPTURE=false` (the eBPF filter then drops RTP at the kernel level). Note: RTP without a correlated SIP dialog (no SDP exchange seen) is dropped, so only media for monitored calls is counted.
 
+The eBPF filter uses **SDP-driven RTP detection**: media endpoints (IP:port) learned from INVITE 200 OK SDP are inserted into a BPF LRU hash map. Only UDP packets matching a registered endpoint pass the kernel filter — all other UDP is dropped. This eliminates false positives from random UDP traffic on public IPs.
+
 ```PromQL
 # Average MOS over the last 5m (per codec)
 sum by (codec) (rate(sip_exporter_rtp_mos_score_sum[5m]))
@@ -378,7 +382,7 @@ See [docs/METRICS.md](docs/METRICS.md) for the full RTP reference, formulas, and
 
 Test suite:
 - **Unit tests** — MC/DC standard, all business logic covered
-- **120 E2E tests** — real SIP traffic via SIPp + testcontainers-go, validates all RFC 6076, RFC 6035, and RTP metrics
+- **124 E2E tests** — real SIP traffic via SIPp + testcontainers-go, validates all RFC 6076, RFC 6035, and RTP metrics
 - **13 load tests** — PPS throughput, VQ reports, concurrent sessions, memory stability, GC pauses, scrape latency
 
 ## Benchmark
@@ -397,7 +401,7 @@ Pre-configured Grafana dashboard and Prometheus alert rules are included in the 
 2. Upload [`examples/grafana-dashboard.json`](examples/grafana-dashboard.json)
 3. Select your Prometheus or VictoriaMetrics datasource
 
-The dashboard includes: traffic counters, SIP request/response breakdowns, active sessions, RFC 6076 performance metrics (SER, SEER, ISA, SCR, NER), registrations (active count, success ratio, failures by code, fraud signals), RTP media analysis (active streams, packet rate, loss rate, MOS, jitter by codec), voice quality metrics (RFC 6035: MOS, jitter, packet loss), delay histograms (RRD, TTR, PDD, SPD, ORD, LRD), session quality metrics (ISS, ASR, SDC), and system errors.
+The dashboard includes: traffic counters, SIP request/response breakdowns, active sessions, RFC 6076 performance metrics (SER, SEER, ISA, SCR, NER), registrations (active count, success ratio, failures by code, fraud signals), RTP media analysis (active streams, packet rate, loss rate, MOS, jitter by codec), voice quality metrics (RFC 6035: MOS, jitter, packet loss), delay histograms (RRD, TTR, PDD, SPD, ORD, LRD, PBD), session quality metrics (ISS, ASR, SDC), diagnostics (SIP retransmissions, short calls), and system errors.
 
 Full alerting guide with Prometheus rules, Alertmanager configs (Slack/PagerDuty/Email), and threshold tuning: [docs/ALERTING.md](docs/ALERTING.md)
 

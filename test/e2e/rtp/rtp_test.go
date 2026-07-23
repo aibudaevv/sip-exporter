@@ -36,8 +36,7 @@ const (
 )
 
 var (
-	portMu       sync.Mutex
-	nextBasePort = 40000
+	portMu sync.Mutex
 
 	projectRoot   string
 	exporterImage string
@@ -53,22 +52,31 @@ func init() {
 	}
 }
 
-// allocatePortsN returns n unique port numbers (as strings) for this process.
+// allocatePortsN returns n unique port numbers (as strings) using the kernel's
+// ephemeral port allocator. Each port is verified free at allocation time via
+// net.Listen(":0"), eliminating collisions between parallel subtests.
 func allocatePortsN(n int) []string {
 	portMu.Lock()
 	defer portMu.Unlock()
-	base := nextBasePort
-	nextBasePort += n
 	out := make([]string, n)
 	for i := range n {
-		out[i] = strconv.Itoa(base + i)
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			panic(fmt.Sprintf("allocatePortsN: failed to get free port: %v", err))
+		}
+		out[i] = strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
+		l.Close()
 	}
 	return out
 }
 
-// startExporter brings up the exporter container on lo with the given RTP capture
-// setting and returns its /metrics endpoint.
-func startExporter(ctx context.Context, t *testing.T, httpPort, sipPort, sipsPort string, rtpCapture bool, ttl string) string {
+// startExporter brings up the exporter container on the given interface(s) with
+// the given RTP capture setting and returns its /metrics endpoint.
+func startExporter(
+	ctx context.Context, t *testing.T,
+	httpPort, sipPort, sipsPort, iface string,
+	rtpCapture bool, ttl string,
+) string {
 	t.Helper()
 
 	startCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
@@ -85,7 +93,7 @@ func startExporter(ctx context.Context, t *testing.T, httpPort, sipPort, sipsPor
 	}
 
 	env := map[string]string{
-		"SIP_EXPORTER_INTERFACE":       testInterface,
+		"SIP_EXPORTER_INTERFACE":       iface,
 		"SIP_EXPORTER_HTTP_PORT":       httpPort,
 		"SIP_EXPORTER_SIP_PORT":        sipPort,
 		"SIP_EXPORTER_SIPS_PORT":       sipsPort,
@@ -323,34 +331,66 @@ func sendRTP(t *testing.T, port int, count int) {
 	}
 }
 
-// TestRTP_ReachesApp_WithCapture verifies that when RTP capture is enabled, the
-// eBPF filter passes RTP packets (pattern-detected) to the exporter's socket.
-func TestRTP_ReachesApp_WithCapture(t *testing.T) {
-	ports := allocatePortsN(4)
-	httpPort, sipPort, sipsPort, rtpPort := ports[0], ports[1], ports[2], ports[3]
-	rtpPortNum, err := strconv.Atoi(rtpPort)
+// sendRTPOutOfOrder sends 3 RTP packets with sequence numbers 1, 5, 3 to the
+// given media port. This triggers reorder detection (seq=3 < maxSeq=5) in the
+// media tracker. Uses PT=8 (PCMA) to match SIPp's G.711a stream codec.
+func sendRTPOutOfOrder(t *testing.T, portStr string) {
+	t.Helper()
+
+	port, err := strconv.Atoi(portStr)
 	require.NoError(t, err)
 
-	endpoint := startExporter(context.Background(), t, httpPort, sipPort, sipsPort, true, "")
+	addr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port}
+	conn, err := net.DialUDP("udp4", nil, addr)
+	require.NoError(t, err)
+	defer conn.Close()
 
-	// Baseline after the exporter settles.
+	pkt := make([]byte, 28)
+	pkt[0] = 0x80                             // V=2, P=0, X=0, CC=0
+	pkt[1] = 0x08                             // M=0, PT=8 (PCMA)
+	binary.BigEndian.PutUint32(pkt[4:8], 160) // timestamp
+
+	for _, seq := range []uint16{1, 5, 3} {
+		binary.BigEndian.PutUint16(pkt[2:4], seq)
+		_, _ = conn.Write(pkt)
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestRTP_ReachesApp_WithCapture verifies that when RTP capture is enabled and
+// a media endpoint is registered via SDP, RTP packets pass the eBPF filter and
+// reach the exporter's socket.
+func TestRTP_ReachesApp_WithCapture(t *testing.T) {
+	ports := allocatePortsN(6)
+	httpPort, uasSIP, sipsPort, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
+	uasMediaNum, _ := strconv.Atoi(uasMedia)
+
+	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP, sipsPort,
+		integrationCarriersYAML, integrationUserAgentsYAML, "")
+
+	wait := startSippContainers(context.Background(), t,
+		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
+
 	require.Eventually(t, func() bool {
-		return getSocketPacketsReceived(t, endpoint) >= 0
-	}, 5*time.Second, 500*time.Millisecond)
+		return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
+	}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
+
 	time.Sleep(1500 * time.Millisecond)
 	before := getSocketPacketsReceived(t, endpoint)
 
-	sendRTP(t, rtpPortNum, rtpPackets)
+	sendControlledRTP(t, uasMediaNum, []uint16{1, 2, 3, 4, 5})
 
 	// Allow the exporter's 1s getsockopt loop to accumulate the received count.
 	time.Sleep(2500 * time.Millisecond)
 	after := getSocketPacketsReceived(t, endpoint)
 
 	delta := after - before
-	t.Logf("capture=ON: socket_packets_received_total before=%v after=%v delta=%v (sent %d)",
-		before, after, delta, rtpPackets)
-	require.GreaterOrEqual(t, delta, float64(rtpPackets)*0.5,
-		"RTP packets must reach the exporter socket when capture is enabled")
+	t.Logf("capture=ON: socket_packets_received_total before=%v after=%v delta=%v (sent 5)",
+		before, after, delta)
+	require.GreaterOrEqual(t, delta, 3.0,
+		"RTP packets must reach the exporter socket when capture is enabled on a registered endpoint")
+
+	wait()
 }
 
 // TestRTP_Dropped_WhenCaptureOff verifies that when RTP capture is disabled, the
@@ -361,7 +401,7 @@ func TestRTP_Dropped_WhenCaptureOff(t *testing.T) {
 	rtpPortNum, err := strconv.Atoi(rtpPort)
 	require.NoError(t, err)
 
-	endpoint := startExporter(context.Background(), t, httpPort, sipPort, sipsPort, false, "")
+	endpoint := startExporter(context.Background(), t, httpPort, sipPort, sipsPort, testInterface, false, "")
 
 	time.Sleep(1500 * time.Millisecond)
 	before := getSocketPacketsReceived(t, endpoint)
@@ -378,18 +418,17 @@ func TestRTP_Dropped_WhenCaptureOff(t *testing.T) {
 		"RTP packets must NOT reach the exporter when capture is disabled")
 }
 
-// TestRTP_UncorrelatedDropped verifies RTP isolation: packets that pass the
-// eBPF filter (capture ON → counted in socket_packets_received_total) but have no
-// correlated SIP dialog (no SDP-registered media endpoint) must NOT be counted as
-// RTP metrics. This is the dialog-scoping guarantee — RTP is monitored only for
-// established calls, so traffic from one port/dialog cannot pollute another.
+// TestRTP_UncorrelatedDropped verifies RTP isolation: with the strict SDP-driven
+// BPF filter, RTP sent to a port with no established SIP dialog (no SDP-registered
+// media endpoint) is dropped by BPF — it never reaches the exporter socket and is
+// not counted as RTP metrics.
 func TestRTP_UncorrelatedDropped(t *testing.T) {
 	ports := allocatePortsN(4)
 	httpPort, sipPort, sipsPort, rtpPort := ports[0], ports[1], ports[2], ports[3]
 	rtpPortNum, err := strconv.Atoi(rtpPort)
 	require.NoError(t, err)
 
-	endpoint := startExporter(context.Background(), t, httpPort, sipPort, sipsPort, true, "")
+	endpoint := startExporter(context.Background(), t, httpPort, sipPort, sipsPort, testInterface, true, "")
 
 	time.Sleep(1500 * time.Millisecond)
 	beforeSocket := getSocketPacketsReceived(t, endpoint)
@@ -400,11 +439,11 @@ func TestRTP_UncorrelatedDropped(t *testing.T) {
 	time.Sleep(2500 * time.Millisecond)
 	afterSocket := getSocketPacketsReceived(t, endpoint)
 
-	// eBPF passed the RTP (capture ON) → socket counter rose.
-	require.GreaterOrEqual(t, afterSocket-beforeSocket, float64(rtpPackets)*0.5,
-		"uncorrelated RTP must still reach the socket (capture ON)")
+	// Strict BPF: unregistered RTP port → dropped by BPF, socket counter stays flat.
+	require.Less(t, afterSocket-beforeSocket, float64(rtpPackets)*0.1,
+		"uncorrelated RTP must NOT reach the socket (strict SDP-driven BPF drops it)")
 
-	// But with no correlated SIP dialog, no RTP packets are counted as metrics.
+	// No RTP metrics counted.
 	require.Equal(t, 0.0, getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total"),
 		"uncorrelated RTP must be dropped (no rtp_packets_total)")
 }

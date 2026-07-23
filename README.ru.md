@@ -104,7 +104,7 @@ docker pull frzq/sip-exporter:latest
 ### Конфигурация
 
 Переменные окружения:
-* `SIP_EXPORTER_INTERFACE` — сетевой интерфейс (обязательно)
+* `SIP_EXPORTER_INTERFACE` — один или несколько сетевых интерфейсов через запятую (обязательно). Примеры: `eth0`, `eth0,eth1,eth2`.
 * `SIP_EXPORTER_HTTP_PORT` — HTTP-порт для Prometheus (по умолчанию 2112)
 * `SIP_EXPORTER_LOGGER_LEVEL` — уровень логирования (по умолчанию info)
 * `SIP_EXPORTER_SIP_PORT` — SIP-порт (по умолчанию 5060)
@@ -114,13 +114,15 @@ docker pull frzq/sip-exporter:latest
 * `SIP_EXPORTER_USER_AGENTS_CONFIG` — путь к YAML-конфигурации user-agents (опционально, см. [`examples/user_agents.yaml`](examples/user_agents.yaml))
 * `SIP_EXPORTER_RTP_CAPTURE` — включить захват и анализ RTP-медиа (по умолчанию true)
 * `SIP_EXPORTER_RTP_STREAM_TTL` — время жизни простаивающего RTP-потока до удаления, таймаут RFC 3550 §6.3.5 (по умолчанию 30s)
-* `SIP_EXPORTER_IGNORE_OUTGOING` — игнорировать исходящие пакеты, считать только входящие (по умолчанию false)
+* `SIP_EXPORTER_IGNORE_OUTGOING` — только для loopback/тестов: подавляет дубликаты TX-пакетов на `lo` (по умолчанию false, НЕ включать в production)
 * `SIP_EXPORTER_GEOIP_COUNTRY_DB` — путь к MaxMind GeoLite2-Country.mmdb для лейбла `source_country` (опционально)
 * `SIP_EXPORTER_LOCAL_COUNTRY_CODE` — код страны ISO alpha-2 для локальных номеров без международного префикса в `destination_country` (опционально, напр. `RU`)
 * `SIP_EXPORTER_HOST_LABELS` — включить лейблы `caller_host`/`called_host` в INVITE-метриках (по умолчанию `false`; opt-in — неограниченная кардинальность, включайте только в доверенных деплоях с ограниченным числом узлов)
 * `SIP_EXPORTER_TELEMETRY` — анонимная телеметрия использования, отключается значением `false` (по умолчанию true)
 
 Контейнер должен запускаться с `--privileged` и `--network host` (eBPF требует `CAP_BPF` и доступ к сетевому интерфейсу). Подробнее о безопасности — в [Безопасность](docs/SECURITY.ru.md).
+
+> ⚠️ **Особенность мульти-интерфейса:** не указывайте интерфейсы, которые видят один и тот же трафик (bond parent + child, bridge + member, VLAN parent + subinterface, дублирующие SPAN-порты). Это приведёт к задвоению метрик. Если сомневаетесь — указывайте только физические NIC.
 
 ## Метрики
 

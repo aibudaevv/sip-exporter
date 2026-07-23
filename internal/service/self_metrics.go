@@ -6,14 +6,16 @@ import (
 )
 
 func (m *metrics) initSelfMetrics(reg *prometheus.Registry) {
-	m.socketPacketsReceived = newCounterWithRegistry(
+	m.socketPacketsReceived = newCounterVecWithRegistry(
 		"sip_exporter_socket_packets_received_total",
 		"Total number of packets received from kernel AF_PACKET socket.",
+		[]string{"iface"},
 		reg,
 	)
-	m.socketPacketsDropped = newCounterWithRegistry(
+	m.socketPacketsDropped = newCounterVecWithRegistry(
 		"sip_exporter_socket_packets_dropped_total",
 		"Total number of packets dropped by kernel due to socket receive buffer overflow.",
+		[]string{"iface"},
 		reg,
 	)
 	m.rtpDropped = newCounterWithRegistry(
@@ -54,12 +56,10 @@ func (m *metrics) ParseError(errorType string) {
 	m.parseErrorsTotal.WithLabelValues(errorType).Inc()
 }
 
-func (m *metrics) SocketStats(received, dropped uint32) {
-	if received > 0 {
-		m.socketPacketsReceived.Add(float64(received))
-	}
-	if dropped > 0 {
-		m.socketPacketsDropped.Add(float64(dropped))
+func (m *metrics) SocketStats(stats []SocketStat) {
+	for _, s := range stats {
+		m.socketPacketsReceived.WithLabelValues(s.Iface).Add(float64(s.Received))
+		m.socketPacketsDropped.WithLabelValues(s.Iface).Add(float64(s.Dropped))
 	}
 }
 

@@ -42,23 +42,32 @@ type testEnv struct {
 }
 
 var (
-	portMu       sync.Mutex
-	nextBasePort = 20000
+	portMu sync.Mutex
 )
 
-// allocatePorts returns 3 guaranteed-unique port numbers within this process.
-// Uses a monotonic counter under a mutex so parallel tests never collide.
-// Ports start at 20000 to stay clear of the OS ephemeral range (32768–60999).
-// Gap layout: exporter=base, sippPort=base+1, [UAS media=base+3],
-// sippClientPort=base+5, [UAC media=base+7], next=base+10.
-// The wide gaps prevent SIPp's default media port (local_port+2) from
-// colliding with the other SIPp instance's signalling port.
+// allocatePorts returns 3 port numbers for exporter, SIPp server, and SIPp client.
+// Uses the kernel's ephemeral port allocator (net.Listen ":0") for each port,
+// ensuring they are free at allocation time.
+// Gap layout: exporter=port[0], sippPort=port[1], [UAS media=port[1]+2],
+// sippClientPort=port[2], [UAC media=port[2]+2].
 func allocatePorts() (exporter, sipp, sippClient string) {
 	portMu.Lock()
 	defer portMu.Unlock()
-	base := nextBasePort
-	nextBasePort += 10
-	return strconv.Itoa(base), strconv.Itoa(base + 1), strconv.Itoa(base + 5)
+	ports := make([]int, 3)
+	listeners := make([]net.Listener, 3)
+	for i := range 3 {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			panic(fmt.Sprintf("allocatePorts: failed to get free port: %v", err))
+		}
+		listeners[i] = l
+		ports[i] = l.Addr().(*net.TCPAddr).Port
+	}
+	// Close all listeners before returning so the ports are free for use.
+	for _, l := range listeners {
+		l.Close()
+	}
+	return strconv.Itoa(ports[0]), strconv.Itoa(ports[1]), strconv.Itoa(ports[2])
 }
 
 // newTestEnv allocates free ports and starts an exporter container for the test.
@@ -534,6 +543,11 @@ func registerExporterCleanup(t *testing.T, container testcontainers.Container, e
 // a dialog stuck for the 1800s default TTL).
 func waitForSessionsZero(t *testing.T, endpoint string) {
 	t.Helper()
+	// No direct metricExists guard: sip_exporter_sessions is a GaugeVec that is
+	// only emitted for label sets created via WithLabelValues. In scenarios with
+	// no successful calls (e.g. 0_percent), sessions may never be instantiated.
+	// The indirect guard is assertSelfMonitoringHealthy (called below), which
+	// verifies packets_received_total > 0, proving the exporter is alive.
 	require.Eventually(t, func() bool {
 		return getMetric(t, endpoint, "sip_exporter_sessions") <= 1
 	}, 15*time.Second, 300*time.Millisecond,
@@ -544,6 +558,17 @@ func waitForSessionsZero(t *testing.T, endpoint string) {
 
 func assertSelfMonitoringHealthy(t *testing.T, endpoint string) {
 	t.Helper()
+
+	require.True(t, metricExists(t, endpoint, "sip_exporter_socket_packets_received_total"),
+		"sip_exporter_socket_packets_received_total should exist in /metrics output")
+	require.True(t, metricExists(t, endpoint, "sip_exporter_socket_packets_dropped_total"),
+		"sip_exporter_socket_packets_dropped_total should exist in /metrics output")
+	require.True(t, metricExists(t, endpoint, "sip_exporter_channel_length"),
+		"sip_exporter_channel_length should exist in /metrics output")
+	require.True(t, metricExists(t, endpoint, "sip_exporter_channel_capacity"),
+		"sip_exporter_channel_capacity should exist in /metrics output")
+	require.True(t, metricExists(t, endpoint, "sip_exporter_active_dialogs"),
+		"sip_exporter_active_dialogs should exist in /metrics output")
 
 	received := getMetric(t, endpoint, "sip_exporter_socket_packets_received_total")
 	require.Equal(t, true, received > 0, "socket_packets_received_total should be > 0 after traffic")
@@ -567,6 +592,8 @@ func assertSelfMonitoringHealthy(t *testing.T, endpoint string) {
 // packets have been processed by the exporter.
 func waitForMetricStable(t *testing.T, endpoint string) {
 	t.Helper()
+	require.True(t, metricExists(t, endpoint, "sip_exporter_packets_total"),
+		"sip_exporter_packets_total should exist in /metrics output")
 	prev := -1.0
 	stableCount := 0
 	require.Eventually(t, func() bool {
@@ -600,6 +627,21 @@ func metricExists(t *testing.T, endpoint string, metricName string) bool {
 	return strings.Contains(string(body), metricName)
 }
 
+// buildMetricRegex compiles a regex matching a Prometheus metric line,
+// optionally filtered by labels. If labelFilter is empty, matches any label
+// set; otherwise matches only lines containing all comma-separated filters.
+func buildMetricRegex(metricName string, labelFilter string) *regexp.Regexp {
+	if labelFilter != "" {
+		filters := strings.Split(labelFilter, ",")
+		quotedParts := make([]string, len(filters))
+		for i, f := range filters {
+			quotedParts[i] = regexp.QuoteMeta(f)
+		}
+		return regexp.MustCompile(`^` + metricName + `\{[^}]*` + strings.Join(quotedParts, `[^}]*`) + `[^}]*\}\s+([0-9.]+)`)
+	}
+	return regexp.MustCompile(`^` + metricName + `(?:\{[^}]*\})?\s+([0-9.]+)`)
+}
+
 // getMetricWithLabel reads a metric with an optional label filter.
 // If labelFilter is empty, matches any label set (first match).
 // If labelFilter is set (e.g. `carrier="loopback-carrier"`), matches that exact label.
@@ -613,18 +655,7 @@ func getMetricWithLabel(t *testing.T, endpoint string, metricName string, labelF
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 
-	var pattern string
-	if labelFilter != "" {
-		filters := strings.Split(labelFilter, ",")
-		quotedParts := make([]string, len(filters))
-		for i, f := range filters {
-			quotedParts[i] = regexp.QuoteMeta(f)
-		}
-		pattern = `^` + metricName + `\{[^}]*` + strings.Join(quotedParts, `[^}]*`) + `[^}]*\}\s+([0-9.]+)`
-	} else {
-		pattern = `^` + metricName + `(?:\{[^}]*\})?\s+([0-9.]+)`
-	}
-	re := regexp.MustCompile(pattern)
+	re := buildMetricRegex(metricName, labelFilter)
 	for _, line := range strings.Split(string(body), "\n") {
 		matches := re.FindStringSubmatch(strings.TrimSpace(line))
 		if len(matches) == 2 {
@@ -635,6 +666,33 @@ func getMetricWithLabel(t *testing.T, endpoint string, metricName string, labelF
 	}
 
 	return 0
+}
+
+// metricWithLabelExists checks whether a metric matching the name AND label
+// filter appears in the exporter /metrics output. Use before assertions that
+// check a label-filtered metric == 0 to prevent vacuum-pass when the label
+// combination is misspelled or missing entirely.
+//
+// Unlike metricExists (which checks name only via strings.Contains), this uses
+// the same regex as getMetricWithLabel, ensuring the guard is label-aware.
+func metricWithLabelExists(t *testing.T, endpoint string, metricName string, labelFilter string) bool {
+	t.Helper()
+
+	resp, err := http.Get(endpoint + "/metrics") //nolint:noctx // test helper
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	re := buildMetricRegex(metricName, labelFilter)
+	for _, line := range strings.Split(string(body), "\n") {
+		if re.MatchString(strings.TrimSpace(line)) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // getMetricWithCarrier reads a metric filtered by carrier label.
@@ -997,6 +1055,16 @@ func getPDD(t *testing.T, endpoint string) float64 {
 	return sum / count
 }
 
+func getPBD(t *testing.T, endpoint string) float64 {
+	t.Helper()
+	sum := getMetric(t, endpoint, "sip_exporter_pbd_sum")
+	count := getMetric(t, endpoint, "sip_exporter_pbd_count")
+	if count == 0 {
+		return 0
+	}
+	return sum / count
+}
+
 func (e *testEnv) getSERByCarrier(t *testing.T) float64 {
 	t.Helper()
 	return getMetricWithCarrier(t, e.endpoint, "sip_exporter_ser", e.carrier)
@@ -1089,6 +1157,10 @@ func (e *testEnv) getLRDByCarrier(t *testing.T) float64 {
 
 func (e *testEnv) waitForSessionsZeroByCarrier(t *testing.T) {
 	t.Helper()
+	// No direct metricWithLabelExists guard: sip_exporter_sessions is a GaugeVec
+	// that may not be instantiated for a carrier with no successful calls.
+	// Indirect guard: assertSelfMonitoringHealthy (called below) verifies
+	// packets_received_total > 0, proving the exporter is alive.
 	require.Eventually(t, func() bool {
 		return getMetricWithCarrier(t, e.endpoint, "sip_exporter_sessions", e.carrier) <= 1
 	}, 10*time.Second, 300*time.Millisecond,

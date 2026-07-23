@@ -28,6 +28,8 @@ The container performs **read-only packet inspection**:
 
 That's it. No packet modification, no packet injection, no network redirection, no iptables/nftables rules, no filesystem writes (except stdout/stderr for logs).
 
+> **Multi-interface note:** The eBPF socket filter is shared across all configured interfaces. One BPF collection is loaded once at startup; the same program is attached to N `AF_PACKET` sockets via `SO_ATTACH_BPF` (one socket per interface). Maps `sip_ports` and `rtp_config` are global — the same filtering rules apply on all interfaces.
+
 ## What the Container Does NOT Do
 
 - Does **not** modify or drop packets — the eBPF filter is *passive* (read-only)

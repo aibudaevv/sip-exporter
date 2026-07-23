@@ -16,10 +16,10 @@ import (
 // The exporter should lock carrier to "carrier-A" (from INVITE source IP) and not switch
 // to "carrier-B" on the 200 OK response.
 //
-// Loopback doubling: inviteTotal doubles (each INVITE seen twice on lo).
-// First 200 OK uses tracker carrier-A, second 200 OK (echo) tracker is gone → resolves from IP → carrier-B.
-// Result: invite200OKTotal{carrier-A}=N, inviteTotal{carrier-A}=2N → SER{carrier-A}=50%.
-// SER{carrier-B}=0 because carrier-B has no INVITEs (only second-echo responses with dead tracker).
+// Carrier is locked to carrier-A from INVITE source IP, not switched to carrier-B on 200 OK response.
+// IGNORE_OUTGOING=true on lo → each packet seen once.
+// inviteTotal{carrier-A}=N, invite200OKTotal{carrier-A}=N → SER{carrier-A}≈100%.
+// SER{carrier-B}=0 because carrier-B has no INVITEs (carrier resolved from INVITE tracker, not response IP).
 // sessionCompletedTotal{carrier-A}=200 (dialog created with carrier-A), sessionCompletedTotal{carrier-B}=0.
 func TestCarrierDirection_InviteResponseMismatch(t *testing.T) {
 	ctx := context.Background()

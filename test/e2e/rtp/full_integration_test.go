@@ -4,6 +4,7 @@ package rtp
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -11,22 +12,33 @@ import (
 )
 
 // TestRTP_BothDirections verifies that both legs of the media flow are captured.
-// SIPp UAC and UAS each stream G.711a RTP from their own media port, so the
-// exporter must track two distinct streams (keyed by media endpoint + SSRC).
-// Streams persist for the tracker TTL after the call, so once the dialog
-// completes the rtp_active_streams gauge reflects both directions.
+// A SIPp dialog establishes SDP-registered endpoints, then sendControlledRTP
+// sends deterministic RTP to both media ports. The exporter must track two
+// distinct streams (keyed by media endpoint + SSRC).
 func TestRTP_BothDirections(t *testing.T) {
-	ports := allocatePortsN(5)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, "0", true, "")
+	ports := allocatePortsN(6)
+	httpPort, uasSIP, sipsPort, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
+	uasMediaNum, _ := strconv.Atoi(uasMedia)
+	uacMediaNum, _ := strconv.Atoi(uacMedia)
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, sipsPort, testInterface, true, "")
 
-	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
+	wait := startSippContainers(context.Background(), t,
+		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
+
+	require.Eventually(t, func() bool {
+		return getMetricByLabel(t, endpoint, "sip_exporter_invite_total") >= 1
+	}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
+
+	sendControlledRTP(t, uacMediaNum, []uint16{1, 2, 3, 4, 5})
+	sendControlledRTP(t, uasMediaNum, []uint16{1, 2, 3, 4, 5})
 
 	// Both UAC→UAS and UAS→UAC legs observed → at least two active PCMA streams.
 	require.Eventually(t, func() bool {
 		return getRTPMetric(t, endpoint, "sip_exporter_rtp_active_streams") >= 2
 	}, 15*time.Second, 500*time.Millisecond,
 		"rtp_active_streams{codec=PCMA} must reflect both media directions (>=2)")
+
+	wait()
 }
 
 // Configs used by the full-integration test: the SIPp loopback traffic
@@ -42,19 +54,33 @@ const (
 	labelCodec   = `codec="PCMA"`
 )
 
-// TestRTP_FullIntegration_MetricsVerified drives a complete SIP dialog with real
-// G.711a RTP through the exporter (carrier+UA config mounted) and asserts:
+// TestRTP_FullIntegration_MetricsVerified drives a complete SIP dialog with
+// controlled RTP through the exporter (carrier+UA config mounted) and asserts:
 //   - all RTP metrics are present with the concrete carrier/ua_type/codec labels
 //     (packets, jitter, MOS, active_streams; loss is 0 on clean G.711a), and
 //   - the SIP signalling path still produces correct metrics with RTP capture ON
 //     (SIP regression: INVITE counted, SER ≈ 100%).
+//
+// Uses sendControlledRTP (deterministic) instead of SIPp's rtp_stream (which
+// intermittently fails to start in one direction).
 func TestRTP_FullIntegration_MetricsVerified(t *testing.T) {
-	ports := allocatePortsN(5)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
-	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP, "0",
+	ports := allocatePortsN(6)
+	httpPort, uasSIP, sipsPort, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
+	uasMediaNum, _ := strconv.Atoi(uasMedia)
+	uacMediaNum, _ := strconv.Atoi(uacMedia)
+	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP, sipsPort,
 		integrationCarriersYAML, integrationUserAgentsYAML, "")
 
-	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
+	wait := startSippContainers(context.Background(), t,
+		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
+
+	require.Eventually(t, func() bool {
+		return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
+	}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
+
+	// Send RTP in both directions (deterministic, unlike SIPp's rtp_stream).
+	sendControlledRTP(t, uacMediaNum, []uint16{1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
+	sendControlledRTP(t, uasMediaNum, []uint16{1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
 
 	// --- RTP metrics with concrete labels ---
 	rtpLabels := []string{labelCarrier, labelUAType, labelCodec}
@@ -94,6 +120,8 @@ func TestRTP_FullIntegration_MetricsVerified(t *testing.T) {
 		return getMetricByLabel(t, endpoint, "sip_exporter_rtp_active_streams", rtpLabels...) >= 2
 	}, 15*time.Second, 500*time.Millisecond, "rtp_active_streams must reflect both directions")
 
+	wait()
+
 	// --- SIP regression: signalling metrics correct with RTP capture ON ---
 	sipLabels := []string{labelCarrier, labelUAType}
 
@@ -115,9 +143,9 @@ func TestRTP_FullIntegration_MetricsVerified(t *testing.T) {
 // have been idle past the TTL and the 1s snapshot cycle has run Cleanup().
 // A hardcoded 30s TTL previously made this path too slow to cover on e2e.
 func TestRTP_StreamExpiry(t *testing.T) {
-	ports := allocatePortsN(5)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, "0", true, "2s")
+	ports := allocatePortsN(6)
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia, sipsPort := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, sipsPort, testInterface, true, "2s")
 
 	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 

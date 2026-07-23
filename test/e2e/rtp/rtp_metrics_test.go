@@ -99,7 +99,10 @@ func getMetricByLabel(t *testing.T, endpoint, name string, labels ...string) flo
 // concurrently during the dialog's active phase (between ACK and BYE). The
 // returned function blocks until both containers finish and must be called
 // (typically at the end of the test, possibly via defer).
-func startSippContainers(ctx context.Context, t *testing.T, uasXML, uacXML, uasSIP, uacSIP, uasMedia, uacMedia string) func() {
+func startSippContainers(
+	ctx context.Context, t *testing.T,
+	uasXML, uacXML, uasSIP, uacSIP, uasMedia, uacMedia, uasIP, uacIP string,
+) func() {
 	t.Helper()
 
 	scenarioDir := filepath.Join(projectRoot, "test", "e2e", "sipp")
@@ -124,8 +127,8 @@ func startSippContainers(ctx context.Context, t *testing.T, uasXML, uacXML, uasS
 		"-v", scenarioDir+":/scenarios:ro",
 		sippImage,
 		"-sf", "/scenarios/"+uasXML,
-		"-i", "127.0.0.1",
-		"-mi", "127.0.0.1",
+		"-i", uasIP,
+		"-mi", uasIP,
 		"-p", uasSIP,
 		"-mp", uasMedia,
 		"-m", "1",
@@ -137,7 +140,7 @@ func startSippContainers(ctx context.Context, t *testing.T, uasXML, uacXML, uasS
 	require.NoError(t, uasCmd.Start())
 
 	require.Eventually(t, func() bool {
-		addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:"+uasSIP)
+		addr, err := net.ResolveUDPAddr("udp", uasIP+":"+uasSIP)
 		if err != nil {
 			return false
 		}
@@ -154,13 +157,13 @@ func startSippContainers(ctx context.Context, t *testing.T, uasXML, uacXML, uasS
 		"-v", scenarioDir+":/scenarios:ro",
 		sippImage,
 		"-sf", "/scenarios/"+uacXML,
-		"-i", "127.0.0.1",
-		"-mi", "127.0.0.1",
+		"-i", uacIP,
+		"-mi", uacIP,
 		"-p", uacSIP,
 		"-mp", uacMedia,
 		"-m", "1",
 		"-nr",
-		"127.0.0.1:"+uasSIP,
+		uasIP+":"+uasSIP,
 	)
 	uacCmd.Stdout = stdout
 	uacCmd.Stderr = stderr
@@ -184,16 +187,22 @@ func startSippContainers(ctx context.Context, t *testing.T, uasXML, uacXML, uasS
 // captures the SIP signalling (correlating media endpoints from SDP) and the RTP,
 // producing labelled RTP metrics.
 func runSippRTP(ctx context.Context, t *testing.T, uasSIP, uacSIP, uasMedia, uacMedia string) {
-	startSippContainers(ctx, t, "uas_rtp.xml", "uac_rtp.xml", uasSIP, uacSIP, uasMedia, uacMedia)()
+	runSippRTPWithIPs(ctx, t, uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
+}
+
+// runSippRTPWithIPs is like runSippRTP but binds UAS and UAC to the given IPs,
+// enabling tests with non-loopback media endpoints.
+func runSippRTPWithIPs(ctx context.Context, t *testing.T, uasSIP, uacSIP, uasMedia, uacMedia, uasIP, uacIP string) {
+	startSippContainers(ctx, t, "uas_rtp.xml", "uac_rtp.xml", uasSIP, uacSIP, uasMedia, uacMedia, uasIP, uacIP)()
 }
 
 // TestRTP_MetricsFromSIPpStream verifies the full pipeline end-to-end: a real SIP
 // dialog (INVITE/200 OK with SDP) + real G.711a RTP streamed by SIPp produces the
 // labelled RTP metrics on /metrics. Closes review item I3.
 func TestRTP_MetricsFromSIPpStream(t *testing.T) {
-	ports := allocatePortsN(5)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, "0", true, "")
+	ports := allocatePortsN(6)
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia, sipsPort := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, sipsPort, testInterface, true, "")
 
 	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 

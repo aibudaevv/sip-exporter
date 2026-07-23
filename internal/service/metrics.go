@@ -17,7 +17,19 @@ import (
 
 const maxUtilizationPercent = 100.0
 
+const (
+	shortCallThreshold20  = 20 * time.Second
+	shortCallThreshold60  = 60 * time.Second
+	shortCallThreshold180 = 180 * time.Second
+)
+
 type (
+	SocketStat struct {
+		Iface    string
+		Received uint32
+		Dropped  uint32
+	}
+
 	carrierAtomicCounters struct {
 		inviteTotal            atomic.Int64
 		invite3xxTotal         atomic.Int64
@@ -64,9 +76,13 @@ type (
 		registerSuccessTotal *prometheus.CounterVec
 		registerFailureTotal *prometheus.CounterVec
 
+		sipRetransmission *prometheus.CounterVec
+
 		registerCountryChange *prometheus.CounterVec
 		registerScanTotal     *prometheus.CounterVec
 		inviteBurstTotal      *prometheus.CounterVec
+
+		shortCalls *prometheus.CounterVec
 
 		activeRegistrations *prometheus.GaugeVec
 		// Single-writer: read+written only from sipDialogMetricsUpdate goroutine.
@@ -92,6 +108,7 @@ type (
 		pdd *prometheus.HistogramVec
 		ord *prometheus.HistogramVec
 		lrd *prometheus.HistogramVec
+		pbd *prometheus.HistogramVec
 
 		vqNLR     *prometheus.HistogramVec
 		vqJDR     *prometheus.HistogramVec
@@ -112,6 +129,7 @@ type (
 		rtpPackets         *prometheus.CounterVec
 		rtpLost            *prometheus.CounterVec
 		rtpDuplicate       *prometheus.CounterVec
+		rtpOutOfOrder      *prometheus.CounterVec
 		rtpJitter          *prometheus.HistogramVec
 		rtpMOS             *prometheus.HistogramVec
 		rtpMOSF1           *prometheus.HistogramVec
@@ -128,8 +146,8 @@ type (
 
 		carrierCounters sync.Map
 
-		socketPacketsReceived prometheus.Counter
-		socketPacketsDropped  prometheus.Counter
+		socketPacketsReceived *prometheus.CounterVec
+		socketPacketsDropped  *prometheus.CounterVec
 		rtpDropped            prometheus.Counter
 		parseErrorsTotal      *prometheus.CounterVec
 		channelLength         prometheus.Gauge
@@ -139,11 +157,11 @@ type (
 	}
 
 	Metricser interface {
-		Request(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost string, in []byte)
+		Request(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface string, in []byte)
 		Reinvite(carrier, uaType, sourceCountry string)
 		Response(carrier, uaType, sourceCountry string, in []byte, isInviteResponse bool)
 		ResponseWithMetrics(carrier, uaType, sourceCountry string, status []byte, isInviteResponse, is200OK bool)
-		Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost string)
+		Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface string)
 		SessionCompleted(carrier, uaType, sourceCountry string)
 		UpdateRRD(carrier, uaType, sourceCountry string, delayMs float64)
 		UpdateSPD(carrier, uaType, sourceCountry string, duration time.Duration)
@@ -151,6 +169,7 @@ type (
 		UpdatePDD(carrier, uaType, sourceCountry string, delayMs float64)
 		UpdateORD(carrier, uaType, sourceCountry string, delayMs float64)
 		UpdateLRD(carrier, uaType, sourceCountry string, delayMs float64)
+		UpdatePBD(carrier, uaType, sourceCountry string, delayMs float64)
 		UpdateSession(carrier, uaType, sourceCountry string, size int)
 		UpdateSessions(counts []LabeledCount)
 		SetSessionsLimits(limits map[string]int)
@@ -159,11 +178,14 @@ type (
 		RegisterCountryChange(carrier, sourceCountry string)
 		RegisterScan(carrier, sourceCountry string)
 		InviteBurst(carrier, sourceCountry string)
+		SIPRetransmission(carrier, uaType, sourceCountry, method string)
+		UpdateShortCalls(carrier, uaType, sourceCountry string, duration time.Duration)
 		UpdateActiveRegistrations(counts []LabeledCount)
 		UpdateVQReport(carrier, uaType, sourceCountry string, report *vq.SessionReport)
 		UpdateRTPPackets(carrier, uaType, codec, sourceCountry string)
 		UpdateRTPLoss(carrier, uaType, codec, sourceCountry string, lost uint64)
 		UpdateRTPDuplicates(carrier, uaType, codec, sourceCountry string)
+		UpdateRTPOutOfOrder(carrier, uaType, codec, sourceCountry string)
 		UpdateRTPJitter(carrier, uaType, codec, sourceCountry string, jitterMs float64)
 		UpdateRTPMOS(carrier, uaType, codec, sourceCountry string, mos float64)
 		UpdateRTPMOSVariants(carrier, uaType, codec, sourceCountry string, f1, f2, adapt float64)
@@ -174,7 +196,7 @@ type (
 		MissingRTP(carrier, uaType, sourceCountry string)
 		SystemError()
 		ParseError(errorType string)
-		SocketStats(received, dropped uint32)
+		SocketStats(stats []SocketStat)
 		RTPDropped()
 		UpdateChannelLength(length int)
 		UpdateChannelCapacity(capacity int)
@@ -253,7 +275,7 @@ func (m *metrics) initRequestCounters(reg *prometheus.Registry) {
 	cl := []string{"carrier", "ua_type", "source_country"}
 	clInvite := []string{
 		"carrier", "ua_type", "source_country",
-		"destination_country", "caller_host", "called_host",
+		"destination_country", "caller_host", "called_host", "iface",
 	}
 	m.requestInviteTotal = newCounterVecWithRegistry(
 		"sip_exporter_invite_total",
@@ -401,6 +423,18 @@ func (m *metrics) initRegistrationMetrics(reg *prometheus.Registry) {
 		[]string{"carrier", "source_country"},
 		reg,
 	)
+	m.sipRetransmission = newCounterVecWithRegistry(
+		"sip_exporter_sip_retransmission_total",
+		"Total retransmitted SIP requests (Timer A on UDP)",
+		[]string{"carrier", "ua_type", "source_country", "method"},
+		reg,
+	)
+	m.shortCalls = newCounterVecWithRegistry(
+		"sip_exporter_short_calls_total",
+		"Completed sessions shorter than threshold seconds",
+		[]string{"carrier", "ua_type", "source_country", "threshold"},
+		reg,
+	)
 }
 
 func (m *metrics) initHistograms(reg *prometheus.Registry) {
@@ -434,6 +468,11 @@ func (m *metrics) initHistograms(reg *prometheus.Registry) {
 	m.lrd = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_lrd",
 		Help:    "Location Registration Delay in milliseconds: delay between REGISTER and 3xx redirect response",
+		Buckets: msBuckets,
+	}, cl, reg)
+	m.pbd = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_pbd",
+		Help:    "Post Bye Delay in milliseconds: delay between BYE request and 200 OK BYE response",
 		Buckets: msBuckets,
 	}, cl, reg)
 }
@@ -547,6 +586,9 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 	m.rtpDuplicate = newCounterVecWithRegistry(
 		"sip_exporter_rtp_duplicate_packets_total",
 		"Total number of duplicate RTP packets detected (same sequence number)", rl, reg)
+	m.rtpOutOfOrder = newCounterVecWithRegistry(
+		"sip_exporter_rtp_out_of_order_total",
+		"Total out-of-order RTP packets (seq < maxSeq, not duplicate)", rl, reg)
 	m.rtpJitter = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_rtp_jitter_milliseconds",
 		Help:    "RTP interarrival jitter in milliseconds (RFC 3550 A.8)",
@@ -761,7 +803,7 @@ func registerRatioCollector(
 
 func (m *metrics) Request(
 	carrier, uaType, sourceCountry, destinationCountry,
-	callerHost, calledHost string, in []byte,
+	callerHost, calledHost, iface string, in []byte,
 ) {
 	defer m.sipPacketsTotal.Inc()
 
@@ -792,7 +834,7 @@ func (m *metrics) Request(
 		m.requestACKTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
 	case bytes.Equal(in, []byte("INVITE")):
 		m.requestInviteTotal.WithLabelValues(
-			carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost,
+			carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface,
 		).Inc()
 		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).inviteTotal.Add(1)
 	case bytes.Equal(in, []byte("MESSAGE")):
@@ -846,9 +888,11 @@ func (m *metrics) ResponseWithMetrics(
 	}
 }
 
-func (m *metrics) Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost string) {
+func (m *metrics) Invite200OK(
+	carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface string,
+) {
 	m.requestInvite200OKTotal.WithLabelValues(
-		carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost,
+		carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface,
 	).Inc()
 }
 
@@ -880,6 +924,28 @@ func (m *metrics) RegisterScan(carrier, sourceCountry string) {
 
 func (m *metrics) InviteBurst(carrier, sourceCountry string) {
 	m.inviteBurstTotal.WithLabelValues(carrier, sourceCountry).Inc()
+}
+
+func (m *metrics) SIPRetransmission(carrier, uaType, sourceCountry, method string) {
+	m.sipRetransmission.WithLabelValues(carrier, uaType, sourceCountry, method).Inc()
+}
+
+func (m *metrics) UpdateShortCalls(carrier, uaType, sourceCountry string, duration time.Duration) {
+	if duration <= 0 {
+		return
+	}
+	for _, threshold := range []struct {
+		label string
+		limit time.Duration
+	}{
+		{"20", shortCallThreshold20},
+		{"60", shortCallThreshold60},
+		{"180", shortCallThreshold180},
+	} {
+		if duration < threshold.limit {
+			m.shortCalls.WithLabelValues(carrier, uaType, sourceCountry, threshold.label).Inc()
+		}
+	}
 }
 
 func isRegisterChallenge(code string) bool {
@@ -930,6 +996,13 @@ func (m *metrics) UpdateLRD(carrier, uaType, sourceCountry string, delayMs float
 		return
 	}
 	m.lrd.WithLabelValues(carrier, uaType, sourceCountry).Observe(delayMs)
+}
+
+func (m *metrics) UpdatePBD(carrier, uaType, sourceCountry string, delayMs float64) {
+	if delayMs < 0 {
+		return
+	}
+	m.pbd.WithLabelValues(carrier, uaType, sourceCountry).Observe(delayMs)
 }
 
 func (m *metrics) UpdateSession(carrier, uaType, sourceCountry string, size int) {
@@ -1028,6 +1101,10 @@ func (m *metrics) UpdateRTPLoss(carrier, uaType, codec, sourceCountry string, lo
 
 func (m *metrics) UpdateRTPDuplicates(carrier, uaType, codec, sourceCountry string) {
 	m.rtpDuplicate.WithLabelValues(carrier, uaType, codec, sourceCountry).Inc()
+}
+
+func (m *metrics) UpdateRTPOutOfOrder(carrier, uaType, codec, sourceCountry string) {
+	m.rtpOutOfOrder.WithLabelValues(carrier, uaType, codec, sourceCountry).Inc()
 }
 
 func (m *metrics) UpdateRTPJitter(carrier, uaType, codec, sourceCountry string, jitterMs float64) {

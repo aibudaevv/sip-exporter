@@ -12,7 +12,7 @@ import (
 // TestASR_AllScenarios tests ASR metric with various scenarios.
 // ASR = (INVITE → 200 OK) / Total INVITE × 100 (ITU-T E.411)
 // 3xx NOT excluded from denominator (difference from SER).
-// On loopback both numerator and denominator double → ASR unchanged (like SER).
+// IGNORE_OUTGOING=true on lo → each packet seen once → ASR matches theoretical.
 func TestASR_AllScenarios(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -73,7 +73,7 @@ func TestASR_AllScenarios(t *testing.T) {
 }
 
 // TestASR_Mixed tests 140 successful + 60 rejected (486).
-// On loopback: inviteTotal=2×100=200, invite200OKTotal=2×140=280 → ASR = 280/400 × 100 = 70%.
+// inviteTotal=200, invite200OKTotal=140 → ASR = 140/200 × 100 = 70%.
 func TestASR_Mixed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -91,7 +91,6 @@ func TestASR_Mixed(t *testing.T) {
 
 // TestASR_MixedWith3xx tests that 3xx are NOT excluded from ASR denominator.
 // 100 redirect (3xx) + 100 successful → ASR = 100/200 × 100 = 50%.
-// On loopback: inviteTotal=2×100=200, invite200OKTotal=2×100=200 → ASR = 200/400 × 100 = 50%.
 // (SER would be 100% because 3xx excluded, but ASR keeps them.)
 func TestASR_MixedWith3xx(t *testing.T) {
 	t.Parallel()
@@ -114,7 +113,6 @@ func TestASR_MixedWith3xx(t *testing.T) {
 
 // TestASR_Complex tests mixed scenarios.
 // 80×200 OK + 60×480 + 60×500 → ASR = 80/200 × 100 = 40%.
-// On loopback: inviteTotal=2×100=200, invite200OKTotal=2×80=160 → ASR = 160/400 × 100 = 40%.
 func TestASR_Complex(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

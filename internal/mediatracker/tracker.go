@@ -46,6 +46,7 @@ type (
 	ObserveResult struct {
 		Counted       bool   // packet counted as received (not duplicate/reorder)
 		Duplicate     bool   // packet is a duplicate (same sequence number)
+		Reorder       bool   // packet is out-of-order (seq < maxSeq, not duplicate)
 		Lost          uint64 // packets newly marked lost by this observation
 		Codec         string // resolved codec name
 		Carrier       string // dialog carrier (for metric labels)
@@ -58,6 +59,12 @@ type (
 		MediaExpected bool // at least 1 media endpoint was registered (SDP seen)
 		RTPObserved   bool // at least 1 RTP stream was active
 		OneWay        bool // 2+ endpoints registered but only 1 has RTP
+	}
+
+	// MediaEndpoint identifies a registered RTP media endpoint (IP:port from SDP).
+	MediaEndpoint struct {
+		IP   string
+		Port uint16
 	}
 
 	endpointKey struct {
@@ -125,15 +132,18 @@ func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) {
 
 // Unregister removes all media endpoints and RTP streams belonging to a SIP
 // dialog (called on BYE 200 OK or Session-Expires cleanup) and returns a
-// summary of the RTP activity observed for that dialog.
-func (t *Tracker) Unregister(callID string) RTPDialogResult {
+// summary of the RTP activity observed for that dialog, plus the list of
+// deleted media endpoints (for BPF map cleanup).
+func (t *Tracker) Unregister(callID string) (RTPDialogResult, []MediaEndpoint) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	var deleted []MediaEndpoint
 	mediaCount := 0
 	for k, v := range t.media {
 		if v.CallID == callID {
 			mediaCount++
+			deleted = append(deleted, MediaEndpoint{IP: k.ip, Port: k.port})
 			delete(t.media, k)
 		}
 	}
@@ -154,7 +164,7 @@ func (t *Tracker) Unregister(callID string) RTPDialogResult {
 		MediaExpected: mediaCount > 0,
 		RTPObserved:   rtpEndpointCount > 0,
 		OneWay:        mediaCount >= 2 && rtpEndpointCount == 1,
-	}
+	}, deleted
 }
 
 // Lookup resolves a media endpoint to its labels.
@@ -224,6 +234,7 @@ func (t *Tracker) Observe(
 	prevLost := entry.state.packetsLost
 	prevTotal := entry.state.packetsTotal
 	prevDup := entry.state.packetsDuplicate
+	prevReorder := entry.state.packetsReorder
 	entry.state.Observe(h, arrival)
 
 	var lostDelta uint64
@@ -234,6 +245,7 @@ func (t *Tracker) Observe(
 	return ObserveResult{
 		Counted:       entry.state.packetsTotal > prevTotal,
 		Duplicate:     entry.state.packetsDuplicate > prevDup,
+		Reorder:       entry.state.packetsReorder > prevReorder,
 		Lost:          lostDelta,
 		Codec:         codec,
 		Carrier:       labels.Carrier,

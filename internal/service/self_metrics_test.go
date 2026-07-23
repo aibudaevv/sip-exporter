@@ -13,7 +13,7 @@ func newTestMetricserWithRegistry() (Metricser, *prometheus.Registry) {
 	return newMetricserWithRegistry(reg), reg
 }
 
-func getSelfCounterValue(reg *prometheus.Registry, name string) float64 {
+func getSelfCounterValue(reg *prometheus.Registry, name string, labels map[string]string) float64 {
 	mfs, err := reg.Gather()
 	if err != nil {
 		return 0
@@ -21,7 +21,9 @@ func getSelfCounterValue(reg *prometheus.Registry, name string) float64 {
 	for _, mf := range mfs {
 		if mf.GetName() == name {
 			for _, m := range mf.GetMetric() {
-				return m.GetCounter().GetValue()
+				if selfMatchLabels(m, labels) {
+					return m.GetCounter().GetValue()
+				}
 			}
 		}
 	}
@@ -123,41 +125,79 @@ func TestSelfMetrics_ParseError_UninitializedIsZero(t *testing.T) {
 	}
 }
 
-func TestSelfMetrics_SocketStats_ReceivedOnly(t *testing.T) {
-	m, reg := newTestMetricserWithRegistry()
-
-	m.SocketStats(100, 0)
-
-	require.InDelta(t, 100.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_received_total"), 0.01)
-	require.InDelta(t, 0.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_dropped_total"), 0.01)
+type socketStatCheck struct {
+	metric string
+	iface  string
+	want   float64
 }
 
-func TestSelfMetrics_SocketStats_DroppedOnly(t *testing.T) {
-	m, reg := newTestMetricserWithRegistry()
+func TestSelfMetrics_SocketStats(t *testing.T) {
+	tests := []struct {
+		name   string
+		stats  []SocketStat
+		checks []socketStatCheck
+	}{
+		{
+			name:  "received_only",
+			stats: []SocketStat{{Iface: "eth0", Received: 100}},
+			checks: []socketStatCheck{
+				{"sip_exporter_socket_packets_received_total", "eth0", 100.0},
+				{"sip_exporter_socket_packets_dropped_total", "eth0", 0.0},
+			},
+		},
+		{
+			name:  "dropped_only",
+			stats: []SocketStat{{Iface: "eth0", Dropped: 5}},
+			checks: []socketStatCheck{
+				{"sip_exporter_socket_packets_received_total", "eth0", 0.0},
+				{"sip_exporter_socket_packets_dropped_total", "eth0", 5.0},
+			},
+		},
+		{
+			name: "accumulation",
+			stats: []SocketStat{
+				{Iface: "eth0", Received: 100, Dropped: 1},
+				{Iface: "eth0", Received: 50, Dropped: 2},
+			},
+			checks: []socketStatCheck{
+				{"sip_exporter_socket_packets_received_total", "eth0", 150.0},
+				{"sip_exporter_socket_packets_dropped_total", "eth0", 3.0},
+			},
+		},
+		{
+			name:  "zero_delta",
+			stats: []SocketStat{{Iface: "eth0"}},
+			checks: []socketStatCheck{
+				{"sip_exporter_socket_packets_received_total", "eth0", 0.0},
+				{"sip_exporter_socket_packets_dropped_total", "eth0", 0.0},
+			},
+		},
+		{
+			name: "per_interface_independence",
+			stats: []SocketStat{
+				{Iface: "eth0", Received: 100, Dropped: 1},
+				{Iface: "eth1", Received: 50, Dropped: 2},
+			},
+			checks: []socketStatCheck{
+				{"sip_exporter_socket_packets_received_total", "eth0", 100.0},
+				{"sip_exporter_socket_packets_dropped_total", "eth0", 1.0},
+				{"sip_exporter_socket_packets_received_total", "eth1", 50.0},
+				{"sip_exporter_socket_packets_dropped_total", "eth1", 2.0},
+			},
+		},
+	}
 
-	m.SocketStats(0, 5)
-
-	require.InDelta(t, 0.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_received_total"), 0.01)
-	require.InDelta(t, 5.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_dropped_total"), 0.01)
-}
-
-func TestSelfMetrics_SocketStats_Accumulation(t *testing.T) {
-	m, reg := newTestMetricserWithRegistry()
-
-	m.SocketStats(100, 1)
-	m.SocketStats(50, 2)
-
-	require.InDelta(t, 150.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_received_total"), 0.01)
-	require.InDelta(t, 3.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_dropped_total"), 0.01)
-}
-
-func TestSelfMetrics_SocketStats_ZeroDelta(t *testing.T) {
-	m, reg := newTestMetricserWithRegistry()
-
-	m.SocketStats(0, 0)
-
-	require.InDelta(t, 0.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_received_total"), 0.01)
-	require.InDelta(t, 0.0, getSelfCounterValue(reg, "sip_exporter_socket_packets_dropped_total"), 0.01)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, reg := newTestMetricserWithRegistry()
+			m.SocketStats(tt.stats)
+			for _, c := range tt.checks {
+				require.InDelta(t, c.want,
+					getSelfCounterValue(reg, c.metric, map[string]string{"iface": c.iface}),
+					0.01, "%s{iface=%s}", c.metric, c.iface)
+			}
+		})
+	}
 }
 
 func TestSelfMetrics_ChannelLength_Updates(t *testing.T) {

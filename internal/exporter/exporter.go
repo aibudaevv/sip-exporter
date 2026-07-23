@@ -38,6 +38,7 @@ const (
 	defaultRegisterTTL        = 60 * time.Second
 	defaultInviteTTL          = 60 * time.Second
 	defaultOptionsTTL         = 60 * time.Second
+	defaultByeTTL             = 60 * time.Second
 	rtpStreamTTL              = 30 * time.Second // idle RTP stream expiry
 	defaultSessionExpiresSec  = 1800             // RFC 4028 default Session-Expires (30 min)
 	defaultRegisterExpiresSec = 3600             // RFC 3261 §10.2 default registration expiry (1 hour)
@@ -70,6 +71,9 @@ const (
 
 	rtpVersionMask    = 0xC0
 	rtpVersion2Prefix = 0x80
+
+	maxStaticRTPPayloadType  = 34
+	minDynamicRTPPayloadType = 96
 
 	sipPartsCount                = 3
 	minSIPParts                  = 2
@@ -113,6 +117,13 @@ type (
 		sourceCountry string
 	}
 
+	byeEntry struct {
+		timestamp     time.Time
+		carrier       string
+		uaType        string
+		sourceCountry string
+	}
+
 	registerExpiryEntry struct {
 		expiry        time.Time
 		carrier       string
@@ -125,10 +136,24 @@ type (
 		timestamp time.Time
 	}
 
+	sockEntry struct {
+		fd    int
+		iface string
+	}
+	rawPacket struct {
+		data  []byte
+		iface string
+	}
+	rtpEndpointKey struct {
+		IP   uint32
+		Port uint16
+		_    [2]byte // explicit padding — cilium/ebpf uses binary.Size, not unsafe.Sizeof
+	}
 	exporter struct {
 		collection       *ebpf.Collection
-		sock             int
-		messages         chan *[]byte
+		rtpEndpointsMap  *ebpf.Map
+		socks            []sockEntry
+		messages         chan *rawPacket
 		done             chan struct{}
 		wg               sync.WaitGroup
 		closeOnce        sync.Once
@@ -148,6 +173,7 @@ type (
 		// If packet parsing becomes parallel (worker pool), thread srcIP as a
 		// parameter instead of using this shared field.
 		pktSrcIP              string
+		pktIface              string
 		registerScanTracker   *registerScanTracker
 		inviteBurstTracker    *inviteBurstTracker
 		registerTracker       map[string]registerEntry
@@ -160,6 +186,8 @@ type (
 		inviteSDPMutex        sync.Mutex
 		optionsTracker        map[string]optionsEntry
 		optionsMutex          sync.RWMutex
+		byeTracker            map[string]byeEntry
+		byeMutex              sync.RWMutex
 		initialized           atomic.Bool
 	}
 	services struct {
@@ -179,14 +207,17 @@ type (
 		FraudInviteBurstThreshold int
 		FraudInviteBurstWindow    time.Duration
 	}
+	InitConfig struct {
+		Interfaces     []string
+		BPFPath        string
+		SIPPort        int
+		SIPSPort       int
+		IgnoreOutgoing bool
+		RTPCapture     bool
+		RTPStreamTTL   time.Duration
+	}
 	Exporter interface {
-		Initialize(
-			interfaceName string,
-			path string,
-			sipPort, sipsPort int,
-			ignoreOutgoing, rtpCapture bool,
-			rtpStreamTTL time.Duration,
-		) error
+		Initialize(cfg InitConfig) error
 		IsAlive() bool
 		Close()
 	}
@@ -195,6 +226,7 @@ type (
 func (e registerEntry) created() time.Time   { return e.timestamp }
 func (e inviteEntry) created() time.Time     { return e.timestamp }
 func (e optionsEntry) created() time.Time    { return e.timestamp }
+func (e byeEntry) created() time.Time        { return e.timestamp }
 func (e inviteSDPEntity) created() time.Time { return e.timestamp }
 
 func NewExporter(deps Deps) Exporter {
@@ -212,17 +244,17 @@ func NewExporter(deps Deps) Exporter {
 		mediaTracker:          mediatracker.NewTracker(rtpStreamTTL),
 		registerScanTracker:   newRegisterScanTracker(deps.FraudRegScanThreshold, deps.FraudRegScanWindow),
 		inviteBurstTracker:    newInviteBurstTracker(deps.FraudInviteBurstThreshold, deps.FraudInviteBurstWindow),
-		messages:              make(chan *[]byte, messagesChanSize),
+		messages:              make(chan *rawPacket, messagesChanSize),
 		done:                  make(chan struct{}),
 		registerTracker:       make(map[string]registerEntry),
 		registerExpiryTracker: make(map[string]registerExpiryEntry),
 		inviteTracker:         make(map[string]inviteEntry),
 		inviteSDP:             make(map[string]inviteSDPEntity),
 		optionsTracker:        make(map[string]optionsEntry),
+		byeTracker:            make(map[string]byeEntry),
 		packetPool: sync.Pool{
 			New: func() any {
-				b := make([]byte, 0, readBufSize)
-				return &b
+				return &rawPacket{data: make([]byte, 0, readBufSize)}
 			},
 		},
 	}
@@ -249,25 +281,24 @@ func checkPrerequisites() error {
 	return nil
 }
 
-func (e *exporter) Initialize(
-	interfaceName string, path string,
-	sipPort, sipsPort int,
-	ignoreOutgoing, rtpCapture bool,
-	rtpStreamTTL time.Duration,
-) error {
+func (e *exporter) Initialize(cfg InitConfig) error {
+	if len(cfg.Interfaces) == 0 {
+		return errors.New("at least one interface is required")
+	}
+
 	if err := checkPrerequisites(); err != nil {
 		return err
 	}
 
 	// Apply the config-driven RTP stream expiry (RFC 3550 §6.3.5 idle-timeout).
-	e.mediaTracker.SetTTL(rtpStreamTTL)
+	e.mediaTracker.SetTTL(cfg.RTPStreamTTL)
 
-	collection, err := ebpf.LoadCollection(path)
+	collection, err := ebpf.LoadCollection(cfg.BPFPath)
 	if err != nil {
 		return fmt.Errorf("failed to load BPF collection: %w", err)
 	}
 
-	e.collection, e.sipPort, e.sipsPort = collection, uint16(sipPort), uint16(sipsPort)
+	e.collection, e.sipPort, e.sipsPort = collection, uint16(cfg.SIPPort), uint16(cfg.SIPSPort)
 
 	prog := collection.Programs["bpf_socket_filter"]
 	if prog == nil {
@@ -275,21 +306,57 @@ func (e *exporter) Initialize(
 	}
 
 	// Configure eBPF maps (SIP ports + RTP capture flag)
-	if err = e.configureEBPFMaps(collection, sipPort, sipsPort, rtpCapture); err != nil {
+	if err = e.configureEBPFMaps(collection, cfg.SIPPort, cfg.SIPSPort, cfg.RTPCapture); err != nil {
 		return err
 	}
 
-	// Create AF_PACKET socket with SOCK_RAW
+	progFD := prog.FD()
+
+	createdSocks := make([]sockEntry, 0, len(cfg.Interfaces))
+	for _, ifaceName := range cfg.Interfaces {
+		sock, sockErr := createSocketForInterface(ifaceName, progFD, cfg.IgnoreOutgoing)
+		if sockErr != nil {
+			for _, s := range createdSocks {
+				_ = unix.Close(s.fd)
+			}
+			e.collection.Close()
+			e.collection = nil
+			return fmt.Errorf("interface %s: %w", ifaceName, sockErr)
+		}
+		createdSocks = append(createdSocks, sockEntry{fd: sock, iface: ifaceName})
+	}
+	e.socks = createdSocks
+
+	zap.L().Info("all interfaces initialized",
+		zap.Int("interfaces_count", len(e.socks)))
+
+	e.startWorkers()
+
+	e.initialized.Store(true)
+
+	return nil
+}
+
+// createSocketForInterface creates an AF_PACKET socket, binds it to the named
+// interface, applies receive-buffer and timeout options, optionally enables
+// PACKET_IGNORE_OUTGOING, attaches the BPF filter and drains the buffer.
+// On error the socket is closed so no FD leaks.
+func createSocketForInterface(ifaceName string, progFD int, ignoreOutgoing bool) (int, error) {
 	sock, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW, int(htons(ethPAll)))
 	if err != nil {
-		return fmt.Errorf("failed to create AF_PACKET socket: %w", err)
+		return 0, fmt.Errorf("failed to create AF_PACKET socket: %w", err)
 	}
-	e.sock = sock
+	ok := false
+	defer func() {
+		if !ok {
+			_ = unix.Close(sock)
+		}
+	}()
 
 	socketRecvBufSize := socketRecvBufMB * miB
 	if setErr := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUFFORCE, socketRecvBufSize); setErr != nil {
 		if setErrFallback := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUF, socketRecvBufSize); setErrFallback != nil {
-			return fmt.Errorf("failed to set SO_RCVBUF: %w", setErrFallback)
+			return 0, fmt.Errorf("failed to set SO_RCVBUF: %w", setErrFallback)
 		}
 		zap.L().Warn("SO_RCVBUFFORCE failed, using SO_RCVBUF (buffer capped by rmem_max)", zap.Error(setErr))
 	}
@@ -297,21 +364,22 @@ func (e *exporter) Initialize(
 	var actualBufSize int
 	actualBufSize, err = unix.GetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUF)
 	if err != nil {
-		return fmt.Errorf("failed to get SO_RCVBUF: %w", err)
+		return 0, fmt.Errorf("failed to get SO_RCVBUF: %w", err)
 	}
 	zap.L().Info("socket receive buffer configured",
+		zap.String("interface", ifaceName),
 		zap.Int("requested_bytes", socketRecvBufSize),
 		zap.Int("actual_bytes", actualBufSize))
 
 	if setErr := unix.SetsockoptTimeval(sock, unix.SOL_SOCKET, unix.SO_RCVTIMEO,
 		&unix.Timeval{Sec: int64(socketRcvTimeo / time.Second), Usec: int64(socketRcvTimeo % time.Second / time.Microsecond)}); setErr != nil {
-		return fmt.Errorf("failed to set SO_RCVTIMEO: %w", setErr)
+		return 0, fmt.Errorf("failed to set SO_RCVTIMEO: %w", setErr)
 	}
 
-	ifaceName := interfaceName
-	iface, err := net.InterfaceByName(ifaceName)
+	var iface *net.Interface
+	iface, err = net.InterfaceByName(ifaceName)
 	if err != nil {
-		return fmt.Errorf("interface %s not found: %w", ifaceName, err)
+		return 0, fmt.Errorf("interface %s not found: %w", ifaceName, err)
 	}
 
 	sa := &unix.SockaddrLinklayer{
@@ -319,34 +387,28 @@ func (e *exporter) Initialize(
 		Ifindex:  iface.Index,
 	}
 
-	err = unix.Bind(sock, sa)
-	if err != nil {
-		return fmt.Errorf("failed to bind AF_PACKET socket to %s: %w", ifaceName, err)
+	if err = unix.Bind(sock, sa); err != nil {
+		return 0, fmt.Errorf("failed to bind AF_PACKET socket to %s: %w", ifaceName, err)
 	}
 
 	if ignoreOutgoing {
 		if setErr := unix.SetsockoptInt(sock, unix.SOL_PACKET, unix.PACKET_IGNORE_OUTGOING, 1); setErr != nil {
-			return fmt.Errorf("failed to set PACKET_IGNORE_OUTGOING: %w", setErr)
+			return 0, fmt.Errorf("failed to set PACKET_IGNORE_OUTGOING: %w", setErr)
 		}
 		zap.L().Info("PACKET_IGNORE_OUTGOING enabled", zap.String("interface", ifaceName))
 	}
 
-	// Attach eBPF filter
-	progFD := prog.FD()
 	if err = unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_ATTACH_BPF, progFD); err != nil {
-		return fmt.Errorf("failed to attach BPF program: %w", err)
+		return 0, fmt.Errorf("failed to attach BPF program: %w", err)
 	}
 
 	zap.L().Info("eBPF program attached to AF_PACKET socket",
-		zap.String("interface", interfaceName),
-		zap.Int("sip_port", sipPort),
-		zap.Int("sips_port", sipsPort))
+		zap.String("interface", ifaceName))
 
-	e.startWorkers()
+	drainSocketBuffer(sock)
 
-	e.initialized.Store(true)
-
-	return nil
+	ok = true
+	return sock, nil
 }
 
 // configureEBPFMaps populates the eBPF SIP-ports map and the RTP-capture flag map.
@@ -373,6 +435,12 @@ func (e *exporter) configureEBPFMaps(collection *ebpf.Collection, sipPort, sipsP
 	if err := rtpConfigMap.Update(uint32(0), rtpValue, ebpf.UpdateAny); err != nil {
 		return fmt.Errorf("failed to set RTP capture config: %w", err)
 	}
+
+	e.rtpEndpointsMap = collection.Maps["rtp_endpoints"]
+	if e.rtpEndpointsMap == nil {
+		return errors.New("failed to find rtp_endpoints map")
+	}
+
 	zap.L().Info("RTP capture configured", zap.Bool("enabled", rtpCapture))
 	return nil
 }
@@ -418,11 +486,25 @@ func (e *exporter) resolveUA(userAgent []byte) string {
 	return e.uaClassifier.Classify(userAgent)
 }
 
+func drainSocketBuffer(sock int) {
+	drainBuf := make([]byte, readBufSize)
+	_ = unix.SetNonblock(sock, true)
+	for {
+		_, err := unix.Read(sock, drainBuf)
+		if err != nil {
+			break
+		}
+	}
+	_ = unix.SetNonblock(sock, false)
+}
+
 func (e *exporter) startWorkers() {
 	e.wg.Add(1)
 	go e.readPackets()
-	e.wg.Add(1)
-	go e.readSocket()
+	for _, sock := range e.socks {
+		e.wg.Add(1)
+		go e.readSocket(sock.fd, sock.iface)
+	}
 	e.wg.Add(1)
 	go e.sipDialogMetricsUpdate()
 }
@@ -448,13 +530,18 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		e.cleanupInviteTracker()
 		e.cleanupInviteSDP()
 		e.cleanupOptionsTracker()
+		e.cleanupByeTracker()
 		e.mediaTracker.Cleanup()
 		s := e.services.dialoger.Size()
 
 		for _, r := range results {
 			e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry)
 			e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
-			rtpResult := e.mediaTracker.Unregister(r.CallID)
+			e.services.metricser.UpdateShortCalls(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
+			rtpResult, deleted := e.mediaTracker.Unregister(r.CallID)
+			for _, ep := range deleted {
+				e.rtpEndpointDelete(ep.IP, ep.Port)
+			}
 			e.handleRTPDialogResult(rtpResult, r.Carrier, r.UAType, r.SourceCountry)
 		}
 
@@ -463,16 +550,36 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		e.services.metricser.UpdateSessions(e.services.dialoger.Counts())
 		e.services.metricser.UpdateActiveRegistrations(e.registrationCounts())
 
-		received, dropped := e.readSocketStats()
-		e.services.metricser.SocketStats(received, dropped)
+		e.services.metricser.SocketStats(e.readSocketStats())
 		e.services.metricser.UpdateChannelLength(len(e.messages))
-		e.services.metricser.UpdateTrackerSize("register", len(e.registerTracker))
-		e.services.metricser.UpdateTrackerSize("invite", len(e.inviteTracker))
-		e.services.metricser.UpdateTrackerSize("options", len(e.optionsTracker))
-		e.services.metricser.UpdateTrackerSize("rtp", e.mediaTracker.StreamCount())
+		e.updateTrackerSizes()
 		e.updateRTPMetrics()
 		e.services.metricser.UpdateActiveDialogs(s)
 	}
+}
+
+func (e *exporter) updateTrackerSizes() {
+	e.registerMutex.RLock()
+	registerCount := len(e.registerTracker)
+	e.registerMutex.RUnlock()
+
+	e.inviteMutex.RLock()
+	inviteCount := len(e.inviteTracker)
+	e.inviteMutex.RUnlock()
+
+	e.optionsMutex.RLock()
+	optionsCount := len(e.optionsTracker)
+	e.optionsMutex.RUnlock()
+
+	e.byeMutex.RLock()
+	byeCount := len(e.byeTracker)
+	e.byeMutex.RUnlock()
+
+	e.services.metricser.UpdateTrackerSize("register", registerCount)
+	e.services.metricser.UpdateTrackerSize("invite", inviteCount)
+	e.services.metricser.UpdateTrackerSize("options", optionsCount)
+	e.services.metricser.UpdateTrackerSize("bye", byeCount)
+	e.services.metricser.UpdateTrackerSize("rtp", e.mediaTracker.StreamCount())
 }
 
 func cleanupExpired[V timed](mu sync.Locker, m map[string]V, ttl time.Duration) {
@@ -501,8 +608,8 @@ func (e *exporter) Close() {
 		if e.collection != nil {
 			e.collection.Close()
 		}
-		if e.sock != 0 {
-			_ = unix.Close(e.sock)
+		for _, s := range e.socks {
+			_ = unix.Close(s.fd)
 		}
 		e.wg.Wait()
 		close(e.messages)
@@ -513,17 +620,25 @@ func (e *exporter) IsAlive() bool {
 	return e.initialized.Load()
 }
 
-func (e *exporter) readSocketStats() (uint32, uint32) {
-	if e.sock == 0 {
-		return 0, 0
+func (e *exporter) readSocketStats() []service.SocketStat {
+	if len(e.socks) == 0 {
+		return nil
 	}
 
-	stats, err := unix.GetsockoptTpacketStats(e.sock, unix.SOL_PACKET, unix.PACKET_STATISTICS)
-	if err != nil {
-		zap.L().Debug("failed to read AF_PACKET stats", zap.Error(err))
-		return 0, 0
+	stats := make([]service.SocketStat, 0, len(e.socks))
+	for _, sock := range e.socks {
+		st, err := unix.GetsockoptTpacketStats(sock.fd, unix.SOL_PACKET, unix.PACKET_STATISTICS)
+		if err != nil {
+			zap.L().Debug("failed to read AF_PACKET stats", zap.Error(err))
+			continue
+		}
+		stats = append(stats, service.SocketStat{
+			Iface:    sock.iface,
+			Received: st.Packets,
+			Dropped:  st.Drops,
+		})
 	}
-	return stats.Packets, stats.Drops
+	return stats
 }
 
 func (e *exporter) readPackets() {
@@ -532,45 +647,61 @@ func (e *exporter) readPackets() {
 		select {
 		case <-e.done:
 			return
-		case bufp, ok := <-e.messages:
+		case pkt, ok := <-e.messages:
 			if !ok {
 				return
 			}
-			if errType, err := e.parseRawPacket(*bufp); err != nil {
+			e.pktIface = pkt.iface
+			if errType, err := e.parseRawPacket(pkt.data); err != nil {
 				e.services.metricser.SystemError()
 				e.services.metricser.ParseError(errType)
 				zap.L().Error("parse err", zap.Error(err))
 			}
-			e.packetPool.Put(bufp)
+			e.packetPool.Put(pkt)
 		}
 	}
 }
 
-func (e *exporter) acquireBuf() *[]byte {
-	b, ok := e.packetPool.Get().(*[]byte)
+func (e *exporter) acquireBuf() *rawPacket {
+	b, ok := e.packetPool.Get().(*rawPacket)
 	if !ok {
-		b = new([]byte)
+		b = &rawPacket{}
 	}
 	return b
 }
 
-func (e *exporter) readSocket() {
+// handleReadError classifies a unix.Read error from readSocket. Returns true
+// if the goroutine should stop (return); false to continue the read loop.
+// SystemError is incremented for unexpected transient errors.
+func (e *exporter) handleReadError(err error) bool {
+	if errors.Is(err, unix.EINTR) {
+		return false
+	}
+	if errors.Is(err, unix.EBADF) || errors.Is(err, unix.ENOTSOCK) {
+		zap.L().Info("socket closed, shutting down readSocket")
+		return true
+	}
+	if errors.Is(err, unix.ENETDOWN) || errors.Is(err, unix.ENODEV) {
+		zap.L().Warn("interface went down (hot-unplug), stopping readSocket for this NIC",
+			zap.Error(err))
+		return true
+	}
+	if !errors.Is(err, unix.EAGAIN) {
+		zap.L().Error("socket read error", zap.Error(err))
+		e.services.metricser.SystemError()
+	}
+	return false
+}
+
+func (e *exporter) readSocket(sock int, iface string) {
 	defer e.wg.Done()
 	buf := make([]byte, readBufSize)
 
 	for {
-		n, err := unix.Read(e.sock, buf)
+		n, err := unix.Read(sock, buf)
 		if err != nil {
-			if err == unix.EINTR {
-				continue
-			}
-			if errors.Is(err, unix.EBADF) || errors.Is(err, unix.ENOTSOCK) {
-				zap.L().Info("socket closed, shutting down readSocket")
+			if e.handleReadError(err) {
 				return
-			}
-			if err != unix.EAGAIN {
-				zap.L().Error("socket read error", zap.Error(err))
-				e.services.metricser.SystemError()
 			}
 			select {
 			case <-e.done:
@@ -584,12 +715,13 @@ func (e *exporter) readSocket() {
 			continue
 		}
 
-		bufp := e.acquireBuf()
-		*bufp = append((*bufp)[:0], buf[:n]...)
+		pkt := e.acquireBuf()
+		pkt.data = append(pkt.data[:0], buf[:n]...)
+		pkt.iface = iface
 
 		zap.L().Debug("packet from socket", zap.Int("len", n))
 
-		if !e.sendPacket(bufp) {
+		if !e.sendPacket(pkt) {
 			return
 		}
 	}
@@ -599,22 +731,22 @@ func (e *exporter) readSocket() {
 // 5060/5061) use a blocking send — they must not be starved by RTP flood.
 // All other packets (RTP) use a non-blocking send — dropped when the channel
 // is full. Returns false if shutdown was signaled.
-func (e *exporter) sendPacket(bufp *[]byte) bool {
-	if e.isSIPPacket(*bufp) {
+func (e *exporter) sendPacket(pkt *rawPacket) bool {
+	if e.isSIPPacket(pkt.data) {
 		select {
-		case e.messages <- bufp:
+		case e.messages <- pkt:
 		case <-e.done:
 			return false
 		}
 		return true
 	}
 	select {
-	case e.messages <- bufp:
+	case e.messages <- pkt:
 	case <-e.done:
 		return false
 	default:
 		e.services.metricser.RTPDropped()
-		e.packetPool.Put(bufp)
+		e.packetPool.Put(pkt)
 	}
 	return true
 }
@@ -756,9 +888,9 @@ func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 
 	sipData := packet[sipOffset:]
 
-	// RTP packets (passed by the eBPF filter with version=2) arrive truncated to
-	// the RTP header. SIP messages start with an ASCII letter and never with the
-	// 0x80-0xBF range, so the first payload byte unambiguously distinguishes RTP.
+	// The eBPF filter passes UDP to SDP-registered media endpoints (truncated to
+	// 64 bytes). The first payload byte distinguishes RTP (V=2, 0x80-0xBF) from
+	// non-RTP; SIP messages start with an ASCII letter and never with 0x80-0xBF.
 	if sipData[0]&rtpVersionMask == rtpVersion2Prefix {
 		srcPort := binary.BigEndian.Uint16(packet[udpOffset : udpOffset+2])
 		dstPort := binary.BigEndian.Uint16(packet[udpOffset+2 : udpOffset+4])
@@ -908,6 +1040,12 @@ func (e *exporter) handleRTP(
 		zap.L().Debug("RTP header parse skipped", zap.Error(err))
 		return "", nil
 	}
+	// Reject PT 35-95: not valid RTP audio. This range includes RTCP packet
+	// types (200-204 → masked 72-76) that share V=2 and arrive on the same
+	// port when rtcp-mux (RFC 5761) is active.
+	if header.PayloadType > maxStaticRTPPayloadType && header.PayloadType < minDynamicRTPPayloadType {
+		return "", nil
+	}
 	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, dstIP.String(), dstPort, header, time.Now())
 	if !ok {
 		// No correlated media endpoint for this flow → drop.
@@ -918,6 +1056,9 @@ func (e *exporter) handleRTP(
 	}
 	if res.Duplicate {
 		e.services.metricser.UpdateRTPDuplicates(res.Carrier, res.UAType, res.Codec, res.SourceCountry)
+	}
+	if res.Reorder {
+		e.services.metricser.UpdateRTPOutOfOrder(res.Carrier, res.UAType, res.Codec, res.SourceCountry)
 	}
 	if res.Lost > 0 {
 		e.services.metricser.UpdateRTPLoss(res.Carrier, res.UAType, res.Codec, res.SourceCountry, res.Lost)
@@ -995,12 +1136,15 @@ func (e *exporter) handleRequest(carrier string, uaType string, sourceCountry st
 		}
 	}
 
-	if isReinvite {
+	switch {
+	case isReinvite:
 		e.services.metricser.Reinvite(carrier, uaType, sourceCountry)
-	} else if !isRetransmission {
+	case isRetransmission:
+		e.services.metricser.SIPRetransmission(carrier, uaType, sourceCountry, "INVITE")
+	default:
 		e.services.metricser.Request(
 			carrier, uaType, sourceCountry, destinationCountry,
-			callerHost, calledHost, packet.Method,
+			callerHost, calledHost, e.pktIface, packet.Method,
 		)
 	}
 
@@ -1019,6 +1163,8 @@ func (e *exporter) handleRequest(carrier string, uaType string, sourceCountry st
 		e.removeInviteTime(string(packet.CallID))
 	case bytes.Equal(packet.Method, []byte("OPTIONS")):
 		e.storeOptionsTime(string(packet.CallID), carrier, uaType, sourceCountry)
+	case bytes.Equal(packet.Method, []byte("BYE")):
+		e.storeByeTime(string(packet.CallID), carrier, uaType, sourceCountry)
 	}
 
 	if isVQContentType(packet.ContentType) {
@@ -1175,7 +1321,15 @@ func (e *exporter) handle200OKResponse(
 				callerHost = string(packet.From.Addr)
 				calledHost = string(packet.To.Addr)
 			}
-			e.services.metricser.Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost)
+			e.services.metricser.Invite200OK(
+				carrier,
+				uaType,
+				sourceCountry,
+				destinationCountry,
+				callerHost,
+				calledHost,
+				e.pktIface,
+			)
 		}
 		if err := e.handleInvite200OK(carrier, uaType, sourceCountry, packet, isReinvite); err != nil {
 			zap.L().Error("handle INVITE 200 OK", zap.Error(err))
@@ -1241,12 +1395,20 @@ func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {
 		return fmt.Errorf("normalize dialog ID: %w", err)
 	}
 
+	if delayMs, byeCarrier, byeUAType, byeSC, ok := e.measureByeTime(string(packet.CallID)); ok {
+		e.services.metricser.UpdatePBD(byeCarrier, byeUAType, byeSC, delayMs)
+	}
+
 	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
 	result := e.services.dialoger.Delete(dialogID)
-	rtpResult := e.mediaTracker.Unregister(string(packet.CallID))
+	rtpResult, deleted := e.mediaTracker.Unregister(string(packet.CallID))
+	for _, ep := range deleted {
+		e.rtpEndpointDelete(ep.IP, ep.Port)
+	}
 	e.handleRTPDialogResult(rtpResult, result.Carrier, result.UAType, result.SourceCountry)
 	if result.Duration > 0 {
 		e.services.metricser.UpdateSPD(result.Carrier, result.UAType, result.SourceCountry, result.Duration)
+		e.services.metricser.UpdateShortCalls(result.Carrier, result.UAType, result.SourceCountry, result.Duration)
 		e.services.metricser.SessionCompleted(result.Carrier, result.UAType, result.SourceCountry)
 	}
 	return nil
@@ -1622,9 +1784,53 @@ func (e *exporter) registerMediaEndpoints(body []byte, labels mediatracker.Media
 		ml.SDPCodecs = m.Codecs
 		ml.ClockRates = m.ClockRates
 		e.mediaTracker.Register(m.IP, m.Port, ml)
+		e.rtpEndpointInsert(m.IP, m.Port)
 		zap.L().Debug("RTP media endpoint registered",
 			zap.String("ip", m.IP), zap.Uint16("port", m.Port),
 			zap.String("call_id", labels.CallID))
+	}
+}
+
+// ipPortToKey converts an IP address string and port to a BPF map key.
+// Returns false if the IP is invalid or not IPv4.
+func ipPortToKey(ipStr string, port uint16) (rtpEndpointKey, bool) {
+	ip := net.ParseIP(ipStr).To4()
+	if ip == nil {
+		return rtpEndpointKey{}, false
+	}
+	return rtpEndpointKey{
+		IP:   binary.BigEndian.Uint32(ip),
+		Port: port,
+	}, true
+}
+
+// rtpEndpointInsert adds a media endpoint to the BPF rtp_endpoints map.
+func (e *exporter) rtpEndpointInsert(ipStr string, port uint16) {
+	if e.rtpEndpointsMap == nil {
+		return
+	}
+	key, ok := ipPortToKey(ipStr, port)
+	if !ok {
+		return
+	}
+	if err := e.rtpEndpointsMap.Update(key, uint8(1), ebpf.UpdateAny); err != nil {
+		zap.L().Debug("failed to update rtp_endpoints BPF map",
+			zap.String("ip", ipStr), zap.Uint16("port", port), zap.Error(err))
+	}
+}
+
+// rtpEndpointDelete removes a media endpoint from the BPF rtp_endpoints map.
+func (e *exporter) rtpEndpointDelete(ipStr string, port uint16) {
+	if e.rtpEndpointsMap == nil {
+		return
+	}
+	key, ok := ipPortToKey(ipStr, port)
+	if !ok {
+		return
+	}
+	if err := e.rtpEndpointsMap.Delete(key); err != nil {
+		zap.L().Debug("failed to delete from rtp_endpoints BPF map",
+			zap.String("ip", ipStr), zap.Uint16("port", port), zap.Error(err))
 	}
 }
 
@@ -1660,4 +1866,38 @@ func (e *exporter) measureOptionsTime(callID string) (float64, string, string, s
 
 func (e *exporter) cleanupOptionsTracker() {
 	cleanupExpired(&e.optionsMutex, e.optionsTracker, defaultOptionsTTL)
+}
+
+func (e *exporter) storeByeTime(callID, carrier, uaType, sourceCountry string) {
+	e.byeMutex.Lock()
+	defer e.byeMutex.Unlock()
+	e.byeTracker[callID] = byeEntry{
+		timestamp:     time.Now(),
+		carrier:       carrier,
+		uaType:        uaType,
+		sourceCountry: sourceCountry,
+	}
+}
+
+func (e *exporter) measureByeTime(callID string) (float64, string, string, string, bool) {
+	e.byeMutex.Lock()
+	defer e.byeMutex.Unlock()
+
+	entry, ok := e.byeTracker[callID]
+	if !ok {
+		return 0, "", defaultUAType, defaultCountry, false
+	}
+
+	delete(e.byeTracker, callID)
+	delayMs := float64(time.Since(entry.timestamp).Nanoseconds()) / nanosPerMs
+
+	zap.L().Debug("PBD measured",
+		zap.String("call_id", callID),
+		zap.Float64("delay_ms", delayMs))
+
+	return delayMs, entry.carrier, entry.uaType, entry.sourceCountry, true
+}
+
+func (e *exporter) cleanupByeTracker() {
+	cleanupExpired(&e.byeMutex, e.byeTracker, defaultByeTTL)
 }
