@@ -888,7 +888,9 @@ func (m *metrics) ResponseWithMetrics(
 	}
 }
 
-func (m *metrics) Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface string) {
+func (m *metrics) Invite200OK(
+	carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface string,
+) {
 	m.requestInvite200OKTotal.WithLabelValues(
 		carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface,
 	).Inc()

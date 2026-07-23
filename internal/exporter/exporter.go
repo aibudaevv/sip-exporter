@@ -1321,7 +1321,15 @@ func (e *exporter) handle200OKResponse(
 				callerHost = string(packet.From.Addr)
 				calledHost = string(packet.To.Addr)
 			}
-			e.services.metricser.Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, e.pktIface)
+			e.services.metricser.Invite200OK(
+				carrier,
+				uaType,
+				sourceCountry,
+				destinationCountry,
+				callerHost,
+				calledHost,
+				e.pktIface,
+			)
 		}
 		if err := e.handleInvite200OK(carrier, uaType, sourceCountry, packet, isReinvite); err != nil {
 			zap.L().Error("handle INVITE 200 OK", zap.Error(err))
