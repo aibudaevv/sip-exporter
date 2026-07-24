@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMosFromR(t *testing.T) {
+func TestMOSFromR(t *testing.T) {
 	require.InDelta(t, 1.0, mosFromR(-10), 0.0001) // R<0 → 1.0
 	require.InDelta(t, 1.0, mosFromR(0), 0.0001)   // R=0 → 1.0
 	require.InDelta(t, 4.5, mosFromR(100), 0.0001) // R=100 → 4.5

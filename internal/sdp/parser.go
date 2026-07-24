@@ -103,12 +103,13 @@ func parseMedia(lines [][]byte, start int, sessionIP string) (Media, int, bool) 
 	mediaIP := ""
 
 	j := start + 1
+scan:
 	for ; j < len(lines); j++ {
 		line := strings.TrimSpace(string(lines[j]))
 		switch {
 		case strings.HasPrefix(line, "m="):
 			j-- // leave this m= for the outer loop
-			goto done
+			break scan
 		case strings.HasPrefix(line, "c="):
 			ip, _ := extractConnIP(line)
 			mediaIP = ip
@@ -118,7 +119,6 @@ func parseMedia(lines [][]byte, start int, sessionIP string) (Media, int, bool) 
 			parseRtpmap(line, media.Codecs, media.ClockRates)
 		}
 	}
-done:
 	consumed := j - start
 
 	if inactive {

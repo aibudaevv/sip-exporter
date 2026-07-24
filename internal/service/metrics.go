@@ -1,3 +1,5 @@
+// Package service implements the SIP metrics layer (Prometheus counters,
+// gauges, histograms, and ratio collectors) and the active-dialog tracker.
 package service
 
 import (
@@ -24,6 +26,7 @@ const (
 )
 
 type (
+	// SocketStat holds per-interface socket packet counts for a single poll.
 	SocketStat struct {
 		Iface    string
 		Received uint32
@@ -47,6 +50,8 @@ type (
 		Country string
 	}
 
+	// LabeledCount pairs a label set with an integer count, used by periodic
+	// gauge snapshots (sessions, active registrations, RTP streams).
 	LabeledCount struct {
 		Labels map[string]string
 		Count  int
@@ -156,6 +161,9 @@ type (
 		activeDialogs         prometheus.Gauge
 	}
 
+	// Metricser records all SIP, RTP, and VQ-RTCPXR metrics exposed by the
+	// exporter. Every method adds data point(s) to Prometheus collectors
+	// keyed by carrier, user-agent type, and source country.
 	Metricser interface {
 		Request(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface string, in []byte)
 		Reinvite(carrier, uaType, sourceCountry string)
@@ -245,6 +253,8 @@ func (rc *ratioCollector) Collect(ch chan<- prometheus.Metric) {
 	})
 }
 
+// NewMetricser creates a [Metricser] registered against the default
+// Prometheus registry.
 func NewMetricser() Metricser {
 	return newMetricserWithRegistry(nil)
 }

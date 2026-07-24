@@ -1,3 +1,5 @@
+// Package geoip provides lookups of ISO country codes from IP addresses using
+// a MaxMind GeoLite2-Country database.
 package geoip
 
 import (
@@ -17,12 +19,14 @@ type countryRecord struct {
 	} `maxminddb:"country"`
 }
 
+// Reader wraps a MaxMind DB reader with thread-safe lookups and hot-reload.
 type Reader struct {
 	db   *maxminddb.Reader
 	path string
 	mu   sync.RWMutex
 }
 
+// New opens the MaxMind DB at path. If path is empty, returns a no-op Reader.
 func New(path string) (*Reader, error) {
 	if path == "" {
 		zap.L().
@@ -42,6 +46,8 @@ func New(path string) (*Reader, error) {
 	return &Reader{db: db, path: path}, nil
 }
 
+// Lookup returns the ISO country code for the given IP and whether the lookup
+// succeeded.
 func (r *Reader) Lookup(ip net.IP) (string, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -62,6 +68,8 @@ func (r *Reader) Lookup(ip net.IP) (string, bool) {
 	return rec.Country.ISOCode, true
 }
 
+// Reload reopens the MaxMind DB from the original path. Safe to call at
+// runtime via SIGHUP.
 func (r *Reader) Reload() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -84,6 +92,7 @@ func (r *Reader) Reload() error {
 	return nil
 }
 
+// Close releases the underlying MaxMind DB handle.
 func (r *Reader) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

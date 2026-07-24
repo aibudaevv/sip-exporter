@@ -15,6 +15,8 @@ type (
 		callID        string
 	}
 
+	// CleanupResult carries the metadata of a dialog that has expired or was
+	// deleted, used by the caller to emit teardown metrics (SPD, SDC, etc.).
 	CleanupResult struct {
 		Duration      time.Duration
 		Carrier       string
@@ -27,6 +29,7 @@ type (
 		m       sync.Mutex
 		storage map[string]dialogEntry
 	}
+	// Dialoger tracks active SIP dialogs for session counting and cleanup.
 	Dialoger interface {
 		Create(
 			dialogID string, expiresAt time.Time, createdAt time.Time,
@@ -43,6 +46,7 @@ type (
 
 const dialogsInitialSize = 10_000
 
+// NewDialoger creates a [Dialoger] with a pre-sized internal map.
 func NewDialoger() Dialoger {
 	return &dialogs{
 		storage: make(map[string]dialogEntry, dialogsInitialSize),
