@@ -105,123 +105,12 @@ func newTestEnvWithCarriersYAML(ctx context.Context, t *testing.T, carriersYAML 
 	return env
 }
 
-func newSharedTestEnvWithCarriersYAML(ctx context.Context, t *testing.T, carriersYAML string, carrierName string) *sharedTestEnv {
-	t.Helper()
-	env := newSharedTestEnvWithConfig(ctx, t, carriersYAML)
-	env.carrier = carrierName
-	return env
-}
-
-type sharedTestEnv struct {
-	testEnv
-	container    testcontainers.Container
-	exporterPort string
-}
-
-func newSharedTestEnv(ctx context.Context, t *testing.T) *sharedTestEnv {
-	t.Helper()
-	return newSharedTestEnvWithConfig(ctx, t, "")
-}
-
-func newSharedTestEnvWithCarriers(ctx context.Context, t *testing.T) *sharedTestEnv {
-	t.Helper()
-	carriersYAML := loadCarriersYAML(t, "carriers.yaml")
-
-	var cfg struct {
-		Carriers []struct {
-			Name string `yaml:"name"`
-		} `yaml:"carriers"`
-	}
-	require.NoError(t, yaml.Unmarshal([]byte(carriersYAML), &cfg))
-	require.NotEmpty(t, cfg.Carriers, "carriers.yaml must define at least one carrier")
-
-	env := newSharedTestEnvWithConfig(ctx, t, carriersYAML)
-	env.carrier = cfg.Carriers[0].Name
-	return env
-}
-
-func newSharedTestEnvWithConfig(ctx context.Context, t *testing.T, carriersYAML string) *sharedTestEnv {
-	t.Helper()
-	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
-
-	env := &sharedTestEnv{
-		testEnv: testEnv{
-			sippPort:       sippPort,
-			sippClientPort: sippClientPort,
-		},
-		exporterPort: exporterHTTPPort,
-	}
-	endpoint, container := startExporterWithConfig(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML)
-	env.endpoint = endpoint
-	env.container = container
-	registerExporterCleanup(t, container, exporterHTTPPort)
-	return env
-}
-
 func loadUserAgentsYAML(t *testing.T, filename string) string {
 	t.Helper()
 	path := filepath.Join(projectRoot, "test", "e2e", filename)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	return string(data)
-}
-
-func newSharedTestEnvWithUAConfig(ctx context.Context, t *testing.T, uaYAMLFile string) *sharedTestEnv {
-	t.Helper()
-	uaYAML := loadUserAgentsYAML(t, uaYAMLFile)
-	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
-
-	env := &sharedTestEnv{
-		testEnv: testEnv{
-			sippPort:       sippPort,
-			sippClientPort: sippClientPort,
-		},
-		exporterPort: exporterHTTPPort,
-	}
-	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, "", uaYAML, nil, "", "")
-	env.endpoint = endpoint
-	env.container = container
-	registerExporterCleanup(t, container, exporterHTTPPort)
-	return env
-}
-
-func newSharedTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML string, carrierName string, uaYAMLFile string) *sharedTestEnv {
-	t.Helper()
-	uaYAML := loadUserAgentsYAML(t, uaYAMLFile)
-	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
-
-	env := &sharedTestEnv{
-		testEnv: testEnv{
-			sippPort:       sippPort,
-			sippClientPort: sippClientPort,
-			carrier:        carrierName,
-		},
-		exporterPort: exporterHTTPPort,
-	}
-	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML, uaYAML, nil, "", "")
-	env.endpoint = endpoint
-	env.container = container
-	registerExporterCleanup(t, container, exporterHTTPPort)
-	return env
-}
-
-func (s *sharedTestEnv) restart(t *testing.T) {
-	t.Helper()
-
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer stopCancel()
-	require.NoError(t, s.container.Stop(stopCtx, nil))
-
-	require.NoError(t, s.container.Start(context.Background()))
-
-	require.Eventually(t, func() bool {
-		resp, err := http.Get(s.endpoint + "/metrics") //nolint:noctx // test helper
-		if err != nil {
-			return false
-		}
-		defer resp.Body.Close()
-		return resp.StatusCode == 200
-	}, 30*time.Second, 500*time.Millisecond, "exporter should be ready after restart")
 }
 
 // loadCarriersYAML reads a carriers YAML file from test/e2e/ directory.
@@ -367,6 +256,40 @@ func newTestEnvWithFraudConfig(ctx context.Context, t *testing.T, carriersYAML, 
 		sippClientPort: sippClientPort,
 	}
 	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML, "", extraEnv, "", sessionsLimitsYAML)
+	env.endpoint = endpoint
+	registerExporterCleanup(t, container, exporterHTTPPort)
+	return env
+}
+
+// newTestEnvWithUAConfig starts an exporter with user-agents YAML but no carriers config.
+func newTestEnvWithUAConfig(ctx context.Context, t *testing.T, uaYAMLFile string) *testEnv {
+	t.Helper()
+	uaYAML := loadUserAgentsYAML(t, uaYAMLFile)
+	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
+
+	env := &testEnv{
+		sippPort:       sippPort,
+		sippClientPort: sippClientPort,
+	}
+	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, "", uaYAML, nil, "", "")
+	env.endpoint = endpoint
+	registerExporterCleanup(t, container, exporterHTTPPort)
+	return env
+}
+
+// newTestEnvWithCarrierAndUA starts an exporter with carriers YAML, carrier name,
+// and user-agents YAML.
+func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML, carrierName, uaYAMLFile string) *testEnv {
+	t.Helper()
+	uaYAML := loadUserAgentsYAML(t, uaYAMLFile)
+	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
+
+	env := &testEnv{
+		sippPort:       sippPort,
+		sippClientPort: sippClientPort,
+		carrier:        carrierName,
+	}
+	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML, uaYAML, nil, "", "")
 	env.endpoint = endpoint
 	registerExporterCleanup(t, container, exporterHTTPPort)
 	return env
@@ -613,17 +536,29 @@ func getMetric(t *testing.T, endpoint string, metricName string) float64 {
 	return getMetricWithLabel(t, endpoint, metricName, "")
 }
 
+// fetchMetricsBody scrapes the raw /metrics body from the exporter endpoint using
+// a request-scoped context. All metric-reading helpers route through it so there is
+// a single HTTP call site (and no http.Get-without-context).
+func fetchMetricsBody(t *testing.T, endpoint string) []byte {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/metrics", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return body
+}
+
 // metricExists checks whether a metric name appears in the exporter /metrics output.
 // Use before assertions that check a metric == 0 to prevent vacuum-pass when the
 // metric name is misspelled or missing entirely (getMetric returns 0.0 for unknown metrics).
 func metricExists(t *testing.T, endpoint string, metricName string) bool {
 	t.Helper()
-	resp, err := http.Get(endpoint + "/metrics") //nolint:noctx // test helper
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	return strings.Contains(string(body), metricName)
+	return strings.Contains(string(fetchMetricsBody(t, endpoint)), metricName)
 }
 
 // buildMetricRegex compiles a regex matching a Prometheus metric line,
@@ -647,12 +582,7 @@ func buildMetricRegex(metricName string, labelFilter string) *regexp.Regexp {
 func getMetricWithLabel(t *testing.T, endpoint string, metricName string, labelFilter string) float64 {
 	t.Helper()
 
-	resp, err := http.Get(endpoint + "/metrics") //nolint:noctx // test helper
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
+	body := fetchMetricsBody(t, endpoint)
 
 	re := buildMetricRegex(metricName, labelFilter)
 	for _, line := range strings.Split(string(body), "\n") {
@@ -677,12 +607,7 @@ func getMetricWithLabel(t *testing.T, endpoint string, metricName string, labelF
 func metricWithLabelExists(t *testing.T, endpoint string, metricName string, labelFilter string) bool {
 	t.Helper()
 
-	resp, err := http.Get(endpoint + "/metrics") //nolint:noctx // test helper
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
+	body := fetchMetricsBody(t, endpoint)
 
 	re := buildMetricRegex(metricName, labelFilter)
 	for _, line := range strings.Split(string(body), "\n") {

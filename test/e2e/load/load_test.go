@@ -321,15 +321,29 @@ func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML,
 	}
 }
 
+func fetchMetricsBody(t *testing.T, endpoint string) []byte {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/metrics", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return body
+}
+
+func metricExists(t *testing.T, endpoint, metricName string) bool {
+	t.Helper()
+	return strings.Contains(string(fetchMetricsBody(t, endpoint)), metricName)
+}
+
 func getMetric(t *testing.T, endpoint, metricName string) float64 {
 	t.Helper()
 
-	resp, err := http.Get(endpoint + "/metrics") //nolint:noctx // test helper
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
+	body := fetchMetricsBody(t, endpoint)
 
 	re := regexp.MustCompile(`^` + metricName + `(?:\{[^}]*\})?\s+([0-9.]+)`)
 	for _, line := range strings.Split(string(body), "\n") {
@@ -347,12 +361,7 @@ func getMetric(t *testing.T, endpoint, metricName string) float64 {
 func getMetricWithLabel(t *testing.T, endpoint, metricName, labelFilter string) float64 {
 	t.Helper()
 
-	resp, err := http.Get(endpoint + "/metrics") //nolint:noctx // test helper
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
+	body := fetchMetricsBody(t, endpoint)
 
 	re := regexp.MustCompile(`^` + metricName + `\{[^}]*` + regexp.QuoteMeta(labelFilter) + `[^}]*\}\s+([0-9.]+)`)
 	for _, line := range strings.Split(string(body), "\n") {

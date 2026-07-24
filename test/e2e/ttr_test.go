@@ -9,152 +9,73 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestTTR_SuccessfulCalls(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
+func TestTTR(t *testing.T) {
+	type sippRun struct {
+		uas, uac string
+		count    int
+		uacOnly  bool
+	}
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 50, env)
+	tests := []struct {
+		name      string
+		carrier   bool
+		scenarios []sippRun
+		wantTTR   bool
+	}{
+		{"SuccessfulCalls", false, []sippRun{{"uas_100.xml", "uac_100.xml", 50, false}}, true},
+		{"BusyCalls", false, []sippRun{{"uas_0.xml", "uac_0.xml", 50, false}}, true},
+		{"ConcurrentCalls", false, []sippRun{{"uas_100.xml", "uac_100.xml", 100, false}}, true},
+		{"MixedScenarios", false, []sippRun{{"uas_100.xml", "uac_100.xml", 30, false}, {"uas_0.xml", "uac_0.xml", 20, false}}, true},
+		{"WithCarrierConfig", true, []sippRun{{"uas_100.xml", "uac_100.xml", 50, false}}, true},
+		{"RegisterScenario", false, []sippRun{{"reg_uas.xml", "reg_uac.xml", 50, false}}, false},
+		{"NoInviteScenario", false, []sippRun{{"uas_no_invite.xml", "uac_no_invite.xml", 50, false}}, false},
+		{"TimeoutNoResponse", false, []sippRun{{"", "uac_100.xml", 5, true}}, false},
+	}
 
-	inviteTotal := getMetric(t, env.endpoint, "sip_exporter_invite_total")
-	t.Logf("sip_exporter_invite_total = %.0f", inviteTotal)
-	require.Greater(t, inviteTotal, 0.0, "should have INVITE requests")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
 
-	status100Total := getMetric(t, env.endpoint, "sip_exporter_100_total")
-	t.Logf("sip_exporter_100_total = %.0f", status100Total)
-	require.Greater(t, status100Total, 0.0, "should have 100 Trying responses")
+			var env *testEnv
+			if tt.carrier {
+				env = newTestEnvWithCarriers(ctx, t)
+			} else {
+				env = newTestEnv(ctx, t)
+			}
 
-	ttr := getTTR(t, env.endpoint)
-	t.Logf("TTR = %.2f ms", ttr)
-	require.Greater(t, ttr, 0.0, "TTR should be greater than 0 when 1xx responses are sent")
-	require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_ttr_count"), 0.0, "TTR histogram should have observations")
+			for _, s := range tt.scenarios {
+				if s.uacOnly {
+					runSippUACOnly(ctx, t, s.uac, s.count, env)
+				} else {
+					runSippScenario(ctx, t, s.uas, s.uac, s.count, env)
+				}
+			}
 
-	waitForSessionsZero(t, env.endpoint)
-}
+			if tt.wantTTR {
+				require.True(t, metricExists(t, env.endpoint, "sip_exporter_ttr_count"),
+					"TTR histogram should exist: %s", tt.name)
+			} else {
+				require.False(t, metricExists(t, env.endpoint, "sip_exporter_ttr_count"),
+					"TTR histogram should be absent: %s", tt.name)
+			}
 
-func TestTTR_BusyCalls(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 50, env)
-
-	inviteTotal := getMetric(t, env.endpoint, "sip_exporter_invite_total")
-	t.Logf("sip_exporter_invite_total = %.0f", inviteTotal)
-	require.Greater(t, inviteTotal, 0.0, "should have INVITE requests")
-
-	status100Total := getMetric(t, env.endpoint, "sip_exporter_100_total")
-	t.Logf("sip_exporter_100_total = %.0f", status100Total)
-	require.Greater(t, status100Total, 0.0, "uas_0 sends 100 Trying before 486")
-
-	ttr := getTTR(t, env.endpoint)
-	t.Logf("TTR = %.2f ms", ttr)
-	require.Greater(t, ttr, 0.0, "TTR should be measured even for rejected calls (100 Trying is sent)")
-	require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_ttr_count"), 0.0, "TTR histogram should have observations")
-
-	waitForSessionsZero(t, env.endpoint)
-}
-
-func TestTTR_RegisterScenario_NoTTR(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	ttrBefore := getTTR(t, env.endpoint)
-
-	runSippScenario(ctx, t, "reg_uas.xml", "reg_uac.xml", 50, env)
-
-	registerTotal := getMetric(t, env.endpoint, "sip_exporter_register_total")
-	t.Logf("sip_exporter_register_total = %.0f", registerTotal)
-	require.Greater(t, registerTotal, 0.0, "should have REGISTER requests")
-
-	ttrAfter := getTTR(t, env.endpoint)
-	t.Logf("TTR before = %.2f ms, after = %.2f ms", ttrBefore, ttrAfter)
-	require.Equal(t, ttrBefore, ttrAfter, "TTR should not change for REGISTER-only scenarios")
-}
-
-func TestTTR_NoInviteScenario(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	ttrBefore := getTTR(t, env.endpoint)
-
-	runSippScenario(ctx, t, "uas_no_invite.xml", "uac_no_invite.xml", 50, env)
-
-	ttrAfter := getTTR(t, env.endpoint)
-	t.Logf("TTR before = %.2f ms, after = %.2f ms", ttrBefore, ttrAfter)
-	require.Equal(t, ttrBefore, ttrAfter, "TTR should not change when no INVITEs are sent")
-}
-
-func TestTTR_Timeout_NoResponse(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	ttrBefore := getTTR(t, env.endpoint)
-	inviteBefore := getMetric(t, env.endpoint, "sip_exporter_invite_total")
-
-	runSippUACOnly(ctx, t, "uac_100.xml", 5, env)
-
-	inviteAfter := getMetric(t, env.endpoint, "sip_exporter_invite_total")
-	require.Greater(t, inviteAfter, inviteBefore, "should have INVITE requests")
-
-	ttrAfter := getTTR(t, env.endpoint)
-	t.Logf("TTR before = %.2f ms, after = %.2f ms", ttrBefore, ttrAfter)
-	require.Equal(t, ttrBefore, ttrAfter, "TTR should not change for timeout (no response)")
-}
-
-func TestTTR_ConcurrentCalls(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 100, env)
-
-	inviteTotal := getMetric(t, env.endpoint, "sip_exporter_invite_total")
-	t.Logf("sip_exporter_invite_total = %.0f", inviteTotal)
-	require.Greater(t, inviteTotal, 0.0, "should have INVITE requests")
-
-	ttr := getTTR(t, env.endpoint)
-	t.Logf("TTR = %.2f ms (100 concurrent calls)", ttr)
-	require.Greater(t, ttr, 0.0, "TTR should be measured for concurrent calls")
-	require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_ttr_count"), 0.0, "TTR histogram should have observations")
-
-	waitForSessionsZero(t, env.endpoint)
-}
-
-func TestTTR_MixedScenarios(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 30, env)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 20, env)
-
-	inviteTotal := getMetric(t, env.endpoint, "sip_exporter_invite_total")
-	t.Logf("sip_exporter_invite_total = %.0f", inviteTotal)
-	require.Greater(t, inviteTotal, 0.0, "should have INVITE requests")
-
-	ttr := getTTR(t, env.endpoint)
-	t.Logf("TTR = %.2f ms (mixed)", ttr)
-	require.Greater(t, ttr, 0.0, "TTR should be measured for mixed scenarios")
-	require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_ttr_count"), 0.0, "TTR histogram should have observations")
-
-	waitForSessionsZero(t, env.endpoint)
-}
-
-// TestTTR_WithCarrierConfig verifies TTR per-carrier.
-func TestTTR_WithCarrierConfig(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnvWithCarriers(ctx, t)
-
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 50, env)
-
-	ttr := env.getTTRByCarrier(t)
-	t.Logf("TTR{carrier=%q} = %.2f ms", env.carrier, ttr)
-	require.Greater(t, ttr, 0.0, "TTR should be greater than 0 when 1xx responses are sent")
-
-	env.waitForSessionsZeroByCarrier(t)
+			if tt.carrier {
+				carrierLabel := `carrier="` + env.carrier + `"`
+				require.True(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_ttr_count", carrierLabel),
+					"TTR histogram should exist for carrier %q", env.carrier)
+				ttr := env.getTTRByCarrier(t)
+				t.Logf("TTR{carrier=%q} = %.2f ms", env.carrier, ttr)
+				require.Greater(t, ttr, 0.0, "TTR should be > 0: %s", tt.name)
+				env.waitForSessionsZeroByCarrier(t)
+			} else if tt.wantTTR {
+				ttr := getTTR(t, env.endpoint)
+				t.Logf("TTR = %.2f ms", ttr)
+				require.Greater(t, ttr, 0.0, "TTR should be > 0: %s", tt.name)
+				require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_ttr_count"), 0.0,
+					"TTR histogram should have observations: %s", tt.name)
+				waitForSessionsZero(t, env.endpoint)
+			}
+		})
+	}
 }

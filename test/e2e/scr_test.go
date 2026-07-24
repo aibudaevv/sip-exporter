@@ -10,14 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSCR_AllScenarios tests SCR metric with various scenarios.
-// SCR = (Successfully Completed Sessions) / (Total INVITE) × 100
-// 3xx NOT excluded from denominator (same as ISA).
-// PACKET_IGNORE_OUTGOING suppresses TX on lo → each packet seen once → SCR matches theoretical.
 func TestSCR_AllScenarios(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	env := newSharedTestEnv(ctx, t)
 
 	tests := []struct {
 		name        string
@@ -25,54 +20,29 @@ func TestSCR_AllScenarios(t *testing.T) {
 		uacScenario string
 		callCount   int
 		wantSCR     float64
+		wantExists  bool
 	}{
-		{
-			name:        "all_completed",
-			uasScenario: "uas_100.xml",
-			uacScenario: "uac_100.xml",
-			callCount:   100,
-			wantSCR:     100.0,
-		},
-		{
-			name:        "none_completed_486",
-			uasScenario: "uas_0.xml",
-			uacScenario: "uac_0.xml",
-			callCount:   100,
-			wantSCR:     0.0,
-		},
-		{
-			name:        "none_completed_500",
-			uasScenario: "uas_server_error.xml",
-			uacScenario: "uac_server_error.xml",
-			callCount:   100,
-			wantSCR:     0.0,
-		},
-		{
-			name:        "redirect_only",
-			uasScenario: "uas_redirect.xml",
-			uacScenario: "uac_redirect.xml",
-			callCount:   100,
-			wantSCR:     0.0,
-		},
-		{
-			name:        "no_invite",
-			uasScenario: "uas_no_invite.xml",
-			uacScenario: "uac_no_invite.xml",
-			callCount:   100,
-			wantSCR:     0.0,
-		},
+		{"all_completed", "uas_100.xml", "uac_100.xml", 100, 100.0, true},
+		{"none_completed_486", "uas_0.xml", "uac_0.xml", 100, 0.0, true},
+		{"none_completed_500", "uas_server_error.xml", "uac_server_error.xml", 100, 0.0, true},
+		{"redirect_only", "uas_redirect.xml", "uac_redirect.xml", 100, 0.0, true},
+		{"no_invite", "uas_no_invite.xml", "uac_no_invite.xml", 100, 0.0, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env.restart(t)
-			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
+			t.Parallel()
+			env := newTestEnv(ctx, t)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
 
+			if tt.wantExists {
+				require.True(t, metricExists(t, env.endpoint, "sip_exporter_scr"))
+			} else {
+				require.False(t, metricExists(t, env.endpoint, "sip_exporter_scr"),
+					"SCR metric should be absent when no INVITEs")
+			}
 			scr := getSCR(t, env.endpoint)
 			t.Logf("SCR = %.2f (want %.2f)", scr, tt.wantSCR)
-			if tt.uacScenario != "uac_no_invite.xml" {
-				require.True(t, metricExists(t, env.endpoint, "sip_exporter_scr"))
-			}
 			require.InDelta(t, tt.wantSCR, scr, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)
@@ -80,63 +50,48 @@ func TestSCR_AllScenarios(t *testing.T) {
 	}
 }
 
-// TestSCR_Mixed tests 140 completed + 60 rejected (486).
-// SCR = 140/200 × 100 = 70%.
 func TestSCR_Mixed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 140, env)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 60, env)
+	type sippRun struct {
+		uas, uac string
+		count    int
+	}
 
-	scr := getSCR(t, env.endpoint)
-	t.Logf("SCR = %.2f (want %.2f)", scr, 70.0)
-	require.InDelta(t, 70.0, scr, ratioDelta)
+	tests := []struct {
+		name           string
+		runs           []sippRun
+		completedCount int
+		denomCount     int
+	}{
+		{"Mixed", []sippRun{{"uas_100.xml", "uac_100.xml", 140}, {"uas_0.xml", "uac_0.xml", 60}}, 140, 200},
+		{"MixedWith3xx", []sippRun{{"uas_redirect.xml", "uac_redirect.xml", 100}, {"uas_100.xml", "uac_100.xml", 100}}, 100, 200},
+		{"Complex", []sippRun{{"uas_100.xml", "uac_100.xml", 80}, {"uas_0.xml", "uac_0.xml", 60}, {"uas_server_error.xml", "uac_server_error.xml", 60}}, 80, 200},
+	}
 
-	waitForSessionsZero(t, env.endpoint)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			env := newTestEnv(ctx, t)
+
+			for _, r := range tt.runs {
+				runSippScenario(ctx, t, r.uas, r.uac, r.count, env)
+			}
+
+			require.True(t, metricExists(t, env.endpoint, "sip_exporter_scr"))
+			scr := getSCR(t, env.endpoint)
+			wantSCR := float64(tt.completedCount) / float64(tt.denomCount) * percentScale
+			t.Logf("SCR = %.2f (want %.2f)", scr, wantSCR)
+			require.InDelta(t, wantSCR, scr, ratioDelta)
+
+			waitForSessionsZero(t, env.endpoint)
+		})
+	}
 }
 
-// TestSCR_MixedWith3xx tests that 3xx are NOT excluded from SCR denominator.
-// 100 redirect (3xx) + 100 successful → SCR = 100/200 × 100 = 50%.
-func TestSCR_MixedWith3xx(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 100, env)
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 100, env)
-
-	scr := getSCR(t, env.endpoint)
-	t.Logf("SCR = %.2f (want %.2f)", scr, 50.0)
-	require.InDelta(t, 50.0, scr, ratioDelta)
-
-	waitForSessionsZero(t, env.endpoint)
-}
-
-// TestSCR_Complex tests mixed scenarios.
-// 80×completed + 60×486 + 60×500 → SCR = 80/200 × 100 = 40%.
-func TestSCR_Complex(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 80, env)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 60, env)
-	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 60, env)
-
-	scr := getSCR(t, env.endpoint)
-	t.Logf("SCR = %.2f (want %.2f)", scr, 40.0)
-	require.InDelta(t, 40.0, scr, ratioDelta)
-
-	waitForSessionsZero(t, env.endpoint)
-}
-
-// TestSCR_SessionExpires tests that expired dialogs (Session-Expires timeout)
-// increment sessionCompletedTotal, increasing SCR.
 func TestSCR_SessionExpires(t *testing.T) {
 	t.Parallel()
-	start := time.Now()
 	ctx := context.Background()
 	env := newTestEnv(ctx, t)
 
@@ -144,7 +99,8 @@ func TestSCR_SessionExpires(t *testing.T) {
 	sessionsBefore := getSessions(t, env.endpoint)
 	t.Logf("Before: SCR = %.2f, sessions = %.0f", scrBefore, sessionsBefore)
 
-	runSippScenario(ctx, t, "uas_short_expires.xml", "uac_short_expires.xml", 10, env)
+	const callCount = 10
+	runSippScenario(ctx, t, "uas_short_expires.xml", "uac_short_expires.xml", callCount, env)
 
 	require.Eventually(t, func() bool {
 		return getMetric(t, env.endpoint, "sip_exporter_sessions") == 0
@@ -154,20 +110,20 @@ func TestSCR_SessionExpires(t *testing.T) {
 	sessionsAfter := getSessions(t, env.endpoint)
 	t.Logf("After: SCR = %.2f, sessions = %.0f", scrAfter, sessionsAfter)
 
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_sessions"))
 	require.Equal(t, 0.0, sessionsAfter, "sessions should be 0 after Session-Expires timeout")
 	require.Greater(t, scrAfter, scrBefore, "SCR should increase after Session-Expires timeout")
-	t.Logf("duration: %v", time.Since(start))
 }
 
-// TestSCR_WithCarrierConfig verifies SCR per-carrier.
-// SCR = sessionCompletedTotal / inviteTotal × 100 = 200/200 × 100 = 100%.
 func TestSCR_WithCarrierConfig(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
+	const callCount = 200
 	env := newTestEnvWithCarriers(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 200, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", callCount, env)
 
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_scr"))
 	scr := env.getSCRByCarrier(t)
 	t.Logf("SCR{carrier=%q} = %.2f (want %.2f)", env.carrier, scr, 100.0)
 	require.InDelta(t, 100.0, scr, ratioDelta)
@@ -175,18 +131,20 @@ func TestSCR_WithCarrierConfig(t *testing.T) {
 	env.waitForSessionsZeroByCarrier(t)
 }
 
-// TestSCR_MixedWithCarrierConfig verifies SCR per-carrier with mixed results.
 func TestSCR_MixedWithCarrierConfig(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
+	const completedCount = 140
+	const failCount = 60
 	env := newTestEnvWithCarriers(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 140, env)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 60, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", completedCount, env)
+	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", failCount, env)
 
 	scr := env.getSCRByCarrier(t)
-	t.Logf("SCR{carrier=%q} = %.2f (want %.2f)", env.carrier, scr, 70.0)
-	require.InDelta(t, 70.0, scr, ratioDelta)
+	wantSCR := float64(completedCount) / float64(completedCount+failCount) * percentScale
+	t.Logf("SCR{carrier=%q} = %.2f (want %.2f)", env.carrier, scr, wantSCR)
+	require.InDelta(t, wantSCR, scr, ratioDelta)
 
 	env.waitForSessionsZeroByCarrier(t)
 }

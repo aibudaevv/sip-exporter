@@ -150,118 +150,6 @@ func TestMultiInterface_RegisterOnBothNICs(t *testing.T) {
 	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
-// TestMultiInterface_InviteFlowOnBothNICs verifies INVITE dialog matching
-// across multiple interfaces with traffic on BOTH lo and veth pair.
-// Each subtest starts a fresh exporter and runs flows on both interfaces.
-//
-// The veth flow exercises cross-NIC dialog correlation: INVITE captured on
-// veth0a RX (UAC→UAS), 200 OK on veth0b RX (UAS→UAC). The dialog tracker must
-// correlate both halves by Call-ID regardless of which NIC delivered them.
-func TestMultiInterface_InviteFlowOnBothNICs(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	setupVethPair(t)
-
-	extraEnv := map[string]string{
-		"SIP_EXPORTER_INTERFACE":   "lo," + veth0aName + "," + veth0bName,
-		"SIP_EXPORTER_HOST_LABELS": "true",
-	}
-	callCount := 10
-
-	tests := []struct {
-		description    string
-		loUAS          string
-		loUAC          string
-		vethUAS        string
-		vethUAC        string
-		wantLoInvite   float64
-		wantLo200OK    float64
-		wantVethInvite float64
-		wantVeth200OK  float64
-		wantSER        float64
-	}{
-		{
-			description:    "lo fail (uas_0) + veth success (uas_100) → SER = 50%",
-			loUAS:          "uas_0.xml",
-			loUAC:          "uac_0.xml",
-			vethUAS:        "uas_100.xml",
-			vethUAC:        "uac_100.xml",
-			wantLoInvite:   float64(callCount),
-			wantLo200OK:    0,
-			wantVethInvite: float64(callCount),
-			wantVeth200OK:  float64(callCount),
-			wantSER:        50.0,
-		},
-		{
-			description:    "lo success (uas_100) + veth success (uas_100) → SER = 100%",
-			loUAS:          "uas_100.xml",
-			loUAC:          "uac_100.xml",
-			vethUAS:        "uas_100.xml",
-			vethUAC:        "uac_100.xml",
-			wantLoInvite:   float64(callCount),
-			wantLo200OK:    float64(callCount),
-			wantVethInvite: float64(callCount),
-			wantVeth200OK:  float64(callCount),
-			wantSER:        100.0,
-		},
-		{
-			description:    "lo fail (uas_0) + veth fail (uas_0) → SER = 0%",
-			loUAS:          "uas_0.xml",
-			loUAC:          "uac_0.xml",
-			vethUAS:        "uas_0.xml",
-			vethUAC:        "uac_0.xml",
-			wantLoInvite:   float64(callCount),
-			wantLo200OK:    0,
-			wantVethInvite: float64(callCount),
-			wantVeth200OK:  0,
-			wantSER:        0.0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.description, func(t *testing.T) {
-			t.Parallel()
-			env := newTestEnvWithExtraEnv(ctx, t, "", extraEnv)
-
-			runSippScenario(ctx, t, tt.loUAS, tt.loUAC, callCount, env)
-			runSippScenarioWithIPs(ctx, t, tt.vethUAS, tt.vethUAC, callCount, env, veth0aIP, veth0bIP)
-
-			loLabel := `called_host="127.0.0.1"`
-			gotLoInvite := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", loLabel)
-			gotLo200OK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", loLabel)
-
-			vethLabel := `called_host="10.10.0.1"`
-			gotVethInvite := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", vethLabel)
-			gotVeth200OK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel)
-
-			require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"), "SER metric must exist")
-			gotSER := getSER(t, env.endpoint)
-
-			t.Logf(
-				"lo: invite %.0f/%.0f, 200 OK %.0f/%.0f | veth: invite %.0f/%.0f, 200 OK %.0f/%.0f | SER %.2f%%/%.1f%%",
-				gotLoInvite,
-				tt.wantLoInvite,
-				gotLo200OK,
-				tt.wantLo200OK,
-				gotVethInvite,
-				tt.wantVethInvite,
-				gotVeth200OK,
-				tt.wantVeth200OK,
-				gotSER,
-				tt.wantSER,
-			)
-
-			require.InDelta(t, tt.wantLoInvite, gotLoInvite, ratioDelta, "lo INVITE: %s", tt.description)
-			require.InDelta(t, tt.wantLo200OK, gotLo200OK, ratioDelta, "lo 200 OK: %s", tt.description)
-			require.InDelta(t, tt.wantVethInvite, gotVethInvite, ratioDelta, "veth INVITE: %s", tt.description)
-			require.InDelta(t, tt.wantVeth200OK, gotVeth200OK, ratioDelta, "veth 200 OK: %s", tt.description)
-			require.InDelta(t, tt.wantSER, gotSER, ratioDelta, "SER: %s", tt.description)
-
-			waitForSessionsZero(t, env.endpoint)
-		})
-	}
-}
-
 // TestMultiInterface_SER verifies SER computation with traffic on BOTH lo and
 // veth pair simultaneously. Each subtest starts a fresh exporter and runs flows
 // on both interfaces, then verifies per-host metrics to prove multi-NIC capture.
@@ -363,6 +251,15 @@ func TestMultiInterface_SER(t *testing.T) {
 				gotSER,
 				tt.wantSER,
 			)
+
+			if tt.wantLo200OK == 0 {
+				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", loLabel),
+					"lo 200 OK series should be absent: %s", tt.description)
+			}
+			if tt.wantVeth200OK == 0 {
+				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel),
+					"veth 200 OK series should be absent: %s", tt.description)
+			}
 
 			require.InDelta(t, tt.wantLoInvite, gotLoInvite, ratioDelta, "lo INVITE: %s", tt.description)
 			require.InDelta(t, tt.wantLo200OK, gotLo200OK, ratioDelta, "lo 200 OK: %s", tt.description)
@@ -477,6 +374,15 @@ func TestMultiInterface_ASR(t *testing.T) {
 				tt.wantASR,
 			)
 
+			if tt.wantLo200OK == 0 {
+				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", loLabel),
+					"lo 200 OK series should be absent: %s", tt.description)
+			}
+			if tt.wantVeth200OK == 0 {
+				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel),
+					"veth 200 OK series should be absent: %s", tt.description)
+			}
+
 			require.InDelta(t, tt.wantLoInvite, gotLoInvite, ratioDelta, "lo INVITE: %s", tt.description)
 			require.InDelta(t, tt.wantLo200OK, gotLo200OK, ratioDelta, "lo 200 OK: %s", tt.description)
 			require.InDelta(t, tt.wantVethInvite, gotVethInvite, ratioDelta, "veth INVITE: %s", tt.description)
@@ -574,6 +480,15 @@ func TestMultiInterface_SDC(t *testing.T) {
 			vethLabel := `called_host="10.10.0.1"`
 			gotVethInvite := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", vethLabel)
 			gotVeth200OK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel)
+
+			if tt.wantLo200OK == 0 {
+				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", loLabel),
+					"lo 200 OK series should be absent: %s", tt.description)
+			}
+			if tt.wantVeth200OK == 0 {
+				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel),
+					"veth 200 OK series should be absent: %s", tt.description)
+			}
 
 			require.InDelta(t, tt.wantLoInvite, gotLoInvite, ratioDelta, "lo INVITE: %s", tt.description)
 			require.InDelta(t, tt.wantLo200OK, gotLo200OK, ratioDelta, "lo 200 OK: %s", tt.description)
@@ -691,6 +606,15 @@ func TestMultiInterface_PDD(t *testing.T) {
 			vethLabel := `called_host="10.10.0.1"`
 			gotVethInvite := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", vethLabel)
 			gotVeth200OK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel)
+
+			if tt.wantLo200OK == 0 {
+				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", loLabel),
+					"lo 200 OK series should be absent: %s", tt.description)
+			}
+			if tt.wantVeth200OK == 0 {
+				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel),
+					"veth 200 OK series should be absent: %s", tt.description)
+			}
 
 			require.InDelta(t, tt.wantLoInvite, gotLoInvite, ratioDelta, "lo INVITE: %s", tt.description)
 			require.InDelta(t, tt.wantLo200OK, gotLo200OK, ratioDelta, "lo 200 OK: %s", tt.description)

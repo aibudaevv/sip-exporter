@@ -108,11 +108,17 @@ func TestRTP_MetricsAfterCallCompletion(t *testing.T) {
 		"rtp_mos histogram must retain samples after call ends")
 
 	// --- Assert: no spurious loss on clean G.711a ---
+	require.True(t,
+		metricLineExists(t, endpoint, "sip_exporter_rtp_packets_lost_total", rtpLabels...),
+		"rtp_packets_lost_total must be present after call")
 	require.InDelta(t, 0.0,
 		getMetricByLabel(t, endpoint, "sip_exporter_rtp_packets_lost_total", rtpLabels...), 0.01,
 		"no RTP loss expected on clean G.711a stream")
 
 	// --- Assert: dialogs cleaned up ---
+	require.True(t,
+		metricLineExists(t, endpoint, "sip_exporter_active_dialogs"),
+		"active_dialogs must be present after call")
 	require.InDelta(t, 0.0,
 		getMetricByLabel(t, endpoint, "sip_exporter_active_dialogs"), 0.01)
 }

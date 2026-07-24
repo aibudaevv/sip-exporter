@@ -9,14 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestISS_AllScenarios tests ISS counter with various scenarios.
-// ISS counts INVITE responses with 408, 500, 503, 504 status codes.
-// IGNORE_OUTGOING=true on lo → each packet seen once → ISS matches call count exactly.
-
 func TestISS_AllScenarios(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	env := newSharedTestEnv(ctx, t)
 
 	tests := []struct {
 		name        string
@@ -25,83 +20,66 @@ func TestISS_AllScenarios(t *testing.T) {
 		callCount   int
 		wantISS     float64
 	}{
-		{
-			name:        "server_error_500",
-			uasScenario: "uas_server_error.xml",
-			uacScenario: "uac_server_error.xml",
-			callCount:   100,
-			wantISS:     100.0,
-		},
-		{
-			name:        "unavailable_503",
-			uasScenario: "uas_unavailable.xml",
-			uacScenario: "uac_unavailable.xml",
-			callCount:   100,
-			wantISS:     100.0,
-		},
-		{
-			name:        "all_200_ok",
-			uasScenario: "uas_100.xml",
-			uacScenario: "uac_100.xml",
-			callCount:   100,
-			wantISS:     0.0,
-		},
-		{
-			name:        "rejected_486",
-			uasScenario: "uas_0.xml",
-			uacScenario: "uac_0.xml",
-			callCount:   100,
-			wantISS:     0.0,
-		},
-		{
-			name:        "no_invite",
-			uasScenario: "uas_no_invite.xml",
-			uacScenario: "uac_no_invite.xml",
-			callCount:   100,
-			wantISS:     0.0,
-		},
+		{"server_error_500", "uas_server_error.xml", "uac_server_error.xml", 100, 100.0},
+		{"unavailable_503", "uas_unavailable.xml", "uac_unavailable.xml", 100, 100.0},
+		{"all_200_ok", "uas_100.xml", "uac_100.xml", 100, 0.0},
+		{"rejected_486", "uas_0.xml", "uac_0.xml", 100, 0.0},
+		{"no_invite", "uas_no_invite.xml", "uac_no_invite.xml", 100, 0.0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env.restart(t)
-			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
+			t.Parallel()
+			env := newTestEnv(ctx, t)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
+
 			iss := getISS(t, env.endpoint)
 			t.Logf("ISS = %.0f (want %.0f)", iss, tt.wantISS)
-			require.Equal(t, tt.wantISS, iss)
+
+			if tt.wantISS > 0 {
+				require.True(t, metricExists(t, env.endpoint, "sip_exporter_iss"),
+					"ISS metric should exist when server errors occur")
+				require.Equal(t, float64(tt.callCount), iss)
+			} else {
+				require.False(t, metricExists(t, env.endpoint, "sip_exporter_iss"),
+					"ISS metric should be absent when no server errors")
+			}
 
 			waitForSessionsZero(t, env.endpoint)
 		})
 	}
 }
 
-// TestISS_Mixed tests 80×200 OK + 60×busy (480) + 60×server error (500).
-// ISS = 60 / 200 × 100 = 30.0.
 func TestISS_Mixed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
+	const successCount = 80
+	const busyCount = 60
+	const errorCount = 60
 	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 80, env)
-	runSippScenario(ctx, t, "uas_busy.xml", "uac_busy.xml", 60, env)
-	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 60, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", successCount, env)
+	runSippScenario(ctx, t, "uas_busy.xml", "uac_busy.xml", busyCount, env)
+	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", errorCount, env)
 
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_iss"),
+		"ISS metric should exist")
 	iss := getISS(t, env.endpoint)
-	t.Logf("ISS = %.0f (want %.0f)", iss, 60.0)
-	require.Equal(t, 60.0, iss)
+	t.Logf("ISS = %.0f (want %.0f)", iss, float64(errorCount))
+	require.Equal(t, float64(errorCount), iss)
 
 	waitForSessionsZero(t, env.endpoint)
 }
 
-// TestISS_WithCarrierConfig verifies ISS per-carrier.
 func TestISS_WithCarrierConfig(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
+	const callCount = 200
 	env := newTestEnvWithCarriers(ctx, t)
 
-	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 200, env)
+	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", callCount, env)
 
 	iss := env.getISSByCarrier(t)
-	t.Logf("ISS{carrier=%q} = %.0f (want 200)", env.carrier, iss)
-	require.Equal(t, 200.0, iss)
+	t.Logf("ISS{carrier=%q} = %.0f (want %.0f)", env.carrier, iss, float64(callCount))
+	require.Equal(t, float64(callCount), iss)
 }

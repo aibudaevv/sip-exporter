@@ -95,7 +95,8 @@ func TestRTP_FullIntegration_MetricsVerified(t *testing.T) {
 	// scraped value is 0; asserting 0 verifies the loss algorithm does not
 	// miscount on a lossless stream.
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_rtp_packets_lost_total", rtpLabels...) == 0
+		return !metricLineExists(t, endpoint, "sip_exporter_rtp_packets_lost_total", rtpLabels...) ||
+			getMetricByLabel(t, endpoint, "sip_exporter_rtp_packets_lost_total", rtpLabels...) == 0
 	}, 10*time.Second, 500*time.Millisecond, "no RTP loss should be detected on clean G.711a")
 
 	// Jitter histogram (emitted by the 1s snapshot).
