@@ -70,12 +70,12 @@ func allocatePortsN(n int) []string {
 	return out
 }
 
-// startExporter brings up the exporter container on the given interface(s) with
-// the given RTP capture setting and returns its /metrics endpoint.
+// startExporter brings up the exporter container on the given interface(s)
+// and returns its /metrics endpoint.
 func startExporter(
 	ctx context.Context, t *testing.T,
-	httpPort, sipPort, sipsPort, iface string,
-	rtpCapture bool, ttl string,
+	httpPort, sipPort, iface string,
+	ttl string,
 ) string {
 	t.Helper()
 
@@ -87,19 +87,12 @@ func startExporter(
 		logLevel = "debug"
 	}
 
-	rtpFlag := "false"
-	if rtpCapture {
-		rtpFlag = "true"
-	}
-
 	env := map[string]string{
 		"SIP_EXPORTER_INTERFACE":       iface,
 		"SIP_EXPORTER_HTTP_PORT":       httpPort,
-		"SIP_EXPORTER_SIP_PORT":        sipPort,
-		"SIP_EXPORTER_SIPS_PORT":       sipsPort,
+		"SIP_EXPORTER_SIP_PORTS":       sipPort,
 		"SIP_EXPORTER_LOGGER_LEVEL":    logLevel,
 		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
-		"SIP_EXPORTER_RTP_CAPTURE":     rtpFlag,
 		"SIP_EXPORTER_TELEMETRY":       "false",
 	}
 	if ttl != "" {
@@ -154,7 +147,7 @@ func startExporter(
 // carry concrete carrier and ua_type labels (mirrors the main e2e suite helper).
 func startExporterWithCarrierUA(
 	ctx context.Context, t *testing.T,
-	httpPort, sipPort, sipsPort string,
+	httpPort, sipPort string,
 	carriersYAML, userAgentsYAML, ttl string,
 ) string {
 	t.Helper()
@@ -170,11 +163,9 @@ func startExporterWithCarrierUA(
 	envVars := map[string]string{
 		"SIP_EXPORTER_INTERFACE":       testInterface,
 		"SIP_EXPORTER_HTTP_PORT":       httpPort,
-		"SIP_EXPORTER_SIP_PORT":        sipPort,
-		"SIP_EXPORTER_SIPS_PORT":       sipsPort,
+		"SIP_EXPORTER_SIP_PORTS":       sipPort,
 		"SIP_EXPORTER_LOGGER_LEVEL":    logLevel,
 		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
-		"SIP_EXPORTER_RTP_CAPTURE":     "true",
 		"SIP_EXPORTER_TELEMETRY":       "false",
 	}
 	if ttl != "" {
@@ -362,10 +353,10 @@ func sendRTPOutOfOrder(t *testing.T, portStr string) {
 // reach the exporter's socket.
 func TestRTP_ReachesApp_WithCapture(t *testing.T) {
 	ports := allocatePortsN(6)
-	httpPort, uasSIP, sipsPort, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 	uasMediaNum, _ := strconv.Atoi(uasMedia)
 
-	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP, sipsPort,
+	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP,
 		integrationCarriersYAML, integrationUserAgentsYAML, "")
 
 	wait := startSippContainers(context.Background(), t,
@@ -393,42 +384,17 @@ func TestRTP_ReachesApp_WithCapture(t *testing.T) {
 	wait()
 }
 
-// TestRTP_Dropped_WhenCaptureOff verifies that when RTP capture is disabled, the
-// eBPF filter drops RTP packets (none reach the exporter socket).
-func TestRTP_Dropped_WhenCaptureOff(t *testing.T) {
-	ports := allocatePortsN(4)
-	httpPort, sipPort, sipsPort, rtpPort := ports[0], ports[1], ports[2], ports[3]
-	rtpPortNum, err := strconv.Atoi(rtpPort)
-	require.NoError(t, err)
-
-	endpoint := startExporter(context.Background(), t, httpPort, sipPort, sipsPort, testInterface, false, "")
-
-	time.Sleep(1500 * time.Millisecond)
-	before := getSocketPacketsReceived(t, endpoint)
-
-	sendRTP(t, rtpPortNum, rtpPackets)
-
-	time.Sleep(2500 * time.Millisecond)
-	after := getSocketPacketsReceived(t, endpoint)
-
-	delta := after - before
-	t.Logf("capture=OFF: socket_packets_received_total before=%v after=%v delta=%v (sent %d)",
-		before, after, delta, rtpPackets)
-	require.Less(t, delta, float64(rtpPackets)*0.1,
-		"RTP packets must NOT reach the exporter when capture is disabled")
-}
-
 // TestRTP_UncorrelatedDropped verifies RTP isolation: with the strict SDP-driven
 // BPF filter, RTP sent to a port with no established SIP dialog (no SDP-registered
 // media endpoint) is dropped by BPF — it never reaches the exporter socket and is
 // not counted as RTP metrics.
 func TestRTP_UncorrelatedDropped(t *testing.T) {
 	ports := allocatePortsN(4)
-	httpPort, sipPort, sipsPort, rtpPort := ports[0], ports[1], ports[2], ports[3]
+	httpPort, sipPort, rtpPort := ports[0], ports[1], ports[2]
 	rtpPortNum, err := strconv.Atoi(rtpPort)
 	require.NoError(t, err)
 
-	endpoint := startExporter(context.Background(), t, httpPort, sipPort, sipsPort, testInterface, true, "")
+	endpoint := startExporter(context.Background(), t, httpPort, sipPort, testInterface, "")
 
 	time.Sleep(1500 * time.Millisecond)
 	beforeSocket := getSocketPacketsReceived(t, endpoint)

@@ -57,8 +57,7 @@ services:
     environment:
       - SIP_EXPORTER_INTERFACE=eth0
       - SIP_EXPORTER_HTTP_PORT=2112
-      - SIP_EXPORTER_SIP_PORT=5060
-      - SIP_EXPORTER_SIPS_PORT=5061
+      - SIP_EXPORTER_SIP_PORTS=5060
       # Optional: carrier labels for per-provider metrics
       # - SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml
       # Optional: user-agent labels for per-device-type metrics
@@ -78,7 +77,7 @@ Access metrics at `http://localhost:2112/metrics`.
 ## Core Technology
 
 This service uses eBPF (extended Berkeley Packet Filter) attached to `AF_PACKET` sockets to
-intercept SIP packets (UDP/5060-5061) at L4 without overhead of iptables/nftables or userspace daemons like tcpdump.
+intercept SIP packets (UDP/5060) at L4 without overhead of iptables/nftables or userspace daemons like tcpdump.
 Filtered packets are delivered to userspace via the socket for efficient Go processing.
 
 ## Architecture
@@ -111,12 +110,10 @@ Environment variables:
 * `SIP_EXPORTER_INTERFACE` - one or more network interfaces, comma-separated (required). Examples: `eth0`, `eth0,eth1,eth2`.
 * `SIP_EXPORTER_HTTP_PORT` - http port for prometheus (default 2112)
 * `SIP_EXPORTER_LOGGER_LEVEL` - log level (default info)
-* `SIP_EXPORTER_SIP_PORT` - SIP port (default 5060)
-* `SIP_EXPORTER_SIPS_PORT` - SIPS port (default 5061)
+* `SIP_EXPORTER_SIP_PORTS` - one or more SIP ports, comma-separated (default 5060; up to 3 per interface). Use `;` for per-interface sets: `5060,5062;5060,5061`.
 * `SIP_EXPORTER_OBJECT_FILE_PATH` - path to eBPF object file (default /usr/local/bin/sip.o)
 * `SIP_EXPORTER_CARRIERS_CONFIG` - path to carriers YAML config (optional, see [`examples/carriers.yaml`](examples/carriers.yaml))
 * `SIP_EXPORTER_USER_AGENTS_CONFIG` - path to user-agents YAML config (optional, see [`examples/user_agents.yaml`](examples/user_agents.yaml))
-* `SIP_EXPORTER_RTP_CAPTURE` - enable RTP media capture and analysis (default true)
 * `SIP_EXPORTER_RTP_STREAM_TTL` - idle RTP stream expiry, RFC 3550 §6.3.5 timeout (default 30s)
 * `SIP_EXPORTER_IGNORE_OUTGOING` - loopback/test only: suppress duplicate TX packets on `lo` (default false, do NOT enable in production)
 * `SIP_EXPORTER_GEOIP_COUNTRY_DB` - path to MaxMind GeoLite2-Country.mmdb for `source_country` label (optional)
@@ -348,7 +345,7 @@ Metrics produced:
 
 **Privacy:** only the 12-byte RTP header is captured — voice payload is truncated in the kernel (eBPF) before reaching userspace, so no call audio is inspected or stored.
 
-RTP capture is on by default and can be disabled with `SIP_EXPORTER_RTP_CAPTURE=false` (the eBPF filter then drops RTP at the kernel level). Note: RTP without a correlated SIP dialog (no SDP exchange seen) is dropped, so only media for monitored calls is counted.
+RTP capture is always enabled. RTP without a correlated SIP dialog (no SDP exchange seen) is dropped, so only media for monitored calls is counted.
 
 The eBPF filter uses **SDP-driven RTP detection**: media endpoints (IP:port) learned from INVITE 200 OK SDP are inserted into a BPF LRU hash map. Only UDP packets matching a registered endpoint pass the kernel filter — all other UDP is dropped. This eliminates false positives from random UDP traffic on public IPs.
 

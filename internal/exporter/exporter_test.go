@@ -55,6 +55,10 @@ type mockMetricser struct {
 	pbdDelay                  float64
 	shortCallsUpdated         bool
 	shortCallsDuration        time.Duration
+	billableCalled            bool
+	billableCarrier           string
+	billableDestCountry       string
+	billableDuration          time.Duration
 	registerSuccessCalls      int
 	registerFailureCodes      []string
 	registerCountryChange     []string
@@ -97,6 +101,13 @@ func (m *mockMetricser) SIPRetransmission(_, _, _, method string) {
 func (m *mockMetricser) UpdateShortCalls(_, _ string, _ string, duration time.Duration) {
 	m.shortCallsUpdated = true
 	m.shortCallsDuration = duration
+}
+
+func (m *mockMetricser) UpdateBillableSeconds(carrier, destCountry string, duration time.Duration) {
+	m.billableCalled = true
+	m.billableCarrier = carrier
+	m.billableDestCountry = destCountry
+	m.billableDuration = duration
 }
 
 func (m *mockMetricser) Response(_, _, _ string, in []byte, isInviteResponse bool) {
@@ -225,10 +236,11 @@ func (m *mockMetricser) OneWayCall(string, string, string)                      
 func (m *mockMetricser) MissingRTP(string, string, string)                                          {}
 
 type dialogCreateArgs struct {
-	expiresAt time.Time
-	createdAt time.Time
-	carrier   string
-	uaType    string
+	expiresAt          time.Time
+	createdAt          time.Time
+	carrier            string
+	uaType             string
+	destinationCountry string
 }
 
 type mockDialoger struct {
@@ -245,11 +257,16 @@ func (m *mockDialoger) Create(
 	uaType string,
 	_ string,
 	_ string,
+	destinationCountry string,
 ) {
 	if m.created == nil {
 		m.created = make(map[string]dialogCreateArgs)
 	}
-	m.created[dialogID] = dialogCreateArgs{expiresAt: expiresAt, createdAt: createdAt, carrier: carrier, uaType: uaType}
+	m.created[dialogID] = dialogCreateArgs{
+		expiresAt: expiresAt, createdAt: createdAt,
+		carrier: carrier, uaType: uaType,
+		destinationCountry: destinationCountry,
+	}
 }
 
 func (m *mockDialoger) Delete(dialogID string) service.CleanupResult {
@@ -257,7 +274,10 @@ func (m *mockDialoger) Delete(dialogID string) service.CleanupResult {
 	if m.created != nil {
 		if args, ok := m.created[dialogID]; ok {
 			delete(m.created, dialogID)
-			return service.CleanupResult{Duration: 100 * time.Millisecond, Carrier: args.carrier}
+			return service.CleanupResult{
+				Duration: 100 * time.Millisecond,
+				Carrier:  args.carrier, DestinationCountry: args.destinationCountry,
+			}
 		}
 	}
 	return service.CleanupResult{}
@@ -899,7 +919,7 @@ func TestSIPPacketParse_NoFromTag(t *testing.T) {
 
 	_, err := e.sipPacketParse(input)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "fail extract tag from")
+	require.Contains(t, err.Error(), "failed to extract tag from")
 	require.Contains(t, err.Error(), "<sip:user@domain>")
 }
 
@@ -1001,7 +1021,7 @@ func TestSIPPacketParse_NoCSeqMethod(t *testing.T) {
 
 	_, err := e.sipPacketParse(input)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "fail extract CSeq from")
+	require.Contains(t, err.Error(), "failed to extract CSeq from")
 }
 
 func TestSIPPacketParse_CSeqMultipleSpaces(t *testing.T) {
@@ -1317,7 +1337,7 @@ func TestHandleMessage_ReINVITE_CountedAsReinvite(t *testing.T) {
 	}
 
 	md.Create("test-call:abc:xyz",
-		time.Now().Add(1*time.Hour), time.Now(), "", "", "", "test-call")
+		time.Now().Add(1*time.Hour), time.Now(), "", "", "", "test-call", "")
 
 	input := []byte("INVITE sip:test SIP/2.0\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
@@ -1384,7 +1404,7 @@ func TestHandleMessage_ReINVITE_200OK_DoesNotInflateMetrics(t *testing.T) {
 	}
 
 	md.Create("test-call:abc:xyz",
-		time.Now().Add(1*time.Hour), time.Now(), "carrier-a", "yealink", "RU", "test-call")
+		time.Now().Add(1*time.Hour), time.Now(), "carrier-a", "yealink", "RU", "test-call", "")
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
@@ -2010,7 +2030,7 @@ func TestHandleMessage_ReINVITE_ExcludedFromBurst(t *testing.T) {
 	}
 
 	md.Create("call-id:abc:xyz",
-		time.Now().Add(1*time.Hour), time.Now(), "", "", "", "call-id")
+		time.Now().Add(1*time.Hour), time.Now(), "", "", "", "call-id", "")
 
 	input := []byte("INVITE sip:test SIP/2.0\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
@@ -2879,7 +2899,7 @@ func TestExporter_RegisterTracker_DifferentCallID(t *testing.T) {
 	require.False(t, exists2, "call-id-2 should be removed")
 }
 
-func TestSipDialogMetricsUpdate_ExpiredIncrementsSessionCompleted(t *testing.T) {
+func TestSIPDialogMetricsUpdate_ExpiredIncrementsSessionCompleted(t *testing.T) {
 	start := time.Now()
 	mm := &mockMetricser{}
 	md := &mockDialoger{
@@ -3844,6 +3864,7 @@ type carrierTrackingMetricser struct {
 	registerScan           []carrierCall
 	inviteBurst            []carrierCall
 	retransmissionCalls    []carrierCall
+	billableCalls          []carrierCall
 	packetsTotal           int
 	systemErrors           int
 	sessionsByCarrierAndUA map[string]map[string]int
@@ -3916,6 +3937,11 @@ func (m *carrierTrackingMetricser) SIPRetransmission(carrier, _, _, method strin
 }
 
 func (m *carrierTrackingMetricser) UpdateShortCalls(string, string, string, time.Duration) {}
+
+func (m *carrierTrackingMetricser) UpdateBillableSeconds(carrier, _ string, duration time.Duration) {
+	m.billableCalls = append(m.billableCalls,
+		carrierCall{carrier: carrier, value: duration.Seconds()})
+}
 
 func (m *carrierTrackingMetricser) UpdateRRD(carrier, _, _ string, delayMs float64) {
 	m.rrdCalls = append(m.rrdCalls, carrierCall{carrier: carrier, value: delayMs})
@@ -4286,6 +4312,65 @@ func TestMCDC_TC12_DialogExpiry_CarrierFromDialog(t *testing.T) {
 	require.Len(t, mm.sessionCompleted, 1)
 	require.Equal(t, "carrier-A", mm.sessionCompleted[0].carrier)
 	require.Equal(t, "carrier-A", mm.spdCalls[0].carrier)
+}
+
+func TestBillable_Bye200OK(t *testing.T) {
+	tests := []struct {
+		name         string
+		preCreate    bool
+		wantBillable bool
+	}{
+		{"existing_dialog_emits_billable", true, true},
+		{"non_existing_dialog_no_billable", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mm := newCarrierTrackingMetricser()
+			md := &mockDialoger{}
+			e := newTestExporter(mm, md)
+
+			if tt.preCreate {
+				e.handleMessage("carrier-A", "", makeInvite("bill-bye", "ft1"))
+				e.handleMessage("carrier-A", "", makeInvite200OK("bill-bye", "ft1", "tt1"))
+				require.Eventually(t, func() bool { return len(md.created) > 0 },
+					100*time.Millisecond, 10*time.Millisecond)
+			}
+
+			e.handleMessage("carrier-A", "", makeBye200OK("bill-bye", "ft1", "tt1"))
+			require.Eventually(t,
+				func() bool { return len(mm.sessionCompleted) > 0 || !tt.preCreate },
+				100*time.Millisecond, 10*time.Millisecond)
+
+			if tt.wantBillable {
+				require.Len(t, mm.billableCalls, 1, "UpdateBillableSeconds must be called on teardown")
+				require.Equal(t, "carrier-A", mm.billableCalls[0].carrier)
+			} else {
+				require.Empty(t, mm.billableCalls, "UpdateBillableSeconds must NOT be called when Duration == 0")
+			}
+		})
+	}
+}
+
+func TestBillable_CleanupExpiry(t *testing.T) {
+	mm := newCarrierTrackingMetricser()
+	md := &mockDialoger{
+		cleanupResults: []service.CleanupResult{
+			{Duration: 5 * time.Minute, Carrier: "carrier-A", DestinationCountry: "RU"},
+		},
+	}
+	e := newTestExporter(mm, md)
+
+	results := e.services.dialoger.Cleanup()
+	for _, r := range results {
+		e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry)
+		e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
+		e.services.metricser.UpdateShortCalls(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
+		e.services.metricser.UpdateBillableSeconds(r.Carrier, r.DestinationCountry, r.Duration)
+	}
+
+	require.Len(t, mm.billableCalls, 1)
+	require.Equal(t, "carrier-A", mm.billableCalls[0].carrier)
+	require.InDelta(t, 300.0, mm.billableCalls[0].value, 0.01)
 }
 
 func TestMCDC_TC13_DialogExpiry_DifferentCarrier(t *testing.T) {
@@ -4728,6 +4813,7 @@ func TestExporter_GracefulShutdown(t *testing.T) {
 			dialoger:  &mockDialoger{},
 		},
 		mediaTracker:    mediatracker.NewTracker(30 * time.Second),
+		sipPortSets:     [][]uint16{{5060, 5061}},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
 		inviteSDP:       make(map[string]inviteSDPEntity),
@@ -4737,7 +4823,7 @@ func TestExporter_GracefulShutdown(t *testing.T) {
 	e.wg.Add(1)
 	go e.readPackets()
 	e.wg.Add(1)
-	go e.readSocket(fds[0], "test")
+	go e.readSocket(0)
 	e.wg.Add(1)
 	go e.sipDialogMetricsUpdate()
 
@@ -4808,8 +4894,7 @@ func TestInitialize_RollbackOnInvalidInterface(t *testing.T) {
 	err := e.Initialize(InitConfig{
 		Interfaces:     []string{"lo", "nonexistent0"},
 		BPFPath:        bpfObjectPath,
-		SIPPort:        5060,
-		SIPSPort:       5061,
+		SIPPorts:       [][]uint16{{5060, 5061}, {5060, 5061}},
 		IgnoreOutgoing: true,
 	})
 
@@ -4819,7 +4904,7 @@ func TestInitialize_RollbackOnInvalidInterface(t *testing.T) {
 
 	// Rollback must clear partial state.
 	require.Empty(t, e.socks, "e.socks must be empty after rollback")
-	require.Nil(t, e.collection, "e.collection must be nil after rollback")
+	require.Empty(t, e.collections, "e.collections must be empty after rollback")
 
 	// All sockets created for "lo" must have been closed → no FD leak.
 	after := countOpenFDs(t)
@@ -4840,14 +4925,13 @@ func TestInitialize_FirstInterfaceInvalid(t *testing.T) {
 	err := e.Initialize(InitConfig{
 		Interfaces:     []string{"definitely_missing0"},
 		BPFPath:        bpfObjectPath,
-		SIPPort:        5060,
-		SIPSPort:       5061,
+		SIPPorts:       [][]uint16{{5060, 5061}},
 		IgnoreOutgoing: true,
 	})
 
 	require.Error(t, err)
 	require.Empty(t, e.socks)
-	require.Nil(t, e.collection)
+	require.Empty(t, e.collections)
 
 	after := countOpenFDs(t)
 	require.Equal(t, before, after, "FD leak detected")
@@ -5046,7 +5130,7 @@ func TestIsVQContentType(t *testing.T) {
 }
 
 func TestIsSIPPacket(t *testing.T) {
-	e := &exporter{sipPort: 5060, sipsPort: 5061}
+	ports := []uint16{5060, 5061}
 
 	tests := []struct {
 		name string
@@ -5068,7 +5152,7 @@ func TestIsSIPPacket(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, e.isSIPPacket(tt.pkt))
+			require.Equal(t, tt.want, isSIPPacket(tt.pkt, ports))
 		})
 	}
 }
@@ -5078,8 +5162,6 @@ func TestSendPacket_RTPDropWhenFull(t *testing.T) {
 	e := &exporter{
 		messages: make(chan *rawPacket, 1),
 		done:     make(chan struct{}),
-		sipPort:  5060,
-		sipsPort: 5061,
 		services: services{metricser: mm},
 	}
 	fillPkt := rawPacket{}
@@ -5087,7 +5169,7 @@ func TestSendPacket_RTPDropWhenFull(t *testing.T) {
 
 	// RTP packet (non-blocking) → dropped, sendPacket returns true
 	rtpPkt := buildUDPPacket(12345, 5004)
-	require.True(t, e.sendPacket(&rawPacket{data: rtpPkt}), "RTP sendPacket should not block")
+	require.True(t, e.sendPacket(&rawPacket{data: rtpPkt}, []uint16{5060, 5061}), "RTP sendPacket should not block")
 	require.Equal(t, 1, mm.rtpDroppedCount, "RTPDropped should be called when channel is full")
 
 	// SIP packet (blocking) → would block, but we signal done to unblock
@@ -5096,7 +5178,11 @@ func TestSendPacket_RTPDropWhenFull(t *testing.T) {
 		close(e.done)
 	}()
 	sipPkt := buildUDPPacket(12345, 5060)
-	require.False(t, e.sendPacket(&rawPacket{data: sipPkt}), "SIP sendPacket should return false on done")
+	require.False(
+		t,
+		e.sendPacket(&rawPacket{data: sipPkt}, []uint16{5060, 5061}),
+		"SIP sendPacket should return false on done",
+	)
 }
 
 func TestSendPacket_SuccessPaths(t *testing.T) {
@@ -5104,10 +5190,9 @@ func TestSendPacket_SuccessPaths(t *testing.T) {
 		e := &exporter{
 			messages: make(chan *rawPacket, 1),
 			done:     make(chan struct{}),
-			sipPort:  5060, sipsPort: 5061,
 		}
 		sipPkt := buildUDPPacket(12345, 5060)
-		require.True(t, e.sendPacket(&rawPacket{data: sipPkt}))
+		require.True(t, e.sendPacket(&rawPacket{data: sipPkt}, []uint16{5060, 5061}))
 		require.Len(t, e.messages, 1)
 	})
 
@@ -5115,10 +5200,9 @@ func TestSendPacket_SuccessPaths(t *testing.T) {
 		e := &exporter{
 			messages: make(chan *rawPacket, 1),
 			done:     make(chan struct{}),
-			sipPort:  5060, sipsPort: 5061,
 		}
 		rtpPkt := buildUDPPacket(12345, 5004)
-		require.True(t, e.sendPacket(&rawPacket{data: rtpPkt}))
+		require.True(t, e.sendPacket(&rawPacket{data: rtpPkt}, []uint16{5060, 5061}))
 		require.Len(t, e.messages, 1)
 	})
 
@@ -5126,11 +5210,14 @@ func TestSendPacket_SuccessPaths(t *testing.T) {
 		e := &exporter{
 			messages: make(chan *rawPacket), // zero-capacity → always full
 			done:     make(chan struct{}),
-			sipPort:  5060, sipsPort: 5061,
 		}
 		close(e.done)
 		rtpPkt := buildUDPPacket(12345, 5004)
-		require.False(t, e.sendPacket(&rawPacket{data: rtpPkt}), "RTP sendPacket should return false on done")
+		require.False(
+			t,
+			e.sendPacket(&rawPacket{data: rtpPkt}, []uint16{5060, 5061}),
+			"RTP sendPacket should return false on done",
+		)
 	})
 }
 
@@ -5244,17 +5331,17 @@ func TestResolveSourceCountry(t *testing.T) {
 	}
 }
 
-// TestSipDialogMetricsUpdate_TrackerLenNoRace verifies that len() calls on
+// TestSIPDialogMetricsUpdate_TrackerLenNoRace verifies that len() calls on
 // registerTracker, inviteTracker, and optionsTracker in sipDialogMetricsUpdate
 // do not race with concurrent writes from readPackets.
 //
-// Run with: go test -race -run TestSipDialogMetricsUpdate_TrackerLenNoRace
+// Run with: go test -race -run TestSIPDialogMetricsUpdate_TrackerLenNoRace
 //
 // Before S14-7.2 fix, the three len() calls at exporter.go:516-518 read map
 // headers without holding the matching mutex, while readPackets (simulated
 // here by a writer goroutine) mutates those maps under lock. Under -race this
 // produces "concurrent map read and map write" — a fatal runtime error.
-func TestSipDialogMetricsUpdate_TrackerLenNoRace(t *testing.T) {
+func TestSIPDialogMetricsUpdate_TrackerLenNoRace(t *testing.T) {
 	e := newRollbackExporter()
 
 	// Writer goroutine: intensively writes/deletes tracker entries under locks,
@@ -5320,13 +5407,15 @@ func TestReadSocket_FailStopNoSystemError(t *testing.T) {
 
 	mm := &mockMetricser{}
 	e := &exporter{
-		messages: make(chan *rawPacket, 10),
-		done:     make(chan struct{}),
-		services: services{metricser: mm, dialoger: &mockDialoger{}},
+		socks:       []sockEntry{{fd: fds[0]}},
+		sipPortSets: [][]uint16{{5060, 5061}},
+		messages:    make(chan *rawPacket, 10),
+		done:        make(chan struct{}),
+		services:    services{metricser: mm, dialoger: &mockDialoger{}},
 	}
 
 	e.wg.Add(1)
-	go e.readSocket(fds[0], "")
+	go e.readSocket(0)
 
 	// Close the FD → EBADF in readSocket → clean return, no SystemError.
 	unix.Close(fds[0])
@@ -5347,7 +5436,7 @@ func TestReadSocket_FailStopNoSystemError(t *testing.T) {
 		"SystemError should not be called on fail-stop (EBADF/ENETDOWN/ENODEV)")
 }
 
-func TestIpPortToKey(t *testing.T) {
+func TestIPPortToKey(t *testing.T) {
 	tests := []struct {
 		name     string
 		ip       string

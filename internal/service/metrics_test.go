@@ -2708,3 +2708,52 @@ func TestRatioCollector_RegisterSuccessRatio(t *testing.T) {
 		}
 	}
 }
+
+func TestMetrics_BillableSeconds(t *testing.T) {
+	tests := []struct {
+		name    string
+		calls   []time.Duration
+		carrier string
+		country string
+		want    float64
+	}{
+		{
+			name:    "single_call_30s",
+			calls:   []time.Duration{30 * time.Second},
+			carrier: "carrier-a",
+			country: "RU",
+			want:    30.0,
+		},
+		{
+			name:    "two_calls_accumulate_120s",
+			calls:   []time.Duration{30 * time.Second, 90 * time.Second},
+			carrier: "carrier-a",
+			country: "RU",
+			want:    120.0,
+		},
+		{
+			name:    "zero_duration_guard",
+			calls:   []time.Duration{0},
+			carrier: "carrier-a",
+			country: "RU",
+			want:    0.0,
+		},
+		{
+			name:    "negative_duration_guard",
+			calls:   []time.Duration{-1 * time.Second},
+			carrier: "carrier-a",
+			country: "RU",
+			want:    0.0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewTestMetricser().(*metrics)
+			for _, d := range tt.calls {
+				m.UpdateBillableSeconds(tt.carrier, tt.country, d)
+			}
+			require.InDelta(t, tt.want,
+				requestVecValue(m.billableSeconds, tt.carrier, tt.country), 0.01)
+		})
+	}
+}

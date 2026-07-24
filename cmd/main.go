@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+// Command sip-exporter captures SIP/RTP traffic via eBPF and exports
+// Prometheus metrics for VoIP call quality monitoring.
 package main
 
 import (

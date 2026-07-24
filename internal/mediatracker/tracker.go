@@ -1,3 +1,5 @@
+// Package mediatracker correlates RTP streams with SIP dialogs, computing
+// jitter, loss, and MOS (RFC 3550 / ITU-T G.107) from observed packets.
 package mediatracker
 
 import (

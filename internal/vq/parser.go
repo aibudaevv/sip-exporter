@@ -6,10 +6,12 @@ import (
 	"strings"
 )
 
+// ErrInvalidReport is returned when a VQ-RTCPXR body cannot be parsed.
 var ErrInvalidReport = errors.New("invalid vq-rtcpxr report")
 
 const kvParts = 2
 
+// ParseReport parses a raw VQ-RTCPXR body into a [*SessionReport].
 func ParseReport(body []byte) (*SessionReport, error) {
 	if len(body) == 0 {
 		return nil, ErrInvalidReport

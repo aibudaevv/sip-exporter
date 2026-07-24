@@ -7,30 +7,35 @@ import (
 
 type (
 	dialogEntry struct {
-		expiresAt     time.Time
-		createdAt     time.Time
-		carrier       string
-		uaType        string
-		sourceCountry string
-		callID        string
+		expiresAt          time.Time
+		createdAt          time.Time
+		carrier            string
+		uaType             string
+		sourceCountry      string
+		destinationCountry string
+		callID             string
 	}
 
+	// CleanupResult carries the metadata of a dialog that has expired or was
+	// deleted, used by the caller to emit teardown metrics (SPD, SDC, etc.).
 	CleanupResult struct {
-		Duration      time.Duration
-		Carrier       string
-		UAType        string
-		SourceCountry string
-		CallID        string
+		Duration           time.Duration
+		Carrier            string
+		UAType             string
+		SourceCountry      string
+		DestinationCountry string
+		CallID             string
 	}
 
 	dialogs struct {
 		m       sync.Mutex
 		storage map[string]dialogEntry
 	}
+	// Dialoger tracks active SIP dialogs for session counting and cleanup.
 	Dialoger interface {
 		Create(
 			dialogID string, expiresAt time.Time, createdAt time.Time,
-			carrier, uaType, sourceCountry, callID string,
+			carrier, uaType, sourceCountry, destinationCountry, callID string,
 		)
 		Delete(dialogID string) CleanupResult
 		HasActiveDialog(dialogID string) bool
@@ -43,6 +48,7 @@ type (
 
 const dialogsInitialSize = 10_000
 
+// NewDialoger creates a [Dialoger] with a pre-sized internal map.
 func NewDialoger() Dialoger {
 	return &dialogs{
 		storage: make(map[string]dialogEntry, dialogsInitialSize),
@@ -61,29 +67,32 @@ func (c *dialogs) Delete(dialogID string) CleanupResult {
 	if d < 0 {
 		return CleanupResult{
 			Carrier: entry.carrier, UAType: entry.uaType,
-			SourceCountry: entry.sourceCountry, CallID: entry.callID,
+			SourceCountry: entry.sourceCountry, DestinationCountry: entry.destinationCountry,
+			CallID: entry.callID,
 		}
 	}
 	return CleanupResult{
 		Duration: d, Carrier: entry.carrier, UAType: entry.uaType,
-		SourceCountry: entry.sourceCountry, CallID: entry.callID,
+		SourceCountry: entry.sourceCountry, DestinationCountry: entry.destinationCountry,
+		CallID: entry.callID,
 	}
 }
 
 func (c *dialogs) Create(
 	dialogID string, expiresAt time.Time, createdAt time.Time,
-	carrier string, uaType string, sourceCountry string, callID string,
+	carrier string, uaType string, sourceCountry string, destinationCountry string, callID string,
 ) {
 	c.m.Lock()
 	defer c.m.Unlock()
 	if _, exists := c.storage[dialogID]; !exists {
 		c.storage[dialogID] = dialogEntry{
-			expiresAt:     expiresAt,
-			createdAt:     createdAt,
-			carrier:       carrier,
-			uaType:        uaType,
-			sourceCountry: sourceCountry,
-			callID:        callID,
+			expiresAt:          expiresAt,
+			createdAt:          createdAt,
+			carrier:            carrier,
+			uaType:             uaType,
+			sourceCountry:      sourceCountry,
+			destinationCountry: destinationCountry,
+			callID:             callID,
 		}
 	}
 }
@@ -145,7 +154,8 @@ func (c *dialogs) Cleanup() []CleanupResult {
 			if d > 0 {
 				results = append(results, CleanupResult{
 					Duration: d, Carrier: entry.carrier, UAType: entry.uaType,
-					SourceCountry: entry.sourceCountry, CallID: entry.callID,
+					SourceCountry: entry.sourceCountry, DestinationCountry: entry.destinationCountry,
+					CallID: entry.callID,
 				})
 			}
 			delete(c.storage, id)

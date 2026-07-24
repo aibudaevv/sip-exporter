@@ -1,3 +1,4 @@
+// Package rtp parses RTP (RFC 3550) fixed headers from raw packet bytes.
 package rtp
 
 import (
@@ -6,8 +7,10 @@ import (
 )
 
 var (
+	// ErrInvalidRTP is returned when a packet is too short for an RTP header.
 	ErrInvalidRTP = errors.New("invalid RTP header: too short")
-	ErrNotRTP     = errors.New("not an RTP packet: version is not 2")
+	// ErrNotRTP is returned when the RTP version field is not 2.
+	ErrNotRTP = errors.New("not an RTP packet: version is not 2")
 )
 
 const (

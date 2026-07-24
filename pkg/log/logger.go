@@ -1,3 +1,4 @@
+// Package log initializes the global zap logger with configurable verbosity.
 package log
 
 import (
@@ -8,6 +9,7 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+// InfoLevel is the string constant for the info log level.
 const InfoLevel = "info"
 
 func timeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
@@ -40,6 +42,8 @@ func setHandler(l zapcore.Level) error {
 	return nil
 }
 
+// Verbosity configures the global zap logger to the named level
+// ("error", "info", "debug", "warn").
 func Verbosity(l string) error {
 	switch strings.ToLower(l) {
 	case "error":

@@ -15,6 +15,7 @@
 - [Здоровье регистраций](#здоровье-регистраций) — `register_success_total`, `register_failure_total`, `register_success_ratio`, `active_registrations`
 - [Детекция фрода](#детекция-фрода) — `register_scan_total`, `invite_burst_total`, `register_country_change_total`
 - [Мониторинг ёмкости](#мониторинг-ёмкости) — `sessions_limit`, `sessions_utilization`
+- [Минуты трафика по направлению](#минуты-трафика-по-направлению) — `billable_seconds_total`
 - [Метрики RTP-медиа](#метрики-rtp-медиа) — `rtp_packets_total`, `rtp_mos_score`, `rtp_jitter_milliseconds` и др.
 - [Метрики самомониторинга](#метрики-самомониторинга) — `socket_packets_*`, `channel_*`, `parse_errors_total`, `active_trackers`, `active_dialogs`, `build_info`
 - [Метрики производительности RFC 6076](#метрики-производительности-rfc-6076)
@@ -652,6 +653,25 @@ sessions_limits:
 
 # Операторы на грани исчерпания ёмкости
 sip_exporter_sessions_utilization > 90
+```
+
+## Минуты трафика по направлению
+
+`sip_exporter_billable_seconds_total{carrier="...",destination_country="..."}` *(counter)*: суммарные секунды завершённых сессий по направлениям, накапливаются при разрыве сессии (BYE 200 OK или истечение Session-Expires). Сессии с `Duration <= 0` (clock-skew, мгновенный разрыв) не учитываются. `destination_country` резолвится из вызываемого номера (E.164 prefix-matching) на этапе INVITE 200 OK и хранится на протяжении жизни диалога.
+
+**Кардинальность:** ~50 операторов × ~250 стран ≈ 12.5K серий (тот же tier, что INVITE-raw).
+
+**Примеры PromQL:**
+```promql
+# Минуты трафика/мин по направлениям (top-10)
+topk(10, sum by (destination_country) (rate(sip_exporter_billable_seconds_total[5m]) / 60))
+
+# ACD (средняя длительность звонка) по направлению, минуты
+sum by (destination_country) (rate(sip_exporter_billable_seconds_total[15m])) / 60
+  / clamp_min(sum by (destination_country) (rate(sip_exporter_invite_200_total[15m])), 1)
+
+# Минуты трафика по оператору за час
+sum by (carrier) (increase(sip_exporter_billable_seconds_total[1h])) / 3600
 ```
 
 ## Метрики RTP-медиа

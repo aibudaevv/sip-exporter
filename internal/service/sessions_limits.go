@@ -14,6 +14,7 @@ type sessionsLimitsConfig struct {
 	} `yaml:"sessions_limits"`
 }
 
+// LoadSessionsLimits reads a YAML file mapping carrier names to session limits.
 func LoadSessionsLimits(path string) (map[string]int, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

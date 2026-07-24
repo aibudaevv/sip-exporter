@@ -1,3 +1,5 @@
+// Package carriers maps source IP addresses to carrier names and countries
+// via CIDR-based configuration loaded from YAML.
 package carriers
 
 import (
@@ -10,12 +12,14 @@ import (
 )
 
 type (
+	// Carrier defines a named operator with associated country and CIDR ranges.
 	Carrier struct {
 		Name    string   `yaml:"name"`
 		Country string   `yaml:"country"`
 		CIDRs   []string `yaml:"cidrs"`
 	}
 
+	// Config is the top-level YAML structure for carriers configuration.
 	Config struct {
 		Carriers []Carrier `yaml:"carriers"`
 	}
@@ -26,11 +30,14 @@ type (
 		country string
 	}
 
+	// Resolver maps IP addresses to carrier names via CIDR matching.
 	Resolver struct {
 		entries []cidrEntry
 	}
 )
 
+// LoadConfig reads and parses the carriers YAML file at path and returns a
+// configured [*Resolver].
 func LoadConfig(path string) (*Resolver, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -46,6 +53,7 @@ func LoadConfig(path string) (*Resolver, error) {
 	return NewResolver(cfg.Carriers)
 }
 
+// NewResolver builds a [*Resolver] from a list of [Carrier] definitions.
 func NewResolver(carrierList []Carrier) (*Resolver, error) {
 	r := &Resolver{}
 	for _, c := range carrierList {
@@ -63,6 +71,8 @@ func NewResolver(carrierList []Carrier) (*Resolver, error) {
 	return r, nil
 }
 
+// Lookup returns the carrier name and country for the given IP. If no CIDR
+// matches, returns ("other", "").
 func (r *Resolver) Lookup(ip net.IP) (string, string) {
 	for _, e := range r.entries {
 		if e.cidr.Contains(ip) {

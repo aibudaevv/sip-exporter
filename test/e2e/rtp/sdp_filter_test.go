@@ -13,10 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// sendNonRtpUDP sends count UDP packets with a non-RTP header (byte[0]=0x00,
+// sendNonRTPUDP sends count UDP packets with a non-RTP header (byte[0]=0x00,
 // V=0 instead of V=2) to 127.0.0.1:port. A local listener is bound to complete
 // the loopback receive cycle (PACKET_IGNORE_OUTGOING sees the RX copy).
-func sendNonRtpUDP(t *testing.T, port int, count int) {
+func sendNonRTPUDP(t *testing.T, port int, count int) {
 	t.Helper()
 
 	listenAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port}
@@ -56,10 +56,10 @@ func sendNonRtpUDP(t *testing.T, port int, count int) {
 	}
 }
 
-// sendNonRtpToSippPort sends non-RTP UDP to a SIPp-bound port via DialUDP.
+// sendNonRTPToSippPort sends non-RTP UDP to a SIPp-bound port via DialUDP.
 // SIPp is listening on the port via -mp, so the loopback RX cycle completes
 // without binding a local listener.
-func sendNonRtpToSippPort(t *testing.T, port int, count int) {
+func sendNonRTPToSippPort(t *testing.T, port int, count int) {
 	t.Helper()
 
 	addr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port}
@@ -96,7 +96,7 @@ func TestSDPFilter(t *testing.T) {
 		setupDialog     bool // establish SIP dialog with SDP before sending
 		sendRTP         bool // true: valid RTP (V=2), false: non-RTP UDP (V=0)
 		expectDropped   bool // expect BPF to drop (socket delta ≈ 0)
-		expectRtpMetric bool // expect rtp_packets_total > 0
+		expectRTPMetric bool // expect rtp_packets_total > 0
 	}{
 		{"sdp_port_non_rtp_passes", true, false, false, false},
 		{"unregistered_port_non_rtp_drops", false, false, true, false},
@@ -109,13 +109,12 @@ func TestSDPFilter(t *testing.T) {
 			ports := allocatePortsN(6)
 			httpPort := ports[0]
 			uasSIP := ports[1]
-			sipsPort := ports[2]
 			uacSIP := ports[3]
 			uasMedia := ports[4]
 			uacMedia := ports[5]
 
 			endpoint := startExporterWithCarrierUA(context.Background(), t,
-				httpPort, uasSIP, sipsPort,
+				httpPort, uasSIP,
 				integrationCarriersYAML, integrationUserAgentsYAML, "")
 
 			var targetPort int
@@ -142,9 +141,9 @@ func TestSDPFilter(t *testing.T) {
 			case tt.sendRTP:
 				sendControlledRTP(t, targetPort, []uint16{1, 2, 3, 4, 5})
 			case tt.setupDialog:
-				sendNonRtpToSippPort(t, targetPort, pktCount)
+				sendNonRTPToSippPort(t, targetPort, pktCount)
 			default:
-				sendNonRtpUDP(t, targetPort, pktCount)
+				sendNonRTPUDP(t, targetPort, pktCount)
 			}
 
 			time.Sleep(2500 * time.Millisecond)
@@ -153,7 +152,7 @@ func TestSDPFilter(t *testing.T) {
 			t.Logf("%s: socket delta=%v (sent %d)", tt.name, delta, pktCount)
 
 			switch {
-			case tt.expectRtpMetric:
+			case tt.expectRTPMetric:
 				require.Eventually(t, func() bool {
 					return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
 				}, 10*time.Second, 500*time.Millisecond,
@@ -193,11 +192,11 @@ func TestSDPFilter_EntryLifecycle(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ports := allocatePortsN(6)
-			httpPort, uasSIP, sipsPort, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
+			httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 			uasMediaNum, _ := strconv.Atoi(uasMedia)
 
 			endpoint := startExporterWithCarrierUA(context.Background(), t,
-				httpPort, uasSIP, sipsPort,
+				httpPort, uasSIP,
 				integrationCarriersYAML, integrationUserAgentsYAML, "")
 
 			wait := startSippContainers(context.Background(), t,
@@ -221,9 +220,9 @@ func TestSDPFilter_EntryLifecycle(t *testing.T) {
 			before := getSocketPacketsReceived(t, endpoint)
 
 			if tt.afterBye {
-				sendNonRtpUDP(t, uasMediaNum, pktCount)
+				sendNonRTPUDP(t, uasMediaNum, pktCount)
 			} else {
-				sendNonRtpToSippPort(t, uasMediaNum, pktCount)
+				sendNonRTPToSippPort(t, uasMediaNum, pktCount)
 			}
 
 			time.Sleep(2500 * time.Millisecond)

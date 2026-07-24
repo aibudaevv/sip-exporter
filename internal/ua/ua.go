@@ -1,3 +1,5 @@
+// Package ua classifies SIP User-Agent header values into short labels via
+// regex patterns loaded from YAML.
 package ua
 
 import (
@@ -10,6 +12,7 @@ import (
 )
 
 type (
+	// Pattern pairs a regex string with a human-readable label.
 	Pattern struct {
 		Regex string `yaml:"regex"`
 		Label string `yaml:"label"`
@@ -20,15 +23,19 @@ type (
 		label string
 	}
 
+	// Config is the top-level YAML structure for user-agents configuration.
 	Config struct {
 		UserAgents []Pattern `yaml:"user_agents"`
 	}
 
+	// Classifier matches User-Agent strings against compiled regex patterns.
 	Classifier struct {
 		entries []patternEntry
 	}
 )
 
+// LoadConfig reads and parses the user-agents YAML file at path and returns a
+// configured [*Classifier].
 func LoadConfig(path string) (*Classifier, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -43,6 +50,7 @@ func LoadConfig(path string) (*Classifier, error) {
 	return NewClassifier(cfg.UserAgents)
 }
 
+// NewClassifier compiles a list of [Pattern] values into a [*Classifier].
 func NewClassifier(patterns []Pattern) (*Classifier, error) {
 	c := &Classifier{}
 	for _, p := range patterns {
@@ -58,6 +66,8 @@ func NewClassifier(patterns []Pattern) (*Classifier, error) {
 	return c, nil
 }
 
+// Classify returns the label of the first matching pattern for the given
+// User-Agent string. Returns "other" if no pattern matches.
 func (c *Classifier) Classify(userAgent []byte) string {
 	if c == nil || len(userAgent) == 0 {
 		return "other"

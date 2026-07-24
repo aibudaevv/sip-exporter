@@ -1,3 +1,5 @@
+// Package server wires configuration, metrics, and the eBPF exporter into an
+// HTTP server that serves Prometheus metrics and health endpoints.
 package server
 
 import (
@@ -31,9 +33,12 @@ type (
 		exporter    exporter.Exporter
 		geoipReader *geoip.Reader
 	}
+	// Server runs the SIP exporter HTTP server.
 	Server interface {
+		// Run initializes the exporter and blocks until a shutdown signal.
 		Run(cfg *config.App) error
 	}
+	// Config holds dependencies for constructing a [Server].
 	Config struct {
 		Resolver                  *carriers.Resolver
 		Classifier                *ua.Classifier
@@ -48,6 +53,7 @@ type (
 	}
 )
 
+// NewServer creates a [Server] with the given configuration.
 func NewServer(cfg Config) Server {
 	m := service.NewMetricser()
 	if len(cfg.SessionsLimits) > 0 {
@@ -76,16 +82,18 @@ func (s *server) Run(cfg *config.App) error {
 	if ifaceErr != nil {
 		return fmt.Errorf("invalid interface config: %w", ifaceErr)
 	}
+	sipPorts, portsErr := cfg.ParsedSIPPorts(len(ifaces))
+	if portsErr != nil {
+		return fmt.Errorf("invalid SIP ports config: %w", portsErr)
+	}
 	if err := s.exporter.Initialize(exporter.InitConfig{
 		Interfaces:     ifaces,
 		BPFPath:        cfg.BPFBinaryPath,
-		SIPPort:        cfg.SIPPort,
-		SIPSPort:       cfg.SIPSPort,
+		SIPPorts:       sipPorts,
 		IgnoreOutgoing: cfg.IgnoreOutgoing,
-		RTPCapture:     cfg.RTPCapture,
 		RTPStreamTTL:   cfg.RTPStreamTTL,
 	}); err != nil {
-		return fmt.Errorf("failed initialized exporter: %w", err)
+		return fmt.Errorf("failed to initialize exporter: %w", err)
 	}
 
 	mux := http.NewServeMux()

@@ -1,5 +1,6 @@
 package vq
 
+// SessionReport holds metrics extracted from a VQ-RTCPXR session block.
 type SessionReport struct {
 	NLR   float64
 	JDR   float64

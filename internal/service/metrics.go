@@ -1,3 +1,5 @@
+// Package service implements the SIP metrics layer (Prometheus counters,
+// gauges, histograms, and ratio collectors) and the active-dialog tracker.
 package service
 
 import (
@@ -24,6 +26,7 @@ const (
 )
 
 type (
+	// SocketStat holds per-interface socket packet counts for a single poll.
 	SocketStat struct {
 		Iface    string
 		Received uint32
@@ -47,6 +50,8 @@ type (
 		Country string
 	}
 
+	// LabeledCount pairs a label set with an integer count, used by periodic
+	// gauge snapshots (sessions, active registrations, RTP streams).
 	LabeledCount struct {
 		Labels map[string]string
 		Count  int
@@ -83,6 +88,8 @@ type (
 		inviteBurstTotal      *prometheus.CounterVec
 
 		shortCalls *prometheus.CounterVec
+
+		billableSeconds *prometheus.CounterVec
 
 		activeRegistrations *prometheus.GaugeVec
 		// Single-writer: read+written only from sipDialogMetricsUpdate goroutine.
@@ -156,6 +163,9 @@ type (
 		activeDialogs         prometheus.Gauge
 	}
 
+	// Metricser records all SIP, RTP, and VQ-RTCPXR metrics exposed by the
+	// exporter. Every method adds data point(s) to Prometheus collectors
+	// keyed by carrier, user-agent type, and source country.
 	Metricser interface {
 		Request(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface string, in []byte)
 		Reinvite(carrier, uaType, sourceCountry string)
@@ -180,6 +190,7 @@ type (
 		InviteBurst(carrier, sourceCountry string)
 		SIPRetransmission(carrier, uaType, sourceCountry, method string)
 		UpdateShortCalls(carrier, uaType, sourceCountry string, duration time.Duration)
+		UpdateBillableSeconds(carrier, destinationCountry string, duration time.Duration)
 		UpdateActiveRegistrations(counts []LabeledCount)
 		UpdateVQReport(carrier, uaType, sourceCountry string, report *vq.SessionReport)
 		UpdateRTPPackets(carrier, uaType, codec, sourceCountry string)
@@ -245,6 +256,8 @@ func (rc *ratioCollector) Collect(ch chan<- prometheus.Metric) {
 	})
 }
 
+// NewMetricser creates a [Metricser] registered against the default
+// Prometheus registry.
 func NewMetricser() Metricser {
 	return newMetricserWithRegistry(nil)
 }
@@ -433,6 +446,12 @@ func (m *metrics) initRegistrationMetrics(reg *prometheus.Registry) {
 		"sip_exporter_short_calls_total",
 		"Completed sessions shorter than threshold seconds",
 		[]string{"carrier", "ua_type", "source_country", "threshold"},
+		reg,
+	)
+	m.billableSeconds = newCounterVecWithRegistry(
+		"sip_exporter_billable_seconds_total",
+		"Total billable seconds of completed sessions by destination country",
+		[]string{"carrier", "destination_country"},
 		reg,
 	)
 }
@@ -946,6 +965,13 @@ func (m *metrics) UpdateShortCalls(carrier, uaType, sourceCountry string, durati
 			m.shortCalls.WithLabelValues(carrier, uaType, sourceCountry, threshold.label).Inc()
 		}
 	}
+}
+
+func (m *metrics) UpdateBillableSeconds(carrier, destinationCountry string, duration time.Duration) {
+	if duration <= 0 {
+		return
+	}
+	m.billableSeconds.WithLabelValues(carrier, destinationCountry).Add(duration.Seconds())
 }
 
 func isRegisterChallenge(code string) bool {

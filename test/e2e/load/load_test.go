@@ -134,8 +134,7 @@ func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
 	envVars := map[string]string{
 		"SIP_EXPORTER_INTERFACE":       testInterface,
 		"SIP_EXPORTER_HTTP_PORT":       exporterHTTPPort,
-		"SIP_EXPORTER_SIP_PORT":        sippPort,
-		"SIP_EXPORTER_SIPS_PORT":       sippClientPort,
+		"SIP_EXPORTER_SIP_PORTS":       sippPort,
 		"SIP_EXPORTER_LOGGER_LEVEL":    exporterLogLevel,
 		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
 	}
@@ -224,8 +223,7 @@ func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML,
 	envVars := map[string]string{
 		"SIP_EXPORTER_INTERFACE":       testInterface,
 		"SIP_EXPORTER_HTTP_PORT":       exporterHTTPPort,
-		"SIP_EXPORTER_SIP_PORT":        sippPort,
-		"SIP_EXPORTER_SIPS_PORT":       sippPort2,
+		"SIP_EXPORTER_SIP_PORTS":       sippPort,
 		"SIP_EXPORTER_LOGGER_LEVEL":    exporterLogLevel,
 		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
 	}

@@ -15,6 +15,7 @@ All metrics are exposed at `/metrics` endpoint in Prometheus exposition format.
 - [Registration Health](#registration-health) — `register_success_total`, `register_failure_total`, `register_success_ratio`, `active_registrations`
 - [Fraud Detection](#fraud-detection) — `register_scan_total`, `invite_burst_total`, `register_country_change_total`
 - [Capacity Monitoring](#capacity-monitoring) — `sessions_limit`, `sessions_utilization`
+- [Traffic Minutes by Destination](#traffic-minutes-by-destination) — `billable_seconds_total`
 - [RTP Media Metrics](#rtp-media-metrics) — `rtp_packets_total`, `rtp_mos_score`, `rtp_jitter_milliseconds`, etc.
 - [Self-Monitoring Metrics](#self-monitoring-metrics) — `socket_packets_*`, `channel_*`, `parse_errors_total`, `active_trackers`, `active_dialogs`, `build_info`
 - [RFC 6076 Performance Metrics](#rfc-6076-performance-metrics)
@@ -61,6 +62,7 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 > | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, destination_country, caller_host, called_host, iface` |
 > | **Fraud** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country` |
 > | **Short calls** | `short_calls_total` | `carrier, ua_type, source_country, threshold` |
+> | **Traffic** | `billable_seconds_total` | `carrier, destination_country` |
 > | **Capacity** | `sessions_limit`, `sessions_utilization` | `carrier` |
 
 `carrier` and `ua_type` default to `"other"` when not configured or when no pattern matches. `source_country` defaults to `"unknown"` when neither carrier country nor GeoIP DB is available.
@@ -687,6 +689,25 @@ rate(sip_exporter_short_calls_total{threshold="20"}[5m]) / rate(sip_exporter_sdc
 
 # Absolute count of sub-60s calls per carrier
 sum by (carrier) (rate(sip_exporter_short_calls_total{threshold="60"}[1h]))
+```
+
+## Traffic Minutes by Destination
+
+`sip_exporter_billable_seconds_total{carrier="...",destination_country="..."}` *(counter)*: total seconds of completed sessions by destination country, accumulated at session teardown (BYE 200 OK or Session-Expires expiry). Only sessions with `Duration > 0` contribute; clock-skew dialogs (instant teardown) are skipped. `destination_country` is resolved from the called number (E.164 prefix matching) at INVITE 200 OK and stored for the lifetime of the dialog.
+
+**Cardinality:** ~50 carriers × ~250 countries ≈ 12.5K series (same tier as INVITE-raw).
+
+**PromQL examples:**
+```promql
+# Traffic minutes/min by destination (top 10)
+topk(10, sum by (destination_country) (rate(sip_exporter_billable_seconds_total[5m]) / 60))
+
+# ACD (average call duration) by destination in minutes
+sum by (destination_country) (rate(sip_exporter_billable_seconds_total[15m])) / 60
+  / clamp_min(sum by (destination_country) (rate(sip_exporter_invite_200_total[15m])), 1)
+
+# Traffic minutes per carrier per hour
+sum by (carrier) (increase(sip_exporter_billable_seconds_total[1h])) / 3600
 ```
 
 ## RTP media metrics

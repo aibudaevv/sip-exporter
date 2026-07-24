@@ -1,3 +1,5 @@
+// Package telemetry sends periodic anonymous beacon pings to a central
+// endpoint for installation tracking.
 package telemetry
 
 import (
@@ -10,6 +12,7 @@ import (
 const defaultBeaconInterval = 24 * time.Hour
 
 type (
+	// Config controls whether telemetry is enabled and where beacons are sent.
 	Config struct {
 		Enabled  bool
 		URL      string
@@ -18,6 +21,7 @@ type (
 	}
 )
 
+// Run starts the telemetry beacon loop. Blocks until ctx is cancelled.
 func Run(ctx context.Context, cfg Config, startTime time.Time) {
 	if !cfg.Enabled {
 		zap.L().Info("telemetry disabled")
