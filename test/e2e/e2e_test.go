@@ -105,129 +105,12 @@ func newTestEnvWithCarriersYAML(ctx context.Context, t *testing.T, carriersYAML 
 	return env
 }
 
-func newSharedTestEnvWithCarriersYAML(ctx context.Context, t *testing.T, carriersYAML string, carrierName string) *sharedTestEnv {
-	t.Helper()
-	env := newSharedTestEnvWithConfig(ctx, t, carriersYAML)
-	env.carrier = carrierName
-	return env
-}
-
-type sharedTestEnv struct {
-	testEnv
-	container    testcontainers.Container
-	exporterPort string
-}
-
-func newSharedTestEnv(ctx context.Context, t *testing.T) *sharedTestEnv {
-	t.Helper()
-	return newSharedTestEnvWithConfig(ctx, t, "")
-}
-
-func newSharedTestEnvWithCarriers(ctx context.Context, t *testing.T) *sharedTestEnv {
-	t.Helper()
-	carriersYAML := loadCarriersYAML(t, "carriers.yaml")
-
-	var cfg struct {
-		Carriers []struct {
-			Name string `yaml:"name"`
-		} `yaml:"carriers"`
-	}
-	require.NoError(t, yaml.Unmarshal([]byte(carriersYAML), &cfg))
-	require.NotEmpty(t, cfg.Carriers, "carriers.yaml must define at least one carrier")
-
-	env := newSharedTestEnvWithConfig(ctx, t, carriersYAML)
-	env.carrier = cfg.Carriers[0].Name
-	return env
-}
-
-func newSharedTestEnvWithConfig(ctx context.Context, t *testing.T, carriersYAML string) *sharedTestEnv {
-	t.Helper()
-	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
-
-	env := &sharedTestEnv{
-		testEnv: testEnv{
-			sippPort:       sippPort,
-			sippClientPort: sippClientPort,
-		},
-		exporterPort: exporterHTTPPort,
-	}
-	endpoint, container := startExporterWithConfig(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML)
-	env.endpoint = endpoint
-	env.container = container
-	registerExporterCleanup(t, container, exporterHTTPPort)
-	return env
-}
-
 func loadUserAgentsYAML(t *testing.T, filename string) string {
 	t.Helper()
 	path := filepath.Join(projectRoot, "test", "e2e", filename)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	return string(data)
-}
-
-func newSharedTestEnvWithUAConfig(ctx context.Context, t *testing.T, uaYAMLFile string) *sharedTestEnv {
-	t.Helper()
-	uaYAML := loadUserAgentsYAML(t, uaYAMLFile)
-	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
-
-	env := &sharedTestEnv{
-		testEnv: testEnv{
-			sippPort:       sippPort,
-			sippClientPort: sippClientPort,
-		},
-		exporterPort: exporterHTTPPort,
-	}
-	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, "", uaYAML, nil, "", "")
-	env.endpoint = endpoint
-	env.container = container
-	registerExporterCleanup(t, container, exporterHTTPPort)
-	return env
-}
-
-func newSharedTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML string, carrierName string, uaYAMLFile string) *sharedTestEnv {
-	t.Helper()
-	uaYAML := loadUserAgentsYAML(t, uaYAMLFile)
-	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
-
-	env := &sharedTestEnv{
-		testEnv: testEnv{
-			sippPort:       sippPort,
-			sippClientPort: sippClientPort,
-			carrier:        carrierName,
-		},
-		exporterPort: exporterHTTPPort,
-	}
-	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML, uaYAML, nil, "", "")
-	env.endpoint = endpoint
-	env.container = container
-	registerExporterCleanup(t, container, exporterHTTPPort)
-	return env
-}
-
-func (s *sharedTestEnv) restart(t *testing.T) {
-	t.Helper()
-
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer stopCancel()
-	require.NoError(t, s.container.Stop(stopCtx, nil))
-
-	require.NoError(t, s.container.Start(context.Background()))
-
-	require.Eventually(t, func() bool {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.endpoint+"/metrics", nil)
-		if err != nil {
-			return false
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return false
-		}
-		defer resp.Body.Close()
-		return resp.StatusCode == 200
-	}, 30*time.Second, 500*time.Millisecond, "exporter should be ready after restart")
 }
 
 // loadCarriersYAML reads a carriers YAML file from test/e2e/ directory.
