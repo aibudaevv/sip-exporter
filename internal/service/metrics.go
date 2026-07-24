@@ -89,6 +89,8 @@ type (
 
 		shortCalls *prometheus.CounterVec
 
+		billableSeconds *prometheus.CounterVec
+
 		activeRegistrations *prometheus.GaugeVec
 		// Single-writer: read+written only from sipDialogMetricsUpdate goroutine.
 		prevActiveRegKeys map[string][]string
@@ -188,6 +190,7 @@ type (
 		InviteBurst(carrier, sourceCountry string)
 		SIPRetransmission(carrier, uaType, sourceCountry, method string)
 		UpdateShortCalls(carrier, uaType, sourceCountry string, duration time.Duration)
+		UpdateBillableSeconds(carrier, destinationCountry string, duration time.Duration)
 		UpdateActiveRegistrations(counts []LabeledCount)
 		UpdateVQReport(carrier, uaType, sourceCountry string, report *vq.SessionReport)
 		UpdateRTPPackets(carrier, uaType, codec, sourceCountry string)
@@ -443,6 +446,12 @@ func (m *metrics) initRegistrationMetrics(reg *prometheus.Registry) {
 		"sip_exporter_short_calls_total",
 		"Completed sessions shorter than threshold seconds",
 		[]string{"carrier", "ua_type", "source_country", "threshold"},
+		reg,
+	)
+	m.billableSeconds = newCounterVecWithRegistry(
+		"sip_exporter_billable_seconds_total",
+		"Total billable seconds of completed sessions by destination country",
+		[]string{"carrier", "destination_country"},
 		reg,
 	)
 }
@@ -956,6 +965,13 @@ func (m *metrics) UpdateShortCalls(carrier, uaType, sourceCountry string, durati
 			m.shortCalls.WithLabelValues(carrier, uaType, sourceCountry, threshold.label).Inc()
 		}
 	}
+}
+
+func (m *metrics) UpdateBillableSeconds(carrier, destinationCountry string, duration time.Duration) {
+	if duration <= 0 {
+		return
+	}
+	m.billableSeconds.WithLabelValues(carrier, destinationCountry).Add(duration.Seconds())
 }
 
 func isRegisterChallenge(code string) bool {

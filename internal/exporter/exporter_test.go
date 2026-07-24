@@ -99,6 +99,8 @@ func (m *mockMetricser) UpdateShortCalls(_, _ string, _ string, duration time.Du
 	m.shortCallsDuration = duration
 }
 
+func (m *mockMetricser) UpdateBillableSeconds(_, _ string, _ time.Duration) {}
+
 func (m *mockMetricser) Response(_, _, _ string, in []byte, isInviteResponse bool) {
 	m.responseCalled = in
 	m.responseIsInvite = isInviteResponse
@@ -3925,6 +3927,8 @@ func (m *carrierTrackingMetricser) SIPRetransmission(carrier, _, _, method strin
 }
 
 func (m *carrierTrackingMetricser) UpdateShortCalls(string, string, string, time.Duration) {}
+
+func (m *carrierTrackingMetricser) UpdateBillableSeconds(string, string, time.Duration) {}
 
 func (m *carrierTrackingMetricser) UpdateRRD(carrier, _, _ string, delayMs float64) {
 	m.rrdCalls = append(m.rrdCalls, carrierCall{carrier: carrier, value: delayMs})
