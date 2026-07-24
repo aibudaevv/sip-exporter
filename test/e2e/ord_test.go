@@ -9,59 +9,64 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestORD_OptionsPing tests ORD histogram with OPTIONS requests.
-// ORD measures delay from OPTIONS request to any response.
-// On loopback: Call-ID deduplication in tracker → ORD count = unique transactions.
-func TestORD_OptionsPing(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
+func TestORD(t *testing.T) {
+	type sippRun struct {
+		uas, uac string
+		count    int
+	}
 
-	runSippScenario(ctx, t, "uas_no_invite.xml", "uac_no_invite.xml", 50, env)
+	tests := []struct {
+		name       string
+		carrier    bool
+		scenarios  []sippRun
+		wantCount  int
+	}{
+		{"OptionsPing", false, []sippRun{{"uas_no_invite.xml", "uac_no_invite.xml", 50}}, 50},
+		{"NoOptions", false, []sippRun{{"uas_100.xml", "uac_100.xml", 50}}, 0},
+		{"MixedWithOptions", false, []sippRun{{"uas_100.xml", "uac_100.xml", 25}, {"uas_no_invite.xml", "uac_no_invite.xml", 25}}, 25},
+		{"WithCarrierConfig", true, []sippRun{{"uas_no_invite.xml", "uac_no_invite.xml", 50}}, 50},
+	}
 
-	ordCount := getORD(t, env.endpoint)
-	t.Logf("ORD count = %.0f (want 50.0)", ordCount)
-	require.Equal(t, 50.0, ordCount)
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
 
-// TestORD_NoOptions verifies ORD = 0 when no OPTIONS traffic.
-func TestORD_NoOptions(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
+			var env *testEnv
+			if tt.carrier {
+				env = newTestEnvWithCarriers(ctx, t)
+			} else {
+				env = newTestEnv(ctx, t)
+			}
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 50, env)
-	waitForSessionsZero(t, env.endpoint)
+			for _, s := range tt.scenarios {
+				runSippScenario(ctx, t, s.uas, s.uac, s.count, env)
+			}
 
-	ordCount := getORD(t, env.endpoint)
-	t.Logf("ORD count = %.0f (want 0.0)", ordCount)
-	require.Equal(t, 0.0, ordCount)
-}
+			if tt.wantCount == 0 {
+				require.False(t, metricExists(t, env.endpoint, "sip_exporter_ord_count"),
+					"ORD histogram should be absent (no OPTIONS)")
+			}
 
-// TestORD_MixedWithOptions tests mixed traffic with some OPTIONS.
-func TestORD_MixedWithOptions(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
+			if tt.carrier {
+				carrierLabel := `carrier="` + env.carrier + `"`
+				require.True(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_ord_count", carrierLabel),
+					"ORD histogram should exist for carrier %q", env.carrier)
+			}
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 25, env)
-	runSippScenario(ctx, t, "uas_no_invite.xml", "uac_no_invite.xml", 25, env)
-	waitForSessionsZero(t, env.endpoint)
+			var ordCount float64
+			if tt.carrier {
+				ordCount = env.getORDByCarrier(t)
+				t.Logf("ORD{carrier=%q} count = %.0f", env.carrier, ordCount)
+			} else {
+				ordCount = getORD(t, env.endpoint)
+				t.Logf("ORD count = %.0f", ordCount)
+			}
+			require.Equal(t, float64(tt.wantCount), ordCount)
 
-	ordCount := getORD(t, env.endpoint)
-	t.Logf("ORD count = %.0f (want 25.0)", ordCount)
-	require.Equal(t, 25.0, ordCount)
-}
-
-// TestORD_WithCarrierConfig verifies ORD per-carrier.
-func TestORD_WithCarrierConfig(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnvWithCarriers(ctx, t)
-
-	runSippScenario(ctx, t, "uas_no_invite.xml", "uac_no_invite.xml", 50, env)
-
-	ordCount := env.getORDByCarrier(t)
-	t.Logf("ORD{carrier=%q} count = %.0f (want 50.0)", env.carrier, ordCount)
-	require.Equal(t, 50.0, ordCount)
+			if !tt.carrier {
+				waitForSessionsZero(t, env.endpoint)
+			}
+		})
+	}
 }
