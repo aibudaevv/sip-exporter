@@ -18,7 +18,14 @@ func TestDialoger_Create(t *testing.T) {
 	require.NotNil(t, d)
 
 	expiresAt := time.Now().Add(1 * time.Hour)
-	d.Create("dialog-1", expiresAt, time.Now(), "test-carrier", "", "", "", "")
+	d.Create(
+		DialogParams{
+			DialogID:  "dialog-1",
+			ExpiresAt: expiresAt,
+			CreatedAt: time.Now(),
+			Carrier:   "test-carrier",
+		},
+	)
 
 	require.Equal(t, 1, d.Size())
 }
@@ -27,10 +34,10 @@ func TestDialoger_Create_ExistingDialog(t *testing.T) {
 	d := NewDialoger()
 
 	firstExpires := time.Now().Add(1 * time.Hour)
-	d.Create("dialog-1", firstExpires, time.Now(), "", "", "", "", "")
+	d.Create(DialogParams{DialogID: "dialog-1", ExpiresAt: firstExpires, CreatedAt: time.Now()})
 
 	secondExpires := time.Now().Add(2 * time.Hour)
-	d.Create("dialog-1", secondExpires, time.Now(), "", "", "", "", "")
+	d.Create(DialogParams{DialogID: "dialog-1", ExpiresAt: secondExpires, CreatedAt: time.Now()})
 
 	require.Equal(t, 1, d.Size())
 }
@@ -39,7 +46,13 @@ func TestDialoger_Delete(t *testing.T) {
 	d := NewDialoger()
 
 	createdAt := time.Now()
-	d.Create("dialog-1", time.Now().Add(1*time.Hour), createdAt, "", "", "", "", "")
+	d.Create(
+		DialogParams{
+			DialogID:  "dialog-1",
+			ExpiresAt: time.Now().Add(1 * time.Hour),
+			CreatedAt: createdAt,
+		},
+	)
 	require.Equal(t, 1, d.Size())
 
 	result := d.Delete("dialog-1")
@@ -57,7 +70,13 @@ func TestDialoger_Delete_NonExisting(t *testing.T) {
 
 func TestDialoger_HasActiveDialog(t *testing.T) {
 	d := NewDialoger()
-	d.Create("dialog-1", time.Now().Add(1*time.Hour), time.Now(), "", "", "", "", "")
+	d.Create(
+		DialogParams{
+			DialogID:  "dialog-1",
+			ExpiresAt: time.Now().Add(1 * time.Hour),
+			CreatedAt: time.Now(),
+		},
+	)
 
 	require.True(t, d.HasActiveDialog("dialog-1"))
 	require.False(t, d.HasActiveDialog("non-existing"))
@@ -70,7 +89,10 @@ func TestDialoger_Refresh(t *testing.T) {
 	d := NewDialoger()
 	createdAt := time.Now()
 	originalExpires := time.Now().Add(1 * time.Hour)
-	d.Create("dialog-1", originalExpires, createdAt, "carrier-a", "yealink", "RU", "", "call-1")
+	d.Create(DialogParams{
+		DialogID: "dialog-1", ExpiresAt: originalExpires, CreatedAt: createdAt,
+		Carrier: "carrier-a", UAType: "yealink", SourceCountry: "RU", CallID: "call-1",
+	})
 
 	newExpires := time.Now().Add(2 * time.Hour)
 	ok := d.Refresh("dialog-1", newExpires)
@@ -82,7 +104,10 @@ func TestDialoger_Refresh(t *testing.T) {
 func TestDialoger_Refresh_PreservesCreatedAt(t *testing.T) {
 	d := NewDialoger()
 	createdAt := time.Now()
-	d.Create("dialog-1", time.Now().Add(1*time.Hour), createdAt, "carrier-a", "yealink", "RU", "", "call-1")
+	d.Create(DialogParams{
+		DialogID: "dialog-1", ExpiresAt: time.Now().Add(1 * time.Hour), CreatedAt: createdAt,
+		Carrier: "carrier-a", UAType: "yealink", SourceCountry: "RU", CallID: "call-1",
+	})
 
 	d.Refresh("dialog-1", time.Now().Add(2*time.Hour))
 	result := d.Delete("dialog-1")
@@ -95,9 +120,27 @@ func TestDialoger_Refresh_PreservesCreatedAt(t *testing.T) {
 func TestDialoger_Size_Multiple(t *testing.T) {
 	d := NewDialoger()
 
-	d.Create("dialog-1", time.Now().Add(1*time.Hour), time.Now(), "", "", "", "", "")
-	d.Create("dialog-2", time.Now().Add(1*time.Hour), time.Now(), "", "", "", "", "")
-	d.Create("dialog-3", time.Now().Add(1*time.Hour), time.Now(), "", "", "", "", "")
+	d.Create(
+		DialogParams{
+			DialogID:  "dialog-1",
+			ExpiresAt: time.Now().Add(1 * time.Hour),
+			CreatedAt: time.Now(),
+		},
+	)
+	d.Create(
+		DialogParams{
+			DialogID:  "dialog-2",
+			ExpiresAt: time.Now().Add(1 * time.Hour),
+			CreatedAt: time.Now(),
+		},
+	)
+	d.Create(
+		DialogParams{
+			DialogID:  "dialog-3",
+			ExpiresAt: time.Now().Add(1 * time.Hour),
+			CreatedAt: time.Now(),
+		},
+	)
 
 	require.Equal(t, 3, d.Size())
 
@@ -110,10 +153,16 @@ func TestDialoger_Cleanup_Expired(t *testing.T) {
 	d := NewDialoger()
 
 	expiredExpires := time.Now().Add(-1 * time.Hour)
-	d.Create("expired-dialog", expiredExpires, start.Add(-2*time.Hour), "", "", "", "", "")
+	d.Create(
+		DialogParams{
+			DialogID:  "expired-dialog",
+			ExpiresAt: expiredExpires,
+			CreatedAt: start.Add(-2 * time.Hour),
+		},
+	)
 
 	validExpires := time.Now().Add(1 * time.Hour)
-	d.Create("valid-dialog", validExpires, time.Now(), "", "", "", "", "")
+	d.Create(DialogParams{DialogID: "valid-dialog", ExpiresAt: validExpires, CreatedAt: time.Now()})
 
 	require.Equal(t, 2, d.Size())
 
@@ -129,9 +178,15 @@ func TestDialoger_Cleanup_AllExpired(t *testing.T) {
 	start := time.Now()
 	d := NewDialoger()
 
-	d.Create("expired-1", time.Now().Add(-1*time.Hour), start.Add(-3*time.Hour), "", "", "", "", "")
-	d.Create("expired-2", time.Now().Add(-2*time.Hour), start.Add(-4*time.Hour), "", "", "", "", "")
-	d.Create("expired-3", time.Now().Add(-3*time.Hour), start.Add(-5*time.Hour), "", "", "", "", "")
+	d.Create(DialogParams{
+		DialogID: "expired-1", ExpiresAt: time.Now().Add(-1 * time.Hour), CreatedAt: start.Add(-3 * time.Hour),
+	})
+	d.Create(DialogParams{
+		DialogID: "expired-2", ExpiresAt: time.Now().Add(-2 * time.Hour), CreatedAt: start.Add(-4 * time.Hour),
+	})
+	d.Create(DialogParams{
+		DialogID: "expired-3", ExpiresAt: time.Now().Add(-3 * time.Hour), CreatedAt: start.Add(-5 * time.Hour),
+	})
 
 	require.Equal(t, 3, d.Size())
 
@@ -146,9 +201,27 @@ func TestDialoger_Cleanup_NoneExpired(t *testing.T) {
 	start := time.Now()
 	d := NewDialoger()
 
-	d.Create("valid-1", time.Now().Add(1*time.Hour), time.Now(), "", "", "", "", "")
-	d.Create("valid-2", time.Now().Add(2*time.Hour), time.Now(), "", "", "", "", "")
-	d.Create("valid-3", time.Now().Add(3*time.Hour), time.Now(), "", "", "", "", "")
+	d.Create(
+		DialogParams{
+			DialogID:  "valid-1",
+			ExpiresAt: time.Now().Add(1 * time.Hour),
+			CreatedAt: time.Now(),
+		},
+	)
+	d.Create(
+		DialogParams{
+			DialogID:  "valid-2",
+			ExpiresAt: time.Now().Add(2 * time.Hour),
+			CreatedAt: time.Now(),
+		},
+	)
+	d.Create(
+		DialogParams{
+			DialogID:  "valid-3",
+			ExpiresAt: time.Now().Add(3 * time.Hour),
+			CreatedAt: time.Now(),
+		},
+	)
 
 	require.Equal(t, 3, d.Size())
 
@@ -174,7 +247,13 @@ func TestDialoger_Delete_ReturnsDuration(t *testing.T) {
 	d := NewDialoger()
 
 	createdAt := time.Now().Add(-5 * time.Second)
-	d.Create("dialog-1", time.Now().Add(1*time.Hour), createdAt, "", "", "", "", "")
+	d.Create(
+		DialogParams{
+			DialogID:  "dialog-1",
+			ExpiresAt: time.Now().Add(1 * time.Hour),
+			CreatedAt: createdAt,
+		},
+	)
 
 	result := d.Delete("dialog-1")
 	require.GreaterOrEqual(t, result.Duration, 5*time.Second)
@@ -186,7 +265,13 @@ func TestDialoger_Concurrent_Create(t *testing.T) {
 
 	for i := range 100 {
 		go func(id int) {
-			d.Create("dialog-"+strconv.Itoa(id), time.Now().Add(1*time.Hour), time.Now(), "", "", "", "", "")
+			d.Create(
+				DialogParams{
+					DialogID:  "dialog-" + strconv.Itoa(id),
+					ExpiresAt: time.Now().Add(1 * time.Hour),
+					CreatedAt: time.Now(),
+				},
+			)
 			done <- true
 		}(i)
 	}
@@ -202,7 +287,13 @@ func TestDialoger_Concurrent_Delete(t *testing.T) {
 	d := NewDialoger()
 
 	for i := range 50 {
-		d.Create("dialog-"+strconv.Itoa(i), time.Now().Add(1*time.Hour), time.Now(), "", "", "", "", "")
+		d.Create(
+			DialogParams{
+				DialogID:  "dialog-" + strconv.Itoa(i),
+				ExpiresAt: time.Now().Add(1 * time.Hour),
+				CreatedAt: time.Now(),
+			},
+		)
 	}
 
 	done := make(chan bool, 50)
@@ -226,9 +317,15 @@ func TestDialoger_Concurrent_Cleanup(t *testing.T) {
 
 	for i := range 50 {
 		if i%2 == 0 {
-			d.Create("expired-"+strconv.Itoa(i), time.Now().Add(-1*time.Hour), time.Now(), "", "", "", "", "")
+			d.Create(
+				DialogParams{
+					DialogID:  "expired-" + strconv.Itoa(i),
+					ExpiresAt: time.Now().Add(-1 * time.Hour),
+					CreatedAt: time.Now(),
+				},
+			)
 		} else {
-			d.Create("valid-"+strconv.Itoa(i), time.Now().Add(1*time.Hour), time.Now(), "", "", "", "", "")
+			d.Create(DialogParams{DialogID: "valid-" + strconv.Itoa(i), ExpiresAt: time.Now().Add(1 * time.Hour), CreatedAt: time.Now()})
 		}
 	}
 
@@ -250,9 +347,33 @@ func TestDialoger_Concurrent_Cleanup(t *testing.T) {
 
 func TestDialogs_Counts(t *testing.T) {
 	d := NewDialoger()
-	d.Create("id1", time.Now().Add(time.Hour), time.Now(), "provider-a", "yealink", "", "", "")
-	d.Create("id2", time.Now().Add(time.Hour), time.Now(), "provider-a", "yealink", "", "", "")
-	d.Create("id3", time.Now().Add(time.Hour), time.Now(), "provider-b", "grandstream", "", "", "")
+	d.Create(
+		DialogParams{
+			DialogID:  "id1",
+			ExpiresAt: time.Now().Add(time.Hour),
+			CreatedAt: time.Now(),
+			Carrier:   "provider-a",
+			UAType:    "yealink",
+		},
+	)
+	d.Create(
+		DialogParams{
+			DialogID:  "id2",
+			ExpiresAt: time.Now().Add(time.Hour),
+			CreatedAt: time.Now(),
+			Carrier:   "provider-a",
+			UAType:    "yealink",
+		},
+	)
+	d.Create(
+		DialogParams{
+			DialogID:  "id3",
+			ExpiresAt: time.Now().Add(time.Hour),
+			CreatedAt: time.Now(),
+			Carrier:   "provider-b",
+			UAType:    "grandstream",
+		},
+	)
 	counts := d.Counts()
 	require.Len(t, counts, 2)
 	for _, lc := range counts {
@@ -276,7 +397,14 @@ func TestDialogs_Counts_Empty(t *testing.T) {
 func TestDialoger_Delete_ReturnsCarrier(t *testing.T) {
 	d := NewDialoger()
 	createdAt := time.Now()
-	d.Create("dialog-1", time.Now().Add(1*time.Hour), createdAt, "test-carrier", "", "", "", "")
+	d.Create(
+		DialogParams{
+			DialogID:  "dialog-1",
+			ExpiresAt: time.Now().Add(1 * time.Hour),
+			CreatedAt: createdAt,
+			Carrier:   "test-carrier",
+		},
+	)
 	result := d.Delete("dialog-1")
 	require.Equal(t, "test-carrier", result.Carrier)
 	require.GreaterOrEqual(t, result.Duration, time.Duration(0))
@@ -284,12 +412,30 @@ func TestDialoger_Delete_ReturnsCarrier(t *testing.T) {
 
 func TestDialoger_Cleanup_ReturnsCarrier(t *testing.T) {
 	d := NewDialoger()
-	d.Create("expired-carrier-a", time.Now().Add(-1*time.Hour),
-		time.Now().Add(-2*time.Hour), "carrier-a", "", "", "", "")
-	d.Create("expired-carrier-b", time.Now().Add(-1*time.Hour),
-		time.Now().Add(-2*time.Hour), "carrier-b", "", "", "", "")
-	d.Create("valid-dialog", time.Now().Add(1*time.Hour),
-		time.Now(), "carrier-c", "", "", "", "")
+	d.Create(
+		DialogParams{
+			DialogID:  "expired-carrier-a",
+			ExpiresAt: time.Now().Add(-1 * time.Hour),
+			CreatedAt: time.Now().Add(-2 * time.Hour),
+			Carrier:   "carrier-a",
+		},
+	)
+	d.Create(
+		DialogParams{
+			DialogID:  "expired-carrier-b",
+			ExpiresAt: time.Now().Add(-1 * time.Hour),
+			CreatedAt: time.Now().Add(-2 * time.Hour),
+			Carrier:   "carrier-b",
+		},
+	)
+	d.Create(
+		DialogParams{
+			DialogID:  "valid-dialog",
+			ExpiresAt: time.Now().Add(1 * time.Hour),
+			CreatedAt: time.Now(),
+			Carrier:   "carrier-c",
+		},
+	)
 	results := d.Cleanup()
 	require.Len(t, results, 2)
 	carriers := map[string]bool{results[0].Carrier: true, results[1].Carrier: true}
@@ -308,7 +454,15 @@ func TestDialoger_Delete_NonExisting_ReturnsEmptyCarrier(t *testing.T) {
 func TestDialoger_Delete_ReturnsUAType(t *testing.T) {
 	d := NewDialoger()
 	createdAt := time.Now()
-	d.Create("dialog-1", time.Now().Add(1*time.Hour), createdAt, "test-carrier", "yealink", "", "", "")
+	d.Create(
+		DialogParams{
+			DialogID:  "dialog-1",
+			ExpiresAt: time.Now().Add(1 * time.Hour),
+			CreatedAt: createdAt,
+			Carrier:   "test-carrier",
+			UAType:    "yealink",
+		},
+	)
 	result := d.Delete("dialog-1")
 	require.Equal(t, "test-carrier", result.Carrier)
 	require.Equal(t, "yealink", result.UAType)
@@ -317,10 +471,24 @@ func TestDialoger_Delete_ReturnsUAType(t *testing.T) {
 
 func TestDialoger_Cleanup_ReturnsUAType(t *testing.T) {
 	d := NewDialoger()
-	d.Create("expired-1", time.Now().Add(-1*time.Hour), time.Now().Add(-2*time.Hour),
-		"carrier-a", "yealink", "", "", "")
-	d.Create("expired-2", time.Now().Add(-1*time.Hour), time.Now().Add(-2*time.Hour),
-		"carrier-b", "grandstream", "", "", "")
+	d.Create(
+		DialogParams{
+			DialogID:  "expired-1",
+			ExpiresAt: time.Now().Add(-1 * time.Hour),
+			CreatedAt: time.Now().Add(-2 * time.Hour),
+			Carrier:   "carrier-a",
+			UAType:    "yealink",
+		},
+	)
+	d.Create(
+		DialogParams{
+			DialogID:  "expired-2",
+			ExpiresAt: time.Now().Add(-1 * time.Hour),
+			CreatedAt: time.Now().Add(-2 * time.Hour),
+			Carrier:   "carrier-b",
+			UAType:    "grandstream",
+		},
+	)
 	results := d.Cleanup()
 	require.Len(t, results, 2)
 	uaTypes := map[string]bool{}
@@ -341,25 +509,36 @@ func TestDialoger_Delete_NonExisting_ReturnsEmptyUAType(t *testing.T) {
 
 func TestDialoger_Cleanup_ReturnsCallID(t *testing.T) {
 	d := NewDialoger()
-	d.Create(
-		"dialog-1",
-		time.Now().Add(-1*time.Hour),
-		time.Now().Add(-2*time.Hour),
-		"carrier-a",
-		"yealink",
-		"",
-		"",
-		"call-id-xyz",
-	)
+	d.Create(DialogParams{
+		DialogID:  "dialog-1",
+		ExpiresAt: time.Now().Add(-1 * time.Hour),
+		CreatedAt: time.Now().Add(-2 * time.Hour),
+		Carrier:   "carrier-a",
+		UAType:    "yealink",
+		CallID:    "call-id-xyz",
+	})
 
 	results := d.Cleanup()
 	require.Len(t, results, 1)
-	require.Equal(t, "call-id-xyz", results[0].CallID, "expired dialog must return its Call-ID for media cleanup")
+	require.Equal(
+		t,
+		"call-id-xyz",
+		results[0].CallID,
+		"expired dialog must return its Call-ID for media cleanup",
+	)
 }
 
 func TestDialoger_Delete_ReturnsCallID(t *testing.T) {
 	d := NewDialoger()
-	d.Create("dialog-1", time.Now().Add(1*time.Hour), time.Now(), "carrier-a", "", "", "", "call-id-del")
+	d.Create(
+		DialogParams{
+			DialogID:  "dialog-1",
+			ExpiresAt: time.Now().Add(1 * time.Hour),
+			CreatedAt: time.Now(),
+			Carrier:   "carrier-a",
+			CallID:    "call-id-del",
+		},
+	)
 
 	require.Equal(t, "call-id-del", d.Delete("dialog-1").CallID)
 }
@@ -402,9 +581,12 @@ func TestDialoger_Delete_DestinationCountry(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			d := NewDialoger()
 			if tt.preCreate {
-				d.Create(tt.deleteID, time.Now().Add(1*time.Hour),
-					time.Now().Add(tt.createdOffset),
-					"carrier-a", "yealink", "RU", tt.destCountry, "call-1")
+				d.Create(DialogParams{
+					DialogID: tt.deleteID, ExpiresAt: time.Now().Add(1 * time.Hour),
+					CreatedAt: time.Now().Add(tt.createdOffset),
+					Carrier:   "carrier-a", UAType: "yealink", SourceCountry: "RU",
+					DestinationCountry: tt.destCountry, CallID: "call-1",
+				})
 			}
 			result := d.Delete(tt.deleteID)
 			require.Equal(t, tt.wantCountry, result.DestinationCountry)
@@ -440,9 +622,12 @@ func TestDialoger_Cleanup_DestinationCountry(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			d := NewDialoger()
-			d.Create("expired-1", time.Now().Add(-1*time.Hour),
-				time.Now().Add(tt.createdOffset),
-				"carrier-a", "yealink", "RU", "US", "call-1")
+			d.Create(DialogParams{
+				DialogID: "expired-1", ExpiresAt: time.Now().Add(-1 * time.Hour),
+				CreatedAt: time.Now().Add(tt.createdOffset),
+				Carrier:   "carrier-a", UAType: "yealink", SourceCountry: "RU",
+				DestinationCountry: "US", CallID: "call-1",
+			})
 
 			require.Equal(t, 1, d.Size())
 			results := d.Cleanup()

@@ -13,7 +13,21 @@ type (
 		uaType             string
 		sourceCountry      string
 		destinationCountry string
+		direction          string
 		callID             string
+	}
+
+	// DialogParams holds the parameters for creating a SIP dialog entry.
+	DialogParams struct {
+		DialogID           string
+		ExpiresAt          time.Time
+		CreatedAt          time.Time
+		Carrier            string
+		UAType             string
+		SourceCountry      string
+		DestinationCountry string
+		Direction          string
+		CallID             string
 	}
 
 	// CleanupResult carries the metadata of a dialog that has expired or was
@@ -24,6 +38,7 @@ type (
 		UAType             string
 		SourceCountry      string
 		DestinationCountry string
+		Direction          string
 		CallID             string
 	}
 
@@ -33,10 +48,7 @@ type (
 	}
 	// Dialoger tracks active SIP dialogs for session counting and cleanup.
 	Dialoger interface {
-		Create(
-			dialogID string, expiresAt time.Time, createdAt time.Time,
-			carrier, uaType, sourceCountry, destinationCountry, callID string,
-		)
+		Create(p DialogParams)
 		Delete(dialogID string) CleanupResult
 		HasActiveDialog(dialogID string) bool
 		Refresh(dialogID string, expiresAt time.Time) bool
@@ -68,31 +80,29 @@ func (c *dialogs) Delete(dialogID string) CleanupResult {
 		return CleanupResult{
 			Carrier: entry.carrier, UAType: entry.uaType,
 			SourceCountry: entry.sourceCountry, DestinationCountry: entry.destinationCountry,
-			CallID: entry.callID,
+			Direction: entry.direction, CallID: entry.callID,
 		}
 	}
 	return CleanupResult{
 		Duration: d, Carrier: entry.carrier, UAType: entry.uaType,
 		SourceCountry: entry.sourceCountry, DestinationCountry: entry.destinationCountry,
-		CallID: entry.callID,
+		Direction: entry.direction, CallID: entry.callID,
 	}
 }
 
-func (c *dialogs) Create(
-	dialogID string, expiresAt time.Time, createdAt time.Time,
-	carrier string, uaType string, sourceCountry string, destinationCountry string, callID string,
-) {
+func (c *dialogs) Create(p DialogParams) {
 	c.m.Lock()
 	defer c.m.Unlock()
-	if _, exists := c.storage[dialogID]; !exists {
-		c.storage[dialogID] = dialogEntry{
-			expiresAt:          expiresAt,
-			createdAt:          createdAt,
-			carrier:            carrier,
-			uaType:             uaType,
-			sourceCountry:      sourceCountry,
-			destinationCountry: destinationCountry,
-			callID:             callID,
+	if _, exists := c.storage[p.DialogID]; !exists {
+		c.storage[p.DialogID] = dialogEntry{
+			expiresAt:          p.ExpiresAt,
+			createdAt:          p.CreatedAt,
+			carrier:            p.Carrier,
+			uaType:             p.UAType,
+			sourceCountry:      p.SourceCountry,
+			destinationCountry: p.DestinationCountry,
+			direction:          p.Direction,
+			callID:             p.CallID,
 		}
 	}
 }
@@ -125,17 +135,17 @@ func (c *dialogs) Size() int {
 func (c *dialogs) Counts() []LabeledCount {
 	c.m.Lock()
 	defer c.m.Unlock()
-	type key struct{ carrier, uaType, sourceCountry string }
+	type key struct{ carrier, uaType, sourceCountry, direction string }
 	tmp := make(map[key]int)
 	for _, entry := range c.storage {
-		tmp[key{entry.carrier, entry.uaType, entry.sourceCountry}]++
+		tmp[key{entry.carrier, entry.uaType, entry.sourceCountry, entry.direction}]++
 	}
 	result := make([]LabeledCount, 0, len(tmp))
 	for k, n := range tmp {
 		result = append(result, LabeledCount{
 			Labels: map[string]string{
 				"carrier": k.carrier, "ua_type": k.uaType,
-				"source_country": k.sourceCountry,
+				"source_country": k.sourceCountry, "direction": k.direction,
 			},
 			Count: n,
 		})
@@ -155,7 +165,7 @@ func (c *dialogs) Cleanup() []CleanupResult {
 				results = append(results, CleanupResult{
 					Duration: d, Carrier: entry.carrier, UAType: entry.uaType,
 					SourceCountry: entry.sourceCountry, DestinationCountry: entry.destinationCountry,
-					CallID: entry.callID,
+					Direction: entry.direction, CallID: entry.callID,
 				})
 			}
 			delete(c.storage, id)

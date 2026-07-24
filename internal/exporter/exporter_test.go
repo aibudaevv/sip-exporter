@@ -82,41 +82,41 @@ func (m *mockMetricser) SetSessionsLimits(_ map[string]int) {}
 
 func (m *mockMetricser) UpdateActiveRegistrations(_ []service.LabeledCount) {}
 
-func (m *mockMetricser) Request(_, _, _, _, _, _, _ string, in []byte) {
+func (m *mockMetricser) Request(_, _, _, _, _, _, _, _ string, in []byte) {
 	m.requestCalled = in
 	m.requestCount++
 	m.packetsIncremented++
 }
 
-func (m *mockMetricser) Reinvite(_, _, _ string) {
+func (m *mockMetricser) Reinvite(_, _, _, _ string) {
 	m.reinviteCalled = true
 	m.packetsIncremented++
 }
 
-func (m *mockMetricser) SIPRetransmission(_, _, _, method string) {
+func (m *mockMetricser) SIPRetransmission(_, _, _, _, method string) {
 	m.sipRetransmissionCalls++
 	m.sipRetransmissionMethod = method
 }
 
-func (m *mockMetricser) UpdateShortCalls(_, _ string, _ string, duration time.Duration) {
+func (m *mockMetricser) UpdateShortCalls(_, _, _, _ string, duration time.Duration) {
 	m.shortCallsUpdated = true
 	m.shortCallsDuration = duration
 }
 
-func (m *mockMetricser) UpdateBillableSeconds(carrier, destCountry string, duration time.Duration) {
+func (m *mockMetricser) UpdateBillableSeconds(carrier, destCountry, _ string, duration time.Duration) {
 	m.billableCalled = true
 	m.billableCarrier = carrier
 	m.billableDestCountry = destCountry
 	m.billableDuration = duration
 }
 
-func (m *mockMetricser) Response(_, _, _ string, in []byte, isInviteResponse bool) {
+func (m *mockMetricser) Response(_, _, _, _ string, in []byte, isInviteResponse bool) {
 	m.responseCalled = in
 	m.responseIsInvite = isInviteResponse
 	m.packetsIncremented++
 }
 
-func (m *mockMetricser) ResponseWithMetrics(_, _, _ string, status []byte, isInviteResponse, is200OK bool) {
+func (m *mockMetricser) ResponseWithMetrics(_, _, _, _ string, status []byte, isInviteResponse, is200OK bool) {
 	m.responseWithMetricsCalled = true
 	m.responseCalled = status
 	m.responseIsInvite = isInviteResponse
@@ -126,69 +126,69 @@ func (m *mockMetricser) ResponseWithMetrics(_, _, _ string, status []byte, isInv
 	}
 }
 
-func (m *mockMetricser) Invite200OK(_, _, _, _, _, _, _ string) {
+func (m *mockMetricser) Invite200OK(_, _, _, _, _, _, _, _ string) {
 	m.invite200OKCalled = true
 }
 
-func (m *mockMetricser) SessionCompleted(_, _, _ string) {
+func (m *mockMetricser) SessionCompleted(_, _, _, _ string) {
 	m.sessionCompletedFlag = true
 }
 
-func (m *mockMetricser) RegisterSuccess(_, _, _ string) {
+func (m *mockMetricser) RegisterSuccess(_, _, _, _ string) {
 	m.registerSuccessCalls++
 }
 
-func (m *mockMetricser) RegisterFailure(_, _, _, code string) {
+func (m *mockMetricser) RegisterFailure(_, _, _, _ string, code string) {
 	m.registerFailureCodes = append(m.registerFailureCodes, code)
 }
 
-func (m *mockMetricser) RegisterCountryChange(_, sourceCountry string) {
+func (m *mockMetricser) RegisterCountryChange(_, sourceCountry, _ string) {
 	m.registerCountryChange = append(m.registerCountryChange, sourceCountry)
 }
 
-func (m *mockMetricser) RegisterScan(_, _ string) {
+func (m *mockMetricser) RegisterScan(_, _, _ string) {
 	m.registerScanCalls++
 }
 
-func (m *mockMetricser) InviteBurst(_, _ string) {
+func (m *mockMetricser) InviteBurst(_, _, _ string) {
 	m.inviteBurstCalls++
 }
 
-func (m *mockMetricser) UpdateRRD(_, _, _ string, delayMs float64) {
+func (m *mockMetricser) UpdateRRD(_, _, _, _ string, delayMs float64) {
 	m.rrdUpdated = true
 	m.rrdDelay = delayMs
 }
 
-func (m *mockMetricser) UpdateSPD(_, _, _ string, duration time.Duration) {
+func (m *mockMetricser) UpdateSPD(_, _, _, _ string, duration time.Duration) {
 	m.spdUpdated = true
 	m.spdDuration = duration
 }
 
-func (m *mockMetricser) UpdateSession(_, _, _ string, size int) {
+func (m *mockMetricser) UpdateSession(_, _, _, _ string, size int) {
 	m.sessionUpdated = size
 }
 
-func (m *mockMetricser) UpdateTTR(_, _, _ string, delayMs float64) {
+func (m *mockMetricser) UpdateTTR(_, _, _, _ string, delayMs float64) {
 	m.ttrUpdated = true
 	m.ttrDelay = delayMs
 }
 
-func (m *mockMetricser) UpdatePDD(_, _, _ string, delayMs float64) {
+func (m *mockMetricser) UpdatePDD(_, _, _, _ string, delayMs float64) {
 	m.pddUpdated = true
 	m.pddDelay = delayMs
 }
 
-func (m *mockMetricser) UpdateORD(_, _, _ string, delayMs float64) {
+func (m *mockMetricser) UpdateORD(_, _, _, _ string, delayMs float64) {
 	m.ordUpdated = true
 	m.ordDelay = delayMs
 }
 
-func (m *mockMetricser) UpdateLRD(_, _, _ string, delayMs float64) {
+func (m *mockMetricser) UpdateLRD(_, _, _, _ string, delayMs float64) {
 	m.lrdUpdated = true
 	m.lrdDelay = delayMs
 }
 
-func (m *mockMetricser) UpdatePBD(_, _, _ string, delayMs float64) {
+func (m *mockMetricser) UpdatePBD(_, _, _, _ string, delayMs float64) {
 	m.pbdUpdated = true
 	m.pbdDelay = delayMs
 }
@@ -205,35 +205,36 @@ func (m *mockMetricser) UpdateChannelCapacity(int)          {}
 func (m *mockMetricser) UpdateTrackerSize(string, int)      {}
 func (m *mockMetricser) UpdateActiveDialogs(int)            {}
 
-func (m *mockMetricser) UpdateVQReport(carrier string, uaType string, _ string, report *vq.SessionReport) {
+func (m *mockMetricser) UpdateVQReport(carrier string, uaType string, _, _ string, report *vq.SessionReport) {
 	m.vqReportCalled = true
 	m.vqCarrier = carrier
 	m.vqUAType = uaType
 	m.vqReport = report
 }
 
-func (m *mockMetricser) UpdateRTPPackets(_, _, _, _ string) {
+func (m *mockMetricser) UpdateRTPPackets(_, _, _, _, _ string) {
 	m.rtpPacketsCalls++
 }
-func (m *mockMetricser) UpdateRTPLoss(_, _, _, _ string, lost uint64) {
+func (m *mockMetricser) UpdateRTPLoss(_, _, _, _, _ string, lost uint64) {
 	m.rtpLossCalls++
 	m.rtpLossValue = lost
 }
-func (m *mockMetricser) UpdateRTPDuplicates(_, _, _, _ string) {
+func (m *mockMetricser) UpdateRTPDuplicates(_, _, _, _, _ string) {
 	m.rtpDuplicateCalls++
 }
-func (m *mockMetricser) UpdateRTPOutOfOrder(_, _, _, _ string) {
+func (m *mockMetricser) UpdateRTPOutOfOrder(_, _, _, _, _ string) {
 	m.rtpOutOfOrderCalls++
 }
-func (m *mockMetricser) UpdateRTPJitter(string, string, string, string, float64) {}
-func (m *mockMetricser) UpdateRTPMOS(string, string, string, string, float64)    {}
-func (m *mockMetricser) UpdateRTPMOSVariants(string, string, string, string, float64, float64, float64) {
+func (m *mockMetricser) UpdateRTPJitter(string, string, string, string, string, float64) {}
+func (m *mockMetricser) UpdateRTPMOS(string, string, string, string, string, float64)    {}
+func (m *mockMetricser) UpdateRTPMOSVariants(string, string, string, string, string, float64, float64, float64) {
 }
-func (m *mockMetricser) UpdateRTPRFactor(string, string, string, string, float64)                   {}
-func (m *mockMetricser) UpdateRTPLossDistribution(string, string, string, string, float64, float64) {}
-func (m *mockMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount)                            {}
-func (m *mockMetricser) OneWayCall(string, string, string)                                          {}
-func (m *mockMetricser) MissingRTP(string, string, string)                                          {}
+func (m *mockMetricser) UpdateRTPRFactor(string, string, string, string, string, float64) {}
+func (m *mockMetricser) UpdateRTPLossDistribution(string, string, string, string, string, float64, float64) {
+}
+func (m *mockMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount) {}
+func (m *mockMetricser) OneWayCall(string, string, string, string)       {}
+func (m *mockMetricser) MissingRTP(string, string, string, string)       {}
 
 type dialogCreateArgs struct {
 	expiresAt          time.Time
@@ -249,23 +250,16 @@ type mockDialoger struct {
 	cleanupResults []service.CleanupResult
 }
 
-func (m *mockDialoger) Create(
-	dialogID string,
-	expiresAt time.Time,
-	createdAt time.Time,
-	carrier string,
-	uaType string,
-	_ string,
-	_ string,
-	destinationCountry string,
-) {
+func (m *mockDialoger) Create(p service.DialogParams) {
 	if m.created == nil {
 		m.created = make(map[string]dialogCreateArgs)
 	}
-	m.created[dialogID] = dialogCreateArgs{
-		expiresAt: expiresAt, createdAt: createdAt,
-		carrier: carrier, uaType: uaType,
-		destinationCountry: destinationCountry,
+	m.created[p.DialogID] = dialogCreateArgs{
+		expiresAt:          p.ExpiresAt,
+		createdAt:          p.CreatedAt,
+		carrier:            p.Carrier,
+		uaType:             p.UAType,
+		destinationCountry: p.DestinationCountry,
 	}
 }
 
@@ -1336,8 +1330,12 @@ func TestHandleMessage_ReINVITE_CountedAsReinvite(t *testing.T) {
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
 
-	md.Create("test-call:abc:xyz",
-		time.Now().Add(1*time.Hour), time.Now(), "", "", "", "test-call", "")
+	md.Create(service.DialogParams{
+		DialogID:  "test-call:abc:xyz",
+		ExpiresAt: time.Now().Add(1 * time.Hour),
+		CreatedAt: time.Now(),
+		CallID:    "test-call",
+	})
 
 	input := []byte("INVITE sip:test SIP/2.0\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
@@ -1403,8 +1401,15 @@ func TestHandleMessage_ReINVITE_200OK_DoesNotInflateMetrics(t *testing.T) {
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
 
-	md.Create("test-call:abc:xyz",
-		time.Now().Add(1*time.Hour), time.Now(), "carrier-a", "yealink", "RU", "test-call", "")
+	md.Create(service.DialogParams{
+		DialogID:      "test-call:abc:xyz",
+		ExpiresAt:     time.Now().Add(1 * time.Hour),
+		CreatedAt:     time.Now(),
+		Carrier:       "carrier-a",
+		UAType:        "yealink",
+		SourceCountry: "RU",
+		CallID:        "test-call",
+	})
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
@@ -1634,7 +1639,7 @@ func newExporterWithRegTracker() *exporter {
 func TestRegisterExpiryTracker_NewRegistration(t *testing.T) {
 	e := newExporterWithRegTracker()
 
-	e.storeRegistration("sip:user1@example.com", "c", "sip", "US", "", 3600)
+	e.storeRegistration("sip:user1@example.com", "c", "sip", "US", "", "", 3600)
 
 	counts := e.registrationCounts()
 	require.Len(t, counts, 1)
@@ -1645,9 +1650,9 @@ func TestRegisterExpiryTracker_RefreshNoDoubleCount(t *testing.T) {
 	e := newExporterWithRegTracker()
 	aor := "sip:user1@example.com"
 
-	e.storeRegistration(aor, "c", "sip", "US", "", 3600)
-	e.storeRegistration(aor, "c", "sip", "US", "", 3600)
-	e.storeRegistration(aor, "c", "sip", "US", "", 3600)
+	e.storeRegistration(aor, "c", "sip", "US", "", "", 3600)
+	e.storeRegistration(aor, "c", "sip", "US", "", "", 3600)
+	e.storeRegistration(aor, "c", "sip", "US", "", "", 3600)
 
 	counts := e.registrationCounts()
 	require.Len(t, counts, 1)
@@ -1657,8 +1662,8 @@ func TestRegisterExpiryTracker_RefreshNoDoubleCount(t *testing.T) {
 func TestRegisterExpiryTracker_DifferentAORs(t *testing.T) {
 	e := newExporterWithRegTracker()
 
-	e.storeRegistration("sip:user1@example.com", "c", "sip", "US", "", 3600)
-	e.storeRegistration("sip:user2@example.com", "c", "sip", "US", "", 3600)
+	e.storeRegistration("sip:user1@example.com", "c", "sip", "US", "", "", 3600)
+	e.storeRegistration("sip:user2@example.com", "c", "sip", "US", "", "", 3600)
 
 	counts := e.registrationCounts()
 	require.Len(t, counts, 1)
@@ -1668,9 +1673,9 @@ func TestRegisterExpiryTracker_DifferentAORs(t *testing.T) {
 func TestRegisterExpiryTracker_GroupsByLabels(t *testing.T) {
 	e := newExporterWithRegTracker()
 
-	e.storeRegistration("sip:u1@a", "carrier-A", "sip", "US", "", 3600)
-	e.storeRegistration("sip:u2@a", "carrier-A", "sip", "US", "", 3600)
-	e.storeRegistration("sip:u3@b", "carrier-B", "yealink", "DE", "", 3600)
+	e.storeRegistration("sip:u1@a", "carrier-A", "sip", "US", "", "", 3600)
+	e.storeRegistration("sip:u2@a", "carrier-A", "sip", "US", "", "", 3600)
+	e.storeRegistration("sip:u3@b", "carrier-B", "yealink", "DE", "", "", 3600)
 
 	counts := e.registrationCounts()
 	require.Len(t, counts, 2)
@@ -1685,7 +1690,7 @@ func TestRegisterExpiryTracker_GroupsByLabels(t *testing.T) {
 func TestRegisterExpiryTracker_CleanupExpired(t *testing.T) {
 	e := newExporterWithRegTracker()
 
-	e.storeRegistration("sip:user1@example.com", "c", "sip", "US", "", 1)
+	e.storeRegistration("sip:user1@example.com", "c", "sip", "US", "", "", 1)
 	// Force expiry by backdating the entry.
 	e.registerExpiryMutex.Lock()
 	for k := range e.registerExpiryTracker {
@@ -1705,7 +1710,7 @@ func TestRegisterExpiryTracker_RefreshKeepsActive(t *testing.T) {
 	e := newExporterWithRegTracker()
 	aor := "sip:user1@example.com"
 
-	e.storeRegistration(aor, "c", "sip", "US", "", 1)
+	e.storeRegistration(aor, "c", "sip", "US", "", "", 1)
 	// Backdate close to expiry.
 	e.registerExpiryMutex.Lock()
 	ent := e.registerExpiryTracker[aor]
@@ -1714,7 +1719,7 @@ func TestRegisterExpiryTracker_RefreshKeepsActive(t *testing.T) {
 	e.registerExpiryMutex.Unlock()
 
 	// Refresh before expiry.
-	e.storeRegistration(aor, "c", "sip", "US", "", 3600)
+	e.storeRegistration(aor, "c", "sip", "US", "", "", 3600)
 
 	// Even though the old expiry has passed, the refresh extended it.
 	time.Sleep(150 * time.Millisecond)
@@ -1733,7 +1738,7 @@ func TestRegisterExpiryTracker_ConcurrentAccess(t *testing.T) {
 		defer wg.Done()
 		for i := range 100 {
 			aor := "sip:user" + strconv.Itoa(i%10) + "@example.com"
-			e.storeRegistration(aor, "c", "sip", "US", "", 3600)
+			e.storeRegistration(aor, "c", "sip", "US", "", "", 3600)
 		}
 	}()
 
@@ -1769,10 +1774,10 @@ func TestRegisterCountryChange_DifferentCountry(t *testing.T) {
 	}
 	aor := "sip:alice@example.com"
 
-	e.storeRegistration(aor, "beeline", "sip", "RU", "", 3600)
+	e.storeRegistration(aor, "beeline", "sip", "RU", "", "", 3600)
 	require.Empty(t, mm.registerCountryChange, "first registration must not signal")
 
-	e.storeRegistration(aor, "beeline", "sip", "GE", "", 3600)
+	e.storeRegistration(aor, "beeline", "sip", "GE", "", "", 3600)
 	require.Len(t, mm.registerCountryChange, 1, "country change must signal")
 	require.Equal(t, "GE", mm.registerCountryChange[0])
 }
@@ -1785,8 +1790,8 @@ func TestRegisterCountryChange_SameCountry(t *testing.T) {
 	}
 	aor := "sip:alice@example.com"
 
-	e.storeRegistration(aor, "beeline", "sip", "RU", "", 3600)
-	e.storeRegistration(aor, "beeline", "sip", "RU", "", 3600)
+	e.storeRegistration(aor, "beeline", "sip", "RU", "", "", 3600)
+	e.storeRegistration(aor, "beeline", "sip", "RU", "", "", 3600)
 
 	require.Empty(t, mm.registerCountryChange, "same country must not signal")
 }
@@ -1798,7 +1803,7 @@ func TestRegisterCountryChange_FirstRegistration(t *testing.T) {
 		registerExpiryTracker: make(map[string]registerExpiryEntry),
 	}
 
-	e.storeRegistration("sip:bob@example.com", "mts", "sip", "DE", "", 3600)
+	e.storeRegistration("sip:bob@example.com", "mts", "sip", "DE", "", "", 3600)
 
 	require.Empty(t, mm.registerCountryChange, "first registration has no baseline")
 }
@@ -1819,7 +1824,7 @@ func TestRegisterCountryChange_EmptyPreviousCountry(t *testing.T) {
 		sourceCountry: "",
 	}
 
-	e.storeRegistration(aor, "beeline", "sip", "RU", "", 3600)
+	e.storeRegistration(aor, "beeline", "sip", "RU", "", "", 3600)
 
 	require.Empty(t, mm.registerCountryChange, "empty previous country must not signal")
 }
@@ -1831,11 +1836,11 @@ func TestRegisterScanTracker_SignalsAtThreshold(t *testing.T) {
 	tracker := newRegisterScanTracker(3, time.Minute)
 
 	for i := range 2 {
-		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", mm)
+		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", "", mm)
 	}
 	require.Zero(t, mm.registerScanCalls, "below threshold must not signal")
 
-	tracker.record("1.2.3.4", "user2@evil.com", "carrier", "RU", mm)
+	tracker.record("1.2.3.4", "user2@evil.com", "carrier", "RU", "", mm)
 	require.Equal(t, 1, mm.registerScanCalls, "at threshold must signal")
 }
 
@@ -1844,7 +1849,7 @@ func TestRegisterScanTracker_IncrementsPerAORAboveThreshold(t *testing.T) {
 	tracker := newRegisterScanTracker(3, time.Minute)
 
 	for i := range 5 {
-		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", mm)
+		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", "", mm)
 	}
 	require.Equal(t, 3, mm.registerScanCalls, "must increment for each AOR at or above threshold (5-3+1=3)")
 }
@@ -1853,9 +1858,9 @@ func TestRegisterScanTracker_UniqueAORsOnly(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newRegisterScanTracker(3, time.Minute)
 
-	tracker.record("1.2.3.4", "user@evil.com", "carrier", "RU", mm)
-	tracker.record("1.2.3.4", "user@evil.com", "carrier", "RU", mm)
-	tracker.record("1.2.3.4", "user@evil.com", "carrier", "RU", mm)
+	tracker.record("1.2.3.4", "user@evil.com", "carrier", "RU", "", mm)
+	tracker.record("1.2.3.4", "user@evil.com", "carrier", "RU", "", mm)
+	tracker.record("1.2.3.4", "user@evil.com", "carrier", "RU", "", mm)
 
 	require.Zero(t, mm.registerScanCalls, "same AOR must not count as scan")
 }
@@ -1864,7 +1869,7 @@ func TestRegisterScanTracker_NilTrackerSafe(t *testing.T) {
 	mm := &mockMetricser{}
 	var tracker *registerScanTracker
 
-	tracker.record("1.2.3.4", "user@evil.com", "carrier", "RU", mm)
+	tracker.record("1.2.3.4", "user@evil.com", "carrier", "RU", "", mm)
 	require.Zero(t, mm.registerScanCalls, "nil tracker must be no-op")
 }
 
@@ -1872,7 +1877,7 @@ func TestRegisterScanTracker_EmptySrcIPSkipped(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newRegisterScanTracker(1, time.Minute)
 
-	tracker.record("", "user@evil.com", "carrier", "RU", mm)
+	tracker.record("", "user@evil.com", "carrier", "RU", "", mm)
 	require.Zero(t, mm.registerScanCalls, "empty srcIP must be skipped")
 }
 
@@ -1883,7 +1888,7 @@ func TestRegisterScanTracker_MemoryBoundedAtMaxEntries(t *testing.T) {
 	tracker := newRegisterScanTracker(3, time.Minute)
 
 	for i := range registerScanMaxEntriesPerIP + 10 {
-		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", mm)
+		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", "", mm)
 	}
 
 	require.LessOrEqual(t, len(tracker.entries["1.2.3.4"]), registerScanMaxEntriesPerIP,
@@ -1896,7 +1901,7 @@ func TestRegisterScanTracker_EvictionWorksAfterCap(t *testing.T) {
 	tracker := newRegisterScanTracker(3, 50*time.Millisecond)
 
 	for i := range 3 {
-		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", mm)
+		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", "", mm)
 	}
 	require.Equal(t, 1, mm.registerScanCalls)
 
@@ -1905,11 +1910,11 @@ func TestRegisterScanTracker_EvictionWorksAfterCap(t *testing.T) {
 	tracker.cleanup()
 	require.Empty(t, tracker.entries["1.2.3.4"], "entries must expire after window")
 
-	tracker.record("1.2.3.4", "newuser@evil.com", "carrier", "RU", mm)
+	tracker.record("1.2.3.4", "newuser@evil.com", "carrier", "RU", "", mm)
 	require.Equal(t, 1, mm.registerScanCalls, "first AOR after reset must not re-signal")
 
-	tracker.record("1.2.3.4", "newuser2@evil.com", "carrier", "RU", mm)
-	tracker.record("1.2.3.4", "newuser3@evil.com", "carrier", "RU", mm)
+	tracker.record("1.2.3.4", "newuser2@evil.com", "carrier", "RU", "", mm)
+	tracker.record("1.2.3.4", "newuser3@evil.com", "carrier", "RU", "", mm)
 	require.Equal(t, 2, mm.registerScanCalls, "new burst after eviction must signal again")
 }
 
@@ -1918,12 +1923,12 @@ func TestRegisterScanTracker_MultipleIPsIndependent(t *testing.T) {
 	tracker := newRegisterScanTracker(3, time.Minute)
 
 	for i := range 3 {
-		tracker.record("10.0.0.1", fmt.Sprintf("user%d@a.com", i), "carrier", "RU", mm)
+		tracker.record("10.0.0.1", fmt.Sprintf("user%d@a.com", i), "carrier", "RU", "", mm)
 	}
 	require.Equal(t, 1, mm.registerScanCalls, "IP1 at threshold must signal")
 
-	tracker.record("10.0.0.2", "user0@b.com", "carrier", "RU", mm)
-	tracker.record("10.0.0.2", "user1@b.com", "carrier", "RU", mm)
+	tracker.record("10.0.0.2", "user0@b.com", "carrier", "RU", "", mm)
+	tracker.record("10.0.0.2", "user1@b.com", "carrier", "RU", "", mm)
 	require.Equal(t, 1, mm.registerScanCalls, "IP2 below threshold must not signal")
 }
 
@@ -1936,14 +1941,14 @@ func TestRegisterScanTracker_NoWastedEventAfterExpiry(t *testing.T) {
 	tracker := newRegisterScanTracker(3, 50*time.Millisecond)
 
 	for i := range 3 {
-		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", mm)
+		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", "", mm)
 	}
 	require.Equal(t, 1, mm.registerScanCalls, "at threshold must signal")
 
 	time.Sleep(80 * time.Millisecond)
 
 	// Eviction happens inside record(), NOT via cleanup().
-	tracker.record("1.2.3.4", "newuser@evil.com", "carrier", "RU", mm)
+	tracker.record("1.2.3.4", "newuser@evil.com", "carrier", "RU", "", mm)
 
 	require.Len(t, tracker.entries["1.2.3.4"], 1,
 		"first event after window expiry must be recorded, not wasted")
@@ -1956,7 +1961,7 @@ func TestRegisterScanTracker_RetriggerAtExactThreshold(t *testing.T) {
 	tracker := newRegisterScanTracker(3, 50*time.Millisecond)
 
 	for i := range 3 {
-		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", mm)
+		tracker.record("1.2.3.4", fmt.Sprintf("user%d@evil.com", i), "carrier", "RU", "", mm)
 	}
 	require.Equal(t, 1, mm.registerScanCalls, "first burst must signal")
 
@@ -1964,9 +1969,9 @@ func TestRegisterScanTracker_RetriggerAtExactThreshold(t *testing.T) {
 
 	// Without cleanup(), eviction happens lazily inside record().
 	// Exactly threshold events must re-trigger — not threshold+1.
-	tracker.record("1.2.3.4", "new1@evil.com", "carrier", "RU", mm)
-	tracker.record("1.2.3.4", "new2@evil.com", "carrier", "RU", mm)
-	tracker.record("1.2.3.4", "new3@evil.com", "carrier", "RU", mm)
+	tracker.record("1.2.3.4", "new1@evil.com", "carrier", "RU", "", mm)
+	tracker.record("1.2.3.4", "new2@evil.com", "carrier", "RU", "", mm)
+	tracker.record("1.2.3.4", "new3@evil.com", "carrier", "RU", "", mm)
 
 	require.Equal(t, 2, mm.registerScanCalls,
 		"re-trigger after window expiry must fire at exactly threshold events")
@@ -1979,11 +1984,11 @@ func TestInviteBurstTracker_SignalsAtThreshold(t *testing.T) {
 	tracker := newInviteBurstTracker(5, time.Minute)
 
 	for range 4 {
-		tracker.record("1.2.3.4", "carrier", "RU", mm)
+		tracker.record("1.2.3.4", "carrier", "RU", "", mm)
 	}
 	require.Zero(t, mm.inviteBurstCalls, "below threshold must not signal")
 
-	tracker.record("1.2.3.4", "carrier", "RU", mm)
+	tracker.record("1.2.3.4", "carrier", "RU", "", mm)
 	require.Equal(t, 1, mm.inviteBurstCalls, "at threshold must signal")
 }
 
@@ -1992,7 +1997,7 @@ func TestInviteBurstTracker_IncrementsPerInviteAboveThreshold(t *testing.T) {
 	tracker := newInviteBurstTracker(3, time.Minute)
 
 	for range 10 {
-		tracker.record("1.2.3.4", "carrier", "RU", mm)
+		tracker.record("1.2.3.4", "carrier", "RU", "", mm)
 	}
 	require.Equal(t, 8, mm.inviteBurstCalls, "must increment for each INVITE at or above threshold (10-3+1=8)")
 }
@@ -2001,7 +2006,7 @@ func TestInviteBurstTracker_NilTrackerSafe(t *testing.T) {
 	mm := &mockMetricser{}
 	var tracker *inviteBurstTracker
 
-	tracker.record("1.2.3.4", "carrier", "RU", mm)
+	tracker.record("1.2.3.4", "carrier", "RU", "", mm)
 	require.Zero(t, mm.inviteBurstCalls, "nil tracker must be no-op")
 }
 
@@ -2009,7 +2014,7 @@ func TestInviteBurstTracker_EmptySrcIPSkipped(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newInviteBurstTracker(1, time.Minute)
 
-	tracker.record("", "carrier", "RU", mm)
+	tracker.record("", "carrier", "RU", "", mm)
 	require.Zero(t, mm.inviteBurstCalls, "empty srcIP must be skipped")
 }
 
@@ -2029,8 +2034,12 @@ func TestHandleMessage_ReINVITE_ExcludedFromBurst(t *testing.T) {
 		inviteBurstTracker: newInviteBurstTracker(3, time.Minute),
 	}
 
-	md.Create("call-id:abc:xyz",
-		time.Now().Add(1*time.Hour), time.Now(), "", "", "", "call-id", "")
+	md.Create(service.DialogParams{
+		DialogID:  "call-id:abc:xyz",
+		ExpiresAt: time.Now().Add(1 * time.Hour),
+		CreatedAt: time.Now(),
+		CallID:    "call-id",
+	})
 
 	input := []byte("INVITE sip:test SIP/2.0\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
@@ -2918,8 +2927,8 @@ func TestSIPDialogMetricsUpdate_ExpiredIncrementsSessionCompleted(t *testing.T) 
 
 	results := e.services.dialoger.Cleanup()
 	for _, r := range results {
-		e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry)
-		e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
+		e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry, "")
+		e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, "", r.Duration)
 	}
 
 	require.True(t, mm.sessionCompletedFlag)
@@ -2943,16 +2952,15 @@ func TestExporter_InviteTracker_StoreAndMeasure(t *testing.T) {
 
 	callID := "test-call-id-123"
 
-	e.storeInviteTime(callID, "other", "other", "")
+	e.storeInviteTime(callID, "other", "other", "", "")
 
-	delayMs, carrier, _, _, ok := e.readInviteEntry(callID)
-	require.True(t, ok, "readInviteEntry should return true for existing entry")
-	require.Greater(t, delayMs, 0.0, "delay should be positive")
-	require.Equal(t, "other", carrier)
+	r := e.readInviteEntry(callID)
+	require.True(t, r.Ok, "readInviteEntry should return true for existing entry")
+	require.Greater(t, r.DelayMs, 0.0, "delay should be positive")
+	require.Equal(t, "other", r.Carrier)
 
 	e.removeInviteTime(callID)
-	_, _, _, _, ok = e.readInviteEntry(callID)
-	require.False(t, ok, "entry should not exist after remove")
+	require.False(t, e.readInviteEntry(callID).Ok, "entry should not exist after remove")
 }
 
 func TestExporter_InviteTracker_StoreAndRemove(t *testing.T) {
@@ -2969,10 +2977,10 @@ func TestExporter_InviteTracker_StoreAndRemove(t *testing.T) {
 
 	callID := "test-call-id-remove"
 
-	e.storeInviteTime(callID, "other", "other", "")
+	e.storeInviteTime(callID, "other", "other", "", "")
 	e.removeInviteTime(callID)
 
-	_, _, _, _, ok := e.readInviteEntry(callID)
+	ok := e.readInviteEntry(callID).Ok
 	require.False(t, ok, "entry should not exist after remove")
 }
 
@@ -2988,10 +2996,10 @@ func TestExporter_InviteTracker_MeasureNonExistent(t *testing.T) {
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
-	delayMs, carrier, _, _, ok := e.readInviteEntry("nonexistent")
-	require.False(t, ok, "readInviteEntry should return false for nonexistent entry")
-	require.InDelta(t, 0.0, delayMs, 0.01)
-	require.Empty(t, carrier)
+	r := e.readInviteEntry("nonexistent")
+	require.False(t, r.Ok, "readInviteEntry should return false for nonexistent entry")
+	require.InDelta(t, 0.0, r.DelayMs, 0.01)
+	require.Empty(t, r.Carrier)
 }
 
 func TestExporter_InviteTracker_RemoveNonExistent(_ *testing.T) {
@@ -3031,9 +3039,9 @@ func TestExporter_InviteTracker_TTLExpired(t *testing.T) {
 
 	e.cleanupInviteTracker()
 
-	_, _, _, _, expiredExists := e.readInviteEntry("expired-call-id")
-	_, _, _, _, borderExists := e.readInviteEntry("border-call-id")
-	_, _, _, _, freshExists := e.readInviteEntry("fresh-call-id")
+	expiredExists := e.readInviteEntry("expired-call-id").Ok
+	borderExists := e.readInviteEntry("border-call-id").Ok
+	freshExists := e.readInviteEntry("fresh-call-id").Ok
 
 	require.False(t, expiredExists, "expired entry (61s) should be removed")
 	require.True(t, borderExists, "entry at 59s should remain (TTL=60s)")
@@ -3057,7 +3065,7 @@ func TestExporter_InviteTracker_TTLNotExpired(t *testing.T) {
 
 	e.cleanupInviteTracker()
 
-	_, _, _, _, exists := e.readInviteEntry("recent-call-id")
+	exists := e.readInviteEntry("recent-call-id").Ok
 	require.True(t, exists, "entry at 30s should remain (TTL=60s)")
 }
 
@@ -3073,16 +3081,16 @@ func TestExporter_InviteTracker_DifferentCallIDs(t *testing.T) {
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
-	e.storeInviteTime("call-id-1", "other", "other", "")
-	e.storeInviteTime("call-id-2", "other", "other", "")
+	e.storeInviteTime("call-id-1", "other", "other", "", "")
+	e.storeInviteTime("call-id-2", "other", "other", "", "")
 
-	_, _, _, _, ok1 := e.readInviteEntry("call-id-1")
-	_, _, _, _, ok2 := e.readInviteEntry("call-id-2")
+	ok1 := e.readInviteEntry("call-id-1").Ok
+	ok2 := e.readInviteEntry("call-id-2").Ok
 	require.True(t, ok1)
 	require.True(t, ok2)
 
 	e.removeInviteTime("call-id-1")
-	_, _, _, _, ok1 = e.readInviteEntry("call-id-1")
+	ok1 = e.readInviteEntry("call-id-1").Ok
 	require.False(t, ok1, "call-id-1 should be removed")
 }
 
@@ -3376,7 +3384,7 @@ func TestHandleMessage_TTR_FinalResponseRemovesTracker(t *testing.T) {
 
 	require.False(t, mm.ttrUpdated, "TTR should NOT be measured for non-1xx response")
 
-	_, _, _, _, ok := e.readInviteEntry("ttr-final-remove")
+	ok := e.readInviteEntry("ttr-final-remove").Ok
 	require.False(t, ok, "tracker entry should be removed after final response")
 }
 
@@ -3876,22 +3884,22 @@ func newCarrierTrackingMetricser() *carrierTrackingMetricser {
 	}
 }
 
-func (m *carrierTrackingMetricser) Request(carrier, _, _, _, _, _, _ string, in []byte) {
+func (m *carrierTrackingMetricser) Request(carrier, _, _, _, _, _, _, _ string, in []byte) {
 	m.requests = append(m.requests, carrierCall{carrier: carrier, method: string(in)})
 	m.packetsTotal++
 }
 
-func (m *carrierTrackingMetricser) Reinvite(carrier, _, _ string) {
+func (m *carrierTrackingMetricser) Reinvite(carrier, _, _, _ string) {
 	m.requests = append(m.requests, carrierCall{carrier: carrier, method: "REINVITE"})
 	m.packetsTotal++
 }
 
-func (m *carrierTrackingMetricser) Response(_, _, _ string, _ []byte, _ bool) {
+func (m *carrierTrackingMetricser) Response(_, _, _, _ string, _ []byte, _ bool) {
 	m.packetsTotal++
 }
 
 func (m *carrierTrackingMetricser) ResponseWithMetrics(
-	carrier, _, _ string, status []byte, isInviteResponse, is200OK bool,
+	carrier, _, _, _ string, status []byte, isInviteResponse, is200OK bool,
 ) {
 	m.responseWithMetrics = append(m.responseWithMetrics, carrierCall{carrier: carrier, method: string(status)})
 	m.packetsTotal++
@@ -3900,78 +3908,78 @@ func (m *carrierTrackingMetricser) ResponseWithMetrics(
 	}
 }
 
-func (m *carrierTrackingMetricser) Invite200OK(_, _, _, _, _, _, _ string) {
+func (m *carrierTrackingMetricser) Invite200OK(_, _, _, _, _, _, _, _ string) {
 	// Tracking is done via ResponseWithMetrics which receives the is200OK flag.
 }
 
-func (m *carrierTrackingMetricser) SessionCompleted(carrier, _, _ string) {
+func (m *carrierTrackingMetricser) SessionCompleted(carrier, _, _, _ string) {
 	m.sessionCompleted = append(m.sessionCompleted, carrierCall{carrier: carrier})
 }
 
-func (m *carrierTrackingMetricser) RegisterSuccess(carrier, _, _ string) {
+func (m *carrierTrackingMetricser) RegisterSuccess(carrier, _, _, _ string) {
 	m.registerSuccess = append(m.registerSuccess, carrier)
 }
 
-func (m *carrierTrackingMetricser) RegisterFailure(carrier, _, _, code string) {
+func (m *carrierTrackingMetricser) RegisterFailure(carrier, _, _, _ string, code string) {
 	m.registerFailure = append(m.registerFailure, carrierFailure{carrier: carrier, code: code})
 }
 
-func (m *carrierTrackingMetricser) RegisterCountryChange(carrier, sourceCountry string) {
+func (m *carrierTrackingMetricser) RegisterCountryChange(carrier, sourceCountry, _ string) {
 	m.registerCountryChange = append(m.registerCountryChange,
 		carrierCall{carrier: carrier, sourceCountry: sourceCountry})
 }
 
-func (m *carrierTrackingMetricser) RegisterScan(carrier, sourceCountry string) {
+func (m *carrierTrackingMetricser) RegisterScan(carrier, sourceCountry, _ string) {
 	m.registerScan = append(m.registerScan,
 		carrierCall{carrier: carrier, sourceCountry: sourceCountry})
 }
 
-func (m *carrierTrackingMetricser) InviteBurst(carrier, sourceCountry string) {
+func (m *carrierTrackingMetricser) InviteBurst(carrier, sourceCountry, _ string) {
 	m.inviteBurst = append(m.inviteBurst,
 		carrierCall{carrier: carrier, sourceCountry: sourceCountry})
 }
 
-func (m *carrierTrackingMetricser) SIPRetransmission(carrier, _, _, method string) {
+func (m *carrierTrackingMetricser) SIPRetransmission(carrier, _, _, _, method string) {
 	m.retransmissionCalls = append(m.retransmissionCalls,
 		carrierCall{carrier: carrier, method: method})
 }
 
-func (m *carrierTrackingMetricser) UpdateShortCalls(string, string, string, time.Duration) {}
+func (m *carrierTrackingMetricser) UpdateShortCalls(string, string, string, string, time.Duration) {}
 
-func (m *carrierTrackingMetricser) UpdateBillableSeconds(carrier, _ string, duration time.Duration) {
+func (m *carrierTrackingMetricser) UpdateBillableSeconds(carrier, _, _ string, duration time.Duration) {
 	m.billableCalls = append(m.billableCalls,
 		carrierCall{carrier: carrier, value: duration.Seconds()})
 }
 
-func (m *carrierTrackingMetricser) UpdateRRD(carrier, _, _ string, delayMs float64) {
+func (m *carrierTrackingMetricser) UpdateRRD(carrier, _, _, _ string, delayMs float64) {
 	m.rrdCalls = append(m.rrdCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
-func (m *carrierTrackingMetricser) UpdateSPD(carrier, _, _ string, duration time.Duration) {
+func (m *carrierTrackingMetricser) UpdateSPD(carrier, _, _, _ string, duration time.Duration) {
 	m.spdCalls = append(m.spdCalls, carrierCall{carrier: carrier, value: duration.Seconds()})
 }
 
-func (m *carrierTrackingMetricser) UpdateTTR(carrier, _, _ string, delayMs float64) {
+func (m *carrierTrackingMetricser) UpdateTTR(carrier, _, _, _ string, delayMs float64) {
 	m.ttrCalls = append(m.ttrCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
-func (m *carrierTrackingMetricser) UpdatePDD(carrier, _, _ string, delayMs float64) {
+func (m *carrierTrackingMetricser) UpdatePDD(carrier, _, _, _ string, delayMs float64) {
 	m.pddCalls = append(m.pddCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
-func (m *carrierTrackingMetricser) UpdateORD(carrier, _, _ string, delayMs float64) {
+func (m *carrierTrackingMetricser) UpdateORD(carrier, _, _, _ string, delayMs float64) {
 	m.ordCalls = append(m.ordCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
-func (m *carrierTrackingMetricser) UpdateLRD(carrier, _, _ string, delayMs float64) {
+func (m *carrierTrackingMetricser) UpdateLRD(carrier, _, _, _ string, delayMs float64) {
 	m.lrdCalls = append(m.lrdCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
-func (m *carrierTrackingMetricser) UpdatePBD(carrier, _, _ string, delayMs float64) {
+func (m *carrierTrackingMetricser) UpdatePBD(carrier, _, _, _ string, delayMs float64) {
 	m.pbdCalls = append(m.pbdCalls, carrierCall{carrier: carrier, value: delayMs})
 }
 
-func (m *carrierTrackingMetricser) UpdateSession(carrier, uaType, _ string, size int) {
+func (m *carrierTrackingMetricser) UpdateSession(carrier, uaType, _, _ string, size int) {
 	if m.sessionsByCarrierAndUA[carrier] == nil {
 		m.sessionsByCarrierAndUA[carrier] = make(map[string]int)
 	}
@@ -3996,24 +4004,27 @@ func (m *carrierTrackingMetricser) UpdateChannelCapacity(int)          {}
 func (m *carrierTrackingMetricser) UpdateTrackerSize(string, int)      {}
 func (m *carrierTrackingMetricser) UpdateActiveDialogs(int)            {}
 
-func (m *carrierTrackingMetricser) UpdateVQReport(carrier, uaType, _ string, _ *vq.SessionReport) {
+func (m *carrierTrackingMetricser) UpdateVQReport(carrier, uaType, _, _ string, _ *vq.SessionReport) {
 	m.vqReports = append(m.vqReports, carrierCall{carrier: carrier, uaType: uaType})
 }
 
-func (m *carrierTrackingMetricser) UpdateRTPPackets(string, string, string, string)         {}
-func (m *carrierTrackingMetricser) UpdateRTPLoss(string, string, string, string, uint64)    {}
-func (m *carrierTrackingMetricser) UpdateRTPDuplicates(string, string, string, string)      {}
-func (m *carrierTrackingMetricser) UpdateRTPOutOfOrder(string, string, string, string)      {}
-func (m *carrierTrackingMetricser) UpdateRTPJitter(string, string, string, string, float64) {}
-func (m *carrierTrackingMetricser) UpdateRTPMOS(string, string, string, string, float64)    {}
-func (m *carrierTrackingMetricser) UpdateRTPMOSVariants(string, string, string, string, float64, float64, float64) {
+func (m *carrierTrackingMetricser) UpdateRTPPackets(string, string, string, string, string)         {}
+func (m *carrierTrackingMetricser) UpdateRTPLoss(string, string, string, string, string, uint64)    {}
+func (m *carrierTrackingMetricser) UpdateRTPDuplicates(string, string, string, string, string)      {}
+func (m *carrierTrackingMetricser) UpdateRTPOutOfOrder(string, string, string, string, string)      {}
+func (m *carrierTrackingMetricser) UpdateRTPJitter(string, string, string, string, string, float64) {}
+func (m *carrierTrackingMetricser) UpdateRTPMOS(string, string, string, string, string, float64)    {}
+func (m *carrierTrackingMetricser) UpdateRTPMOSVariants(
+	string, string, string, string, string, float64, float64, float64,
+) {
 }
-func (m *carrierTrackingMetricser) UpdateRTPRFactor(string, string, string, string, float64) {}
-func (m *carrierTrackingMetricser) UpdateRTPLossDistribution(string, string, string, string, float64, float64) {
+func (m *carrierTrackingMetricser) UpdateRTPRFactor(string, string, string, string, string, float64) {
+}
+func (m *carrierTrackingMetricser) UpdateRTPLossDistribution(string, string, string, string, string, float64, float64) {
 }
 func (m *carrierTrackingMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount) {}
-func (m *carrierTrackingMetricser) OneWayCall(string, string, string)               {}
-func (m *carrierTrackingMetricser) MissingRTP(string, string, string)               {}
+func (m *carrierTrackingMetricser) OneWayCall(string, string, string, string)       {}
+func (m *carrierTrackingMetricser) MissingRTP(string, string, string, string)       {}
 
 // ==================== SIP message builders for MC/DC tests ====================
 
@@ -4211,8 +4222,7 @@ func TestMCDC_TC6_TTR_Non1xxResponse_NotMeasured(t *testing.T) {
 
 	require.Eventually(t, func() bool { return len(mm.invite200OK) > 0 }, 100*time.Millisecond, 10*time.Millisecond)
 	require.Empty(t, mm.ttrCalls)
-	_, _, _, _, ok := e.readInviteEntry("tc6")
-	require.False(t, ok)
+	require.False(t, e.readInviteEntry("tc6").Ok)
 }
 
 func TestMCDC_TC7_TTR_NonInviteResponse_Ignored(t *testing.T) {
@@ -4305,8 +4315,8 @@ func TestMCDC_TC12_DialogExpiry_CarrierFromDialog(t *testing.T) {
 
 	results := e.services.dialoger.Cleanup()
 	for _, r := range results {
-		e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry)
-		e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
+		e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry, "")
+		e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, "", r.Duration)
 	}
 
 	require.Len(t, mm.sessionCompleted, 1)
@@ -4362,10 +4372,10 @@ func TestBillable_CleanupExpiry(t *testing.T) {
 
 	results := e.services.dialoger.Cleanup()
 	for _, r := range results {
-		e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry)
-		e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
-		e.services.metricser.UpdateShortCalls(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
-		e.services.metricser.UpdateBillableSeconds(r.Carrier, r.DestinationCountry, r.Duration)
+		e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry, "")
+		e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, "", r.Duration)
+		e.services.metricser.UpdateShortCalls(r.Carrier, r.UAType, r.SourceCountry, "", r.Duration)
+		e.services.metricser.UpdateBillableSeconds(r.Carrier, r.DestinationCountry, "", r.Duration)
 	}
 
 	require.Len(t, mm.billableCalls, 1)
@@ -4384,8 +4394,8 @@ func TestMCDC_TC13_DialogExpiry_DifferentCarrier(t *testing.T) {
 
 	results := e.services.dialoger.Cleanup()
 	for _, r := range results {
-		e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry)
-		e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
+		e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry, "")
+		e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, "", r.Duration)
 	}
 
 	require.Equal(t, "carrier-B", mm.sessionCompleted[0].carrier)
@@ -4569,8 +4579,7 @@ func TestHandleMessage_CANCEL_RemovesInviteTracker(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		_, _, _, _, ok := e.readInviteEntry("cancel-test-1")
-		return ok
+		return e.readInviteEntry("cancel-test-1").Ok
 	}, 100*time.Millisecond, 10*time.Millisecond, "inviteTracker should have entry after INVITE")
 
 	cancelPkt := []byte("CANCEL sip:test SIP/2.0\r\n" +
@@ -4582,7 +4591,7 @@ func TestHandleMessage_CANCEL_RemovesInviteTracker(t *testing.T) {
 	err = e.handleMessage("other", "", cancelPkt)
 	require.NoError(t, err)
 
-	_, _, _, _, ok := e.readInviteEntry("cancel-test-1")
+	ok := e.readInviteEntry("cancel-test-1").Ok
 	require.False(t, ok, "inviteTracker entry should be removed after CANCEL")
 }
 
@@ -4638,8 +4647,7 @@ func TestHandleMessage_CANCEL_ThenProvisional_NoTTR(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		_, _, _, _, ok := e.readInviteEntry("cancel-ttr-test")
-		return ok
+		return e.readInviteEntry("cancel-ttr-test").Ok
 	}, 100*time.Millisecond, 10*time.Millisecond)
 
 	cancelPkt := []byte("CANCEL sip:test SIP/2.0\r\n" +
@@ -5434,6 +5442,85 @@ func TestReadSocket_FailStopNoSystemError(t *testing.T) {
 
 	require.False(t, mm.systemErrorCalled,
 		"SystemError should not be called on fail-stop (EBADF/ENETDOWN/ENODEV)")
+}
+
+func TestDirectionFromPkttype(t *testing.T) {
+	tests := []struct {
+		name       string
+		pkttype    uint8
+		isResponse bool
+		want       string
+	}{
+		{"request_host_inbound", unix.PACKET_HOST, false, directionInbound},
+		{"request_outgoing_outbound", unix.PACKET_OUTGOING, false, directionOutbound},
+		{"response_host_outbound", unix.PACKET_HOST, true, directionOutbound},
+		{"response_outgoing_inbound", unix.PACKET_OUTGOING, true, directionInbound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, directionFromPkttype(tt.pkttype, tt.isResponse))
+		})
+	}
+}
+
+type directionTrackingMetricser struct {
+	mockMetricser
+
+	requestDirections  []string
+	responseDirections []string
+}
+
+func (m *directionTrackingMetricser) Request(_, _, _, _, _, _, _, direction string, _ []byte) {
+	m.requestDirections = append(m.requestDirections, direction)
+}
+
+func (m *directionTrackingMetricser) ResponseWithMetrics(_, _, _, direction string, _ []byte, _, _ bool) {
+	m.responseDirections = append(m.responseDirections, direction)
+}
+
+func TestHandleMessage_DirectionFromPkttype(t *testing.T) {
+	tests := []struct {
+		name      string
+		pktType   uint8
+		isRequest bool
+		wantDir   string
+	}{
+		{"request_host_inbound", unix.PACKET_HOST, true, directionInbound},
+		{"request_outgoing_outbound", unix.PACKET_OUTGOING, true, directionOutbound},
+		{"response_host_outbound", unix.PACKET_HOST, false, directionOutbound},
+		{"response_outgoing_inbound", unix.PACKET_OUTGOING, false, directionInbound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mm := &directionTrackingMetricser{}
+			md := &mockDialoger{}
+
+			e := &exporter{
+				services: services{
+					metricser: mm,
+					dialoger:  md,
+				},
+				inviteTracker:  make(map[string]inviteEntry),
+				inviteSDP:      make(map[string]inviteSDPEntity),
+				optionsTracker: make(map[string]optionsEntry),
+				mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
+			}
+			e.pktType = tt.pktType
+
+			callID := tt.name
+			if tt.isRequest {
+				err := e.handleMessage("carrier", "", makeInvite(callID, "ft"))
+				require.NoError(t, err)
+				require.Len(t, mm.requestDirections, 1)
+				require.Equal(t, tt.wantDir, mm.requestDirections[0])
+			} else {
+				err := e.handleMessage("carrier", "", makeTrying(callID, "ft", "tt"))
+				require.NoError(t, err)
+				require.Len(t, mm.responseDirections, 1)
+				require.Equal(t, tt.wantDir, mm.responseDirections[0])
+			}
+		})
+	}
 }
 
 func TestIPPortToKey(t *testing.T) {

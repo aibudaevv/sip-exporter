@@ -45,9 +45,10 @@ type (
 	}
 
 	counterKey struct {
-		Carrier string
-		UAType  string
-		Country string
+		Carrier   string
+		UAType    string
+		Country   string
+		Direction string
 	}
 
 	// LabeledCount pairs a label set with an integer count, used by periodic
@@ -167,44 +168,47 @@ type (
 	// exporter. Every method adds data point(s) to Prometheus collectors
 	// keyed by carrier, user-agent type, and source country.
 	Metricser interface {
-		Request(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface string, in []byte)
-		Reinvite(carrier, uaType, sourceCountry string)
-		Response(carrier, uaType, sourceCountry string, in []byte, isInviteResponse bool)
-		ResponseWithMetrics(carrier, uaType, sourceCountry string, status []byte, isInviteResponse, is200OK bool)
-		Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface string)
-		SessionCompleted(carrier, uaType, sourceCountry string)
-		UpdateRRD(carrier, uaType, sourceCountry string, delayMs float64)
-		UpdateSPD(carrier, uaType, sourceCountry string, duration time.Duration)
-		UpdateTTR(carrier, uaType, sourceCountry string, delayMs float64)
-		UpdatePDD(carrier, uaType, sourceCountry string, delayMs float64)
-		UpdateORD(carrier, uaType, sourceCountry string, delayMs float64)
-		UpdateLRD(carrier, uaType, sourceCountry string, delayMs float64)
-		UpdatePBD(carrier, uaType, sourceCountry string, delayMs float64)
-		UpdateSession(carrier, uaType, sourceCountry string, size int)
+		Request(carrier, uaType, sourceCountry, destinationCountry,
+			callerHost, calledHost, iface, direction string, in []byte)
+		Reinvite(carrier, uaType, sourceCountry, direction string)
+		Response(carrier, uaType, sourceCountry, direction string, in []byte, isInviteResponse bool)
+		ResponseWithMetrics(carrier, uaType, sourceCountry, direction string,
+			status []byte, isInviteResponse, is200OK bool)
+		Invite200OK(carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface, direction string)
+		SessionCompleted(carrier, uaType, sourceCountry, direction string)
+		UpdateRRD(carrier, uaType, sourceCountry, direction string, delayMs float64)
+		UpdateSPD(carrier, uaType, sourceCountry, direction string, duration time.Duration)
+		UpdateTTR(carrier, uaType, sourceCountry, direction string, delayMs float64)
+		UpdatePDD(carrier, uaType, sourceCountry, direction string, delayMs float64)
+		UpdateORD(carrier, uaType, sourceCountry, direction string, delayMs float64)
+		UpdateLRD(carrier, uaType, sourceCountry, direction string, delayMs float64)
+		UpdatePBD(carrier, uaType, sourceCountry, direction string, delayMs float64)
+		UpdateSession(carrier, uaType, sourceCountry, direction string, size int)
 		UpdateSessions(counts []LabeledCount)
 		SetSessionsLimits(limits map[string]int)
-		RegisterSuccess(carrier, uaType, sourceCountry string)
-		RegisterFailure(carrier, uaType, sourceCountry, code string)
-		RegisterCountryChange(carrier, sourceCountry string)
-		RegisterScan(carrier, sourceCountry string)
-		InviteBurst(carrier, sourceCountry string)
-		SIPRetransmission(carrier, uaType, sourceCountry, method string)
-		UpdateShortCalls(carrier, uaType, sourceCountry string, duration time.Duration)
-		UpdateBillableSeconds(carrier, destinationCountry string, duration time.Duration)
+		RegisterSuccess(carrier, uaType, sourceCountry, direction string)
+		RegisterFailure(carrier, uaType, sourceCountry, direction, code string)
+		RegisterCountryChange(carrier, sourceCountry, direction string)
+		RegisterScan(carrier, sourceCountry, direction string)
+		InviteBurst(carrier, sourceCountry, direction string)
+		SIPRetransmission(carrier, uaType, sourceCountry, direction, method string)
+		UpdateShortCalls(carrier, uaType, sourceCountry, direction string, duration time.Duration)
+		UpdateBillableSeconds(carrier, destinationCountry, direction string, duration time.Duration)
 		UpdateActiveRegistrations(counts []LabeledCount)
-		UpdateVQReport(carrier, uaType, sourceCountry string, report *vq.SessionReport)
-		UpdateRTPPackets(carrier, uaType, codec, sourceCountry string)
-		UpdateRTPLoss(carrier, uaType, codec, sourceCountry string, lost uint64)
-		UpdateRTPDuplicates(carrier, uaType, codec, sourceCountry string)
-		UpdateRTPOutOfOrder(carrier, uaType, codec, sourceCountry string)
-		UpdateRTPJitter(carrier, uaType, codec, sourceCountry string, jitterMs float64)
-		UpdateRTPMOS(carrier, uaType, codec, sourceCountry string, mos float64)
-		UpdateRTPMOSVariants(carrier, uaType, codec, sourceCountry string, f1, f2, adapt float64)
-		UpdateRTPRFactor(carrier, uaType, codec, sourceCountry string, rFactor float64)
-		UpdateRTPLossDistribution(carrier, uaType, codec, sourceCountry string, burstDensity, gapDensity float64)
+		UpdateVQReport(carrier, uaType, sourceCountry, direction string, report *vq.SessionReport)
+		UpdateRTPPackets(carrier, uaType, codec, sourceCountry, direction string)
+		UpdateRTPLoss(carrier, uaType, codec, sourceCountry, direction string, lost uint64)
+		UpdateRTPDuplicates(carrier, uaType, codec, sourceCountry, direction string)
+		UpdateRTPOutOfOrder(carrier, uaType, codec, sourceCountry, direction string)
+		UpdateRTPJitter(carrier, uaType, codec, sourceCountry, direction string, jitterMs float64)
+		UpdateRTPMOS(carrier, uaType, codec, sourceCountry, direction string, mos float64)
+		UpdateRTPMOSVariants(carrier, uaType, codec, sourceCountry, direction string, f1, f2, adapt float64)
+		UpdateRTPRFactor(carrier, uaType, codec, sourceCountry, direction string, rFactor float64)
+		UpdateRTPLossDistribution(carrier, uaType, codec, sourceCountry, direction string,
+			burstDensity, gapDensity float64)
 		UpdateRTPActiveStreams(counts []LabeledCount)
-		OneWayCall(carrier, uaType, sourceCountry string)
-		MissingRTP(carrier, uaType, sourceCountry string)
+		OneWayCall(carrier, uaType, sourceCountry, direction string)
+		MissingRTP(carrier, uaType, sourceCountry, direction string)
 		SystemError()
 		ParseError(errorType string)
 		SocketStats(stats []SocketStat)
@@ -229,11 +233,11 @@ type (
 )
 
 func (counterKey) labelNames() []string {
-	return []string{"carrier", "ua_type", "source_country"}
+	return []string{"carrier", "ua_type", "source_country", "direction"}
 }
 
 func (k counterKey) labelValues() []string {
-	return []string{k.Carrier, k.UAType, k.Country}
+	return []string{k.Carrier, k.UAType, k.Country, k.Direction}
 }
 
 func (rc *ratioCollector) Describe(ch chan<- *prometheus.Desc) {
@@ -285,9 +289,9 @@ func newMetricserWithRegistry(reg *prometheus.Registry) Metricser {
 }
 
 func (m *metrics) initRequestCounters(reg *prometheus.Registry) {
-	cl := []string{"carrier", "ua_type", "source_country"}
+	cl := []string{"carrier", "ua_type", "source_country", "direction"}
 	clInvite := []string{
-		"carrier", "ua_type", "source_country",
+		"carrier", "ua_type", "source_country", "direction",
 		"destination_country", "caller_host", "called_host", "iface",
 	}
 	m.requestInviteTotal = newCounterVecWithRegistry(
@@ -341,7 +345,7 @@ func (m *metrics) initRequestCounters(reg *prometheus.Registry) {
 }
 
 func (m *metrics) initStatusCounters(reg *prometheus.Registry) {
-	cl := []string{"carrier", "ua_type", "source_country"}
+	cl := []string{"carrier", "ua_type", "source_country", "direction"}
 	statusCodes := []struct {
 		code string
 		help string
@@ -387,7 +391,7 @@ func (m *metrics) initStatusCounters(reg *prometheus.Registry) {
 }
 
 func (m *metrics) initSessionMetrics(reg *prometheus.Registry) {
-	cl := []string{"carrier", "ua_type", "source_country"}
+	cl := []string{"carrier", "ua_type", "source_country", "direction"}
 	m.sdc = newCounterVecWithRegistry(
 		"sip_exporter_sdc_total",
 		"Total number of completed SIP sessions", cl, reg)
@@ -409,7 +413,7 @@ func (m *metrics) initSessionMetrics(reg *prometheus.Registry) {
 }
 
 func (m *metrics) initRegistrationMetrics(reg *prometheus.Registry) {
-	cl := []string{"carrier", "ua_type", "source_country"}
+	cl := []string{"carrier", "ua_type", "source_country", "direction"}
 	m.registerSuccessTotal = newCounterVecWithRegistry(
 		"sip_exporter_register_success_total",
 		"Total number of successful REGISTER responses (200 OK)", cl, reg)
@@ -423,17 +427,17 @@ func (m *metrics) initRegistrationMetrics(reg *prometheus.Registry) {
 	m.registerCountryChange = newCounterVecWithRegistry(
 		"sip_exporter_register_country_change_total",
 		"Number of times a SIP user re-registered from a different source country (account takeover signal)",
-		[]string{"carrier", "source_country"}, reg)
+		[]string{"carrier", "source_country", "direction"}, reg)
 	m.registerScanTotal = newCounterVecWithRegistry(
 		"sip_exporter_register_scan_total",
 		"Total registration events where unique-AOR count from a single source IP reached or exceeded the scan threshold",
-		[]string{"carrier", "source_country"},
+		[]string{"carrier", "source_country", "direction"},
 		reg,
 	)
 	m.inviteBurstTotal = newCounterVecWithRegistry(
 		"sip_exporter_invite_burst_total",
 		"INVITEs from a single IP exceeding the burst threshold (per INVITE at or above threshold, excludes re-INVITEs)",
-		[]string{"carrier", "source_country"},
+		[]string{"carrier", "source_country", "direction"},
 		reg,
 	)
 	m.sipRetransmission = newCounterVecWithRegistry(
@@ -451,14 +455,14 @@ func (m *metrics) initRegistrationMetrics(reg *prometheus.Registry) {
 	m.billableSeconds = newCounterVecWithRegistry(
 		"sip_exporter_billable_seconds_total",
 		"Total billable seconds of completed sessions by destination country",
-		[]string{"carrier", "destination_country"},
+		[]string{"carrier", "destination_country", "direction"},
 		reg,
 	)
 }
 
 func (m *metrics) initHistograms(reg *prometheus.Registry) {
 	msBuckets := []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000}
-	cl := []string{"carrier", "ua_type", "source_country"}
+	cl := []string{"carrier", "ua_type", "source_country", "direction"}
 	m.rrd = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_rrd",
 		Help:    "Registration Request Delay in milliseconds (RFC 6076)",
@@ -503,7 +507,7 @@ func (m *metrics) initVQHistograms(reg *prometheus.Registry) {
 	mosBuckets := []float64{1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0}
 	rFactorBuckets := []float64{0, 10, 20, 30, 50, 60, 70, 80, 90, 100, 120}
 	rerlBuckets := []float64{0, 5, 10, 15, 20, 30, 40, 50, 60, 80, 100}
-	cl := []string{"carrier", "ua_type", "source_country"}
+	cl := []string{"carrier", "ua_type", "source_country", "direction"}
 	m.vqNLR = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_vq_nlr_percent",
 		Help:    "Voice Quality Network Packet Loss Rate percentage (RFC 6035)",
@@ -595,7 +599,7 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 	mosBuckets := []float64{1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0}
 	rFactorBuckets := []float64{10, 20, 30, 40, 50, 60, 70, 80, 85, 90, 93, 100}
 	lossDensityBuckets := []float64{10, 25, 50, 75, 100}
-	rl := []string{"carrier", "ua_type", "codec", "source_country"}
+	rl := []string{"carrier", "ua_type", "codec", "source_country", "direction"}
 	m.rtpPackets = newCounterVecWithRegistry(
 		"sip_exporter_rtp_packets_total",
 		"Total number of RTP packets observed (correlated with SIP dialogs)", rl, reg)
@@ -648,7 +652,7 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 		Help:    "Percentage of lost RTP packets in isolated gaps, range 0-100",
 		Buckets: lossDensityBuckets,
 	}, rl, reg)
-	rl3 := []string{"carrier", "ua_type", "source_country"}
+	rl3 := []string{"carrier", "ua_type", "source_country", "direction"}
 	m.rtpOneWayCalls = newCounterVecWithRegistry(
 		"sip_exporter_rtp_oneway_calls_total",
 		"SIP dialogs where RTP was observed in only one direction (one-way audio)", rl3, reg)
@@ -822,134 +826,135 @@ func registerRatioCollector(
 
 func (m *metrics) Request(
 	carrier, uaType, sourceCountry, destinationCountry,
-	callerHost, calledHost, iface string, in []byte,
+	callerHost, calledHost, iface, direction string, in []byte,
 ) {
 	defer m.sipPacketsTotal.Inc()
 
 	switch {
 	case bytes.Equal(in, []byte("PUBLISH")):
-		m.requestPublishTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+		m.requestPublishTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 	case bytes.Equal(in, []byte("PRACK")):
-		m.requestPrackTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+		m.requestPrackTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 	case bytes.Equal(in, []byte("NOTIFY")):
-		m.requestNotifyTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+		m.requestNotifyTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 	case bytes.Equal(in, []byte("SUBSCRIBE")):
-		m.requestSubscribeTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+		m.requestSubscribeTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 	case bytes.Equal(in, []byte("REFER")):
-		m.requestReferTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+		m.requestReferTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 	case bytes.Equal(in, []byte("INFO")):
-		m.requestInfoTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+		m.requestInfoTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 	case bytes.Equal(in, []byte("UPDATE")):
-		m.requestUpdateTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+		m.requestUpdateTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 	case bytes.Equal(in, []byte("REGISTER")):
-		m.requestRegisterTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+		m.requestRegisterTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 	case bytes.Equal(in, []byte("OPTIONS")):
-		m.requestOptionsTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+		m.requestOptionsTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 	case bytes.Equal(in, []byte("CANCEL")):
-		m.requestCancelTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+		m.requestCancelTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 	case bytes.Equal(in, []byte("BYE")):
-		m.requestByeTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+		m.requestByeTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 	case bytes.Equal(in, []byte("ACK")):
-		m.requestACKTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+		m.requestACKTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 	case bytes.Equal(in, []byte("INVITE")):
 		m.requestInviteTotal.WithLabelValues(
-			carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface,
+			carrier, uaType, sourceCountry, direction,
+			destinationCountry, callerHost, calledHost, iface,
 		).Inc()
-		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).inviteTotal.Add(1)
+		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry, direction).inviteTotal.Add(1)
 	case bytes.Equal(in, []byte("MESSAGE")):
-		m.requestMessageTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+		m.requestMessageTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 	default:
 		zap.L().Warn("unknown request", zap.ByteString("in", in))
 	}
 }
 
-func (m *metrics) Reinvite(carrier, uaType, sourceCountry string) {
+func (m *metrics) Reinvite(carrier, uaType, sourceCountry, direction string) {
 	defer m.sipPacketsTotal.Inc()
-	m.requestReinviteTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+	m.requestReinviteTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 }
 
-func (m *metrics) Response(carrier, uaType, sourceCountry string, in []byte, isInviteResponse bool) {
+func (m *metrics) Response(carrier, uaType, sourceCountry, direction string, in []byte, isInviteResponse bool) {
 	defer m.sipPacketsTotal.Inc()
 
-	m.incrementStatusCodeCounter(carrier, uaType, sourceCountry, in)
+	m.incrementStatusCodeCounter(carrier, uaType, sourceCountry, direction, in)
 
 	if isInviteResponse && len(in) == 3 && in[0] == '3' {
-		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).invite3xxTotal.Add(1)
+		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry, direction).invite3xxTotal.Add(1)
 	}
 
 	if isInviteResponse && isEffectiveResponse(in) {
-		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).inviteEffectiveTotal.Add(1)
+		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry, direction).inviteEffectiveTotal.Add(1)
 	}
 
 	if isInviteResponse && isIneffectiveResponse(in) {
-		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).inviteIneffectiveTotal.Add(1)
-		m.iss.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry, direction).inviteIneffectiveTotal.Add(1)
+		m.iss.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 	}
 }
 
-func (m *metrics) incrementStatusCodeCounter(carrier, uaType, sourceCountry string, in []byte) {
+func (m *metrics) incrementStatusCodeCounter(carrier, uaType, sourceCountry, direction string, in []byte) {
 	counter, ok := m.statusCounters[string(in)]
 	if ok {
-		counter.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+		counter.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 		return
 	}
 	zap.L().Warn("unknown response", zap.ByteString("in", in))
 }
 
 func (m *metrics) ResponseWithMetrics(
-	carrier, uaType, sourceCountry string,
+	carrier, uaType, sourceCountry, direction string,
 	status []byte, isInviteResponse, is200OK bool,
 ) {
-	m.Response(carrier, uaType, sourceCountry, status, isInviteResponse)
+	m.Response(carrier, uaType, sourceCountry, direction, status, isInviteResponse)
 
 	if isInviteResponse && is200OK {
-		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).invite200OKTotal.Add(1)
+		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry, direction).invite200OKTotal.Add(1)
 	}
 }
 
 func (m *metrics) Invite200OK(
-	carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface string,
+	carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface, direction string,
 ) {
 	m.requestInvite200OKTotal.WithLabelValues(
-		carrier, uaType, sourceCountry, destinationCountry, callerHost, calledHost, iface,
+		carrier, uaType, sourceCountry, direction, destinationCountry, callerHost, calledHost, iface,
 	).Inc()
 }
 
-func (m *metrics) SessionCompleted(carrier, uaType, sourceCountry string) {
-	m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).sessionCompletedTotal.Add(1)
-	m.sdc.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+func (m *metrics) SessionCompleted(carrier, uaType, sourceCountry, direction string) {
+	m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry, direction).sessionCompletedTotal.Add(1)
+	m.sdc.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 }
 
-func (m *metrics) RegisterSuccess(carrier, uaType, sourceCountry string) {
-	m.registerSuccessTotal.WithLabelValues(carrier, uaType, sourceCountry).Inc()
-	m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).registerSuccessTotal.Add(1)
+func (m *metrics) RegisterSuccess(carrier, uaType, sourceCountry, direction string) {
+	m.registerSuccessTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
+	m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry, direction).registerSuccessTotal.Add(1)
 }
 
-func (m *metrics) RegisterFailure(carrier, uaType, sourceCountry, code string) {
+func (m *metrics) RegisterFailure(carrier, uaType, sourceCountry, direction, code string) {
 	m.registerFailureTotal.WithLabelValues(carrier, uaType, sourceCountry, code).Inc()
 	if isRegisterChallenge(code) || isRedirectStatus(code) {
 		return
 	}
-	m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry).registerFailureTotal.Add(1)
+	m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry, direction).registerFailureTotal.Add(1)
 }
 
-func (m *metrics) RegisterCountryChange(carrier, sourceCountry string) {
-	m.registerCountryChange.WithLabelValues(carrier, sourceCountry).Inc()
+func (m *metrics) RegisterCountryChange(carrier, sourceCountry, direction string) {
+	m.registerCountryChange.WithLabelValues(carrier, sourceCountry, direction).Inc()
 }
 
-func (m *metrics) RegisterScan(carrier, sourceCountry string) {
-	m.registerScanTotal.WithLabelValues(carrier, sourceCountry).Inc()
+func (m *metrics) RegisterScan(carrier, sourceCountry, direction string) {
+	m.registerScanTotal.WithLabelValues(carrier, sourceCountry, direction).Inc()
 }
 
-func (m *metrics) InviteBurst(carrier, sourceCountry string) {
-	m.inviteBurstTotal.WithLabelValues(carrier, sourceCountry).Inc()
+func (m *metrics) InviteBurst(carrier, sourceCountry, direction string) {
+	m.inviteBurstTotal.WithLabelValues(carrier, sourceCountry, direction).Inc()
 }
 
-func (m *metrics) SIPRetransmission(carrier, uaType, sourceCountry, method string) {
+func (m *metrics) SIPRetransmission(carrier, uaType, sourceCountry, _, method string) {
 	m.sipRetransmission.WithLabelValues(carrier, uaType, sourceCountry, method).Inc()
 }
 
-func (m *metrics) UpdateShortCalls(carrier, uaType, sourceCountry string, duration time.Duration) {
+func (m *metrics) UpdateShortCalls(carrier, uaType, sourceCountry, _ string, duration time.Duration) {
 	if duration <= 0 {
 		return
 	}
@@ -967,11 +972,11 @@ func (m *metrics) UpdateShortCalls(carrier, uaType, sourceCountry string, durati
 	}
 }
 
-func (m *metrics) UpdateBillableSeconds(carrier, destinationCountry string, duration time.Duration) {
+func (m *metrics) UpdateBillableSeconds(carrier, destinationCountry, direction string, duration time.Duration) {
 	if duration <= 0 {
 		return
 	}
-	m.billableSeconds.WithLabelValues(carrier, destinationCountry).Add(duration.Seconds())
+	m.billableSeconds.WithLabelValues(carrier, destinationCountry, direction).Add(duration.Seconds())
 }
 
 func isRegisterChallenge(code string) bool {
@@ -982,57 +987,57 @@ func isRedirectStatus(code string) bool {
 	return len(code) > 0 && code[0] == '3'
 }
 
-func (m *metrics) UpdateSPD(carrier, uaType, sourceCountry string, duration time.Duration) {
+func (m *metrics) UpdateSPD(carrier, uaType, sourceCountry, direction string, duration time.Duration) {
 	if duration < 0 {
 		return
 	}
-	m.spd.WithLabelValues(carrier, uaType, sourceCountry).Observe(duration.Seconds())
+	m.spd.WithLabelValues(carrier, uaType, sourceCountry, direction).Observe(duration.Seconds())
 }
 
-func (m *metrics) UpdateRRD(carrier, uaType, sourceCountry string, delayMs float64) {
+func (m *metrics) UpdateRRD(carrier, uaType, sourceCountry, direction string, delayMs float64) {
 	if delayMs < 0 {
 		return
 	}
-	m.rrd.WithLabelValues(carrier, uaType, sourceCountry).Observe(delayMs)
+	m.rrd.WithLabelValues(carrier, uaType, sourceCountry, direction).Observe(delayMs)
 }
 
-func (m *metrics) UpdateTTR(carrier, uaType, sourceCountry string, delayMs float64) {
+func (m *metrics) UpdateTTR(carrier, uaType, sourceCountry, direction string, delayMs float64) {
 	if delayMs < 0 {
 		return
 	}
-	m.ttr.WithLabelValues(carrier, uaType, sourceCountry).Observe(delayMs)
+	m.ttr.WithLabelValues(carrier, uaType, sourceCountry, direction).Observe(delayMs)
 }
 
-func (m *metrics) UpdatePDD(carrier, uaType, sourceCountry string, delayMs float64) {
+func (m *metrics) UpdatePDD(carrier, uaType, sourceCountry, direction string, delayMs float64) {
 	if delayMs < 0 {
 		return
 	}
-	m.pdd.WithLabelValues(carrier, uaType, sourceCountry).Observe(delayMs)
+	m.pdd.WithLabelValues(carrier, uaType, sourceCountry, direction).Observe(delayMs)
 }
 
-func (m *metrics) UpdateORD(carrier, uaType, sourceCountry string, delayMs float64) {
+func (m *metrics) UpdateORD(carrier, uaType, sourceCountry, direction string, delayMs float64) {
 	if delayMs < 0 {
 		return
 	}
-	m.ord.WithLabelValues(carrier, uaType, sourceCountry).Observe(delayMs)
+	m.ord.WithLabelValues(carrier, uaType, sourceCountry, direction).Observe(delayMs)
 }
 
-func (m *metrics) UpdateLRD(carrier, uaType, sourceCountry string, delayMs float64) {
+func (m *metrics) UpdateLRD(carrier, uaType, sourceCountry, direction string, delayMs float64) {
 	if delayMs < 0 {
 		return
 	}
-	m.lrd.WithLabelValues(carrier, uaType, sourceCountry).Observe(delayMs)
+	m.lrd.WithLabelValues(carrier, uaType, sourceCountry, direction).Observe(delayMs)
 }
 
-func (m *metrics) UpdatePBD(carrier, uaType, sourceCountry string, delayMs float64) {
+func (m *metrics) UpdatePBD(carrier, uaType, sourceCountry, direction string, delayMs float64) {
 	if delayMs < 0 {
 		return
 	}
-	m.pbd.WithLabelValues(carrier, uaType, sourceCountry).Observe(delayMs)
+	m.pbd.WithLabelValues(carrier, uaType, sourceCountry, direction).Observe(delayMs)
 }
 
-func (m *metrics) UpdateSession(carrier, uaType, sourceCountry string, size int) {
-	m.sessions.WithLabelValues(carrier, uaType, sourceCountry).Set(float64(size))
+func (m *metrics) UpdateSession(carrier, uaType, sourceCountry, direction string, size int) {
+	m.sessions.WithLabelValues(carrier, uaType, sourceCountry, direction).Set(float64(size))
 }
 
 func setGaugeFromCounts(
@@ -1061,7 +1066,7 @@ func setGaugeFromCounts(
 
 func (m *metrics) UpdateSessions(counts []LabeledCount) {
 	setGaugeFromCounts(m.sessions, &m.prevSessionKeys, counts,
-		[]string{"carrier", "ua_type", "source_country"})
+		[]string{"carrier", "ua_type", "source_country", "direction"})
 
 	m.sessionsLimitsMu.RLock()
 	limits := m.sessionsLimits
@@ -1098,81 +1103,81 @@ func (m *metrics) SetSessionsLimits(limits map[string]int) {
 
 func (m *metrics) UpdateActiveRegistrations(counts []LabeledCount) {
 	setGaugeFromCounts(m.activeRegistrations, &m.prevActiveRegKeys, counts,
-		[]string{"carrier", "ua_type", "source_country"})
+		[]string{"carrier", "ua_type", "source_country", "direction"})
 }
 
 func (m *metrics) SystemError() {
 	m.systemErrorTotal.Inc()
 }
 
-func (m *metrics) UpdateVQReport(carrier, uaType, sourceCountry string, report *vq.SessionReport) {
+func (m *metrics) UpdateVQReport(carrier, uaType, sourceCountry, direction string, report *vq.SessionReport) {
 	for _, vm := range m.vqTable {
 		if report.Present[vm.key] {
-			vm.hist.WithLabelValues(carrier, uaType, sourceCountry).Observe(vm.val(report))
+			vm.hist.WithLabelValues(carrier, uaType, sourceCountry, direction).Observe(vm.val(report))
 		}
 	}
-	m.vqReports.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+	m.vqReports.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 }
 
-func (m *metrics) UpdateRTPPackets(carrier, uaType, codec, sourceCountry string) {
-	m.rtpPackets.WithLabelValues(carrier, uaType, codec, sourceCountry).Inc()
+func (m *metrics) UpdateRTPPackets(carrier, uaType, codec, sourceCountry, direction string) {
+	m.rtpPackets.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Inc()
 }
 
-func (m *metrics) UpdateRTPLoss(carrier, uaType, codec, sourceCountry string, lost uint64) {
+func (m *metrics) UpdateRTPLoss(carrier, uaType, codec, sourceCountry, direction string, lost uint64) {
 	if lost == 0 {
 		return
 	}
-	m.rtpLost.WithLabelValues(carrier, uaType, codec, sourceCountry).Add(float64(lost))
+	m.rtpLost.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Add(float64(lost))
 }
 
-func (m *metrics) UpdateRTPDuplicates(carrier, uaType, codec, sourceCountry string) {
-	m.rtpDuplicate.WithLabelValues(carrier, uaType, codec, sourceCountry).Inc()
+func (m *metrics) UpdateRTPDuplicates(carrier, uaType, codec, sourceCountry, direction string) {
+	m.rtpDuplicate.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Inc()
 }
 
-func (m *metrics) UpdateRTPOutOfOrder(carrier, uaType, codec, sourceCountry string) {
-	m.rtpOutOfOrder.WithLabelValues(carrier, uaType, codec, sourceCountry).Inc()
+func (m *metrics) UpdateRTPOutOfOrder(carrier, uaType, codec, sourceCountry, direction string) {
+	m.rtpOutOfOrder.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Inc()
 }
 
-func (m *metrics) UpdateRTPJitter(carrier, uaType, codec, sourceCountry string, jitterMs float64) {
-	m.rtpJitter.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(jitterMs)
+func (m *metrics) UpdateRTPJitter(carrier, uaType, codec, sourceCountry, direction string, jitterMs float64) {
+	m.rtpJitter.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(jitterMs)
 }
 
-func (m *metrics) UpdateRTPMOS(carrier, uaType, codec, sourceCountry string, mos float64) {
-	m.rtpMOS.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(mos)
+func (m *metrics) UpdateRTPMOS(carrier, uaType, codec, sourceCountry, direction string, mos float64) {
+	m.rtpMOS.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(mos)
 }
 
 func (m *metrics) UpdateRTPMOSVariants(
-	carrier, uaType, codec, sourceCountry string,
+	carrier, uaType, codec, sourceCountry, direction string,
 	f1, f2, adapt float64,
 ) {
-	m.rtpMOSF1.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(f1)
-	m.rtpMOSF2.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(f2)
-	m.rtpMOSAdaptive.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(adapt)
+	m.rtpMOSF1.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(f1)
+	m.rtpMOSF2.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(f2)
+	m.rtpMOSAdaptive.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(adapt)
 }
 
-func (m *metrics) UpdateRTPRFactor(carrier, uaType, codec, sourceCountry string, rFactor float64) {
-	m.rtpRFactor.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(rFactor)
+func (m *metrics) UpdateRTPRFactor(carrier, uaType, codec, sourceCountry, direction string, rFactor float64) {
+	m.rtpRFactor.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(rFactor)
 }
 
 func (m *metrics) UpdateRTPLossDistribution(
-	carrier, uaType, codec, sourceCountry string,
+	carrier, uaType, codec, sourceCountry, direction string,
 	burstDensity, gapDensity float64,
 ) {
-	m.rtpBurstLoss.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(burstDensity)
-	m.rtpGapLoss.WithLabelValues(carrier, uaType, codec, sourceCountry).Observe(gapDensity)
+	m.rtpBurstLoss.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(burstDensity)
+	m.rtpGapLoss.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(gapDensity)
 }
 
 func (m *metrics) UpdateRTPActiveStreams(counts []LabeledCount) {
 	setGaugeFromCounts(m.rtpActiveStreams, &m.prevRTPKeys, counts,
-		[]string{"carrier", "ua_type", "codec", "source_country"})
+		[]string{"carrier", "ua_type", "codec", "source_country", "direction"})
 }
 
-func (m *metrics) OneWayCall(carrier, uaType, sourceCountry string) {
-	m.rtpOneWayCalls.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+func (m *metrics) OneWayCall(carrier, uaType, sourceCountry, direction string) {
+	m.rtpOneWayCalls.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 }
 
-func (m *metrics) MissingRTP(carrier, uaType, sourceCountry string) {
-	m.sessionsMissingRTP.WithLabelValues(carrier, uaType, sourceCountry).Inc()
+func (m *metrics) MissingRTP(carrier, uaType, sourceCountry, direction string) {
+	m.sessionsMissingRTP.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 }
 
 func isEffectiveResponse(code []byte) bool {
@@ -1207,8 +1212,8 @@ func (m *metrics) registerBuildInfo(reg *prometheus.Registry) {
 	}
 }
 
-func (m *metrics) getOrCreateCarrierCounters(carrier, uaType, sourceCountry string) *carrierAtomicCounters {
-	key := counterKey{Carrier: carrier, UAType: uaType, Country: sourceCountry}
+func (m *metrics) getOrCreateCarrierCounters(carrier, uaType, sourceCountry, direction string) *carrierAtomicCounters {
+	key := counterKey{Carrier: carrier, UAType: uaType, Country: sourceCountry, Direction: direction}
 	if v, ok := m.carrierCounters.Load(key); ok {
 		c, _ := v.(*carrierAtomicCounters)
 		return c
