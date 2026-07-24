@@ -1390,7 +1390,8 @@ func (e *exporter) handleInvite200OK(
 		zap.L().Debug("create sip dialog",
 			zap.String("session", dialogID),
 			zap.Int("expires_sec", expires))
-		e.services.dialoger.Create(dialogID, expiresAt, time.Now(), carrier, uaType, sourceCountry, callID)
+		destinationCountry := e.resolveDestinationCountry(packet.To.User)
+		e.services.dialoger.Create(dialogID, expiresAt, time.Now(), carrier, uaType, sourceCountry, destinationCountry, callID)
 	}
 
 	// Register RTP media endpoints for correlation: the caller side from the

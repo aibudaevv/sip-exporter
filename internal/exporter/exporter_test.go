@@ -225,10 +225,11 @@ func (m *mockMetricser) OneWayCall(string, string, string)                      
 func (m *mockMetricser) MissingRTP(string, string, string)                                          {}
 
 type dialogCreateArgs struct {
-	expiresAt time.Time
-	createdAt time.Time
-	carrier   string
-	uaType    string
+	expiresAt          time.Time
+	createdAt          time.Time
+	carrier            string
+	uaType             string
+	destinationCountry string
 }
 
 type mockDialoger struct {
@@ -245,11 +246,16 @@ func (m *mockDialoger) Create(
 	uaType string,
 	_ string,
 	_ string,
+	destinationCountry string,
 ) {
 	if m.created == nil {
 		m.created = make(map[string]dialogCreateArgs)
 	}
-	m.created[dialogID] = dialogCreateArgs{expiresAt: expiresAt, createdAt: createdAt, carrier: carrier, uaType: uaType}
+	m.created[dialogID] = dialogCreateArgs{
+		expiresAt: expiresAt, createdAt: createdAt,
+		carrier: carrier, uaType: uaType,
+		destinationCountry: destinationCountry,
+	}
 }
 
 func (m *mockDialoger) Delete(dialogID string) service.CleanupResult {
@@ -257,7 +263,10 @@ func (m *mockDialoger) Delete(dialogID string) service.CleanupResult {
 	if m.created != nil {
 		if args, ok := m.created[dialogID]; ok {
 			delete(m.created, dialogID)
-			return service.CleanupResult{Duration: 100 * time.Millisecond, Carrier: args.carrier}
+			return service.CleanupResult{
+				Duration: 100 * time.Millisecond,
+				Carrier:  args.carrier, DestinationCountry: args.destinationCountry,
+			}
 		}
 	}
 	return service.CleanupResult{}
@@ -1317,7 +1326,7 @@ func TestHandleMessage_ReINVITE_CountedAsReinvite(t *testing.T) {
 	}
 
 	md.Create("test-call:abc:xyz",
-		time.Now().Add(1*time.Hour), time.Now(), "", "", "", "test-call")
+		time.Now().Add(1*time.Hour), time.Now(), "", "", "", "test-call", "")
 
 	input := []byte("INVITE sip:test SIP/2.0\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
@@ -1384,7 +1393,7 @@ func TestHandleMessage_ReINVITE_200OK_DoesNotInflateMetrics(t *testing.T) {
 	}
 
 	md.Create("test-call:abc:xyz",
-		time.Now().Add(1*time.Hour), time.Now(), "carrier-a", "yealink", "RU", "test-call")
+		time.Now().Add(1*time.Hour), time.Now(), "carrier-a", "yealink", "RU", "test-call", "")
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
@@ -2010,7 +2019,7 @@ func TestHandleMessage_ReINVITE_ExcludedFromBurst(t *testing.T) {
 	}
 
 	md.Create("call-id:abc:xyz",
-		time.Now().Add(1*time.Hour), time.Now(), "", "", "", "call-id")
+		time.Now().Add(1*time.Hour), time.Now(), "", "", "", "call-id", "")
 
 	input := []byte("INVITE sip:test SIP/2.0\r\n" +
 		"From: <sip:user@domain>;tag=abc\r\n" +
