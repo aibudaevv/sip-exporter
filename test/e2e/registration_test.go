@@ -16,6 +16,8 @@ import (
 // waitForMetricStable returns.
 const counterDelta = 3.0
 
+const percentScale = 100.0
+
 // S4-2.1: Registration Counters & Ratio
 
 // TestRegisterSuccess_CountersAndRatio verifies that 50 successful REGISTER
@@ -49,225 +51,146 @@ func TestRegisterSuccess_CountersAndRatio(t *testing.T) {
 	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
-// TestRegisterFailure_403_TerminalFailure verifies that 403 Forbidden is counted
-// as a terminal failure: register_failure_total{code="403"}=50, ratio=0%.
-func TestRegisterFailure_403_TerminalFailure(t *testing.T) {
+// TestRegister_FailureCodes consolidates terminal-failure and challenge/redirect
+// registration tests. Each subtest runs N failed registrations and verifies:
+//   - register_success_total absent (0 successes)
+//   - register_failure_total{code=X}=N
+//   - register_success_ratio=0%
+func TestRegister_FailureCodes(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
 	const callCount = 50
-	runSippScenario(ctx, t, "reg_uas_403.xml", "reg_uac_403.xml", callCount, env)
 
-	success := getMetric(t, env.endpoint, "sip_exporter_register_success_total")
-	failure403 := getMetricWithLabel(t, env.endpoint, "sip_exporter_register_failure_total", `code="403"`)
-	ratio := getMetric(t, env.endpoint, "sip_exporter_register_success_ratio")
+	tests := []struct {
+		name        string
+		uasScenario string
+		uacScenario string
+		failCode    string
+	}{
+		{"403_terminal_failure", "reg_uas_403.xml", "reg_uac_403.xml", "403"},
+		{"500_terminal_failure", "reg_uas_500.xml", "reg_uac_500.xml", "500"},
+		{"401_challenge_excluded", "reg_uas_401.xml", "reg_uac_401.xml", "401"},
+		{"302_redirect_excluded", "reg_uas_redirect.xml", "reg_uac_redirect.xml", "302"},
+	}
 
-	t.Logf("success=%.0f, failure_403=%.0f, ratio=%.1f%%", success, failure403, ratio)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			env := newTestEnv(ctx, t)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, callCount, env)
 
-	require.Equal(t, 0.0, success, "no successful registrations")
-	require.Equal(t, float64(callCount), failure403, "all registrations get 403")
-	require.InDelta(t, 0.0, ratio, ratioDelta, "ratio should be 0%% for terminal failures only")
+			require.False(t, metricExists(t, env.endpoint, "sip_exporter_register_success_total"),
+				"no successful registrations")
+			success := getMetric(t, env.endpoint, "sip_exporter_register_success_total")
+			require.Equal(t, 0.0, success, "no successful registrations")
 
-	assertSelfMonitoringHealthy(t, env.endpoint)
+			labelFilter := `code="` + tt.failCode + `"`
+			require.True(t,
+				metricWithLabelExists(t, env.endpoint, "sip_exporter_register_failure_total", labelFilter),
+				"failure counter for code %s should exist", tt.failCode)
+			failure := getMetricWithLabel(t, env.endpoint, "sip_exporter_register_failure_total", labelFilter)
+			require.Equal(t, float64(callCount), failure, "all registrations get %s", tt.failCode)
+
+			require.True(t, metricExists(t, env.endpoint, "sip_exporter_register_success_ratio"),
+				"ratio metric should exist")
+			ratio := getMetric(t, env.endpoint, "sip_exporter_register_success_ratio")
+			require.InDelta(t, 0.0, ratio, ratioDelta, "ratio should be 0%%")
+
+			assertSelfMonitoringHealthy(t, env.endpoint)
+		})
+	}
 }
 
-// TestRegisterFailure_500_TerminalFailure verifies that 500 Server Error is
-// counted as a terminal failure: register_failure_total{code="500"}=50, ratio=0%.
-func TestRegisterFailure_500_TerminalFailure(t *testing.T) {
+// TestRegister_MixedRatio consolidates mixed success+failure ratio tests.
+// Each subtest runs 30 successful + 30 failed registrations and verifies
+// the ratio formula: success / (success + terminal_failures) * 100.
+// Challenges (401) and redirects (302) are excluded from the denominator.
+func TestRegister_MixedRatio(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	const callCount = 50
-	runSippScenario(ctx, t, "reg_uas_500.xml", "reg_uac_500.xml", callCount, env)
-
-	success := getMetric(t, env.endpoint, "sip_exporter_register_success_total")
-	failure500 := getMetricWithLabel(t, env.endpoint, "sip_exporter_register_failure_total", `code="500"`)
-	ratio := getMetric(t, env.endpoint, "sip_exporter_register_success_ratio")
-
-	t.Logf("success=%.0f, failure_500=%.0f, ratio=%.1f%%", success, failure500, ratio)
-
-	require.Equal(t, 0.0, success, "no successful registrations")
-	require.Equal(t, float64(callCount), failure500, "all registrations get 500")
-	require.InDelta(t, 0.0, ratio, ratioDelta, "ratio should be 0%% for terminal failures only")
-
-	assertSelfMonitoringHealthy(t, env.endpoint)
-}
-
-// TestRegisterFailure_401_ChallengeExcludedFromRatio verifies that 401
-// digest-auth challenges are counted in register_failure_total{code="401"}
-// but excluded from the ratio denominator (ratio=0, denominator=0 → returns 0).
-func TestRegisterFailure_401_ChallengeExcludedFromRatio(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	const callCount = 50
-	runSippScenario(ctx, t, "reg_uas_401.xml", "reg_uac_401.xml", callCount, env)
-
-	success := getMetric(t, env.endpoint, "sip_exporter_register_success_total")
-	failure401 := getMetricWithLabel(t, env.endpoint, "sip_exporter_register_failure_total", `code="401"`)
-	ratio := getMetric(t, env.endpoint, "sip_exporter_register_success_ratio")
-
-	t.Logf("success=%.0f, failure_401=%.0f, ratio=%.1f%%", success, failure401, ratio)
-
-	require.Equal(t, 0.0, success, "no successful registrations")
-	require.Equal(t, float64(callCount), failure401, "401 challenge counted in failure CounterVec")
-	require.InDelta(t, 0.0, ratio, ratioDelta,
-		"ratio should be 0%% (denominator=0 because 401 excluded)")
-
-	assertSelfMonitoringHealthy(t, env.endpoint)
-}
-
-// TestRegisterFailure_302_RedirectExcludedFromRatio verifies that 302 redirects
-// are counted in register_failure_total{code="302"} but excluded from the ratio
-// denominator (ratio=0, denominator=0 → returns 0).
-func TestRegisterFailure_302_RedirectExcludedFromRatio(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	const callCount = 50
-	runSippScenario(ctx, t, "reg_uas_redirect.xml", "reg_uac_redirect.xml", callCount, env)
-
-	success := getMetric(t, env.endpoint, "sip_exporter_register_success_total")
-	failure302 := getMetricWithLabel(t, env.endpoint, "sip_exporter_register_failure_total", `code="302"`)
-	ratio := getMetric(t, env.endpoint, "sip_exporter_register_success_ratio")
-
-	t.Logf("success=%.0f, failure_302=%.0f, ratio=%.1f%%", success, failure302, ratio)
-
-	require.Equal(t, 0.0, success, "no successful registrations")
-	require.Equal(t, float64(callCount), failure302, "302 redirect counted in failure CounterVec")
-	require.InDelta(t, 0.0, ratio, ratioDelta,
-		"ratio should be 0%% (denominator=0 because 3xx excluded)")
-
-	assertSelfMonitoringHealthy(t, env.endpoint)
-}
-
-// TestRegisterRatio_MixedSuccessAndTerminalFailure verifies ratio=50% when
-// 30 successful + 30 terminal-failure (403) registrations are processed.
-// Formula: 30 / (30+30) × 100 = 50%.
-func TestRegisterRatio_MixedSuccessAndTerminalFailure(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
 	const successCount = 30
 	const failCount = 30
-	runSippScenario(ctx, t, "reg_uas.xml", "reg_uac.xml", successCount, env)
-	runSippScenario(ctx, t, "reg_uas_403.xml", "reg_uac_403.xml", failCount, env)
 
-	success := getMetric(t, env.endpoint, "sip_exporter_register_success_total")
-	failure403 := getMetricWithLabel(t, env.endpoint, "sip_exporter_register_failure_total", `code="403"`)
-	ratio := getMetric(t, env.endpoint, "sip_exporter_register_success_ratio")
+	tests := []struct {
+		name      string
+		failUas   string
+		failUac   string
+		failCode  string
+		denomPart int // terminal failures counted in denominator (0 for challenges/redirects)
+	}{
+		{"TerminalFailure_50percent", "reg_uas_403.xml", "reg_uac_403.xml", "403", failCount},
+		{"Challenge_Still100", "reg_uas_401.xml", "reg_uac_401.xml", "401", 0},
+		{"Redirect_Still100", "reg_uas_redirect.xml", "reg_uac_redirect.xml", "302", 0},
+	}
 
-	t.Logf("success=%.0f, failure_403=%.0f, ratio=%.1f%%", success, failure403, ratio)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			env := newTestEnv(ctx, t)
+			runSippScenario(ctx, t, "reg_uas.xml", "reg_uac.xml", successCount, env)
+			runSippScenario(ctx, t, tt.failUas, tt.failUac, failCount, env)
 
-	require.InDelta(t, float64(successCount), success, counterDelta)
-	require.InDelta(t, float64(failCount), failure403, counterDelta)
-	require.InDelta(t, 50.0, ratio, ratioDelta, "30/(30+30) = 50%%")
+			require.True(t, metricExists(t, env.endpoint, "sip_exporter_register_success_total"),
+				"success counter should exist")
+			success := getMetric(t, env.endpoint, "sip_exporter_register_success_total")
+			require.InDelta(t, float64(successCount), success, counterDelta)
 
-	assertSelfMonitoringHealthy(t, env.endpoint)
-}
+			labelFilter := `code="` + tt.failCode + `"`
+			require.True(t,
+				metricWithLabelExists(t, env.endpoint, "sip_exporter_register_failure_total", labelFilter),
+				"failure counter for code %s should exist", tt.failCode)
+			failure := getMetricWithLabel(t, env.endpoint, "sip_exporter_register_failure_total", labelFilter)
+			require.InDelta(t, float64(failCount), failure, counterDelta)
 
-// TestRegisterRatio_MixedSuccessAndChallenge_Still100 verifies that 401
-// challenges do NOT lower the ratio: 30 success + 30 challenge → ratio=100%.
-// The 401 digest-auth challenge is excluded from the denominator.
-func TestRegisterRatio_MixedSuccessAndChallenge_Still100(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
+			require.True(t, metricExists(t, env.endpoint, "sip_exporter_register_success_ratio"),
+				"ratio metric should exist")
+			ratio := getMetric(t, env.endpoint, "sip_exporter_register_success_ratio")
+			wantRatio := float64(successCount) / float64(successCount+tt.denomPart) * percentScale
+			require.InDelta(t, wantRatio, ratio, ratioDelta,
+				"%d/(%d+%d) = %.0f%%", successCount, successCount, tt.denomPart, wantRatio)
 
-	const successCount = 30
-	const failCount = 30
-	runSippScenario(ctx, t, "reg_uas.xml", "reg_uac.xml", successCount, env)
-	runSippScenario(ctx, t, "reg_uas_401.xml", "reg_uac_401.xml", failCount, env)
-
-	success := getMetric(t, env.endpoint, "sip_exporter_register_success_total")
-	failure401 := getMetricWithLabel(t, env.endpoint, "sip_exporter_register_failure_total", `code="401"`)
-	ratio := getMetric(t, env.endpoint, "sip_exporter_register_success_ratio")
-
-	t.Logf("success=%.0f, failure_401=%.0f, ratio=%.1f%%", success, failure401, ratio)
-
-	require.InDelta(t, float64(successCount), success, counterDelta)
-	require.InDelta(t, float64(failCount), failure401, counterDelta, "401 counted in CounterVec")
-	require.InDelta(t, 100.0, ratio, ratioDelta,
-		"ratio should stay 100%% because 401 challenges excluded from denominator")
-
-	assertSelfMonitoringHealthy(t, env.endpoint)
-}
-
-// TestRegisterRatio_MixedSuccessAndRedirect_Still100 verifies that 3xx
-// redirects do NOT lower the ratio: 30 success + 30 redirect → ratio=100%.
-func TestRegisterRatio_MixedSuccessAndRedirect_Still100(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	const successCount = 30
-	const failCount = 30
-	runSippScenario(ctx, t, "reg_uas.xml", "reg_uac.xml", successCount, env)
-	runSippScenario(ctx, t, "reg_uas_redirect.xml", "reg_uac_redirect.xml", failCount, env)
-
-	success := getMetric(t, env.endpoint, "sip_exporter_register_success_total")
-	failure302 := getMetricWithLabel(t, env.endpoint, "sip_exporter_register_failure_total", `code="302"`)
-	ratio := getMetric(t, env.endpoint, "sip_exporter_register_success_ratio")
-
-	t.Logf("success=%.0f, failure_302=%.0f, ratio=%.1f%%", success, failure302, ratio)
-
-	require.InDelta(t, float64(successCount), success, counterDelta)
-	require.InDelta(t, float64(failCount), failure302, counterDelta, "302 counted in CounterVec")
-	require.InDelta(t, 100.0, ratio, ratioDelta,
-		"ratio should stay 100%% because 3xx redirects excluded from denominator")
-
-	assertSelfMonitoringHealthy(t, env.endpoint)
+			assertSelfMonitoringHealthy(t, env.endpoint)
+		})
+	}
 }
 
 // S4-2.2 + S4-1: Active Registrations & Expires
 
-// TestActiveRegistrations_SingleAOR_Dedup verifies that 50 REGISTER calls
-// with the same AOR (sipp@127.0.0.1) produce active_registrations=1, not 50.
-// storeRegistration overwrites by AOR (refresh), not appends.
-func TestActiveRegistrations_SingleAOR_Dedup(t *testing.T) {
+// TestRegister_ActiveRegistrations consolidates AOR dedup and multi-AOR tests.
+func TestRegister_ActiveRegistrations(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "reg_uas.xml", "reg_uac.xml", 50, env)
+	tests := []struct {
+		name        string
+		uasScenario string
+		uacScenario string
+		callCount   int
+		wantActive  int
+	}{
+		{"SingleAOR_Dedup", "reg_uas.xml", "reg_uac.xml", 50, 1},
+		{"MultipleAORs", "reg_uas.xml", "reg_uac_multi.xml", 10, 10},
+	}
 
-	require.Eventually(t, func() bool {
-		return getMetric(t, env.endpoint, "sip_exporter_active_registrations") == 1.0
-	}, 5*time.Second, 500*time.Millisecond,
-		"active_registrations should be 1 (AOR dedup, not call count)")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			env := newTestEnv(ctx, t)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
 
-	assertSelfMonitoringHealthy(t, env.endpoint)
-}
+			require.Eventually(t, func() bool {
+				return getMetric(t, env.endpoint, "sip_exporter_active_registrations") == float64(tt.wantActive)
+			}, 5*time.Second, 500*time.Millisecond,
+				"active_registrations should be %d", tt.wantActive)
 
-// TestActiveRegistrations_MultipleAORs verifies that 10 REGISTER calls with
-// unique AORs (user1@…, user2@…, …) produce active_registrations=10.
-func TestActiveRegistrations_MultipleAORs(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	const callCount = 10
-	runSippScenario(ctx, t, "reg_uas.xml", "reg_uac_multi.xml", callCount, env)
-
-	require.Eventually(t, func() bool {
-		active := getMetric(t, env.endpoint, "sip_exporter_active_registrations")
-		t.Logf("active_registrations = %.0f (want %d)", active, callCount)
-		return active == float64(callCount)
-	}, 5*time.Second, 500*time.Millisecond,
-		"active_registrations should equal call count for unique AORs")
-
-	assertSelfMonitoringHealthy(t, env.endpoint)
+			assertSelfMonitoringHealthy(t, env.endpoint)
+		})
+	}
 }
 
 // TestActiveRegistrations_Expiry verifies the full TTL lifecycle:
 // 1. 5 registrations with Expires:3 are stored → active=5
 // 2. After expiry + cleanup tick → active=0
-// Covers S4-1 (Expires header parsing) and S4-2.2 (cleanupExpiredRegistrations).
 func TestActiveRegistrations_Expiry(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -310,8 +233,13 @@ func TestRegister_WithCarrierConfig(t *testing.T) {
 
 	success := getMetricWithCarrier(t, env.endpoint,
 		"sip_exporter_register_success_total", env.carrier)
-	failure403 := getMetricWithLabel(t, env.endpoint, "sip_exporter_register_failure_total",
-		fmt.Sprintf(`carrier="%s",code="403"`, env.carrier))
+
+	carrierFailLabel := fmt.Sprintf(`carrier="%s",code="403"`, env.carrier)
+	require.True(t,
+		metricWithLabelExists(t, env.endpoint, "sip_exporter_register_failure_total", carrierFailLabel),
+		"failure counter for carrier %s code 403 should exist", env.carrier)
+	failure403 := getMetricWithLabel(t, env.endpoint, "sip_exporter_register_failure_total", carrierFailLabel)
+
 	ratio := getMetricWithCarrier(t, env.endpoint,
 		"sip_exporter_register_success_ratio", env.carrier)
 
@@ -320,7 +248,8 @@ func TestRegister_WithCarrierConfig(t *testing.T) {
 
 	require.InDelta(t, float64(successCount), success, counterDelta, "30 successful registrations with carrier label")
 	require.InDelta(t, float64(failCount), failure403, counterDelta, "20 terminal failures with carrier label")
-	require.InDelta(t, 60.0, ratio, ratioDelta, "30/(30+20) = 60%%")
+	wantRatio := float64(successCount) / float64(successCount+failCount) * percentScale
+	require.InDelta(t, wantRatio, ratio, ratioDelta, "%.0f/(%.0f+%.0f) = %.0f%%", successCount, successCount, failCount, wantRatio)
 
 	require.Eventually(t, func() bool {
 		active := getMetricWithCarrier(t, env.endpoint,
@@ -347,9 +276,19 @@ func TestRegisterAuthCompletion_401ChallengeThenSuccess(t *testing.T) {
 	runSippScenario(ctx, t, "reg_uas_auth.xml", "reg_uac_auth.xml", callCount, env)
 
 	registerTotal := getMetric(t, env.endpoint, "sip_exporter_register_total")
+
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_register_success_total"),
+		"success counter should exist")
 	success := getMetric(t, env.endpoint, "sip_exporter_register_success_total")
+
+	require.True(t,
+		metricWithLabelExists(t, env.endpoint, "sip_exporter_register_failure_total", `code="401"`),
+		"failure counter for 401 should exist")
 	failure401 := getMetricWithLabel(t, env.endpoint,
 		"sip_exporter_register_failure_total", `code="401"`)
+
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_register_success_ratio"),
+		"ratio metric should exist")
 	ratio := getMetric(t, env.endpoint, "sip_exporter_register_success_ratio")
 
 	t.Logf("register=%.0f, success=%.0f, failure_401=%.0f, ratio=%.1f%%",
