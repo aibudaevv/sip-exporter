@@ -551,6 +551,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 			e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry)
 			e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
 			e.services.metricser.UpdateShortCalls(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
+			e.services.metricser.UpdateBillableSeconds(r.Carrier, r.DestinationCountry, r.Duration)
 			rtpResult, deleted := e.mediaTracker.Unregister(r.CallID)
 			for _, ep := range deleted {
 				e.rtpEndpointDelete(ep.IP, ep.Port)
@@ -1429,6 +1430,7 @@ func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {
 		e.services.metricser.UpdateSPD(result.Carrier, result.UAType, result.SourceCountry, result.Duration)
 		e.services.metricser.UpdateShortCalls(result.Carrier, result.UAType, result.SourceCountry, result.Duration)
 		e.services.metricser.SessionCompleted(result.Carrier, result.UAType, result.SourceCountry)
+		e.services.metricser.UpdateBillableSeconds(result.Carrier, result.DestinationCountry, result.Duration)
 	}
 	return nil
 }

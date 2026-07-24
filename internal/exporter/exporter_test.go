@@ -55,6 +55,10 @@ type mockMetricser struct {
 	pbdDelay                  float64
 	shortCallsUpdated         bool
 	shortCallsDuration        time.Duration
+	billableCalled            bool
+	billableCarrier           string
+	billableDestCountry       string
+	billableDuration          time.Duration
 	registerSuccessCalls      int
 	registerFailureCodes      []string
 	registerCountryChange     []string
@@ -99,7 +103,12 @@ func (m *mockMetricser) UpdateShortCalls(_, _ string, _ string, duration time.Du
 	m.shortCallsDuration = duration
 }
 
-func (m *mockMetricser) UpdateBillableSeconds(_, _ string, _ time.Duration) {}
+func (m *mockMetricser) UpdateBillableSeconds(carrier, destCountry string, duration time.Duration) {
+	m.billableCalled = true
+	m.billableCarrier = carrier
+	m.billableDestCountry = destCountry
+	m.billableDuration = duration
+}
 
 func (m *mockMetricser) Response(_, _, _ string, in []byte, isInviteResponse bool) {
 	m.responseCalled = in
@@ -3855,6 +3864,7 @@ type carrierTrackingMetricser struct {
 	registerScan           []carrierCall
 	inviteBurst            []carrierCall
 	retransmissionCalls    []carrierCall
+	billableCalls          []carrierCall
 	packetsTotal           int
 	systemErrors           int
 	sessionsByCarrierAndUA map[string]map[string]int
@@ -3928,7 +3938,10 @@ func (m *carrierTrackingMetricser) SIPRetransmission(carrier, _, _, method strin
 
 func (m *carrierTrackingMetricser) UpdateShortCalls(string, string, string, time.Duration) {}
 
-func (m *carrierTrackingMetricser) UpdateBillableSeconds(string, string, time.Duration) {}
+func (m *carrierTrackingMetricser) UpdateBillableSeconds(carrier, _ string, duration time.Duration) {
+	m.billableCalls = append(m.billableCalls,
+		carrierCall{carrier: carrier, value: duration.Seconds()})
+}
 
 func (m *carrierTrackingMetricser) UpdateRRD(carrier, _, _ string, delayMs float64) {
 	m.rrdCalls = append(m.rrdCalls, carrierCall{carrier: carrier, value: delayMs})
@@ -4299,6 +4312,65 @@ func TestMCDC_TC12_DialogExpiry_CarrierFromDialog(t *testing.T) {
 	require.Len(t, mm.sessionCompleted, 1)
 	require.Equal(t, "carrier-A", mm.sessionCompleted[0].carrier)
 	require.Equal(t, "carrier-A", mm.spdCalls[0].carrier)
+}
+
+func TestBillable_Bye200OK(t *testing.T) {
+	tests := []struct {
+		name         string
+		preCreate    bool
+		wantBillable bool
+	}{
+		{"existing_dialog_emits_billable", true, true},
+		{"non_existing_dialog_no_billable", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mm := newCarrierTrackingMetricser()
+			md := &mockDialoger{}
+			e := newTestExporter(mm, md)
+
+			if tt.preCreate {
+				e.handleMessage("carrier-A", "", makeInvite("bill-bye", "ft1"))
+				e.handleMessage("carrier-A", "", makeInvite200OK("bill-bye", "ft1", "tt1"))
+				require.Eventually(t, func() bool { return len(md.created) > 0 },
+					100*time.Millisecond, 10*time.Millisecond)
+			}
+
+			e.handleMessage("carrier-A", "", makeBye200OK("bill-bye", "ft1", "tt1"))
+			require.Eventually(t,
+				func() bool { return len(mm.sessionCompleted) > 0 || !tt.preCreate },
+				100*time.Millisecond, 10*time.Millisecond)
+
+			if tt.wantBillable {
+				require.Len(t, mm.billableCalls, 1, "UpdateBillableSeconds must be called on teardown")
+				require.Equal(t, "carrier-A", mm.billableCalls[0].carrier)
+			} else {
+				require.Empty(t, mm.billableCalls, "UpdateBillableSeconds must NOT be called when Duration == 0")
+			}
+		})
+	}
+}
+
+func TestBillable_CleanupExpiry(t *testing.T) {
+	mm := newCarrierTrackingMetricser()
+	md := &mockDialoger{
+		cleanupResults: []service.CleanupResult{
+			{Duration: 5 * time.Minute, Carrier: "carrier-A", DestinationCountry: "RU"},
+		},
+	}
+	e := newTestExporter(mm, md)
+
+	results := e.services.dialoger.Cleanup()
+	for _, r := range results {
+		e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry)
+		e.services.metricser.UpdateSPD(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
+		e.services.metricser.UpdateShortCalls(r.Carrier, r.UAType, r.SourceCountry, r.Duration)
+		e.services.metricser.UpdateBillableSeconds(r.Carrier, r.DestinationCountry, r.Duration)
+	}
+
+	require.Len(t, mm.billableCalls, 1)
+	require.Equal(t, "carrier-A", mm.billableCalls[0].carrier)
+	require.InDelta(t, 300.0, mm.billableCalls[0].value, 0.01)
 }
 
 func TestMCDC_TC13_DialogExpiry_DifferentCarrier(t *testing.T) {
