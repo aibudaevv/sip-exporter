@@ -62,15 +62,16 @@ func TestRegister_FailureCodes(t *testing.T) {
 	const callCount = 50
 
 	tests := []struct {
-		name        string
-		uasScenario string
-		uacScenario string
-		failCode    string
+		name          string
+		uasScenario   string
+		uacScenario   string
+		failCode      string
+		ratioExcluded bool
 	}{
-		{"403_terminal_failure", "reg_uas_403.xml", "reg_uac_403.xml", "403"},
-		{"500_terminal_failure", "reg_uas_500.xml", "reg_uac_500.xml", "500"},
-		{"401_challenge_excluded", "reg_uas_401.xml", "reg_uac_401.xml", "401"},
-		{"302_redirect_excluded", "reg_uas_redirect.xml", "reg_uac_redirect.xml", "302"},
+		{"403_terminal_failure", "reg_uas_403.xml", "reg_uac_403.xml", "403", false},
+		{"500_terminal_failure", "reg_uas_500.xml", "reg_uac_500.xml", "500", false},
+		{"401_challenge_excluded", "reg_uas_401.xml", "reg_uac_401.xml", "401", true},
+		{"302_redirect_excluded", "reg_uas_redirect.xml", "reg_uac_redirect.xml", "302", true},
 	}
 
 	for _, tt := range tests {
@@ -91,10 +92,15 @@ func TestRegister_FailureCodes(t *testing.T) {
 			failure := getMetricWithLabel(t, env.endpoint, "sip_exporter_register_failure_total", labelFilter)
 			require.Equal(t, float64(callCount), failure, "all registrations get %s", tt.failCode)
 
-			require.True(t, metricExists(t, env.endpoint, "sip_exporter_register_success_ratio"),
-				"ratio metric should exist")
-			ratio := getMetric(t, env.endpoint, "sip_exporter_register_success_ratio")
-			require.InDelta(t, 0.0, ratio, ratioDelta, "ratio should be 0%%")
+			if tt.ratioExcluded {
+				require.False(t, metricExists(t, env.endpoint, "sip_exporter_register_success_ratio"),
+					"ratio metric absent (denominator=0, %s excluded)", tt.failCode)
+			} else {
+				require.True(t, metricExists(t, env.endpoint, "sip_exporter_register_success_ratio"),
+					"ratio metric should exist")
+				ratio := getMetric(t, env.endpoint, "sip_exporter_register_success_ratio")
+				require.InDelta(t, 0.0, ratio, ratioDelta, "ratio should be 0%%")
+			}
 
 			assertSelfMonitoringHealthy(t, env.endpoint)
 		})
