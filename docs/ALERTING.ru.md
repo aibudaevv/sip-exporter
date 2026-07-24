@@ -322,6 +322,26 @@ groups:
         annotations:
           summary: "Очень короткая длительность звонков"
           description: "95-й перцентиль длительности сессии — {{ $value | printf \"%.1f\" }}с. Звонки завершаются очень быстро — возможны проблемы с медиа или неверная настройка диалпланов."
+
+      - alert: SIPBillableMinutesSpike
+        expr: sum by (destination_country) (rate(sip_exporter_billable_seconds_total[5m]))
+              > 3 * sum by (destination_country) (rate(sip_exporter_billable_seconds_total[5m] offset 1h))
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Скачок минут трафика в направление {{ $labels.destination_country }}"
+          description: "Секунды трафика в направление {{ $labels.destination_country }} выросли более чем в 3 раза по сравнению с 1ч назад. Возможен всплеск трафика или фрод."
+
+      - alert: SIPACDLowByDestination
+        expr: (sum by (destination_country) (rate(sip_exporter_billable_seconds_total[15m])) / 60)
+              / clamp_min(sum by (destination_country) (rate(sip_exporter_invite_200_total[15m])), 1) < 0.5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Низкий ACD для {{ $labels.destination_country }}"
+          description: "Средняя длительность звонка в направление {{ $labels.destination_country }} ниже 30 секунд уже 15 минут. Короткие звонки могут указывать на проблемы с качеством или фрод."
 ```
 
 ## Дашборд Grafana
@@ -342,6 +362,7 @@ groups:
 - **SIP Traffic** — разбивка rate запросов/ответов по методам и кодам статусов
 - **Registrations** — активные регистрации, success ratio, ошибки по кодам, фрод-сигналы
 - **System Health** — rate ошибок, ISS rate
+- **Минуты трафика** — минуты трафика/мин по направлениям (top 10), ACD по направлениям
 - **Geographic Distribution** — топ исходных/целевых стран по rate INVITE (GeoIP)
 
 Файл дашборда: [`examples/grafana-dashboard.json`](../examples/grafana-dashboard.json)

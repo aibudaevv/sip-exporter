@@ -348,6 +348,26 @@ These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) mea
         annotations:
           summary: "Very short call duration"
           description: "95th percentile session duration is {{ $value | printf \"%.1f\" }}s. Calls are terminating very quickly, possible media issues or misconfigured dial plans."
+
+      - alert: SIPBillableMinutesSpike
+        expr: sum by (destination_country) (rate(sip_exporter_billable_seconds_total[5m]))
+              > 3 * sum by (destination_country) (rate(sip_exporter_billable_seconds_total[5m] offset 1h))
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Traffic minutes spike to {{ $labels.destination_country }}"
+          description: "Traffic seconds to {{ $labels.destination_country }} increased >3× compared to 1h ago. Possible traffic surge or fraud."
+
+      - alert: SIPACDLowByDestination
+        expr: (sum by (destination_country) (rate(sip_exporter_billable_seconds_total[15m])) / 60)
+              / clamp_min(sum by (destination_country) (rate(sip_exporter_invite_200_total[15m])), 1) < 0.5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low ACD for {{ $labels.destination_country }}"
+          description: "Average call duration to {{ $labels.destination_country }} is below 30 seconds for 15m. Short calls may indicate quality issues or toll fraud."
 ```
 
 ## Grafana Dashboard
@@ -368,6 +388,7 @@ The dashboard includes `$carrier`, `$source_country`, and `$destination_country`
 - **SIP Traffic** — Request/response rate breakdown by method and status code
 - **Registrations** — Active registrations, success ratio, failures by code, fraud signals
 - **System Health** — Error rate, ISS rate
+- **Traffic Minutes** — Traffic minutes/min by destination (top 10), ACD by destination
 - **Geographic Distribution** — Top source/destination countries by INVITE rate (GeoIP-enriched)
 
 Dashboard file: [`examples/grafana-dashboard.json`](../examples/grafana-dashboard.json)
