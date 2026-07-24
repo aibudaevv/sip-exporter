@@ -41,6 +41,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - 🏷️ **Per-carrier metrics** — CIDR-based carrier resolution for all SIP metrics
 - 🏷️ **Per-device-type metrics** — User-Agent classification for all SIP metrics
 - 🌍 **Geo-enrichment** — `source_country` (GeoIP) and `destination_country` (E.164 prefix) labels on SIP metrics
+- 🔀 **Traffic direction** — `inbound`/`outbound` label on all metrics via kernel `pkttype`, zero-config
 - 📞 **Voice quality (RFC 6035)** — MOS scores, jitter, packet loss from SIP PUBLISH/NOTIFY
 - 🎧 **RTP media analysis** — jitter, packet loss, and MOS (E-model G.107) from RTP streams correlated with SIP dialogs, with no voice payload captured (header-only)
 - 🛡️ **Fraud detection** — registration scan, INVITE burst, and account-takeover (country change) signals

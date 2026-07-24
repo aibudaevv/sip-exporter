@@ -45,6 +45,7 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 | `carrier` | Base (all SIP) | Carrier name from config | Source IP → CIDR mapping, resolved at request time |
 | `ua_type` | Base (all SIP) | UA type from config | `User-Agent` header → regex mapping, resolved at request time |
 | `source_country` | Base (all SIP) | ISO 3166-1 alpha-2 | Country of the calling device. See [Geo-Enrichment Labels](#geo-enrichment-labels) |
+| `direction` | Base (all SIP) | `inbound` or `outbound` | Traffic direction from the server's perspective. See [Direction Label](#direction-label) |
 | `destination_country` | INVITE raw only | ISO alpha-2 or `"unknown"` | Destination country from E.164 phone-number prefix. See [Geo-Enrichment Labels](#geo-enrichment-labels) |
 | `caller_host` | INVITE raw only (**opt-in**) | IP or domain | Host part of the `From` SIP URI |
 | `called_host` | INVITE raw only (**opt-in**) | IP or domain | Host part of the `To` SIP URI |
@@ -54,24 +55,24 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 > | Tier | Metrics | Full label set |
 > |------|---------|----------------|
 > | **System** | `packets_total`, `system_error_total`, self-monitoring | *(none)* |
-> | **Base** | All SIP requests, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD/PBD, VQ reports, sessions, `reinvite_total`, registration health (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country` |
-> | **Reg failure** | `register_failure_total` | `carrier, ua_type, source_country, code` |
-> | **Retransmission** | `sip_retransmission_total` | `carrier, ua_type, source_country, method` |
-> | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_out_of_order_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country` |
-> | **RTP dialog** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country` |
-> | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, destination_country, caller_host, called_host, iface` |
-> | **Fraud** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country` |
-> | **Short calls** | `short_calls_total` | `carrier, ua_type, source_country, threshold` |
-> | **Traffic** | `billable_seconds_total` | `carrier, destination_country` |
+> | **Base** | All SIP requests, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD/PBD, VQ reports, sessions, `reinvite_total`, registration health (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country, direction` |
+> | **Reg failure** | `register_failure_total` | `carrier, ua_type, source_country, direction, code` |
+> | **Retransmission** | `sip_retransmission_total` | `carrier, ua_type, source_country, direction, method` |
+> | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_out_of_order_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country, direction` |
+> | **RTP dialog** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country, direction` |
+> | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, direction, destination_country, caller_host, called_host, iface` |
+> | **Fraud** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country, direction` |
+> | **Short calls** | `short_calls_total` | `carrier, ua_type, source_country, direction, threshold` |
+> | **Traffic** | `billable_seconds_total` | `carrier, destination_country, direction` |
 > | **Capacity** | `sessions_limit`, `sessions_utilization` | `carrier` |
 
 `carrier` and `ua_type` default to `"other"` when not configured or when no pattern matches. `source_country` defaults to `"unknown"` when neither carrier country nor GeoIP DB is available.
 
 **Example:**
 ```
-sip_exporter_invite_total{carrier="carrier-a",ua_type="yealink",source_country="RU",destination_country="US",caller_host="10.1.5.20",called_host="sip.example.com",iface="ens3"} 1523
-sip_exporter_200_total{carrier="carrier-a",ua_type="yealink",source_country="RU"} 847
-sip_exporter_ser{carrier="carrier-a",ua_type="yealink",source_country="RU"} 95.2
+sip_exporter_invite_total{carrier="carrier-a",ua_type="yealink",source_country="RU",direction="inbound",destination_country="US",caller_host="10.1.5.20",called_host="sip.example.com",iface="ens3"} 1523
+sip_exporter_200_total{carrier="carrier-a",ua_type="yealink",source_country="RU",direction="inbound"} 847
+sip_exporter_ser{carrier="carrier-a",ua_type="yealink",source_country="RU",direction="inbound"} 95.2
 ```
 
 ### Metrics WITHOUT `carrier` and `ua_type` labels
@@ -458,6 +459,48 @@ sum by (iface) (rate(sip_exporter_invite_total[5m]))
 rate(sip_exporter_socket_packets_dropped_total{iface="ens3"}[5m])
 ```
 
+### Direction Label
+
+The `direction` label classifies traffic as `inbound` or `outbound` from the server's perspective. It is determined automatically from the kernel's `pkttype` field — **zero configuration required**.
+
+**How it works:**
+
+The Linux kernel assigns each packet a `pkttype` when delivering it to an AF_PACKET socket:
+
+| pkttype | Meaning | Request direction | Response direction |
+|---------|---------|-------------------|--------------------|
+| `PACKET_HOST` (0) | Packet arriving at our interface (RX) | `inbound` | `outbound` |
+| `PACKET_OUTGOING` (4) | Packet sent by us (TX) | `outbound` | `inbound` |
+
+For responses, the direction is inverted: a response arriving at our interface means it's a response to our outbound request, and vice versa. INVITE responses inherit the direction from the original INVITE via the invite tracker, ensuring consistency within a call.
+
+**Semantics:**
+
+- `inbound` — someone is calling us (incoming calls, registrations from devices, OPTIONS from peers)
+- `outbound` — we are calling out (outgoing calls, outgoing registrations, outgoing OPTIONS)
+
+All packets within the same call carry the same `direction` value.
+
+**Requirements:**
+
+- `SIP_EXPORTER_IGNORE_OUTGOING=false` (default) — both RX and TX packets must be captured. With `IgnoreOutgoing=true`, TX packets are filtered and `direction` collapses to `inbound` for all calls (only non-INVITE responses appear as `outbound` due to inversion).
+- On loopback (`lo`), `IgnoreOutgoing=true` is typically used to prevent packet duplication, which means `direction` cannot distinguish inbound/outbound. For meaningful direction analysis, use a physical NIC or veth pair.
+
+**PromQL examples:**
+```promql
+# ASR separately for inbound vs outbound calls
+sum by (direction) (sip_exporter_asr)
+
+# INVITE rate by direction
+sum by (direction) (rate(sip_exporter_invite_total[5m]))
+
+# Inbound call failure rate
+sum(rate(sip_exporter_480_total{direction="inbound"}[5m]))
+  / sum(rate(sip_exporter_invite_total{direction="inbound"}[5m]))
+```
+
+**Cardinality impact:** +1 label × 2 values = 2× combinations. Typical: 5 carriers × 3 UA types × 10 countries × 2 directions = 300 series per metric.
+
 ### SER by Destination (PromQL)
 
 Ratio metrics (SER, SEER, ISA, SCR) carry `source_country` but **not** `destination_country` (cardinality control). To calculate SER for a specific destination, use PromQL on the raw INVITE counters:
@@ -484,6 +527,8 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 ## Active sessions
 
 `sip_exporter_sessions{carrier="...",ua_type="..."}`: number of active SIP dialogs (RFC 3261).
+
+> Note: Actual metric includes `source_country` and `direction` labels. See [Labels](#labels) table for the full label set per metric tier.
 
 **How dialogs are counted:**
 - A dialog is created when a `200 OK` response is received for an `INVITE` request
