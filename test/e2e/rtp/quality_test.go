@@ -104,115 +104,92 @@ func TestRTP_QualityMetrics_Degraded(t *testing.T) {
 	require.LessOrEqual(t, f2Avg, adaptAvg, "F2 (JB=200) should be <= Adaptive (JB=500)")
 }
 
-// TestRTP_DuplicatePackets verifies that duplicate RTP sequence numbers
-// increment the rtp_duplicate_packets_total counter.
-func TestRTP_DuplicatePackets(t *testing.T) {
-	ports := allocatePortsN(6)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
-	uasMediaNum, _ := strconv.Atoi(uasMedia)
+// TestRTP_TeardownMetrics consolidates four dialog-teardown RTP quality tests
+// into a single table-driven test. Each case establishes a SIP dialog, optionally
+// sends RTP with controlled sequence numbers, then verifies a teardown metric.
+func TestRTP_TeardownMetrics(t *testing.T) {
+	tests := []struct {
+		name      string
+		rtpSeqs   []uint16
+		waitFirst bool
+		check     func(t *testing.T, endpoint string)
+	}{
+		{
+			name:    "DuplicatePackets",
+			rtpSeqs: []uint16{1, 2, 2, 3, 4, 4, 5},
+			check: func(t *testing.T, endpoint string) {
+				require.Eventually(t, func() bool {
+					return getRTPMetric(t, endpoint, "sip_exporter_rtp_duplicate_packets_total") >= 2
+				}, 10*time.Second, 500*time.Millisecond, "duplicate packets must be counted")
+			},
+		},
+		{
+			name:    "BurstGapLoss",
+			rtpSeqs: []uint16{1, 2, 3, 4, 5, 10, 11, 12, 14, 15},
+			check: func(t *testing.T, endpoint string) {
+				require.Eventually(t, func() bool {
+					return getRTPMetric(t, endpoint, "sip_exporter_rtp_burst_loss_density_count") > 0
+				}, 10*time.Second, 500*time.Millisecond, "burst_loss_density must have samples")
+				require.Eventually(t, func() bool {
+					return getRTPMetric(t, endpoint, "sip_exporter_rtp_gap_loss_density_count") > 0
+				}, 10*time.Second, 500*time.Millisecond, "gap_loss_density must have samples")
 
-	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP,
-		integrationCarriersYAML, integrationUserAgentsYAML, "")
+				burstAvg := avgHistogramValue(t, endpoint, "sip_exporter_rtp_burst_loss_density")
+				gapAvg := avgHistogramValue(t, endpoint, "sip_exporter_rtp_gap_loss_density")
+				t.Logf("Loss distribution: burst=%.1f%% gap=%.1f%%", burstAvg, gapAvg)
+				require.Greater(t, burstAvg, gapAvg, "burst density should exceed gap density")
+			},
+		},
+		{
+			name:      "OneWayCall",
+			rtpSeqs:   []uint16{1, 2, 3, 4, 5},
+			waitFirst: true,
+			check: func(t *testing.T, endpoint string) {
+				require.Eventually(t, func() bool {
+					return getMetricByLabel(t, endpoint, "sip_exporter_rtp_oneway_calls_total", labelCarrier, labelUAType) >= 1
+				}, 10*time.Second, 500*time.Millisecond, "one-way call must be detected at teardown")
+			},
+		},
+		{
+			name:      "MissingRTP",
+			waitFirst: true,
+			check: func(t *testing.T, endpoint string) {
+				require.Eventually(t, func() bool {
+					return getMetricByLabel(t, endpoint, "sip_exporter_sessions_missing_rtp_total", labelCarrier, labelUAType) >= 1
+				}, 10*time.Second, 500*time.Millisecond, "missing RTP must be detected at teardown")
+			},
+		},
+	}
 
-	wait := startSippContainers(context.Background(), t,
-		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ports := allocatePortsN(6)
+			httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
+			uasMediaNum, _ := strconv.Atoi(uasMedia)
 
-	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
-	}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
+			endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP,
+				integrationCarriersYAML, integrationUserAgentsYAML, "")
 
-	sendControlledRTP(t, uasMediaNum, []uint16{1, 2, 2, 3, 4, 4, 5})
+			wait := startSippContainers(context.Background(), t,
+				"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
 
-	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_duplicate_packets_total") >= 2
-	}, 10*time.Second, 500*time.Millisecond, "duplicate packets must be counted")
+			require.Eventually(t, func() bool {
+				return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
+			}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
 
-	wait()
-}
+			if tt.rtpSeqs != nil {
+				sendControlledRTP(t, uasMediaNum, tt.rtpSeqs)
+			}
 
-// TestRTP_BurstGapLoss verifies that consecutive losses (burst, run ≥3) and
-// isolated losses (gap, run <3) populate the respective loss density histograms.
-func TestRTP_BurstGapLoss(t *testing.T) {
-	ports := allocatePortsN(6)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
-	uasMediaNum, _ := strconv.Atoi(uasMedia)
+			if tt.waitFirst {
+				wait()
+			}
 
-	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP,
-		integrationCarriersYAML, integrationUserAgentsYAML, "")
+			tt.check(t, endpoint)
 
-	wait := startSippContainers(context.Background(), t,
-		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
-
-	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
-	}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
-
-	// Loss pattern: seq [1-5, 10-12, 14-15]
-	//   Lost 6,7,8,9 → run=4 ≥3 → burst
-	//   Lost 13      → run=1 <3 → gap
-	sendControlledRTP(t, uasMediaNum, []uint16{1, 2, 3, 4, 5, 10, 11, 12, 14, 15})
-
-	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_burst_loss_density_count") > 0
-	}, 10*time.Second, 500*time.Millisecond, "burst_loss_density must have samples")
-
-	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_gap_loss_density_count") > 0
-	}, 10*time.Second, 500*time.Millisecond, "gap_loss_density must have samples")
-
-	burstAvg := avgHistogramValue(t, endpoint, "sip_exporter_rtp_burst_loss_density")
-	gapAvg := avgHistogramValue(t, endpoint, "sip_exporter_rtp_gap_loss_density")
-	t.Logf("Loss distribution: burst=%.1f%% gap=%.1f%%", burstAvg, gapAvg)
-	require.Greater(t, burstAvg, gapAvg, "burst density should exceed gap density")
-
-	wait()
-}
-
-// TestRTP_OneWayCall verifies that a dialog with RTP in only one direction
-// increments the rtp_oneway_calls_total counter at teardown.
-func TestRTP_OneWayCall(t *testing.T) {
-	ports := allocatePortsN(6)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
-	uasMediaNum, _ := strconv.Atoi(uasMedia)
-
-	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP,
-		integrationCarriersYAML, integrationUserAgentsYAML, "")
-
-	wait := startSippContainers(context.Background(), t,
-		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
-
-	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
-	}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
-
-	sendControlledRTP(t, uasMediaNum, []uint16{1, 2, 3, 4, 5})
-
-	wait()
-
-	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_rtp_oneway_calls_total", labelCarrier, labelUAType) >= 1
-	}, 10*time.Second, 500*time.Millisecond, "one-way call must be detected at teardown")
-}
-
-// TestRTP_MissingRTP verifies that a dialog with SDP but no RTP increments
-// the sessions_missing_rtp_total counter at teardown.
-func TestRTP_MissingRTP(t *testing.T) {
-	ports := allocatePortsN(6)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
-
-	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP,
-		integrationCarriersYAML, integrationUserAgentsYAML, "")
-
-	wait := startSippContainers(context.Background(), t,
-		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
-
-	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
-	}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
-
-	wait()
-
-	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_sessions_missing_rtp_total", labelCarrier, labelUAType) >= 1
-	}, 10*time.Second, 500*time.Millisecond, "missing RTP must be detected at teardown")
+			if !tt.waitFirst {
+				wait()
+			}
+		})
+	}
 }
