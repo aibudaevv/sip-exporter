@@ -886,3 +886,192 @@ func TestMultiPort_PerInterfaceDifferentPorts(t *testing.T) {
 
 	assertSelfMonitoringHealthy(t, env.endpoint)
 }
+
+// TestMultiPort_PerInterfacePortIsolation verifies that port sets are truly
+// per-interface: traffic on loPort sent via sipns0 (where loPort is NOT in
+// sipns0's port set) is silently dropped by the eBPF filter.
+//
+// Interfaces:
+//
+//	lo     → [loPort]
+//	sipns0 → [vethPort]
+//
+// Phase 1 (positive): REGISTER on loPort via lo → captured.
+// Phase 2 (negative): REGISTER on loPort via sipns0 → eBPF drops it.
+//
+// The SIPp exchange in phase 2 succeeds because the eBPF socket filter only
+// affects the exporter's AF_PACKET copies, not normal kernel packet delivery.
+func TestMultiPort_PerInterfacePortIsolation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pauseID := setupVethNetns(t)
+
+	loPort := freePort(t)
+	vethPort := freePort(t)
+
+	extraEnv := map[string]string{
+		"SIP_EXPORTER_INTERFACE": testInterface + "," + nsVethHost,
+		"SIP_EXPORTER_SIP_PORTS": loPort + ";" + vethPort,
+	}
+	env := newTestEnvWithExtraEnv(ctx, t, "", extraEnv)
+
+	const callCount = 5
+
+	// Phase 1: REGISTER on loPort via lo (positive control).
+	loEnv := &testEnv{
+		endpoint:       env.endpoint,
+		sippPort:       loPort,
+		sippClientPort: freePort(t),
+	}
+	runSippScenario(ctx, t, "reg_uas.xml", "reg_uac.xml", callCount, loEnv)
+
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_register_total"),
+		"register_total must exist after phase 1")
+	registerBefore := getMetric(t, env.endpoint, "sip_exporter_register_total")
+	t.Logf("phase 1 (lo, port=%s): register_total=%.0f (want >= %d)",
+		loPort, registerBefore, callCount)
+	require.GreaterOrEqual(t, registerBefore, float64(callCount),
+		"phase 1: REGISTER captured on lo:%s", loPort)
+
+	// Phase 2: REGISTER on loPort via sipns0 (negative — loPort ∉ sipns0's ports).
+	// UAS on host (nsHostIP:loPort), UAC in netns (nsGuestIP → nsHostIP:loPort).
+	uasCtx, uasCancel := context.WithTimeout(ctx, 60*time.Second)
+	defer uasCancel()
+	uasPath := absScenarioPath(t, "reg_uas.xml")
+	sippVol := filepath.Dir(uasPath)
+	uasCmd := exec.CommandContext(uasCtx, "docker", "run", "--rm",
+		"--network", "host",
+		"-v", sippVol+":/scenarios:ro",
+		sippImage,
+		"-sf", "/scenarios/reg_uas.xml",
+		"-i", nsHostIP,
+		"-p", loPort,
+		"-m", strconv.Itoa(callCount),
+		"-nr", "-nostdin",
+	)
+	if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
+		uasCmd.Stdout = &testWriter{t}
+		uasCmd.Stderr = &testWriter{t}
+	} else {
+		uasCmd.Stdout = io.Discard
+		uasCmd.Stderr = io.Discard
+	}
+	require.NoError(t, uasCmd.Start())
+	require.Eventually(t, func() bool {
+		return isUDPPortInUse(loPort)
+	}, 10*time.Second, 50*time.Millisecond, "UAS should start listening on %s:%s", nsHostIP, loPort)
+
+	vethEnv := &testEnv{
+		endpoint:       env.endpoint,
+		sippPort:       loPort,
+		sippClientPort: freePort(t),
+	}
+	runSippUACInNetns(ctx, t, pauseID, "reg_uac.xml", callCount, vethEnv, nsHostIP)
+	_ = uasCmd.Wait()
+	waitForMetricStable(t, env.endpoint)
+
+	registerAfter := getMetric(t, env.endpoint, "sip_exporter_register_total")
+	t.Logf("phase 2 (sipns0, port=%s): register_total=%.0f (want == %.0f, unchanged)",
+		loPort, registerAfter, registerBefore)
+	require.InDelta(t, registerBefore, registerAfter, 0.0,
+		"phase 2: REGISTER on loPort via sipns0 must NOT be captured (loPort ∉ sipns0's ports)")
+
+	assertSelfMonitoringHealthy(t, env.endpoint)
+}
+
+// TestMultiPort_UnconfiguredPortDropped verifies that SIP traffic on a port NOT
+// listed in SIP_EXPORTER_SIP_PORTS is silently dropped by the eBPF filter.
+//
+// Single interface (lo) with SIP_EXPORTER_SIP_PORTS=port1,port2.
+//
+// Phase 1 (positive): REGISTER on port1 → captured.
+// Phase 2 (negative): REGISTER on port3 (unconfigured) → eBPF drops it.
+func TestMultiPort_UnconfiguredPortDropped(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	port1 := freePort(t)
+	port2 := freePort(t)
+	port3 := freePort(t)
+
+	extraEnv := map[string]string{
+		"SIP_EXPORTER_SIP_PORTS": port1 + "," + port2,
+	}
+	env := newTestEnvWithExtraEnv(ctx, t, "", extraEnv)
+
+	const callCount = 5
+
+	// Phase 1: REGISTER on port1 (configured).
+	flowEnv := &testEnv{
+		endpoint:       env.endpoint,
+		sippPort:       port1,
+		sippClientPort: freePort(t),
+	}
+	runSippScenario(ctx, t, "reg_uas.xml", "reg_uac.xml", callCount, flowEnv)
+
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_register_total"),
+		"register_total must exist after phase 1")
+	registerBefore := getMetric(t, env.endpoint, "sip_exporter_register_total")
+	t.Logf("phase 1 (port=%s): register_total=%.0f (want >= %d)",
+		port1, registerBefore, callCount)
+	require.GreaterOrEqual(t, registerBefore, float64(callCount),
+		"phase 1: REGISTER captured on configured port %s", port1)
+
+	// Phase 2: REGISTER on port3 (NOT configured) — eBPF filter should drop it.
+	dropEnv := &testEnv{
+		endpoint:       env.endpoint,
+		sippPort:       port3,
+		sippClientPort: freePort(t),
+	}
+	runSippScenario(ctx, t, "reg_uas.xml", "reg_uac.xml", callCount, dropEnv)
+
+	registerAfter := getMetric(t, env.endpoint, "sip_exporter_register_total")
+	t.Logf("phase 2 (port=%s, unconfigured): register_total=%.0f (want == %.0f, unchanged)",
+		port3, registerAfter, registerBefore)
+	require.InDelta(t, registerBefore, registerAfter, 0.0,
+		"phase 2: REGISTER on unconfigured port %s must NOT be captured", port3)
+
+	assertSelfMonitoringHealthy(t, env.endpoint)
+}
+
+// TestMultiPort_INVITE_Flow verifies that INVITE→200 OK→BYE dialogs are captured
+// across multiple configured SIP ports on a single interface.
+//
+// Single interface (lo) with 3 SIP ports. Each port runs a full INVITE flow
+// with callCount calls. The eBPF filter matches both dst_port (INVITE/BYE/ACK)
+// and src_port (200 OK responses) against the configured SIP ports.
+func TestMultiPort_INVITE_Flow(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	sipPorts := []string{freePort(t), freePort(t), freePort(t)}
+
+	extraEnv := map[string]string{
+		"SIP_EXPORTER_SIP_PORTS": strings.Join(sipPorts, ","),
+	}
+	env := newTestEnvWithExtraEnv(ctx, t, "", extraEnv)
+
+	const callCount = 5
+
+	for i := range sipPorts {
+		flowEnv := &testEnv{
+			endpoint:       env.endpoint,
+			sippPort:       sipPorts[i],
+			sippClientPort: freePort(t),
+		}
+		runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", callCount, flowEnv)
+	}
+
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_invite_total"),
+		"invite_total must exist after INVITE traffic")
+	inviteTotal := getMetric(t, env.endpoint, "sip_exporter_invite_total")
+	invite200 := getMetric(t, env.endpoint, "sip_exporter_invite_200_total")
+	t.Logf("invite_total=%.0f, invite_200_total=%.0f (want >= %d each)",
+		inviteTotal, invite200, 3*callCount)
+	require.GreaterOrEqual(t, inviteTotal, 3.0*callCount,
+		"INVITE captured on all 3 SIP ports")
+	require.GreaterOrEqual(t, invite200, 3.0*callCount,
+		"200 OK for INVITE captured on all 3 SIP ports")
+
+	waitForSessionsZero(t, env.endpoint)
+}
