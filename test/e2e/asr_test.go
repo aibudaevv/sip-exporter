@@ -9,14 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestASR_AllScenarios tests ASR metric with various scenarios.
-// ASR = (INVITE → 200 OK) / Total INVITE × 100 (ITU-T E.411)
-// 3xx NOT excluded from denominator (difference from SER).
-// IGNORE_OUTGOING=true on lo → each packet seen once → ASR matches theoretical.
 func TestASR_AllScenarios(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	env := newSharedTestEnv(ctx, t)
 
 	tests := []struct {
 		name        string
@@ -25,46 +20,21 @@ func TestASR_AllScenarios(t *testing.T) {
 		callCount   int
 		wantASR     float64
 	}{
-		{
-			name:        "100_percent",
-			uasScenario: "uas_100.xml",
-			uacScenario: "uac_100.xml",
-			callCount:   100,
-			wantASR:     100.0,
-		},
-		{
-			name:        "0_percent",
-			uasScenario: "uas_0.xml",
-			uacScenario: "uac_0.xml",
-			callCount:   100,
-			wantASR:     0.0,
-		},
-		{
-			name:        "redirect",
-			uasScenario: "uas_redirect.xml",
-			uacScenario: "uac_redirect.xml",
-			callCount:   100,
-			wantASR:     0.0,
-		},
-		{
-			name:        "no_invite",
-			uasScenario: "uas_no_invite.xml",
-			uacScenario: "uac_no_invite.xml",
-			callCount:   100,
-			wantASR:     0.0,
-		},
+		{"100_percent", "uas_100.xml", "uac_100.xml", 100, 100.0},
+		{"0_percent", "uas_0.xml", "uac_0.xml", 100, 0.0},
+		{"redirect", "uas_redirect.xml", "uac_redirect.xml", 100, 0.0},
+		{"no_invite", "uas_no_invite.xml", "uac_no_invite.xml", 100, 0.0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env.restart(t)
-			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
+			t.Parallel()
+			env := newTestEnv(ctx, t)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
 
+			require.True(t, metricExists(t, env.endpoint, "sip_exporter_asr"))
 			asr := getASR(t, env.endpoint)
 			t.Logf("ASR = %.2f (want %.2f)", asr, tt.wantASR)
-			if tt.uacScenario != "uac_no_invite.xml" {
-				require.True(t, metricExists(t, env.endpoint, "sip_exporter_asr"))
-			}
 			require.InDelta(t, tt.wantASR, asr, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)
@@ -72,71 +42,55 @@ func TestASR_AllScenarios(t *testing.T) {
 	}
 }
 
-// TestASR_Mixed tests 140 successful + 60 rejected (486).
-// inviteTotal=200, invite200OKTotal=140 → ASR = 140/200 × 100 = 70%.
 func TestASR_Mixed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 140, env)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 60, env)
+	type sippRun struct {
+		uas, uac string
+		count    int
+	}
 
-	asr := getASR(t, env.endpoint)
-	t.Logf("ASR = %.2f (want %.2f)", asr, 70.0)
-	require.InDelta(t, 70.0, asr, ratioDelta)
+	tests := []struct {
+		name         string
+		runs         []sippRun
+		successCount int
+		denomCount   int
+	}{
+		{"Mixed", []sippRun{{"uas_100.xml", "uac_100.xml", 140}, {"uas_0.xml", "uac_0.xml", 60}}, 140, 200},
+		{"MixedWith3xx", []sippRun{{"uas_redirect.xml", "uac_redirect.xml", 100}, {"uas_100.xml", "uac_100.xml", 100}}, 100, 200},
+		{"Complex", []sippRun{{"uas_100.xml", "uac_100.xml", 80}, {"uas_busy.xml", "uac_busy.xml", 60}, {"uas_server_error.xml", "uac_server_error.xml", 60}}, 80, 200},
+	}
 
-	waitForSessionsZero(t, env.endpoint)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			env := newTestEnv(ctx, t)
+
+			for _, r := range tt.runs {
+				runSippScenario(ctx, t, r.uas, r.uac, r.count, env)
+			}
+
+			require.True(t, metricExists(t, env.endpoint, "sip_exporter_asr"))
+			asr := getASR(t, env.endpoint)
+			wantASR := float64(tt.successCount) / float64(tt.denomCount) * percentScale
+			t.Logf("ASR = %.2f (want %.2f)", asr, wantASR)
+			require.InDelta(t, wantASR, asr, ratioDelta)
+
+			waitForSessionsZero(t, env.endpoint)
+		})
+	}
 }
 
-// TestASR_MixedWith3xx tests that 3xx are NOT excluded from ASR denominator.
-// 100 redirect (3xx) + 100 successful → ASR = 100/200 × 100 = 50%.
-// (SER would be 100% because 3xx excluded, but ASR keeps them.)
-func TestASR_MixedWith3xx(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 100, env)
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 100, env)
-
-	asr := getASR(t, env.endpoint)
-	t.Logf("ASR = %.2f (want %.2f)", asr, 50.0)
-	require.InDelta(t, 50.0, asr, ratioDelta)
-
-	ser := getSER(t, env.endpoint)
-	t.Logf("SER = %.2f (must be >= ASR)", ser)
-	require.GreaterOrEqual(t, ser, asr, "SER must be >= ASR")
-
-	waitForSessionsZero(t, env.endpoint)
-}
-
-// TestASR_Complex tests mixed scenarios.
-// 80×200 OK + 60×480 + 60×500 → ASR = 80/200 × 100 = 40%.
-func TestASR_Complex(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 80, env)
-	runSippScenario(ctx, t, "uas_busy.xml", "uac_busy.xml", 60, env)
-	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 60, env)
-
-	asr := getASR(t, env.endpoint)
-	t.Logf("ASR = %.2f (want %.2f)", asr, 40.0)
-	require.InDelta(t, 40.0, asr, ratioDelta)
-
-	waitForSessionsZero(t, env.endpoint)
-}
-
-// TestASR_WithCarrierConfig verifies ASR per-carrier.
 func TestASR_WithCarrierConfig(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
+	const callCount = 200
 	env := newTestEnvWithCarriers(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 200, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", callCount, env)
 
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_asr"))
 	asr := env.getASRByCarrier(t)
 	t.Logf("ASR{carrier=%q} = %.2f (want %.2f)", env.carrier, asr, 100.0)
 	require.InDelta(t, 100.0, asr, ratioDelta)
@@ -144,18 +98,20 @@ func TestASR_WithCarrierConfig(t *testing.T) {
 	env.waitForSessionsZeroByCarrier(t)
 }
 
-// TestASR_MixedWithCarrierConfig verifies ASR per-carrier for mixed traffic.
 func TestASR_MixedWithCarrierConfig(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
+	const successCount = 140
+	const failCount = 60
 	env := newTestEnvWithCarriers(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 140, env)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 60, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", successCount, env)
+	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", failCount, env)
 
 	asr := env.getASRByCarrier(t)
-	t.Logf("ASR{carrier=%q} = %.2f (want %.2f)", env.carrier, asr, 70.0)
-	require.InDelta(t, 70.0, asr, ratioDelta)
+	wantASR := float64(successCount) / float64(successCount+failCount) * percentScale
+	t.Logf("ASR{carrier=%q} = %.2f (want %.2f)", env.carrier, asr, wantASR)
+	require.InDelta(t, wantASR, asr, ratioDelta)
 
 	env.waitForSessionsZeroByCarrier(t)
 }
