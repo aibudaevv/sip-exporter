@@ -9,75 +9,64 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestLRD_RegisterRedirect tests LRD histogram with REGISTER 3xx redirect.
-// LRD measures delay from REGISTER to 3xx response.
-// On loopback: registerTracker keyed by Call-ID → LRD count = unique transactions.
-func TestLRD_RegisterRedirect(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
+func TestLRD(t *testing.T) {
+	type sippRun struct {
+		uas, uac string
+		count    int
+	}
 
-	runSippScenario(ctx, t, "reg_uas_redirect.xml", "reg_uac_redirect.xml", 50, env)
+	tests := []struct {
+		name      string
+		carrier   bool
+		scenarios []sippRun
+		wantZero  bool
+	}{
+		{"RegisterRedirect", false, []sippRun{{"reg_uas_redirect.xml", "reg_uac_redirect.xml", 50}}, false},
+		{"Register200OK", false, []sippRun{{"reg_uas.xml", "reg_uac.xml", 50}}, true},
+		{"RegisterError", false, []sippRun{{"reg_uas_500.xml", "reg_uac_500.xml", 50}}, true},
+		{"Mixed", false, []sippRun{{"reg_uas.xml", "reg_uac.xml", 25}, {"reg_uas_redirect.xml", "reg_uac_redirect.xml", 25}}, false},
+		{"WithCarrierConfig", true, []sippRun{{"reg_uas_redirect.xml", "reg_uac_redirect.xml", 50}}, false},
+	}
 
-	lrdCount := getLRD(t, env.endpoint)
-	t.Logf("LRD count = %.0f (want 50.0)", lrdCount)
-	require.Equal(t, 50.0, lrdCount)
-	assertSelfMonitoringHealthy(t, env.endpoint)
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
 
-// TestLRD_Register200OK verifies LRD = 0 for REGISTER 200 OK (RRD measured, not LRD).
-func TestLRD_Register200OK(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
+			var env *testEnv
+			if tt.carrier {
+				env = newTestEnvWithCarriers(ctx, t)
+			} else {
+				env = newTestEnv(ctx, t)
+			}
 
-	runSippScenario(ctx, t, "reg_uas.xml", "reg_uac.xml", 50, env)
+			for _, s := range tt.scenarios {
+				runSippScenario(ctx, t, s.uas, s.uac, s.count, env)
+			}
 
-	lrdCount := getLRD(t, env.endpoint)
-	t.Logf("LRD count = %.0f (want 0.0)", lrdCount)
-	require.Equal(t, 0.0, lrdCount)
-	assertSelfMonitoringHealthy(t, env.endpoint)
-}
+			if tt.wantZero {
+				require.False(t, metricExists(t, env.endpoint, "sip_exporter_lrd_count"),
+					"LRD histogram should be absent (no 3xx redirects)")
+			}
 
-// TestLRD_RegisterError verifies LRD = 0 for REGISTER 500 (not a redirect).
-func TestLRD_RegisterError(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
+			if tt.carrier {
+				carrierLabel := `carrier="` + env.carrier + `"`
+				require.True(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_lrd_count", carrierLabel),
+					"LRD histogram should exist for carrier %q", env.carrier)
+				lrdCount := env.getLRDByCarrier(t)
+				t.Logf("LRD{carrier=%q} count = %.0f", env.carrier, lrdCount)
+				require.Greater(t, lrdCount, 0.0, "LRD count should be > 0 for redirect scenarios")
+			} else {
+				lrdCount := getLRD(t, env.endpoint)
+				t.Logf("LRD count = %.0f", lrdCount)
+				if tt.wantZero {
+					require.Equal(t, 0.0, lrdCount, "LRD count should be 0 (no redirects)")
+				} else {
+					require.Greater(t, lrdCount, 0.0, "LRD count should be > 0 for redirect scenarios")
+				}
+			}
 
-	runSippScenario(ctx, t, "reg_uas_500.xml", "reg_uac_500.xml", 50, env)
-
-	lrdCount := getLRD(t, env.endpoint)
-	t.Logf("LRD count = %.0f (want 0.0)", lrdCount)
-	require.Equal(t, 0.0, lrdCount)
-	assertSelfMonitoringHealthy(t, env.endpoint)
-}
-
-// TestLRD_Mixed tests 25×REGISTER 200 OK + 25×REGISTER redirect.
-func TestLRD_Mixed(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	runSippScenario(ctx, t, "reg_uas.xml", "reg_uac.xml", 25, env)
-	runSippScenario(ctx, t, "reg_uas_redirect.xml", "reg_uac_redirect.xml", 25, env)
-
-	lrdCount := getLRD(t, env.endpoint)
-	t.Logf("LRD count = %.0f (want 25.0)", lrdCount)
-	require.Equal(t, 25.0, lrdCount)
-	assertSelfMonitoringHealthy(t, env.endpoint)
-}
-
-// TestLRD_WithCarrierConfig verifies LRD per-carrier.
-func TestLRD_WithCarrierConfig(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnvWithCarriers(ctx, t)
-
-	runSippScenario(ctx, t, "reg_uas_redirect.xml", "reg_uac_redirect.xml", 50, env)
-
-	lrdCount := env.getLRDByCarrier(t)
-	t.Logf("LRD{carrier=%q} count = %.0f (want 50.0)", env.carrier, lrdCount)
-	require.Equal(t, 50.0, lrdCount)
-	assertSelfMonitoringHealthy(t, env.endpoint)
+			assertSelfMonitoringHealthy(t, env.endpoint)
+		})
+	}
 }
