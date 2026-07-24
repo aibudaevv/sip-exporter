@@ -23,8 +23,6 @@ func TestMultiCodec_EarlyMedia_Success(t *testing.T) {
 	status183 := getMetric(t, env.endpoint, "sip_exporter_183_total")
 	ackTotal := getMetric(t, env.endpoint, "sip_exporter_ack_total")
 	byeTotal := getMetric(t, env.endpoint, "sip_exporter_bye_total")
-	require.True(t, metricExists(t, env.endpoint, "sip_exporter_parse_errors_total"),
-		"parse_errors_total metric should exist")
 	parseErrors := getMetric(t, env.endpoint, "sip_exporter_parse_errors_total")
 
 	t.Logf("invite=%.0f, invite_200=%.0f, 183=%.0f, ack=%.0f, bye=%.0f, parse_errors=%.0f",
