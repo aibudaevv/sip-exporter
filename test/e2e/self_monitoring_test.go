@@ -101,8 +101,10 @@ func TestSelfMonitoring_ActiveTrackers(t *testing.T) {
 
 		for _, trackerType := range []string{"register", "invite", "options"} {
 			labelFilter := `type="` + trackerType + `"`
-			require.True(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_active_trackers", labelFilter),
-				"active_trackers{type=%q} should exist", trackerType)
+			require.Eventually(t, func() bool {
+				return metricWithLabelExists(t, env.endpoint, "sip_exporter_active_trackers", labelFilter)
+			}, 5*time.Second, 500*time.Millisecond,
+				"active_trackers{type=%q} should exist after first metrics tick", trackerType)
 			val := getMetricWithLabel(t, env.endpoint, "sip_exporter_active_trackers", labelFilter)
 			require.GreaterOrEqual(t, val, 0.0, "active_trackers{type=%q} should be >= 0", trackerType)
 		}
