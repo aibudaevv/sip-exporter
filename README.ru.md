@@ -56,8 +56,7 @@ services:
     environment:
       - SIP_EXPORTER_INTERFACE=eth0
       - SIP_EXPORTER_HTTP_PORT=2112
-      - SIP_EXPORTER_SIP_PORT=5060
-      - SIP_EXPORTER_SIPS_PORT=5061
+      - SIP_EXPORTER_SIP_PORTS=5060
       # Опционально: метки carrier для мониторинга по операторам
       # - SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml
       # Опционально: метки ua_type для мониторинга по типам устройств
@@ -76,7 +75,7 @@ curl http://localhost:2112/metrics
 
 ## Технология
 
-Сервис использует eBPF (extended Berkeley Packet Filter), подключённый к сокетам `AF_PACKET` для перехвата SIP-пакетов (UDP/5060-5061) на L4 без накладных расходов iptables/nftables или userspace-демонов вроде tcpdump. Отфильтрованные пакеты передаются в userspace через сокет для эффективной обработки на Go.
+Сервис использует eBPF (extended Berkeley Packet Filter), подключённый к сокетам `AF_PACKET` для перехвата SIP-пакетов (UDP/5060) на L4 без накладных расходов iptables/nftables или userspace-демонов вроде tcpdump. Отфильтрованные пакеты передаются в userspace через сокет для эффективной обработки на Go.
 
 ## Архитектура
 ```
@@ -109,12 +108,10 @@ docker pull frzq/sip-exporter:latest
 * `SIP_EXPORTER_INTERFACE` — один или несколько сетевых интерфейсов через запятую (обязательно). Примеры: `eth0`, `eth0,eth1,eth2`.
 * `SIP_EXPORTER_HTTP_PORT` — HTTP-порт для Prometheus (по умолчанию 2112)
 * `SIP_EXPORTER_LOGGER_LEVEL` — уровень логирования (по умолчанию info)
-* `SIP_EXPORTER_SIP_PORT` — SIP-порт (по умолчанию 5060)
-* `SIP_EXPORTER_SIPS_PORT` — SIPS-порт (по умолчанию 5061)
+* `SIP_EXPORTER_SIP_PORTS` — один или несколько SIP-портов через запятую (по умолчанию 5060; до 3 на интерфейс). Через `;` — наборы для каждого интерфейса: `5060,5062;5060,5061`.
 * `SIP_EXPORTER_OBJECT_FILE_PATH` — путь к eBPF-объектному файлу (по умолчанию /usr/local/bin/sip.o)
 * `SIP_EXPORTER_CARRIERS_CONFIG` — путь к YAML-конфигурации carriers (опционально, см. [`examples/carriers.yaml`](examples/carriers.yaml))
 * `SIP_EXPORTER_USER_AGENTS_CONFIG` — путь к YAML-конфигурации user-agents (опционально, см. [`examples/user_agents.yaml`](examples/user_agents.yaml))
-* `SIP_EXPORTER_RTP_CAPTURE` — включить захват и анализ RTP-медиа (по умолчанию true)
 * `SIP_EXPORTER_RTP_STREAM_TTL` — время жизни простаивающего RTP-потока до удаления, таймаут RFC 3550 §6.3.5 (по умолчанию 30s)
 * `SIP_EXPORTER_IGNORE_OUTGOING` — только для loopback/тестов: подавляет дубликаты TX-пакетов на `lo` (по умолчанию false, НЕ включать в production)
 * `SIP_EXPORTER_GEOIP_COUNTRY_DB` — путь к MaxMind GeoLite2-Country.mmdb для лейбла `source_country` (опционально)
@@ -346,7 +343,7 @@ sum by (destination_country) (rate(sip_exporter_invite_total[5m]))
 
 **Приватность:** захватывается только 12-байтовый заголовок RTP — голосовой payload обрезается в ядре (eBPF) до попадания в userspace, поэтому никакой аудиозаписи не происходит.
 
-Захват RTP включён по умолчанию и отключается через `SIP_EXPORTER_RTP_CAPTURE=false` (тогда eBPF-фильтр отсекает RTP на уровне ядра). Важно: RTP без скоррелированного SIP-диалога (без замеченного SDP-обмена) отбрасывается, поэтому учитывается только медиа для отслеживаемых звонков.
+Захват RTP всегда включён. RTP без скоррелированного SIP-диалога (без замеченного SDP-обмена) отбрасывается, поэтому учитывается только медиа для отслеживаемых звонков.
 
 eBPF-фильтр использует **SDP-driven RTP-детекцию**: media-endpoint'ы (IP:порт), извлечённые из SDP в INVITE 200 OK, помещаются в BPF LRU hash map. Через ядро проходят только UDP-пакеты, совпадающие с зарегистрированным endpoint'ом — весь остальной UDP отбрасывается. Это исключает ложные срабатывания от постороннего UDP-трафика на публичных IP-адресах.
 

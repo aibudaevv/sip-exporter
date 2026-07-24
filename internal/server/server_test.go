@@ -59,8 +59,7 @@ func TestServer_Run_Success(t *testing.T) {
 		Interfaces:    "lo",
 		Port:          "2113",
 		BPFBinaryPath: "/tmp/nonexistent.o",
-		SIPPort:       5060,
-		SIPSPort:      5061,
+		SIPPorts:      "5060",
 	}
 
 	done := make(chan struct{})
@@ -98,12 +97,13 @@ func TestServer_Run_InitializeError(t *testing.T) {
 	cfg := &config.App{
 		Interfaces: "lo",
 		Port:       "2112",
+		SIPPorts:   "5060",
 	}
 
 	err := s.Run(cfg)
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "failed initialized exporter")
+	require.Contains(t, err.Error(), "failed to initialize exporter")
 }
 
 func TestShutDownTimeout_Constant(t *testing.T) {
@@ -121,6 +121,7 @@ func TestServer_Run_ContextDeadline(t *testing.T) {
 	cfg := &config.App{
 		Interfaces: "lo",
 		Port:       "2114",
+		SIPPorts:   "5060",
 	}
 
 	done := make(chan struct{})

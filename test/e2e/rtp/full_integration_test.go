@@ -17,10 +17,10 @@ import (
 // distinct streams (keyed by media endpoint + SSRC).
 func TestRTP_BothDirections(t *testing.T) {
 	ports := allocatePortsN(6)
-	httpPort, uasSIP, sipsPort, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 	uasMediaNum, _ := strconv.Atoi(uasMedia)
 	uacMediaNum, _ := strconv.Atoi(uacMedia)
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, sipsPort, testInterface, true, "")
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
 
 	wait := startSippContainers(context.Background(), t,
 		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
@@ -65,10 +65,10 @@ const (
 // intermittently fails to start in one direction).
 func TestRTP_FullIntegration_MetricsVerified(t *testing.T) {
 	ports := allocatePortsN(6)
-	httpPort, uasSIP, sipsPort, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 	uasMediaNum, _ := strconv.Atoi(uasMedia)
 	uacMediaNum, _ := strconv.Atoi(uacMedia)
-	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP, sipsPort,
+	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP,
 		integrationCarriersYAML, integrationUserAgentsYAML, "")
 
 	wait := startSippContainers(context.Background(), t,
@@ -144,8 +144,8 @@ func TestRTP_FullIntegration_MetricsVerified(t *testing.T) {
 // A hardcoded 30s TTL previously made this path too slow to cover on e2e.
 func TestRTP_StreamExpiry(t *testing.T) {
 	ports := allocatePortsN(6)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia, sipsPort := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, sipsPort, testInterface, true, "2s")
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "2s")
 
 	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 

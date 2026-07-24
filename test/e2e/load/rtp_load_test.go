@@ -58,11 +58,9 @@ func newRTPTestEnv(ctx context.Context, t *testing.T) *testEnv {
 	envVars := map[string]string{
 		"SIP_EXPORTER_INTERFACE":       testInterface,
 		"SIP_EXPORTER_HTTP_PORT":       httpPort,
-		"SIP_EXPORTER_SIP_PORT":        uasSIP,
-		"SIP_EXPORTER_SIPS_PORT":       uacSIP,
+		"SIP_EXPORTER_SIP_PORTS":       uasSIP,
 		"SIP_EXPORTER_LOGGER_LEVEL":    logLevel,
 		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
-		"SIP_EXPORTER_RTP_CAPTURE":     "true",
 	}
 
 	if maxProcs := os.Getenv("SIP_EXPORTER_E2E_GOMAXPROCS"); maxProcs != "" {

@@ -114,12 +114,11 @@ func newMultiNICEnv(ctx context.Context, t *testing.T, ifaces []string, pairs []
 	portMu.Lock()
 	httpPort := strconv.Itoa(nextBasePort)
 	sipPort := strconv.Itoa(nextBasePort + 1)
-	sipsPort := strconv.Itoa(nextBasePort + 2)
 	uacPorts := make([]string, len(ifaces))
 	for i := range ifaces {
-		uacPorts[i] = strconv.Itoa(nextBasePort + 3 + i)
+		uacPorts[i] = strconv.Itoa(nextBasePort + 2 + i)
 	}
-	nextBasePort += 3 + len(ifaces)
+	nextBasePort += 2 + len(ifaces)
 	portMu.Unlock()
 
 	exporterLogLevel := "error"
@@ -130,8 +129,7 @@ func newMultiNICEnv(ctx context.Context, t *testing.T, ifaces []string, pairs []
 	envVars := map[string]string{
 		"SIP_EXPORTER_INTERFACE":       strings.Join(ifaces, ","),
 		"SIP_EXPORTER_HTTP_PORT":       httpPort,
-		"SIP_EXPORTER_SIP_PORT":        sipPort,
-		"SIP_EXPORTER_SIPS_PORT":       sipsPort,
+		"SIP_EXPORTER_SIP_PORTS":       sipPort,
 		"SIP_EXPORTER_LOGGER_LEVEL":    exporterLogLevel,
 		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
 	}

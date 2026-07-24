@@ -1,8 +1,11 @@
+// Package config reads environment variables into a typed [App] struct.
 package config
 
 import (
 	"errors"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,17 +15,16 @@ import (
 )
 
 type (
+	// App holds all configuration values sourced from SIP_EXPORTER_* env vars.
 	App struct {
 		LogLevel                  string        `env:"SIP_EXPORTER_LOGGER_LEVEL"                  env-default:"info"`
 		Port                      string        `env:"SIP_EXPORTER_HTTP_PORT"                     env-default:"2112"`
 		Interfaces                string        `env:"SIP_EXPORTER_INTERFACE"                                                                                env-required:"true"`
 		BPFBinaryPath             string        `env:"SIP_EXPORTER_OBJECT_FILE_PATH"              env-default:"/usr/local/bin/sip.o"`
-		SIPPort                   int           `env:"SIP_EXPORTER_SIP_PORT"                      env-default:"5060"`
-		SIPSPort                  int           `env:"SIP_EXPORTER_SIPS_PORT"                     env-default:"5061"`
+		SIPPorts                  string        `env:"SIP_EXPORTER_SIP_PORTS"                     env-default:"5060"`
 		CarriersConfigPath        string        `env:"SIP_EXPORTER_CARRIERS_CONFIG"`
 		UserAgentsConfigPath      string        `env:"SIP_EXPORTER_USER_AGENTS_CONFIG"`
 		IgnoreOutgoing            bool          `env:"SIP_EXPORTER_IGNORE_OUTGOING"               env-default:"false"`
-		RTPCapture                bool          `env:"SIP_EXPORTER_RTP_CAPTURE"                   env-default:"true"`
 		RTPStreamTTL              time.Duration `env:"SIP_EXPORTER_RTP_STREAM_TTL"                env-default:"30s"`
 		Telemetry                 bool          `env:"SIP_EXPORTER_TELEMETRY"                     env-default:"true"`
 		TelemetryURL              string        `env:"SIP_EXPORTER_TELEMETRY_URL"                 env-default:"https://telemetry.sip-exporter.com/v1/beacon"`
@@ -38,17 +40,15 @@ type (
 	}
 )
 
+// GetConfig reads all SIP_EXPORTER_* environment variables and returns a
+// populated [*App]. Returns an error if a required variable is missing.
 func GetConfig() (*App, error) {
 	cfg := &App{}
 
 	if err := cleanenv.ReadEnv(cfg); err != nil {
 		helpText := "error read env"
 		help, _ := cleanenv.GetDescription(cfg, &helpText)
-		return nil, fmt.Errorf("err: %s, info: %s", err.Error(), help)
-	}
-
-	if err := cfg.validatePorts(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read env: %w, info: %s", err, help)
 	}
 
 	return cfg, nil
@@ -81,16 +81,67 @@ func (c *App) ParsedInterfaces() ([]string, error) {
 	return out, nil
 }
 
-func (c *App) validatePorts() error {
+// ParsedSIPPorts parses SIP_EXPORTER_SIP_PORTS into a per-interface list of
+// port sets. The value is either a single port list shared by all interfaces
+// ("5060,5062,5080") or a semicolon-separated per-interface list
+// ("5060,5062;5060,5061") whose group count must match interfaceCount.
+// Each group may contain 1-3 unique ports in range 1-65535.
+func (c *App) ParsedSIPPorts(interfaceCount int) ([][]uint16, error) {
+	groups := strings.Split(c.SIPPorts, ";")
+	if len(groups) == 1 {
+		ports, err := parsePortGroup(groups[0])
+		if err != nil {
+			return nil, err
+		}
+		out := make([][]uint16, interfaceCount)
+		for i := range out {
+			out[i] = slices.Clone(ports)
+		}
+		return out, nil
+	}
+	if len(groups) != interfaceCount {
+		return nil, fmt.Errorf(
+			"SIP_EXPORTER_SIP_PORTS has %d interface groups but SIP_EXPORTER_INTERFACE has %d",
+			len(groups),
+			interfaceCount,
+		)
+	}
+	out := make([][]uint16, interfaceCount)
+	for i, g := range groups {
+		ports, err := parsePortGroup(g)
+		if err != nil {
+			return nil, fmt.Errorf("SIP_EXPORTER_SIP_PORTS group %d: %w", i+1, err)
+		}
+		out[i] = ports
+	}
+	return out, nil
+}
+
+// parsePortGroup parses a comma-separated port list ("5060,5062,5080") into a
+// validated []uint16. Enforces: numeric, range 1-65535, no duplicates, max 3.
+func parsePortGroup(s string) ([]uint16, error) {
 	const minPort, maxPort = 1, 65535
-	if c.SIPPort < minPort || c.SIPPort > maxPort {
-		return fmt.Errorf("invalid SIP_EXPORTER_SIP_PORT: %d (must be %d-%d)", c.SIPPort, minPort, maxPort)
+	const maxPortsPerInterface = 3 // must match SIP_MAX_PORTS in internal/bpf/sip.c
+	parts := strings.Split(s, ",")
+	if len(parts) > maxPortsPerInterface {
+		return nil, fmt.Errorf("too many ports (%d): max %d per interface", len(parts), maxPortsPerInterface)
 	}
-	if c.SIPSPort < minPort || c.SIPSPort > maxPort {
-		return fmt.Errorf("invalid SIP_EXPORTER_SIPS_PORT: %d (must be %d-%d)", c.SIPSPort, minPort, maxPort)
+	ports := make([]uint16, 0, len(parts))
+	seen := make(map[uint16]struct{}, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		port, err := strconv.Atoi(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid port %q: must be a number", p)
+		}
+		if port < minPort || port > maxPort {
+			return nil, fmt.Errorf("invalid port %d: must be %d-%d", port, minPort, maxPort)
+		}
+		if _, dup := seen[uint16(port)]; dup {
+			return nil, fmt.Errorf("duplicate port %d", port)
+		}
+		seen[uint16(port)] = struct{}{}
+		ports = append(ports, uint16(port))
 	}
-	if c.SIPPort == c.SIPSPort {
-		return fmt.Errorf("SIP_EXPORTER_SIP_PORT and SIP_EXPORTER_SIPS_PORT must differ, both: %d", c.SIPPort)
-	}
-	return nil
+	return ports, nil
 }

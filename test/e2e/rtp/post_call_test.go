@@ -58,8 +58,8 @@ func metricLineExists(t *testing.T, endpoint, metricName string, labelSubstrings
 //   - active_dialogs is 0.
 func TestRTP_MetricsAfterCallCompletion(t *testing.T) {
 	ports := allocatePortsN(6)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia, sipsPort := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
-	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP, sipsPort,
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
+	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP,
 		integrationCarriersYAML, integrationUserAgentsYAML, "")
 
 	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)

@@ -18,9 +18,9 @@ import (
 // with seq [1, 5, 3] — seq=3 after maxSeq=5 triggers reorder detection.
 func TestRTP_OutOfOrderMetric(t *testing.T) {
 	ports := allocatePortsN(6)
-	httpPort, uasSIP, uacSIP, sipsPort, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 
-	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP, sipsPort,
+	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP,
 		integrationCarriersYAML, integrationUserAgentsYAML, "")
 
 	waitFn := startSippContainers(context.Background(), t,

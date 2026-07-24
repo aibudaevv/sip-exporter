@@ -96,10 +96,10 @@ func TestRTP_MultiInterface(t *testing.T) {
 	setupVethPair(t)
 
 	ports := allocatePortsN(6)
-	httpPort, uasSIP, sipsPort, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 
 	iface := "lo," + veth0aName + "," + veth0bName
-	endpoint := startExporter(ctx, t, httpPort, uasSIP, sipsPort, iface, true, "")
+	endpoint := startExporter(ctx, t, httpPort, uasSIP, iface, "")
 
 	// SIP+RTP flow with non-loopback IPs: UAS on 10.10.0.1, UAC on 10.10.0.2.
 	runSippRTPWithIPs(ctx, t, uasSIP, uacSIP, uasMedia, uacMedia, veth0aIP, veth0bIP)

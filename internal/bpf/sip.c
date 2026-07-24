@@ -5,23 +5,15 @@
 
 #define ETH_P_IP     0x0800
 #define IPPROTO_UDP  17
+#define SIP_MAX_PORTS 3  // must match maxPortsPerInterface in internal/config/config.go
 
 // Map for SIP ports (configured from userspace)
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
-	__uint(max_entries, 2);
+	__uint(max_entries, SIP_MAX_PORTS);
 	__type(key, __u32);
 	__type(value, __u16);
 } sip_ports SEC(".maps");
-
-// RTP capture config (configured from userspace)
-// value: 1 = RTP capture enabled, 0 = disabled
-struct {
-	__uint(type, BPF_MAP_TYPE_ARRAY);
-	__uint(max_entries, 1);
-	__type(key, __u32);
-	__type(value, __u8);
-} rtp_config SEC(".maps");
 
 // SDP-driven RTP endpoint map (populated from userspace via SDP parsing)
 struct rtp_endpoint_key {
@@ -101,29 +93,19 @@ int bpf_socket_filter(struct __sk_buff *skb) {
     __u16 src_port = (__u16)((udp_raw[0] << 8) | udp_raw[1]);
     __u16 dest_port = (__u16)((udp_raw[2] << 8) | udp_raw[3]);
 
-    // Read ports from map
-    __u32 key_sip = 0;
-    __u32 key_sips = 1;
-    __u16 *sip_port = bpf_map_lookup_elem(&sip_ports, &key_sip);
-    __u16 *sips_port = bpf_map_lookup_elem(&sip_ports, &key_sips);
-    
-    __u16 port1 = sip_port ? *sip_port : 5060;
-    __u16 port2 = sips_port ? *sips_port : 5061;
-
-    // SIP port → pass the entire packet (for SIP header parsing)
-    if (src_port == port1 || src_port == port2 ||
-        dest_port == port1 || dest_port == port2) {
-        return skb->len;
+    // Check SIP ports (up to SIP_MAX_PORTS slots; zero entries are skipped).
+    // Backward compat: userspace writes keys 0,1 (sip,sips); key 2 stays 0.
+    #pragma unroll
+    for (int i = 0; i < SIP_MAX_PORTS; i++) {
+        __u32 key = i;
+        __u16 *port = bpf_map_lookup_elem(&sip_ports, &key);
+        if (port && *port != 0 &&
+            (src_port == *port || dest_port == *port)) {
+            return skb->len;
+        }
     }
 
-    // Not a SIP port — check RTP capture config
-    __u32 cfg_key = 0;
-    __u8 *rtp_on = bpf_map_lookup_elem(&rtp_config, &cfg_key);
-    if (!rtp_on || *rtp_on != 1) {
-        return 0;
-    }
-
-    // SDP-driven lookup: check if endpoint is a known RTP media endpoint.
+    // Not a SIP port — check SDP-driven RTP endpoint lookup.
     // dst first (local receive endpoint, NAT-robust), then src as fallback.
     __u32 src_ip = (__u32)ip_header[12]<<24 | (__u32)ip_header[13]<<16
                  | (__u32)ip_header[14]<<8  | (__u32)ip_header[15];

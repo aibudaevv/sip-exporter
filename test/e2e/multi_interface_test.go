@@ -4,8 +4,12 @@ package e2e
 
 import (
 	"context"
+	"io"
+	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -233,10 +237,19 @@ func TestMultiInterface_InviteFlowOnBothNICs(t *testing.T) {
 			require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"), "SER metric must exist")
 			gotSER := getSER(t, env.endpoint)
 
-			t.Logf("lo: invite %.0f/%.0f, 200 OK %.0f/%.0f | veth: invite %.0f/%.0f, 200 OK %.0f/%.0f | SER %.2f%%/%.1f%%",
-				gotLoInvite, tt.wantLoInvite, gotLo200OK, tt.wantLo200OK,
-				gotVethInvite, tt.wantVethInvite, gotVeth200OK, tt.wantVeth200OK,
-				gotSER, tt.wantSER)
+			t.Logf(
+				"lo: invite %.0f/%.0f, 200 OK %.0f/%.0f | veth: invite %.0f/%.0f, 200 OK %.0f/%.0f | SER %.2f%%/%.1f%%",
+				gotLoInvite,
+				tt.wantLoInvite,
+				gotLo200OK,
+				tt.wantLo200OK,
+				gotVethInvite,
+				tt.wantVethInvite,
+				gotVeth200OK,
+				tt.wantVeth200OK,
+				gotSER,
+				tt.wantSER,
+			)
 
 			require.InDelta(t, tt.wantLoInvite, gotLoInvite, ratioDelta, "lo INVITE: %s", tt.description)
 			require.InDelta(t, tt.wantLo200OK, gotLo200OK, ratioDelta, "lo 200 OK: %s", tt.description)
@@ -337,10 +350,19 @@ func TestMultiInterface_SER(t *testing.T) {
 			require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"), "SER metric must exist")
 			gotSER := getSER(t, env.endpoint)
 
-			t.Logf("lo: invite %.0f/%.0f, 200 OK %.0f/%.0f | veth: invite %.0f/%.0f, 200 OK %.0f/%.0f | SER %.2f%%/%.1f%%",
-				gotLoInvite, tt.wantLoInvite, gotLo200OK, tt.wantLo200OK,
-				gotVethInvite, tt.wantVethInvite, gotVeth200OK, tt.wantVeth200OK,
-				gotSER, tt.wantSER)
+			t.Logf(
+				"lo: invite %.0f/%.0f, 200 OK %.0f/%.0f | veth: invite %.0f/%.0f, 200 OK %.0f/%.0f | SER %.2f%%/%.1f%%",
+				gotLoInvite,
+				tt.wantLoInvite,
+				gotLo200OK,
+				tt.wantLo200OK,
+				gotVethInvite,
+				tt.wantVethInvite,
+				gotVeth200OK,
+				tt.wantVeth200OK,
+				gotSER,
+				tt.wantSER,
+			)
 
 			require.InDelta(t, tt.wantLoInvite, gotLoInvite, ratioDelta, "lo INVITE: %s", tt.description)
 			require.InDelta(t, tt.wantLo200OK, gotLo200OK, ratioDelta, "lo 200 OK: %s", tt.description)
@@ -441,10 +463,19 @@ func TestMultiInterface_ASR(t *testing.T) {
 			require.True(t, metricExists(t, env.endpoint, "sip_exporter_asr"), "ASR metric must exist")
 			gotASR := getASR(t, env.endpoint)
 
-			t.Logf("lo: invite %.0f/%.0f, 200 OK %.0f/%.0f | veth: invite %.0f/%.0f, 200 OK %.0f/%.0f | ASR %.2f%%/%.1f%%",
-				gotLoInvite, tt.wantLoInvite, gotLo200OK, tt.wantLo200OK,
-				gotVethInvite, tt.wantVethInvite, gotVeth200OK, tt.wantVeth200OK,
-				gotASR, tt.wantASR)
+			t.Logf(
+				"lo: invite %.0f/%.0f, 200 OK %.0f/%.0f | veth: invite %.0f/%.0f, 200 OK %.0f/%.0f | ASR %.2f%%/%.1f%%",
+				gotLoInvite,
+				tt.wantLoInvite,
+				gotLo200OK,
+				tt.wantLo200OK,
+				gotVethInvite,
+				tt.wantVethInvite,
+				gotVeth200OK,
+				tt.wantVeth200OK,
+				gotASR,
+				tt.wantASR,
+			)
 
 			require.InDelta(t, tt.wantLoInvite, gotLoInvite, ratioDelta, "lo INVITE: %s", tt.description)
 			require.InDelta(t, tt.wantLo200OK, gotLo200OK, ratioDelta, "lo 200 OK: %s", tt.description)
@@ -674,10 +705,20 @@ func TestMultiInterface_PDD(t *testing.T) {
 				pddCount := getMetric(t, env.endpoint, "sip_exporter_pdd_count")
 				pdd := getPDD(t, env.endpoint)
 
-				t.Logf("lo: invite %.0f/%.0f, 200 OK %.0f/%.0f | veth: invite %.0f/%.0f, 200 OK %.0f/%.0f | PDD count %.0f (want >= %.0f) | PDD %.2f ms",
-					gotLoInvite, tt.wantLoInvite, gotLo200OK, tt.wantLo200OK,
-					gotVethInvite, tt.wantVethInvite, gotVeth200OK, tt.wantVeth200OK,
-					pddCount, tt.wantPDDCount, pdd)
+				t.Logf(
+					"lo: invite %.0f/%.0f, 200 OK %.0f/%.0f | veth: invite %.0f/%.0f, 200 OK %.0f/%.0f | PDD count %.0f (want >= %.0f) | PDD %.2f ms",
+					gotLoInvite,
+					tt.wantLoInvite,
+					gotLo200OK,
+					tt.wantLo200OK,
+					gotVethInvite,
+					tt.wantVethInvite,
+					gotVeth200OK,
+					tt.wantVeth200OK,
+					pddCount,
+					tt.wantPDDCount,
+					pdd,
+				)
 
 				require.GreaterOrEqual(t, pddCount, tt.wantPDDCount,
 					"PDD observations: %s", tt.description)
@@ -698,4 +739,150 @@ func TestMultiInterface_PDD(t *testing.T) {
 			waitForSessionsZero(t, env.endpoint)
 		})
 	}
+}
+
+// freePort returns a single free TCP port number (for SIPp -p allocation).
+func freePort(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer l.Close()
+	return strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
+}
+
+// TestMultiPortPerInterface verifies that SIP_EXPORTER_SIP_PORTS configures
+// multiple SIP ports on a single interface and the exporter captures REGISTER
+// traffic on ALL of them — proving the 3-entry eBPF map + userspace
+// isSIPPacket port scan work end-to-end.
+//
+// Single interface (lo) with 3 distinct SIP ports. lo + IGNORE_OUTGOING=true →
+// each packet seen once (AGENTS.md Critical Rule for loopback).
+//
+// Per-interface port sets (different ports per NIC) are covered by the
+// ParsedSIPPorts MC/DC unit tests and the multi-collection Initialize path
+// exercised by the existing multi-interface e2e suite.
+func TestMultiPortPerInterface(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	sipPorts := []string{freePort(t), freePort(t), freePort(t)}
+
+	extraEnv := map[string]string{
+		"SIP_EXPORTER_SIP_PORTS": strings.Join(sipPorts, ","),
+	}
+	env := newTestEnvWithExtraEnv(ctx, t, "", extraEnv)
+
+	const callCount = 5
+
+	for i := range sipPorts {
+		flowEnv := &testEnv{
+			endpoint:       env.endpoint,
+			sippPort:       sipPorts[i],
+			sippClientPort: freePort(t),
+		}
+		runSippScenario(ctx, t, "reg_uas.xml", "reg_uac.xml", callCount, flowEnv)
+	}
+
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_register_total"),
+		"register_total must exist after SIP traffic")
+	registerTotal := getMetric(t, env.endpoint, "sip_exporter_register_total")
+	t.Logf("register_total=%.0f (want >= %d)", registerTotal, 3*callCount)
+	require.GreaterOrEqual(t, registerTotal, 3.0*callCount,
+		"REGISTER captured on all 3 SIP ports")
+
+	assertSelfMonitoringHealthy(t, env.endpoint)
+}
+
+// TestMultiPort_PerInterfaceDifferentPorts verifies that each interface gets
+// its OWN port set — different SIP ports on different NICs — and traffic on
+// each interface's configured ports is captured.
+//
+// Interfaces:
+//
+//	lo     → [loPort1, loPort2]
+//	sipns0 → [vethPort]   (host end of veth bridging to an isolated netns)
+//
+// SIP_EXPORTER_SIP_PORTS = "loPort1,loPort2;vethPort"
+//
+// The veth flow uses a pause container (isolated netns) so traffic physically
+// traverses sipns0 — kernel local delivery via lo does NOT apply (unlike
+// setupVethPair where both ends share the host netns). See setupVethNetns.
+//
+// The veth flow on vethPort is captured ONLY because sipns0's BPF collection
+// has vethPort in its sip_ports map. If a bug applied lo's port set
+// [loPort1,loPort2] to all collections, vethPort traffic would be dropped by
+// the eBPF filter → register_total = 2*callCount, failing the assertion.
+func TestMultiPort_PerInterfaceDifferentPorts(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pauseID := setupVethNetns(t)
+
+	loPort1 := freePort(t)
+	loPort2 := freePort(t)
+	vethPort := freePort(t)
+
+	extraEnv := map[string]string{
+		"SIP_EXPORTER_INTERFACE": testInterface + "," + nsVethHost,
+		"SIP_EXPORTER_SIP_PORTS": loPort1 + "," + loPort2 + ";" + vethPort,
+	}
+	env := newTestEnvWithExtraEnv(ctx, t, "", extraEnv)
+
+	const callCount = 5
+
+	// Flows 1+2: loopback on loPort1 and loPort2 (lo's port set).
+	for _, port := range []string{loPort1, loPort2} {
+		flowEnv := &testEnv{
+			endpoint:       env.endpoint,
+			sippPort:       port,
+			sippClientPort: freePort(t),
+		}
+		runSippScenario(ctx, t, "reg_uas.xml", "reg_uac.xml", callCount, flowEnv)
+	}
+
+	// Flow 3: veth (sipns0) on vethPort. UAS on host (nsHostIP:vethPort),
+	// UAC in isolated netns (nsGuestIP) → traffic physically traverses sipns0.
+	vethEnv := &testEnv{
+		endpoint:       env.endpoint,
+		sippPort:       vethPort,
+		sippClientPort: freePort(t),
+	}
+	uasCtx, uasCancel := context.WithTimeout(ctx, 60*time.Second)
+	defer uasCancel()
+	uasPath := absScenarioPath(t, "reg_uas.xml")
+	sippVol := filepath.Dir(uasPath)
+	uasCmd := exec.CommandContext(uasCtx, "docker", "run", "--rm",
+		"--network", "host",
+		"-v", sippVol+":/scenarios:ro",
+		sippImage,
+		"-sf", "/scenarios/reg_uas.xml",
+		"-i", nsHostIP,
+		"-p", vethPort,
+		"-m", strconv.Itoa(callCount),
+		"-nr", "-nostdin",
+	)
+	if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
+		uasCmd.Stdout = &testWriter{t}
+		uasCmd.Stderr = &testWriter{t}
+	} else {
+		uasCmd.Stdout = io.Discard
+		uasCmd.Stderr = io.Discard
+	}
+	require.NoError(t, uasCmd.Start())
+	require.Eventually(t, func() bool {
+		return isUDPPortInUse(vethPort)
+	}, 10*time.Second, 50*time.Millisecond, "UAS should start listening on %s:%s", nsHostIP, vethPort)
+
+	runSippUACInNetns(ctx, t, pauseID, "reg_uac.xml", callCount, vethEnv, nsHostIP)
+	_ = uasCmd.Wait()
+	waitForMetricStable(t, env.endpoint)
+
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_register_total"),
+		"register_total must exist after SIP traffic")
+	registerTotal := getMetric(t, env.endpoint, "sip_exporter_register_total")
+	t.Logf("register_total=%.0f (want >= %d: lo 2×%d + veth 1×%d)",
+		registerTotal, 3*callCount, callCount, callCount)
+	require.GreaterOrEqual(t, registerTotal, 3.0*callCount,
+		"REGISTER captured on lo ports AND veth port (per-interface port sets)")
+
+	assertSelfMonitoringHealthy(t, env.endpoint)
 }

@@ -1,3 +1,5 @@
+// Package exporter captures SIP/RTP traffic via AF_PACKET sockets with an eBPF
+// filter, parses messages, correlates dialogs, and updates Prometheus metrics.
 package exporter
 
 import (
@@ -29,6 +31,7 @@ import (
 )
 
 var (
+	// ErrUserNotRoot is returned when the process does not have root privileges.
 	ErrUserNotRoot = errors.New("this program requires root privileges")
 )
 
@@ -150,16 +153,15 @@ type (
 		_    [2]byte // explicit padding — cilium/ebpf uses binary.Size, not unsafe.Sizeof
 	}
 	exporter struct {
-		collection       *ebpf.Collection
-		rtpEndpointsMap  *ebpf.Map
+		collections      []*ebpf.Collection
+		rtpEndpointsMaps []*ebpf.Map
 		socks            []sockEntry
 		messages         chan *rawPacket
 		done             chan struct{}
 		wg               sync.WaitGroup
 		closeOnce        sync.Once
 		packetPool       sync.Pool
-		sipPort          uint16
-		sipsPort         uint16
+		sipPortSets      [][]uint16
 		services         services
 		carrierResolver  *carriers.Resolver
 		uaClassifier     *ua.Classifier
@@ -194,6 +196,7 @@ type (
 		metricser service.Metricser
 		dialoger  service.Dialoger
 	}
+	// Deps holds external dependencies required to construct an [Exporter].
 	Deps struct {
 		Metricser                 service.Metricser
 		Dialoger                  service.Dialoger
@@ -207,18 +210,22 @@ type (
 		FraudInviteBurstThreshold int
 		FraudInviteBurstWindow    time.Duration
 	}
+	// InitConfig configures the exporter during [Exporter.Initialize].
 	InitConfig struct {
 		Interfaces     []string
 		BPFPath        string
-		SIPPort        int
-		SIPSPort       int
+		SIPPorts       [][]uint16
 		IgnoreOutgoing bool
-		RTPCapture     bool
 		RTPStreamTTL   time.Duration
 	}
+	// Exporter captures packets, parses SIP messages, and updates metrics.
 	Exporter interface {
+		// Initialize loads the eBPF collection, creates AF_PACKET sockets,
+		// and starts background workers.
 		Initialize(cfg InitConfig) error
+		// IsAlive reports whether the exporter has been initialized.
 		IsAlive() bool
+		// Close releases all sockets, eBPF collections, and stops workers.
 		Close()
 	}
 )
@@ -229,6 +236,7 @@ func (e optionsEntry) created() time.Time    { return e.timestamp }
 func (e byeEntry) created() time.Time        { return e.timestamp }
 func (e inviteSDPEntity) created() time.Time { return e.timestamp }
 
+// NewExporter creates an [Exporter] with the given dependencies.
 func NewExporter(deps Deps) Exporter {
 	e := &exporter{
 		services: services{
@@ -293,39 +301,57 @@ func (e *exporter) Initialize(cfg InitConfig) error {
 	// Apply the config-driven RTP stream expiry (RFC 3550 §6.3.5 idle-timeout).
 	e.mediaTracker.SetTTL(cfg.RTPStreamTTL)
 
-	collection, err := ebpf.LoadCollection(cfg.BPFPath)
-	if err != nil {
-		return fmt.Errorf("failed to load BPF collection: %w", err)
-	}
-
-	e.collection, e.sipPort, e.sipsPort = collection, uint16(cfg.SIPPort), uint16(cfg.SIPSPort)
-
-	prog := collection.Programs["bpf_socket_filter"]
-	if prog == nil {
-		return errors.New("failed to find BPF program: bpf_socket_filter")
-	}
-
-	// Configure eBPF maps (SIP ports + RTP capture flag)
-	if err = e.configureEBPFMaps(collection, cfg.SIPPort, cfg.SIPSPort, cfg.RTPCapture); err != nil {
-		return err
-	}
-
-	progFD := prog.FD()
-
+	collections := make([]*ebpf.Collection, 0, len(cfg.Interfaces))
+	rtpEndpointsMaps := make([]*ebpf.Map, 0, len(cfg.Interfaces))
 	createdSocks := make([]sockEntry, 0, len(cfg.Interfaces))
-	for _, ifaceName := range cfg.Interfaces {
-		sock, sockErr := createSocketForInterface(ifaceName, progFD, cfg.IgnoreOutgoing)
+
+	// releaseAll rolls back every resource allocated so far on failure.
+	releaseAll := func() {
+		for _, s := range createdSocks {
+			_ = unix.Close(s.fd)
+		}
+		for _, c := range collections {
+			c.Close()
+		}
+	}
+
+	for i, ifaceName := range cfg.Interfaces {
+		coll, err := ebpf.LoadCollection(cfg.BPFPath)
+		if err != nil {
+			releaseAll()
+			return fmt.Errorf("failed to load BPF collection for %s: %w", ifaceName, err)
+		}
+
+		rtpMap, cfgErr := configureEBPFMaps(coll, cfg.SIPPorts[i])
+		if cfgErr != nil {
+			coll.Close()
+			releaseAll()
+			return fmt.Errorf("interface %s: %w", ifaceName, cfgErr)
+		}
+
+		prog := coll.Programs["bpf_socket_filter"]
+		if prog == nil {
+			coll.Close()
+			releaseAll()
+			return errors.New("failed to find BPF program: bpf_socket_filter")
+		}
+
+		sock, sockErr := createSocketForInterface(ifaceName, prog.FD(), cfg.IgnoreOutgoing)
 		if sockErr != nil {
-			for _, s := range createdSocks {
-				_ = unix.Close(s.fd)
-			}
-			e.collection.Close()
-			e.collection = nil
+			coll.Close()
+			releaseAll()
 			return fmt.Errorf("interface %s: %w", ifaceName, sockErr)
 		}
+
+		collections = append(collections, coll)
+		rtpEndpointsMaps = append(rtpEndpointsMaps, rtpMap)
 		createdSocks = append(createdSocks, sockEntry{fd: sock, iface: ifaceName})
 	}
+
+	e.collections = collections
+	e.rtpEndpointsMaps = rtpEndpointsMaps
 	e.socks = createdSocks
+	e.sipPortSets = cfg.SIPPorts
 
 	zap.L().Info("all interfaces initialized",
 		zap.Int("interfaces_count", len(e.socks)))
@@ -411,38 +437,25 @@ func createSocketForInterface(ifaceName string, progFD int, ignoreOutgoing bool)
 	return sock, nil
 }
 
-// configureEBPFMaps populates the eBPF SIP-ports map and the RTP-capture flag map.
-func (e *exporter) configureEBPFMaps(collection *ebpf.Collection, sipPort, sipsPort int, rtpCapture bool) error {
+// configureEBPFMaps populates the eBPF SIP-ports map of the given collection
+// and returns the rtp_endpoints map handle.
+func configureEBPFMaps(collection *ebpf.Collection, sipPorts []uint16) (*ebpf.Map, error) {
 	sipPortsMap := collection.Maps["sip_ports"]
 	if sipPortsMap == nil {
-		return errors.New("failed to find sip_ports map")
+		return nil, errors.New("failed to find sip_ports map")
 	}
-	if err := sipPortsMap.Update(uint32(0), uint16(sipPort), ebpf.UpdateAny); err != nil {
-		return fmt.Errorf("failed to set SIP port: %w", err)
-	}
-	if err := sipPortsMap.Update(uint32(1), uint16(sipsPort), ebpf.UpdateAny); err != nil {
-		return fmt.Errorf("failed to set SIPS port: %w", err)
-	}
-
-	rtpConfigMap := collection.Maps["rtp_config"]
-	if rtpConfigMap == nil {
-		return errors.New("failed to find rtp_config map")
-	}
-	rtpValue := uint8(0)
-	if rtpCapture {
-		rtpValue = 1
-	}
-	if err := rtpConfigMap.Update(uint32(0), rtpValue, ebpf.UpdateAny); err != nil {
-		return fmt.Errorf("failed to set RTP capture config: %w", err)
+	for i, p := range sipPorts {
+		if err := sipPortsMap.Update(uint32(i), p, ebpf.UpdateAny); err != nil {
+			return nil, fmt.Errorf("failed to set SIP port %d: %w", p, err)
+		}
 	}
 
-	e.rtpEndpointsMap = collection.Maps["rtp_endpoints"]
-	if e.rtpEndpointsMap == nil {
-		return errors.New("failed to find rtp_endpoints map")
+	rtpEndpointsMap := collection.Maps["rtp_endpoints"]
+	if rtpEndpointsMap == nil {
+		return nil, errors.New("failed to find rtp_endpoints map")
 	}
 
-	zap.L().Info("RTP capture configured", zap.Bool("enabled", rtpCapture))
-	return nil
+	return rtpEndpointsMap, nil
 }
 
 func extractIPs(ipHeader []byte) (net.IP, net.IP) {
@@ -501,9 +514,9 @@ func drainSocketBuffer(sock int) {
 func (e *exporter) startWorkers() {
 	e.wg.Add(1)
 	go e.readPackets()
-	for _, sock := range e.socks {
+	for i := range e.socks {
 		e.wg.Add(1)
-		go e.readSocket(sock.fd, sock.iface)
+		go e.readSocket(i)
 	}
 	e.wg.Add(1)
 	go e.sipDialogMetricsUpdate()
@@ -605,8 +618,8 @@ func (e *exporter) Close() {
 	e.closeOnce.Do(func() {
 		e.initialized.Store(false)
 		close(e.done)
-		if e.collection != nil {
-			e.collection.Close()
+		for _, c := range e.collections {
+			c.Close()
 		}
 		for _, s := range e.socks {
 			_ = unix.Close(s.fd)
@@ -693,12 +706,13 @@ func (e *exporter) handleReadError(err error) bool {
 	return false
 }
 
-func (e *exporter) readSocket(sock int, iface string) {
+func (e *exporter) readSocket(idx int) {
 	defer e.wg.Done()
+	entry := e.socks[idx]
 	buf := make([]byte, readBufSize)
 
 	for {
-		n, err := unix.Read(sock, buf)
+		n, err := unix.Read(entry.fd, buf)
 		if err != nil {
 			if e.handleReadError(err) {
 				return
@@ -717,22 +731,22 @@ func (e *exporter) readSocket(sock int, iface string) {
 
 		pkt := e.acquireBuf()
 		pkt.data = append(pkt.data[:0], buf[:n]...)
-		pkt.iface = iface
+		pkt.iface = entry.iface
 
 		zap.L().Debug("packet from socket", zap.Int("len", n))
 
-		if !e.sendPacket(pkt) {
+		if !e.sendPacket(pkt, e.sipPortSets[idx]) {
 			return
 		}
 	}
 }
 
-// sendPacket routes a packet to the messages channel. SIP packets (port
-// 5060/5061) use a blocking send — they must not be starved by RTP flood.
+// sendPacket routes a packet to the messages channel. SIP packets (matching one
+// of ports) use a blocking send — they must not be starved by RTP flood.
 // All other packets (RTP) use a non-blocking send — dropped when the channel
 // is full. Returns false if shutdown was signaled.
-func (e *exporter) sendPacket(pkt *rawPacket) bool {
-	if e.isSIPPacket(pkt.data) {
+func (e *exporter) sendPacket(pkt *rawPacket, ports []uint16) bool {
+	if isSIPPacket(pkt.data, ports) {
 		select {
 		case e.messages <- pkt:
 		case <-e.done:
@@ -751,10 +765,10 @@ func (e *exporter) sendPacket(pkt *rawPacket) bool {
 	return true
 }
 
-// isSIPPacket does a quick L4 port check to classify a packet as SIP (port
-// 5060/5061) or RTP/other. When headers can't be parsed, defaults to true
+// isSIPPacket does a quick L4 port check to classify a packet as SIP (one of
+// ports) or RTP/other. When headers can't be parsed, defaults to true
 // to avoid dropping potentially critical traffic.
-func (e *exporter) isSIPPacket(packet []byte) bool {
+func isSIPPacket(packet []byte, ports []uint16) bool {
 	if len(packet) < minRawPacketLen {
 		return true
 	}
@@ -772,8 +786,12 @@ func (e *exporter) isSIPPacket(packet []byte) bool {
 	}
 	srcPort := binary.BigEndian.Uint16(packet[udpOff : udpOff+2])
 	dstPort := binary.BigEndian.Uint16(packet[udpOff+2 : udpOff+4])
-	return srcPort == e.sipPort || srcPort == e.sipsPort ||
-		dstPort == e.sipPort || dstPort == e.sipsPort
+	for _, p := range ports {
+		if srcPort == p || dstPort == p {
+			return true
+		}
+	}
+	return false
 }
 
 // parseEthernet extracts the IP offset from the L2 Ethernet header,
@@ -969,7 +987,7 @@ func (e *exporter) parseHeaders(lines [][]byte, p *dto.Packet) error {
 		case bytes.EqualFold(header, []byte("From")):
 			tag := extractTag(value)
 			if tag == nil {
-				return fmt.Errorf("fail extract tag from '%s'", value)
+				return fmt.Errorf("failed to extract tag from '%s'", value)
 			}
 
 			p.From.Tag = tag
@@ -982,7 +1000,7 @@ func (e *exporter) parseHeaders(lines [][]byte, p *dto.Packet) error {
 		case bytes.EqualFold(header, []byte("CSeq")):
 			id, method := extractCSeq(value)
 			if id == nil || method == nil {
-				return fmt.Errorf("fail extract CSeq from '%s'", value)
+				return fmt.Errorf("failed to extract CSeq from '%s'", value)
 			}
 
 			p.CSeq.Method = method
@@ -1804,33 +1822,32 @@ func ipPortToKey(ipStr string, port uint16) (rtpEndpointKey, bool) {
 	}, true
 }
 
-// rtpEndpointInsert adds a media endpoint to the BPF rtp_endpoints map.
+// rtpEndpointInsert adds a media endpoint to every BPF rtp_endpoints map (one
+// per interface collection) so that RTP is captured regardless of NIC.
 func (e *exporter) rtpEndpointInsert(ipStr string, port uint16) {
-	if e.rtpEndpointsMap == nil {
-		return
-	}
 	key, ok := ipPortToKey(ipStr, port)
 	if !ok {
 		return
 	}
-	if err := e.rtpEndpointsMap.Update(key, uint8(1), ebpf.UpdateAny); err != nil {
-		zap.L().Debug("failed to update rtp_endpoints BPF map",
-			zap.String("ip", ipStr), zap.Uint16("port", port), zap.Error(err))
+	for _, m := range e.rtpEndpointsMaps {
+		if err := m.Update(key, uint8(1), ebpf.UpdateAny); err != nil {
+			zap.L().Debug("failed to update rtp_endpoints BPF map",
+				zap.String("ip", ipStr), zap.Uint16("port", port), zap.Error(err))
+		}
 	}
 }
 
-// rtpEndpointDelete removes a media endpoint from the BPF rtp_endpoints map.
+// rtpEndpointDelete removes a media endpoint from every BPF rtp_endpoints map.
 func (e *exporter) rtpEndpointDelete(ipStr string, port uint16) {
-	if e.rtpEndpointsMap == nil {
-		return
-	}
 	key, ok := ipPortToKey(ipStr, port)
 	if !ok {
 		return
 	}
-	if err := e.rtpEndpointsMap.Delete(key); err != nil {
-		zap.L().Debug("failed to delete from rtp_endpoints BPF map",
-			zap.String("ip", ipStr), zap.Uint16("port", port), zap.Error(err))
+	for _, m := range e.rtpEndpointsMaps {
+		if err := m.Delete(key); err != nil {
+			zap.L().Debug("failed to delete from rtp_endpoints BPF map",
+				zap.String("ip", ipStr), zap.Uint16("port", port), zap.Error(err))
+		}
 	}
 }
 

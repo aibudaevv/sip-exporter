@@ -28,7 +28,7 @@ The container performs **read-only packet inspection**:
 
 That's it. No packet modification, no packet injection, no network redirection, no iptables/nftables rules, no filesystem writes (except stdout/stderr for logs).
 
-> **Multi-interface note:** The eBPF socket filter is shared across all configured interfaces. One BPF collection is loaded once at startup; the same program is attached to N `AF_PACKET` sockets via `SO_ATTACH_BPF` (one socket per interface). Maps `sip_ports` and `rtp_config` are global — the same filtering rules apply on all interfaces.
+> **Multi-interface note:** A separate BPF collection is loaded per interface at startup; each program is attached to its own `AF_PACKET` socket via `SO_ATTACH_BPF`. Maps `sip_ports` and `rtp_endpoints` are per-collection — each interface has independent filtering rules.
 
 ## What the Container Does NOT Do
 
@@ -69,7 +69,7 @@ SIP-exporter derives metric labels from packet content, but no **phone numbers**
 
 ## eBPF Code Audit
 
-The entire eBPF program is [~140 lines of C](../internal/bpf/sip.c). It does two things: (1) passes through UDP traffic on the configured SIP ports (default 5060/5061), and (2) when RTP capture is enabled (default `true`, controlled by `SIP_EXPORTER_RTP_CAPTURE`), also passes through UDP packets matching the RTP version-2 pattern with a valid payload type.
+The entire eBPF program is [~130 lines of C](../internal/bpf/sip.c). It does two things: (1) passes through UDP traffic on the configured SIP port (default 5060), and (2) passes through RTP packets from media endpoints learned via SDP signaling (INVITE 200 OK).
 
 **What the eBPF program does:**
 1. Checks Ethernet header — skips non-Ethernet frames
@@ -78,7 +78,7 @@ The entire eBPF program is [~140 lines of C](../internal/bpf/sip.c). It does two
 4. Validates IP header length (IHL)
 5. Filters for UDP only (`protocol 17`)
 6. Reads source and destination ports
-7. Passes through packets where src or dst port matches SIP/SIPS port
+7. Passes through packets where src or dst port matches a configured SIP port
 8. If RTP capture is enabled: also checks the first payload byte for the RTP version-2 prefix (`0x80`–`0xBF`) and a valid payload type — these are non-SIP-port packets on any UDP port
 9. Returns `skb->len` (pass) or `0` (drop from buffer — the packet still reaches its destination, it's just not copied to userspace)
 

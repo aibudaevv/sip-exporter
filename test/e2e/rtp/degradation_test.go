@@ -136,9 +136,9 @@ func avgHistogramValue(t *testing.T, endpoint, name string) float64 {
 // this combined-degradation test.
 func TestRTP_NetemDegradation(t *testing.T) {
 	ports := allocatePortsN(6)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia, sipsPort := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, sipsPort, testInterface, true, "")
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
 
 	applyNetem(t,
 		[]string{"delay", "30ms", "10ms", "loss", "50%"},
@@ -191,9 +191,9 @@ func TestRTP_NetemDegradation(t *testing.T) {
 // small-sample variance (at 400 packets, σ≈9.2).
 func TestRTP_NetemPacketLoss(t *testing.T) {
 	ports := allocatePortsN(6)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia, sipsPort := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, sipsPort, testInterface, true, "")
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
 
 	applyNetem(t,
 		[]string{"loss", "30%"},

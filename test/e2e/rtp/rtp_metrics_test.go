@@ -201,8 +201,8 @@ func runSippRTPWithIPs(ctx context.Context, t *testing.T, uasSIP, uacSIP, uasMed
 // labelled RTP metrics on /metrics. Closes review item I3.
 func TestRTP_MetricsFromSIPpStream(t *testing.T) {
 	ports := allocatePortsN(6)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia, sipsPort := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, sipsPort, testInterface, true, "")
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
 
 	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 

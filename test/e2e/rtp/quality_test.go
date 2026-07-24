@@ -43,8 +43,8 @@ func sendControlledRTP(t *testing.T, port int, seqNums []uint16) {
 // r_factor, mos_f1, mos_f2, and mos_adaptive histograms with sane values.
 func TestRTP_QualityMetrics_Baseline(t *testing.T) {
 	ports := allocatePortsN(6)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia, sipsPort := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, sipsPort, testInterface, true, "")
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
 
 	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 
@@ -77,8 +77,8 @@ func TestRTP_QualityMetrics_Baseline(t *testing.T) {
 // tests with controlled jitter inputs.
 func TestRTP_QualityMetrics_Degraded(t *testing.T) {
 	ports := allocatePortsN(6)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia, sipsPort := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, sipsPort, testInterface, true, "")
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
 
 	applyNetem(t, []string{"delay", "30ms", "10ms", "loss", "30%"}, uasMedia, uacMedia)
 	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
@@ -108,10 +108,10 @@ func TestRTP_QualityMetrics_Degraded(t *testing.T) {
 // increment the rtp_duplicate_packets_total counter.
 func TestRTP_DuplicatePackets(t *testing.T) {
 	ports := allocatePortsN(6)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia, sipsPort := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 	uasMediaNum, _ := strconv.Atoi(uasMedia)
 
-	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP, sipsPort,
+	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP,
 		integrationCarriersYAML, integrationUserAgentsYAML, "")
 
 	wait := startSippContainers(context.Background(), t,
@@ -134,10 +134,10 @@ func TestRTP_DuplicatePackets(t *testing.T) {
 // isolated losses (gap, run <3) populate the respective loss density histograms.
 func TestRTP_BurstGapLoss(t *testing.T) {
 	ports := allocatePortsN(6)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia, sipsPort := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 	uasMediaNum, _ := strconv.Atoi(uasMedia)
 
-	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP, sipsPort,
+	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP,
 		integrationCarriersYAML, integrationUserAgentsYAML, "")
 
 	wait := startSippContainers(context.Background(), t,
@@ -172,10 +172,10 @@ func TestRTP_BurstGapLoss(t *testing.T) {
 // increments the rtp_oneway_calls_total counter at teardown.
 func TestRTP_OneWayCall(t *testing.T) {
 	ports := allocatePortsN(6)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia, sipsPort := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 	uasMediaNum, _ := strconv.Atoi(uasMedia)
 
-	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP, sipsPort,
+	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP,
 		integrationCarriersYAML, integrationUserAgentsYAML, "")
 
 	wait := startSippContainers(context.Background(), t,
@@ -198,9 +198,9 @@ func TestRTP_OneWayCall(t *testing.T) {
 // the sessions_missing_rtp_total counter at teardown.
 func TestRTP_MissingRTP(t *testing.T) {
 	ports := allocatePortsN(6)
-	httpPort, uasSIP, uacSIP, uasMedia, uacMedia, sipsPort := ports[0], ports[1], ports[2], ports[3], ports[4], ports[5]
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 
-	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP, sipsPort,
+	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP,
 		integrationCarriersYAML, integrationUserAgentsYAML, "")
 
 	wait := startSippContainers(context.Background(), t,
