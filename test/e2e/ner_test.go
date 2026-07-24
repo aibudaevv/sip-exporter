@@ -9,14 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestNER_AllScenarios tests NER metric with various scenarios.
-// NER = (Total INVITE - ineffective) / Total INVITE × 100 (GSMA IR.42)
-// IGNORE_OUTGOING=true on lo → each packet seen once → NER matches theoretical.
-
 func TestNER_AllScenarios(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	env := newSharedTestEnv(ctx, t)
 
 	tests := []struct {
 		name        string
@@ -25,52 +20,22 @@ func TestNER_AllScenarios(t *testing.T) {
 		callCount   int
 		wantNER     float64
 	}{
-		{
-			name:        "100_percent",
-			uasScenario: "uas_100.xml",
-			uacScenario: "uac_100.xml",
-			callCount:   100,
-			wantNER:     100.0,
-		},
-		{
-			name:        "0_percent_486",
-			uasScenario: "uas_0.xml",
-			uacScenario: "uac_0.xml",
-			callCount:   100,
-			wantNER:     100.0,
-		},
-		{
-			name:        "server_error",
-			uasScenario: "uas_server_error.xml",
-			uacScenario: "uac_server_error.xml",
-			callCount:   100,
-			wantNER:     0.0,
-		},
-		{
-			name:        "redirect",
-			uasScenario: "uas_redirect.xml",
-			uacScenario: "uac_redirect.xml",
-			callCount:   100,
-			wantNER:     100.0,
-		},
-		{
-			name:        "no_invite",
-			uasScenario: "uas_no_invite.xml",
-			uacScenario: "uac_no_invite.xml",
-			callCount:   100,
-			wantNER:     0.0,
-		},
+		{"100_percent", "uas_100.xml", "uac_100.xml", 100, 100.0},
+		{"0_percent_486", "uas_0.xml", "uac_0.xml", 100, 100.0},
+		{"server_error", "uas_server_error.xml", "uac_server_error.xml", 100, 0.0},
+		{"redirect", "uas_redirect.xml", "uac_redirect.xml", 100, 100.0},
+		{"no_invite", "uas_no_invite.xml", "uac_no_invite.xml", 100, 0.0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env.restart(t)
-			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
+			t.Parallel()
+			env := newTestEnv(ctx, t)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
+
+			require.True(t, metricExists(t, env.endpoint, "sip_exporter_ner"))
 			ner := getNER(t, env.endpoint)
 			t.Logf("NER = %.2f (want %.2f)", ner, tt.wantNER)
-			if tt.uacScenario != "uac_no_invite.xml" {
-				require.True(t, metricExists(t, env.endpoint, "sip_exporter_ner"))
-			}
 			require.InDelta(t, tt.wantNER, ner, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)
@@ -78,25 +43,24 @@ func TestNER_AllScenarios(t *testing.T) {
 	}
 }
 
-// TestNER_Mixed tests 140 successful + 60 server error (500).
-// ineffective = 60, total = 200 → NER = 140/200 × 100 = 70%.
-
 func TestNER_Mixed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
+	const effectiveCount = 140
+	const ineffectiveCount = 60
 	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 140, env)
-	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 60, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", effectiveCount, env)
+	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", ineffectiveCount, env)
 
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_ner"))
 	ner := getNER(t, env.endpoint)
-	t.Logf("NER = %.2f (want %.2f)", ner, 70.0)
-	require.InDelta(t, 70.0, ner, ratioDelta)
+	wantNER := float64(effectiveCount) / float64(effectiveCount+ineffectiveCount) * percentScale
+	t.Logf("NER = %.2f (want %.2f)", ner, wantNER)
+	require.InDelta(t, wantNER, ner, ratioDelta)
 
 	waitForSessionsZero(t, env.endpoint)
 }
-
-// TestNER_Equals100MinusISA verifies NER = 100 - ISA.
 
 func TestNER_Equals100MinusISA(t *testing.T) {
 	t.Parallel()
@@ -110,21 +74,23 @@ func TestNER_Equals100MinusISA(t *testing.T) {
 	ner := getNER(t, env.endpoint)
 	isa := getISA(t, env.endpoint)
 	t.Logf("NER = %.2f, ISA = %.2f", ner, isa)
-	require.InDelta(t, 100.0-isa, ner, 0.01, "NER must equal 100 - ISA")
+	require.InDelta(t, percentScale-isa, ner, 0.01, "NER must equal 100 - ISA")
 
 	waitForSessionsZero(t, env.endpoint)
 }
 
-// TestNER_WithCarrierConfig verifies NER per-carrier.
 func TestNER_WithCarrierConfig(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
+	const effectiveCount = 140
+	const ineffectiveCount = 60
 	env := newTestEnvWithCarriers(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 140, env)
-	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", 60, env)
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", effectiveCount, env)
+	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", ineffectiveCount, env)
 
 	ner := env.getNERByCarrier(t)
-	t.Logf("NER{carrier=%q} = %.2f (want %.2f)", env.carrier, ner, 70.0)
-	require.InDelta(t, 70.0, ner, ratioDelta)
+	wantNER := float64(effectiveCount) / float64(effectiveCount+ineffectiveCount) * percentScale
+	t.Logf("NER{carrier=%q} = %.2f (want %.2f)", env.carrier, ner, wantNER)
+	require.InDelta(t, wantNER, ner, ratioDelta)
 }
