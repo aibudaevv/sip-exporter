@@ -378,6 +378,40 @@ func newTestEnvWithFraudConfig(ctx context.Context, t *testing.T, carriersYAML, 
 	return env
 }
 
+// newTestEnvWithUAConfig starts an exporter with user-agents YAML but no carriers config.
+func newTestEnvWithUAConfig(ctx context.Context, t *testing.T, uaYAMLFile string) *testEnv {
+	t.Helper()
+	uaYAML := loadUserAgentsYAML(t, uaYAMLFile)
+	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
+
+	env := &testEnv{
+		sippPort:       sippPort,
+		sippClientPort: sippClientPort,
+	}
+	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, "", uaYAML, nil, "", "")
+	env.endpoint = endpoint
+	registerExporterCleanup(t, container, exporterHTTPPort)
+	return env
+}
+
+// newTestEnvWithCarrierAndUA starts an exporter with carriers YAML, carrier name,
+// and user-agents YAML.
+func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML, carrierName, uaYAMLFile string) *testEnv {
+	t.Helper()
+	uaYAML := loadUserAgentsYAML(t, uaYAMLFile)
+	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
+
+	env := &testEnv{
+		sippPort:       sippPort,
+		sippClientPort: sippClientPort,
+		carrier:        carrierName,
+	}
+	endpoint, container := startExporterWithConfigAndUA(ctx, t, exporterHTTPPort, sippPort, sippClientPort, carriersYAML, uaYAML, nil, "", "")
+	env.endpoint = endpoint
+	registerExporterCleanup(t, container, exporterHTTPPort)
+	return env
+}
+
 var projectRoot string
 var interfaceIP string
 var exporterImage string
