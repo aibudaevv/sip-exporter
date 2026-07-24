@@ -12,7 +12,6 @@ import (
 func TestStatusCodes_AllCodes(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	env := newSharedTestEnv(ctx, t)
 
 	tests := []struct {
 		name        string
@@ -123,8 +122,9 @@ func TestStatusCodes_AllCodes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env.restart(t)
-			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
+			t.Parallel()
+			env := newTestEnv(ctx, t)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
 
 			value := getMetric(t, env.endpoint, tt.metricName)
 			want := float64(tt.callCount)
@@ -139,7 +139,6 @@ func TestStatusCodes_AllCodes(t *testing.T) {
 func TestStatusCodes_WithCarrierConfig(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	env := newSharedTestEnvWithCarriers(ctx, t)
 
 	tests := []struct {
 		name        string
@@ -180,8 +179,9 @@ func TestStatusCodes_WithCarrierConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env.restart(t)
-			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
+			t.Parallel()
+			env := newTestEnvWithCarriers(ctx, t)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
 
 			value := getMetricWithCarrier(t, env.endpoint, tt.metricName, env.carrier)
 			want := float64(tt.callCount)
