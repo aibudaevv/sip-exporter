@@ -19,12 +19,13 @@ func TestNER_AllScenarios(t *testing.T) {
 		uacScenario string
 		callCount   int
 		wantNER     float64
+		wantExists  bool
 	}{
-		{"100_percent", "uas_100.xml", "uac_100.xml", 100, 100.0},
-		{"0_percent_486", "uas_0.xml", "uac_0.xml", 100, 100.0},
-		{"server_error", "uas_server_error.xml", "uac_server_error.xml", 100, 0.0},
-		{"redirect", "uas_redirect.xml", "uac_redirect.xml", 100, 100.0},
-		{"no_invite", "uas_no_invite.xml", "uac_no_invite.xml", 100, 0.0},
+		{"100_percent", "uas_100.xml", "uac_100.xml", 100, 100.0, true},
+		{"0_percent_486", "uas_0.xml", "uac_0.xml", 100, 100.0, true},
+		{"server_error", "uas_server_error.xml", "uac_server_error.xml", 100, 0.0, true},
+		{"redirect", "uas_redirect.xml", "uac_redirect.xml", 100, 100.0, true},
+		{"no_invite", "uas_no_invite.xml", "uac_no_invite.xml", 100, 0.0, false},
 	}
 
 	for _, tt := range tests {
@@ -33,7 +34,12 @@ func TestNER_AllScenarios(t *testing.T) {
 			env := newTestEnv(ctx, t)
 			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
 
-			require.True(t, metricExists(t, env.endpoint, "sip_exporter_ner"))
+			if tt.wantExists {
+				require.True(t, metricExists(t, env.endpoint, "sip_exporter_ner"))
+			} else {
+				require.False(t, metricExists(t, env.endpoint, "sip_exporter_ner"),
+					"NER metric should be absent when no INVITEs")
+			}
 			ner := getNER(t, env.endpoint)
 			t.Logf("NER = %.2f (want %.2f)", ner, tt.wantNER)
 			require.InDelta(t, tt.wantNER, ner, ratioDelta)

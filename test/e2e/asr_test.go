@@ -19,11 +19,12 @@ func TestASR_AllScenarios(t *testing.T) {
 		uacScenario string
 		callCount   int
 		wantASR     float64
+		wantExists  bool
 	}{
-		{"100_percent", "uas_100.xml", "uac_100.xml", 100, 100.0},
-		{"0_percent", "uas_0.xml", "uac_0.xml", 100, 0.0},
-		{"redirect", "uas_redirect.xml", "uac_redirect.xml", 100, 0.0},
-		{"no_invite", "uas_no_invite.xml", "uac_no_invite.xml", 100, 0.0},
+		{"100_percent", "uas_100.xml", "uac_100.xml", 100, 100.0, true},
+		{"0_percent", "uas_0.xml", "uac_0.xml", 100, 0.0, true},
+		{"redirect", "uas_redirect.xml", "uac_redirect.xml", 100, 0.0, true},
+		{"no_invite", "uas_no_invite.xml", "uac_no_invite.xml", 100, 0.0, false},
 	}
 
 	for _, tt := range tests {
@@ -32,7 +33,12 @@ func TestASR_AllScenarios(t *testing.T) {
 			env := newTestEnv(ctx, t)
 			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
 
-			require.True(t, metricExists(t, env.endpoint, "sip_exporter_asr"))
+			if tt.wantExists {
+				require.True(t, metricExists(t, env.endpoint, "sip_exporter_asr"))
+			} else {
+				require.False(t, metricExists(t, env.endpoint, "sip_exporter_asr"),
+					"ASR metric should be absent when no INVITEs")
+			}
 			asr := getASR(t, env.endpoint)
 			t.Logf("ASR = %.2f (want %.2f)", asr, tt.wantASR)
 			require.InDelta(t, tt.wantASR, asr, ratioDelta)
