@@ -53,7 +53,10 @@ func TestBenchmark_ScrapeLatencyUnderLoad(t *testing.T) {
 		wg      sync.WaitGroup
 	)
 
-	const numScrapes = 50
+	const (
+		numScrapes                = 50
+		scrapeErrorToleranceDenom = 20
+	)
 	scrapeInterval := 100 * time.Millisecond
 
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -88,7 +91,7 @@ func TestBenchmark_ScrapeLatencyUnderLoad(t *testing.T) {
 		durations = append(durations, float64(r.duration.Microseconds())/1000.0)
 	}
 
-	maxErrors := numScrapes / 20 //nolint:mnd // 5% error tolerance
+	maxErrors := numScrapes / scrapeErrorToleranceDenom
 	require.LessOrEqual(t, errors, maxErrors,
 		"scrape error rate SLO: < 5%% (%d/%d failed)", errors, numScrapes)
 	require.NotEmpty(t, durations, "should have successful scrapes for latency measurement")
