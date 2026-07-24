@@ -215,7 +215,13 @@ func (s *sharedTestEnv) restart(t *testing.T) {
 	require.NoError(t, s.container.Start(context.Background()))
 
 	require.Eventually(t, func() bool {
-		resp, err := http.Get(s.endpoint + "/metrics") //nolint:noctx // test helper
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.endpoint+"/metrics", nil)
+		if err != nil {
+			return false
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return false
 		}
@@ -613,17 +619,29 @@ func getMetric(t *testing.T, endpoint string, metricName string) float64 {
 	return getMetricWithLabel(t, endpoint, metricName, "")
 }
 
+// fetchMetricsBody scrapes the raw /metrics body from the exporter endpoint using
+// a request-scoped context. All metric-reading helpers route through it so there is
+// a single HTTP call site (and no http.Get-without-context).
+func fetchMetricsBody(t *testing.T, endpoint string) []byte {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/metrics", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return body
+}
+
 // metricExists checks whether a metric name appears in the exporter /metrics output.
 // Use before assertions that check a metric == 0 to prevent vacuum-pass when the
 // metric name is misspelled or missing entirely (getMetric returns 0.0 for unknown metrics).
 func metricExists(t *testing.T, endpoint string, metricName string) bool {
 	t.Helper()
-	resp, err := http.Get(endpoint + "/metrics") //nolint:noctx // test helper
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	return strings.Contains(string(body), metricName)
+	return strings.Contains(string(fetchMetricsBody(t, endpoint)), metricName)
 }
 
 // buildMetricRegex compiles a regex matching a Prometheus metric line,
@@ -647,12 +665,7 @@ func buildMetricRegex(metricName string, labelFilter string) *regexp.Regexp {
 func getMetricWithLabel(t *testing.T, endpoint string, metricName string, labelFilter string) float64 {
 	t.Helper()
 
-	resp, err := http.Get(endpoint + "/metrics") //nolint:noctx // test helper
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
+	body := fetchMetricsBody(t, endpoint)
 
 	re := buildMetricRegex(metricName, labelFilter)
 	for _, line := range strings.Split(string(body), "\n") {
@@ -677,12 +690,7 @@ func getMetricWithLabel(t *testing.T, endpoint string, metricName string, labelF
 func metricWithLabelExists(t *testing.T, endpoint string, metricName string, labelFilter string) bool {
 	t.Helper()
 
-	resp, err := http.Get(endpoint + "/metrics") //nolint:noctx // test helper
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
+	body := fetchMetricsBody(t, endpoint)
 
 	re := buildMetricRegex(metricName, labelFilter)
 	for _, line := range strings.Split(string(body), "\n") {
