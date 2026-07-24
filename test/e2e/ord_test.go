@@ -16,10 +16,10 @@ func TestORD(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		carrier    bool
-		scenarios  []sippRun
-		wantCount  int
+		name      string
+		carrier   bool
+		scenarios []sippRun
+		wantCount int
 	}{
 		{"OptionsPing", false, []sippRun{{"uas_no_invite.xml", "uac_no_invite.xml", 50}}, 50},
 		{"NoOptions", false, []sippRun{{"uas_100.xml", "uac_100.xml", 50}}, 0},

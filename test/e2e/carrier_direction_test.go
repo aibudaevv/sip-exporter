@@ -59,13 +59,13 @@ func TestCarrierDirection(t *testing.T) {
 				serA := getMetricWithCarrier(t, endpoint, "sip_exporter_ser", "carrier-A")
 				require.Greater(t, serA, 0.0, "carrier-A should have SER > 0")
 
-			require.True(t, metricWithLabelExists(t, endpoint, "sip_exporter_ser", `carrier="carrier-B"`),
-				"SER for carrier-B should exist (0/200 = 0%%)")
-			serB := getMetricWithCarrier(t, endpoint, "sip_exporter_ser", "carrier-B")
-			require.Equal(t, 0.0, serB, "carrier-B should have SER = 0")
+				require.True(t, metricWithLabelExists(t, endpoint, "sip_exporter_ser", `carrier="carrier-B"`),
+					"SER for carrier-B should exist (0/200 = 0%%)")
+				serB := getMetricWithCarrier(t, endpoint, "sip_exporter_ser", "carrier-B")
+				require.Equal(t, 0.0, serB, "carrier-B should have SER = 0")
 
-			inviteA := getMetricWithCarrier(t, endpoint, "sip_exporter_invite_total", "carrier-A")
-			inviteB := getMetricWithCarrier(t, endpoint, "sip_exporter_invite_total", "carrier-B")
+				inviteA := getMetricWithCarrier(t, endpoint, "sip_exporter_invite_total", "carrier-A")
+				inviteB := getMetricWithCarrier(t, endpoint, "sip_exporter_invite_total", "carrier-B")
 				require.Greater(t, inviteA, 0.0, "carrier-A should have INVITEs")
 				require.Greater(t, inviteB, 0.0, "carrier-B should have INVITEs")
 			},
