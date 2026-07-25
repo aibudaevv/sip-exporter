@@ -2308,9 +2308,11 @@ func TestFAS_ByePath_FiresAfterFloor(t *testing.T) {
 	require.Len(t, e.fasTracker.entries, 1)
 
 	// Simulate answer→BYE duration above the floor by backdating the entry.
+	shift := fasByeFloor + time.Second
 	e.fasTracker.mu.Lock()
 	ent := e.fasTracker.entries["call-1"]
-	ent.createdAt = time.Now().Add(-fasByeFloor - time.Second)
+	ent.createdAt = time.Now().Add(-shift)
+	ent.byeFloor = ent.byeFloor.Add(-shift)
 	e.fasTracker.entries["call-1"] = ent
 	e.fasTracker.mu.Unlock()
 
@@ -2353,6 +2355,38 @@ func TestFAS_ByePath_NoFire_WhenMediaCleared(t *testing.T) {
 	// Backdate would be moot — the entry is already gone; BYE must not fire.
 	require.NoError(t, e.handleBye200OK(fasInvite200OK("call-1", ""), ""))
 	require.Zero(t, mm.fasCalls, "no FAS when media already cleared the entry")
+}
+
+// TestFAS_ByePath_SRTPRespectsGrace is the S11-6 × S11-7 interaction regression:
+// an SRTP call (a=fingerprint) ending via BYE WITHIN the DTLS/ICE grace window
+// must NOT fire FAS — the grace that protects the sweep path must also protect
+// the BYE path. Otherwise WebRTC calls that fail ICE and hang up false-positive.
+func TestFAS_ByePath_SRTPRespectsGrace(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, 100*time.Millisecond)
+
+	const srtpSDP = "v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\nc=IN IP4 10.0.0.1\r\n" +
+		"t=0 0\r\nm=audio 5004 RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\n" +
+		"a=fingerprint:sha-256 AB:CD:01:02\r\na=setup:actpass\r\n"
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", srtpSDP), false),
+	)
+	require.Len(t, e.fasTracker.entries, 1)
+
+	// Elapsed (5s) is past fasByeFloor (3s) but well within the SRTP grace
+	// window (deadline = base 100ms + grace 15s ≈ 15.1s). A plain-RTP call here
+	// WOULD fire at BYE; an SRTP call must NOT — still in ICE/DTLS tolerance.
+	const elapsed = 5 * time.Second
+	e.fasTracker.mu.Lock()
+	ent := e.fasTracker.entries["call-1"]
+	ent.createdAt = time.Now().Add(-elapsed)
+	ent.deadline = ent.deadline.Add(-elapsed)
+	ent.byeFloor = ent.byeFloor.Add(-elapsed)
+	e.fasTracker.entries["call-1"] = ent
+	e.fasTracker.mu.Unlock()
+
+	require.NoError(t, e.handleBye200OK(fasInvite200OK("call-1", ""), ""))
+	require.Zero(t, mm.fasCalls, "SRTP call ending within grace must not fire FAS at BYE")
 }
 
 // TestFAS_SRTP_ExtendsThreshold verifies the DTLS-SRTP grace: a call whose

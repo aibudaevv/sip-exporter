@@ -172,6 +172,7 @@ func (t *inviteBurstTracker) cleanup() {
 type fasEntry struct {
 	createdAt     time.Time
 	deadline      time.Time // createdAt + threshold (+ fasSRTPGrace when SRTP); sweep fires after this
+	byeFloor      time.Time // earliest teardown time at which finalizeOnBye may report FAS (= deadline for SRTP, else createdAt + fasByeFloor)
 	carrier       string
 	uaType        string
 	sourceCountry string
@@ -216,10 +217,16 @@ func (t *fasTracker) store(callID string, e fasEntry, offerEndpoints []fasEndpoi
 	now := time.Now()
 	e.createdAt = now
 	deadline := now.Add(t.threshold)
+	// The BYE path may report FAS once the call outlived its setup tolerance. For
+	// plain RTP that's fasByeFloor; for DTLS-SRTP it's the full grace window
+	// (deadline) — a WebRTC call that fails ICE and hangs up is not FAS.
+	byeFloor := now.Add(fasByeFloor)
 	if srtp {
 		deadline = deadline.Add(fasSRTPGrace)
+		byeFloor = deadline
 	}
 	e.deadline = deadline
+	e.byeFloor = byeFloor
 	t.entries[callID] = e
 	if len(offerEndpoints) > 0 {
 		set := make(map[fasEndpoint]struct{}, len(offerEndpoints))
@@ -277,9 +284,11 @@ func (t *fasTracker) clearIfAnswerMedia(callID string, ep fasEndpoint, packetsTo
 }
 
 // finalizeOnBye reports FAS at teardown when the entry is still pending (the
-// answer side never sent media) and the call lasted beyond fasByeFloor, then
+// answer side never sent media) and the call lasted beyond its byeFloor, then
 // clears. A no-op when media already cleared the entry earlier (normal case).
-// This catches short dead-air calls that end via BYE before the sweep threshold.
+// byeFloor equals fasByeFloor for plain RTP but the full deadline (threshold +
+// fasSRTPGrace) for DTLS-SRTP, so a WebRTC call failing ICE and hanging up does
+// not false-positive during the setup window.
 func (t *fasTracker) finalizeOnBye(callID string, metricser service.Metricser) {
 	if t == nil || callID == "" {
 		return
@@ -290,7 +299,7 @@ func (t *fasTracker) finalizeOnBye(callID string, metricser service.Metricser) {
 	if !ok {
 		return
 	}
-	if time.Since(e.createdAt) >= fasByeFloor {
+	if time.Now().After(e.byeFloor) {
 		metricser.FasCall(e.carrier, e.uaType, e.sourceCountry, e.direction)
 		zap.L().Warn("FAS suspected at BYE: answered call ended with no answer-side RTP",
 			zap.String("call_id", callID),
