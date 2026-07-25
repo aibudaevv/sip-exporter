@@ -42,6 +42,7 @@
 - 🌍 **Гео-обогащение** — лейблы `source_country` (GeoIP) и `destination_country` (E.164 prefix) в SIP-метриках
 - 📞 **Качество голоса (RFC 6035)** — MOS, джиттер, потери пакетов из SIP PUBLISH/NOTIFY
 - 🎧 **Анализ RTP-медиа** — джиттер, потери и MOS (E-model G.107) из RTP-потоков, скоррелированных с SIP-диалогами, без захвата голосового payload (только заголовок)
+- 📊 **RTCP-качество от эндпоинтов** — потери, джиттер и round-trip time (RTT) из RTCP SR/RR (RFC 3550), корреляция по SSRC; поддерживает rtcp-mux (RFC 5761), явный `a=rtcp` (RFC 3605) и legacy port+1
 - 🛡️ **Детекция фрода** — сигналы сканирования регистраций, всплесков INVITE и перехвата аккаунтов (смена страны)
 
 ## Быстрый старт
@@ -132,6 +133,7 @@ docker pull frzq/sip-exporter:latest
 - **Метрики RFC 6076** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, PDD, PBD
 - **Метрики качества голоса RFC 6035** — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
 - **Метрики RTP-медиа** — `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_active_streams` (лейблы: `carrier,ua_type,codec,source_country`)
+- **Метрики RTCP-качества** — `rtcp_reports_total`, `rtcp_loss_fraction_percent`, `rtcp_cumulative_loss_total`, `rtcp_jitter_milliseconds`, `rtcp_rtt_milliseconds`, `rtcp_orphan_reports_total` (лейблы: `carrier,ua_type,codec,source_country,direction`)
 - **Диагностика** — `sip_retransmission_total` (ретрансмиссии по SIP Timer A), `rtp_out_of_order_total` (нарушение порядка RTP-пакетов), `short_calls_total` (звонки короче 20/60/180 секунд)
 
 Полный справочник с формулами, примерами и привязкой к RFC: [docs/METRICS.ru.md](docs/METRICS.ru.md)

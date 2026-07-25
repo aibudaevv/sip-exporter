@@ -45,6 +45,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - 🔀 **Traffic direction** — `inbound`/`outbound` label on all metrics via kernel `pkttype`, zero-config
 - 📞 **Voice quality (RFC 6035)** — MOS scores, jitter, packet loss from SIP PUBLISH/NOTIFY
 - 🎧 **RTP media analysis** — jitter, packet loss, and MOS (E-model G.107) from RTP streams correlated with SIP dialogs, with no voice payload captured (header-only)
+- 📊 **RTCP endpoint-reported quality** — loss, jitter, and round-trip time (RTT) from RTCP SR/RR (RFC 3550), correlated by SSRC; supports rtcp-mux (RFC 5761), explicit `a=rtcp` (RFC 3605), and legacy port+1
 - 🛡️ **Fraud detection** — registration scan, INVITE burst, and account-takeover (country change) signals ([docs/fraud-detection.md](docs/fraud-detection.md))
 
 ## Quick Start
@@ -141,6 +142,7 @@ All metrics are exposed at `/metrics` in Prometheus exposition format. Most SIP 
 - **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, PDD, PBD
 - **RFC 6035 voice quality metrics** — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
 - **RTP media metrics** — `sip_exporter_rtp_packets_total`, `sip_exporter_rtp_packets_lost_total`, `sip_exporter_rtp_jitter_milliseconds`, `sip_exporter_rtp_mos_score`, `sip_exporter_rtp_active_streams` (labels: `carrier,ua_type,codec,source_country,direction`)
+- **RTCP quality metrics** — `sip_exporter_rtcp_reports_total`, `sip_exporter_rtcp_loss_fraction_percent`, `sip_exporter_rtcp_cumulative_loss_total`, `sip_exporter_rtcp_jitter_milliseconds`, `sip_exporter_rtcp_rtt_milliseconds`, `sip_exporter_rtcp_orphan_reports_total` (labels: `carrier,ua_type,codec,source_country,direction`)
 - **Diagnostics** — `sip_exporter_sip_retransmission_total` (SIP Timer A retransmissions), `sip_exporter_rtp_out_of_order_total` (out-of-sequence RTP packets), `sip_exporter_short_calls_total` (calls shorter than 20/60/180 seconds)
 
 Full reference with formulas, examples, and RFC section mapping: [docs/METRICS.md](docs/METRICS.md)
