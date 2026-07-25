@@ -340,6 +340,28 @@ These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) mea
         annotations:
           summary: "High endpoint-reported jitter (RTCP)"
           description: "95th percentile RTCP-reported jitter for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}ms. The receiver's own observation exceeds 50ms — its jitter buffer is under stress."
+
+      - alert: SIPRTCPReportedLossHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtcp_loss_fraction_percent_bucket[5m]))) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High endpoint-reported loss (RTCP)"
+          description: "95th percentile RTCP-reported loss fraction for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}%. The receiver reports losing >5% of packets — the most direct QoE signal; check the media path."
+
+      - alert: SIPRTCPSilence
+        expr: |
+          (sum(rate(sip_exporter_rtp_packets_total[5m])) > 10)
+          unless
+          (sum(rate(sip_exporter_rtcp_reports_total[5m])) > 0)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No RTCP received while RTP flows"
+          description: "RTP packets are flowing but zero RTCP reports have been received for 10m. RTCP is mandatory (RFC 3550) — its absence suggests RTCP is filtered, endpoints do not send it, or capture/registration is broken (check sip_exporter_rtcp_orphan_reports_total)."
       ```
 
 ### System Health Alerts
