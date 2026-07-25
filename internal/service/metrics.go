@@ -703,7 +703,10 @@ func (m *metrics) initRTCPMetrics(reg *prometheus.Registry) {
 	rlReports := []string{"carrier", "ua_type", "source_country", "direction", "type"}
 	m.rtcpReports = newCounterVecWithRegistry(
 		"sip_exporter_rtcp_reports_total",
-		"RTCP SR/RR reports received (type=sr|rr)", rlReports, reg)
+		"RTCP SR/RR reception report blocks received for tracked streams (type=sr|rr; counted per block)",
+		rlReports,
+		reg,
+	)
 }
 
 func registerRatioCollectors(m *metrics, reg *prometheus.Registry) {

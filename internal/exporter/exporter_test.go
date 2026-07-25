@@ -74,6 +74,18 @@ type mockMetricser struct {
 	rtpDuplicateCalls         int
 	rtpOutOfOrderCalls        int
 	rtpDroppedCount           int
+	rtcpJitterCalls           int
+	rtcpJitterVal             float64
+	rtcpLossFracCalls         int
+	rtcpLossFracVal           float64
+	rtcpCumLossCalls          int
+	rtcpCumLossVal            uint64
+	rtcpRTTCalls              int
+	rtcpRTTVal                float64
+	rtcpReportCalls           int
+	rtcpReportType            string
+	rtcpReportCarrier         string
+	rtcpReportDirection       string
 }
 
 func (m *mockMetricser) UpdateSessions(_ []service.LabeledCount) {}
@@ -236,11 +248,28 @@ func (m *mockMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount) {}
 func (m *mockMetricser) OneWayCall(string, string, string, string)       {}
 func (m *mockMetricser) MissingRTP(string, string, string, string)       {}
 
-func (m *mockMetricser) UpdateRTCPJitter(string, string, string, string, string, float64)        {}
-func (m *mockMetricser) UpdateRTCPLossFraction(string, string, string, string, string, float64)  {}
-func (m *mockMetricser) UpdateRTCPCumulativeLoss(string, string, string, string, string, uint64) {}
-func (m *mockMetricser) UpdateRTCPRTT(string, string, string, string, string, float64)           {}
-func (m *mockMetricser) UpdateRTCPReport(string, string, string, string, string)                 {}
+func (m *mockMetricser) UpdateRTCPJitter(_, _, _, _, _ string, jitterMs float64) {
+	m.rtcpJitterCalls++
+	m.rtcpJitterVal = jitterMs
+}
+func (m *mockMetricser) UpdateRTCPLossFraction(_, _, _, _, _ string, fractionPercent float64) {
+	m.rtcpLossFracCalls++
+	m.rtcpLossFracVal = fractionPercent
+}
+func (m *mockMetricser) UpdateRTCPCumulativeLoss(_, _, _, _, _ string, lostDelta uint64) {
+	m.rtcpCumLossCalls++
+	m.rtcpCumLossVal = lostDelta
+}
+func (m *mockMetricser) UpdateRTCPRTT(_, _, _, _, _ string, rttMs float64) {
+	m.rtcpRTTCalls++
+	m.rtcpRTTVal = rttMs
+}
+func (m *mockMetricser) UpdateRTCPReport(carrier, _, _, direction, reportType string) {
+	m.rtcpReportCalls++
+	m.rtcpReportType = reportType
+	m.rtcpReportCarrier = carrier
+	m.rtcpReportDirection = direction
+}
 
 type dialogCreateArgs struct {
 	expiresAt          time.Time

@@ -23,6 +23,7 @@ import (
 	"github.com/aibudaevv/sip-exporter/internal/dto"
 	"github.com/aibudaevv/sip-exporter/internal/geoip"
 	"github.com/aibudaevv/sip-exporter/internal/mediatracker"
+	"github.com/aibudaevv/sip-exporter/internal/rtcp"
 	"github.com/aibudaevv/sip-exporter/internal/rtp"
 	"github.com/aibudaevv/sip-exporter/internal/sdp"
 	"github.com/aibudaevv/sip-exporter/internal/service"
@@ -82,6 +83,14 @@ const (
 	// RTP and RTCP share V=2; the PT byte range is disjoint (RFC 5761).
 	rtcpPTMin = 200
 	rtcpPTMax = 204
+
+	ntpEpochOffset  = 2208988800 // seconds between the NTP epoch (1900) and the Unix epoch (1970)
+	ntpFractionBits = 32         // width of the fractional half of a 64-bit NTP timestamp
+	ntpHalfBits     = 16         // shift to take the middle 32 bits of a 64-bit NTP timestamp
+	ntp32Scale      = 65536.0    // RTCP LSR/DLSR/RTT are in 16.16-second NTP32 units (2^16 per second)
+	fracLostScale   = 256.0      // RTCP fraction-lost is an 8-bit ratio (N/256)
+	msPerSec        = 1000.0     // milliseconds per second
+	percentScale    = 100.0      // scale factor for fraction-to-percent conversion
 
 	sipPartsCount                = 3
 	minSIPParts                  = 2
@@ -1093,22 +1102,76 @@ func isRTCPPayload(payload []byte) bool {
 	return len(payload) > 1 && payload[1] >= rtcpPTMin && payload[1] <= rtcpPTMax
 }
 
-// handleRTCP processes an RTCP compound packet (RFC 3550 §6). RTCP SR/RR report
-// endpoint-observed quality (jitter, loss, RTT) and correlate to RTP streams by
-// SSRC. The full implementation is delivered in S12-3..S12-6 (parser, SSRC index,
-// metrics, wiring); this routing target ensures RTCP no longer reaches handleRTP.
+// nowNTP32 returns the middle 32 bits of the NTP timestamp (RFC 3550 §4) for t —
+// the compact 16.16-second format used by RTCP LSR/DLSR fields. Used to compute
+// round-trip time from a Receiver Report: RTT = nowNTP32 − LSR − DLSR.
+func nowNTP32(t time.Time) uint32 {
+	secs := uint64(t.Unix()) + ntpEpochOffset
+	frac := (uint64(t.Nanosecond()) << ntpFractionBits) / uint64(time.Second)
+	ntp64 := secs<<ntpFractionBits | frac
+	return uint32(ntp64 >> ntpHalfBits)
+}
+
+// handleRTCP processes an RTCP compound packet (RFC 3550 §6). SR/RR report blocks
+// carry endpoint-observed quality for an SSRC; each block is correlated to the
+// tracked RTP stream sending with that SSRC (destination-first, NAT-robust) and
+// emits jitter / loss-fraction / cumulative-loss / RTT metrics inheriting the
+// stream's labels. RTT is computed as (now_NTP32 − LSR − DLSR) and skipped when
+// LSR is zero (no prior SR) or the result is negative (clock skew). Blocks whose
+// SSRC is not tracked are dropped — consistent with RTP correlation.
 func (e *exporter) handleRTCP(
 	srcIP net.IP, srcPort uint16,
 	dstIP net.IP, dstPort uint16,
 	payload []byte,
 ) (string, error) {
-	zap.L().Debug("RTCP packet received",
-		zap.String("src_ip", srcIP.String()),
-		zap.Uint16("src_port", srcPort),
-		zap.String("dst_ip", dstIP.String()),
-		zap.Uint16("dst_port", dstPort),
-		zap.Int("payload_len", len(payload)))
+	reports, err := rtcp.Parse(payload)
+	if err != nil {
+		zap.L().Debug("RTCP parse skipped", zap.Error(err))
+		return "", nil
+	}
+	nowNTP := nowNTP32(time.Now())
+	sIP, dIP := srcIP.String(), dstIP.String()
+
+	for _, rep := range reports {
+		reportType := "rr"
+		if rep.Type == rtcp.PTSenderReport {
+			reportType = "sr"
+		}
+		for _, blk := range rep.Blocks {
+			ctx, ok := e.mediaTracker.LookupBySSRC(blk.SSRC, sIP, srcPort, dIP, dstPort)
+			if !ok {
+				continue
+			}
+			carrier, uaType, codec := ctx.Labels.Carrier, ctx.Labels.UAType, ctx.Codec
+			sourceCountry, direction := ctx.Labels.SourceCountry, ctx.Labels.Direction
+
+			e.services.metricser.UpdateRTCPJitter(carrier, uaType, codec, sourceCountry, direction,
+				rtcpJitterMs(blk.Jitter, ctx.ClockRate))
+			e.services.metricser.UpdateRTCPLossFraction(carrier, uaType, codec, sourceCountry, direction,
+				float64(blk.FractionLost)/fracLostScale*percentScale)
+			if delta := e.mediaTracker.RecordRTCPLoss(blk.SSRC, blk.CumulativeLost, sIP, srcPort, dIP, dstPort); delta > 0 {
+				e.services.metricser.UpdateRTCPCumulativeLoss(carrier, uaType, codec, sourceCountry, direction, delta)
+			}
+			if blk.LSR != 0 {
+				rttUnits := nowNTP - blk.LSR - blk.DLSR
+				if int32(rttUnits) > 0 {
+					e.services.metricser.UpdateRTCPRTT(carrier, uaType, codec, sourceCountry, direction,
+						float64(rttUnits)/ntp32Scale*msPerSec)
+				}
+			}
+			e.services.metricser.UpdateRTCPReport(carrier, uaType, sourceCountry, direction, reportType)
+		}
+	}
 	return "", nil
+}
+
+// rtcpJitterMs converts an RTCP interarrival-jitter field (in RTP timestamp units)
+// to milliseconds using the stream's clock rate, mirroring StreamState.JitterMs.
+func rtcpJitterMs(jitterTicks uint32, clockRate uint32) float64 {
+	if clockRate == 0 {
+		return 0
+	}
+	return float64(jitterTicks) / float64(clockRate) * msPerSec
 }
 
 // handleRTP parses an RTP header and feeds it to the media tracker. Packets with
