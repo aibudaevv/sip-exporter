@@ -78,6 +78,11 @@ const (
 	maxStaticRTPPayloadType  = 34
 	minDynamicRTPPayloadType = 96
 
+	// RTCP packet types (RFC 3550 §6): SR=200, RR=201, SDES=202, BYE=203, APP=204.
+	// RTP and RTCP share V=2; the PT byte range is disjoint (RFC 5761).
+	rtcpPTMin = 200
+	rtcpPTMax = 204
+
 	sipPartsCount                = 3
 	minSIPParts                  = 2
 	minResponseStatusLen         = 3
@@ -944,6 +949,9 @@ func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 		srcPort := binary.BigEndian.Uint16(packet[udpOffset : udpOffset+2])
 		dstPort := binary.BigEndian.Uint16(packet[udpOffset+2 : udpOffset+4])
 		srcIP, dstIP := extractIPs(ipHeader)
+		if isRTCPPayload(sipData) {
+			return e.handleRTCP(srcIP, srcPort, dstIP, dstPort, sipData)
+		}
 		return e.handleRTP(srcIP, srcPort, dstIP, dstPort, sipData)
 	}
 
@@ -1074,6 +1082,33 @@ func (e *exporter) handleMessage(carrier string, sourceCountry string, rawPacket
 	}
 
 	return nil
+}
+
+// isRTCPPayload reports whether a V=2 UDP payload is an RTCP packet rather than
+// RTP, by inspecting the 8-bit packet-type byte (payload[1]). RTCP PT range is
+// 200-204 (RFC 3550 §6); RTP PTs occupy 0-127 with a separate marker bit. The
+// ranges are disjoint, so a single byte distinguishes them. Must be called only
+// after the caller has confirmed V=2 (sipData[0]&0xC0 == 0x80).
+func isRTCPPayload(payload []byte) bool {
+	return len(payload) > 1 && payload[1] >= rtcpPTMin && payload[1] <= rtcpPTMax
+}
+
+// handleRTCP processes an RTCP compound packet (RFC 3550 §6). RTCP SR/RR report
+// endpoint-observed quality (jitter, loss, RTT) and correlate to RTP streams by
+// SSRC. The full implementation is delivered in S12-3..S12-6 (parser, SSRC index,
+// metrics, wiring); this routing target ensures RTCP no longer reaches handleRTP.
+func (e *exporter) handleRTCP(
+	srcIP net.IP, srcPort uint16,
+	dstIP net.IP, dstPort uint16,
+	payload []byte,
+) (string, error) {
+	zap.L().Debug("RTCP packet received",
+		zap.String("src_ip", srcIP.String()),
+		zap.Uint16("src_port", srcPort),
+		zap.String("dst_ip", dstIP.String()),
+		zap.Uint16("dst_port", dstPort),
+		zap.Int("payload_len", len(payload)))
+	return "", nil
 }
 
 // handleRTP parses an RTP header and feeds it to the media tracker. Packets with
