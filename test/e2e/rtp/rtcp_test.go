@@ -139,13 +139,13 @@ func sendRTCPRR(t *testing.T, port int, ssrc, cumLost uint32) {
 
 	// RR: common header (4) + sender SSRC (4) + one report block (24) = 32 bytes.
 	pkt := make([]byte, 32)
-	pkt[0] = 0x81                                                                     // V=2, P=0, RC=1 (one report block)
-	pkt[1] = 201                                                                      // PT = RR
-	binary.BigEndian.PutUint16(pkt[2:4], 7)                                           // length = 32/4 - 1
-	binary.BigEndian.PutUint32(pkt[4:8], 0x5A5A5A5A)                                  // reporter (sender) SSRC
-	binary.BigEndian.PutUint32(pkt[8:12], ssrc)                                       // reported source SSRC
-	pkt[12] = 10                                                                      // fraction lost (10/256 ≈ 3.9%)
-	pkt[13] = byte(cumLost >> 16)                                                     // 24-bit cumulative number of packets lost
+	pkt[0] = 0x81                                    // V=2, P=0, RC=1 (one report block)
+	pkt[1] = 201                                     // PT = RR
+	binary.BigEndian.PutUint16(pkt[2:4], 7)          // length = 32/4 - 1
+	binary.BigEndian.PutUint32(pkt[4:8], 0x5A5A5A5A) // reporter (sender) SSRC
+	binary.BigEndian.PutUint32(pkt[8:12], ssrc)      // reported source SSRC
+	pkt[12] = 10                                     // fraction lost (10/256 ≈ 3.9%)
+	pkt[13] = byte(cumLost >> 16)                    // 24-bit cumulative number of packets lost
 	pkt[14] = byte(cumLost >> 8)
 	pkt[15] = byte(cumLost)
 	binary.BigEndian.PutUint32(pkt[16:20], 500)                                       // extended highest sequence
@@ -189,8 +189,8 @@ func TestRTCP_MetricsFromInjectedRR(t *testing.T) {
 	// so a stream with a deterministic SSRC is tracked, then RR(s) for that SSRC.
 	// Two RRs guard against a single dropped packet at the socket.
 	sendRTPWithSSRC(t, uasMediaNum, testSSRC, 20)
-	time.Sleep(300 * time.Millisecond) // let RTP reach the tracker before the RR
-	sendRTCPRR(t, uasMediaNum, testSSRC, 0)   // first RR: establishes the loss baseline (delta=0)
+	time.Sleep(300 * time.Millisecond)      // let RTP reach the tracker before the RR
+	sendRTCPRR(t, uasMediaNum, testSSRC, 0) // first RR: establishes the loss baseline (delta=0)
 	time.Sleep(100 * time.Millisecond)
 	sendRTCPRR(t, uasMediaNum, testSSRC, 500) // second RR: cumulative=500 → delta=500 emitted
 	time.Sleep(300 * time.Millisecond)        // let the RTCP be processed before BYE
