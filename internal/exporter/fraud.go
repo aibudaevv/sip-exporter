@@ -195,6 +195,7 @@ type fasTracker struct {
 	// (callee→caller); only such media defeats FAS. When empty for a call (INVITE
 	// SDP was not cached), the side is unknown and any media clears (legacy).
 	offer map[string]map[fasEndpoint]struct{}
+	now   func() time.Time
 }
 
 func newFasTracker(threshold time.Duration) *fasTracker {
@@ -205,7 +206,18 @@ func newFasTracker(threshold time.Duration) *fasTracker {
 		threshold: threshold,
 		entries:   make(map[string]fasEntry),
 		offer:     make(map[string]map[fasEndpoint]struct{}),
+		now:       time.Now,
 	}
+}
+
+// SetNow overrides the clock used for FAS timing (for testing).
+func (t *fasTracker) SetNow(now func() time.Time) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.now = now
+	t.mu.Unlock()
 }
 
 func (t *fasTracker) store(callID string, e fasEntry, offerEndpoints []fasEndpoint, srtp bool) {
@@ -214,7 +226,7 @@ func (t *fasTracker) store(callID string, e fasEntry, offerEndpoints []fasEndpoi
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	now := time.Now()
+	now := t.now()
 	e.createdAt = now
 	deadline := now.Add(t.threshold)
 	// The BYE path may report FAS once the call outlived its setup tolerance. For
@@ -332,7 +344,7 @@ func (t *fasTracker) finalizeOnBye(callID string, metricser service.Metricser) {
 	if !ok {
 		return
 	}
-	if time.Now().After(e.byeFloor) {
+	if t.now().After(e.byeFloor) {
 		metricser.FasCall(e.carrier, e.uaType, e.sourceCountry, e.direction)
 		zap.L().Warn("FAS suspected at BYE: answered call ended with no answer-side RTP",
 			zap.String("call_id", callID),
@@ -340,7 +352,7 @@ func (t *fasTracker) finalizeOnBye(callID string, metricser service.Metricser) {
 			zap.String("ua_type", e.uaType),
 			zap.String("source_country", e.sourceCountry),
 			zap.String("direction", e.direction),
-			zap.Duration("duration", time.Since(e.createdAt)),
+			zap.Duration("duration", t.now().Sub(e.createdAt)),
 		)
 	}
 	delete(t.entries, callID)
@@ -353,7 +365,7 @@ func (t *fasTracker) sweep(metricser service.Metricser) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	now := time.Now()
+	now := t.now()
 	for callID, e := range t.entries {
 		if now.After(e.deadline) {
 			metricser.FasCall(e.carrier, e.uaType, e.sourceCountry, e.direction)

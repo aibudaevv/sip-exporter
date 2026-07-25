@@ -2404,6 +2404,9 @@ func TestFAS_SRTP_ExtendsThreshold(t *testing.T) {
 	base := 60 * time.Millisecond
 	e := newFasTestExporter(mm, base)
 
+	t0 := time.Unix(1_700_000_000, 0)
+	e.fasTracker.SetNow(func() time.Time { return t0 })
+
 	const srtpSDP = "v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\nc=IN IP4 10.0.0.1\r\n" +
 		"t=0 0\r\nm=audio 5004 RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\n" +
 		"a=fingerprint:sha-256 AB:CD:01:02\r\na=setup:actpass\r\n"
@@ -2414,12 +2417,12 @@ func TestFAS_SRTP_ExtendsThreshold(t *testing.T) {
 	require.Len(t, e.fasTracker.entries, 1)
 
 	// At base threshold, an SRTP call must NOT fire yet (grace still running).
-	time.Sleep(base + 20*time.Millisecond)
+	e.fasTracker.SetNow(func() time.Time { return t0.Add(base + 10*time.Millisecond) })
 	e.fasTracker.sweep(mm)
 	require.Zero(t, mm.fasCalls, "SRTP call must not fire within base threshold (grace active)")
 
 	// After base + grace, with no RTP, FAS fires.
-	time.Sleep(fasSRTPGrace)
+	e.fasTracker.SetNow(func() time.Time { return t0.Add(base + fasSRTPGrace + 10*time.Millisecond) })
 	e.fasTracker.sweep(mm)
 	require.Equal(t, 1, mm.fasCalls, "SRTP call must fire after base+grace with no RTP")
 }
