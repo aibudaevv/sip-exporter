@@ -23,7 +23,8 @@ const (
 type Media struct {
 	IP         string           // connection IP (per-media c= || session c= || o= fallback)
 	Port       uint16           // port from m=audio <port>
-	RTCPPort   uint16           // RTCP port from a=rtcp (RFC 3605); 0 when absent (rtcp-mux assumed)
+	RTCPPort   uint16           // RTCP port from a=rtcp (RFC 3605); 0 when absent
+	RTCPMux    bool             // a=rtcp-mux (RFC 5761): RTCP multiplexed on the RTP port
 	Codecs     map[uint8]string // payload type → codec name (from a=rtpmap)
 	ClockRates map[uint8]uint32 // payload type → clock rate Hz (from a=rtpmap)
 }
@@ -120,6 +121,8 @@ scan:
 			parseRtpmap(line, media.Codecs, media.ClockRates)
 		case strings.HasPrefix(line, "a=rtcp:"):
 			media.RTCPPort = parseRTCPPort(line)
+		case line == "a=rtcp-mux":
+			media.RTCPMux = true
 		}
 	}
 	consumed := j - start

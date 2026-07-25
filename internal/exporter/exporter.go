@@ -64,6 +64,7 @@ const (
 	ipV4HdrLenShift  = 4
 	ipProtoUDP       = 17
 	udpHeaderLen     = 8
+	maxUDPPort       = 65535
 	minSIPDataLen    = 50
 	minRawPacketLen  = ethHeaderLen + ipV4MinHeaderLen + udpHeaderLen
 	minVLANPacketLen = vlanHeaderLen + ipV4MinHeaderLen + udpHeaderLen
@@ -1984,8 +1985,18 @@ func (e *exporter) registerMediaEndpoints(body []byte, labels mediatracker.Media
 		ml.ClockRates = m.ClockRates
 		e.mediaTracker.Register(m.IP, m.Port, ml)
 		e.rtpEndpointInsert(m.IP, m.Port)
-		if m.RTCPPort != 0 {
+		// Register the RTCP endpoint so non-mux RTCP is captured. Explicit a=rtcp
+		// (RFC 3605) wins; otherwise rtcp-mux (RFC 5761) shares the RTP port
+		// (already registered); otherwise assume legacy RTCP on port+1 (RFC 3550 §9).
+		switch {
+		case m.RTCPPort != 0:
 			e.rtpEndpointInsert(m.IP, m.RTCPPort)
+		case m.RTCPMux:
+			// RTCP on the RTP port — nothing extra to register.
+		default:
+			if m.Port < maxUDPPort {
+				e.rtpEndpointInsert(m.IP, m.Port+1)
+			}
 		}
 		zap.L().Debug("RTP media endpoint registered",
 			zap.String("ip", m.IP), zap.Uint16("port", m.Port),

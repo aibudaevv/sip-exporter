@@ -165,3 +165,32 @@ func TestParse_RTCPAttribute(t *testing.T) {
 		})
 	}
 }
+
+// TestParse_RTCPMux verifies a=rtcp-mux (RFC 5761) detection, which determines
+// whether the exporter registers the adjacent port+1 for legacy RTCP.
+func TestParse_RTCPMux(t *testing.T) {
+	tests := []struct {
+		name    string
+		attr    string // a=... appended after rtpmap; empty means absent
+		wantMux bool
+		wantPt  uint16
+	}{
+		{"rtcp-mux present", "a=rtcp-mux", true, 0},
+		{"a=rtcp overrides (no mux)", "a=rtcp:5005", false, 5005},
+		{"neither (legacy)", "", false, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte("c=IN IP4 10.0.0.1\r\n" +
+				"m=audio 5004 RTP/AVP 0\r\n" +
+				"a=rtpmap:0 PCMU/8000\r\n")
+			if tt.attr != "" {
+				body = append(body, []byte(tt.attr+"\r\n")...)
+			}
+			media := Parse(body)
+			require.Len(t, media, 1)
+			require.Equal(t, tt.wantMux, media[0].RTCPMux)
+			require.Equal(t, tt.wantPt, media[0].RTCPPort)
+		})
+	}
+}
