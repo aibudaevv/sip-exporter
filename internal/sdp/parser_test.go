@@ -140,16 +140,18 @@ func TestParse_RTCPAttributePort(t *testing.T) {
 
 func TestParse_RTCPAttribute(t *testing.T) {
 	tests := []struct {
-		name string
-		rtcp string // full a=rtcp line; empty means absent
-		want uint16
+		name     string
+		rtcp     string // full a=rtcp line; empty means absent
+		want     uint16
+		wantAddr string // unicast RTCP address (RFC 3605); "" when absent/ignored
 	}{
-		{"port only", "a=rtcp:5005", 5005},
-		{"port with address (RFC 3605)", "a=rtcp:5006 IN IP4 10.0.0.99", 5006},
-		{"non-numeric port ignored", "a=rtcp:abc", 0},
-		{"zero port ignored", "a=rtcp:0", 0},
-		{"out-of-range port ignored", "a=rtcp:70000", 0},
-		{"attribute absent (rtcp-mux)", "", 0},
+		{"port only", "a=rtcp:5005", 5005, ""},
+		{"port with IPv4 address (RFC 3605)", "a=rtcp:5006 IN IP4 10.0.0.99", 5006, "10.0.0.99"},
+		{"non-numeric port ignored", "a=rtcp:abc", 0, ""},
+		{"zero port ignored", "a=rtcp:0", 0, ""},
+		{"out-of-range port ignored", "a=rtcp:70000", 0, ""},
+		{"attribute absent (rtcp-mux)", "", 0, ""},
+		{"IPv6 address ignored (IPv4-only capture)", "a=rtcp:5007 IN IP6 ::1", 5007, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -162,6 +164,7 @@ func TestParse_RTCPAttribute(t *testing.T) {
 			media := Parse(body)
 			require.Len(t, media, 1)
 			require.Equal(t, tt.want, media[0].RTCPPort)
+			require.Equal(t, tt.wantAddr, media[0].RTCPAddr, "unicast RTCP address (RFC 3605)")
 		})
 	}
 }

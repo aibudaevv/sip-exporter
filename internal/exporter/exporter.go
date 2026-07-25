@@ -1995,7 +1995,14 @@ func (e *exporter) registerMediaEndpoints(body []byte, labels mediatracker.Media
 		// (already registered); otherwise assume legacy RTCP on port+1 (RFC 3550 §9).
 		switch {
 		case m.RTCPPort != 0:
-			e.rtpEndpointInsert(m.IP, m.RTCPPort)
+			// Explicit a=rtcp (RFC 3605): register the RTCP endpoint. The
+			// address defaults to the c= connection IP but may be a different
+			// host when a=rtcp carries a unicast address.
+			rtcpIP := m.IP
+			if m.RTCPAddr != "" {
+				rtcpIP = m.RTCPAddr
+			}
+			e.rtpEndpointInsert(rtcpIP, m.RTCPPort)
 		case m.RTCPMux:
 			// RTCP on the RTP port — nothing extra to register.
 		default:
