@@ -319,6 +319,27 @@ groups:
         annotations:
           summary: "Высокий RTP jitter"
           description: "95-й перцентиль RTP jitter для оператора {{ $labels.carrier }} — {{ $value | printf \"%.1f\" }}мс. Jitter выше 50мс вызывает артефакты аудио и переполнение jitter buffer."
+
+      # Алерты RTCP (RFC 3550) — что эндпоинт переживает сам.
+      - alert: SIPRTCPRoundTripHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtcp_rtt_milliseconds_bucket[5m]))) > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Высокий RTT из RTCP"
+          description: "95-й перцентиль RTT (из LSR/DLSR блока RR) для оператора {{ $labels.carrier }} — {{ $value | printf \"%.0f\" }}мс. Высокий RTT вызывает эхо и затрудняет диалог; проверьте маршрутизацию и очереди."
+
+      - alert: SIPRTCPReportedJitterHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtcp_jitter_milliseconds_bucket[5m]))) > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Высокий endpoint-reported jitter (RTCP)"
+          description: "95-й перцентиль отрепорченного через RTCP jitter для оператора {{ $labels.carrier }} — {{ $value | printf \"%.1f\" }}мс. Собственное наблюдение приёмника превышает 50мс — его jitter-буфер в напряжении."
       ```
 
 ### Алерты здоровья системы

@@ -17,6 +17,7 @@ All metrics are exposed at `/metrics` endpoint in Prometheus exposition format.
 - [Capacity Monitoring](#capacity-monitoring) — `sessions_limit`, `sessions_utilization`
 - [Traffic Minutes by Destination](#traffic-minutes-by-destination) — `billable_seconds_total`
 - [RTP Media Metrics](#rtp-media-metrics) — `rtp_packets_total`, `rtp_mos_score`, `rtp_jitter_milliseconds`, etc.
+- [RTCP Endpoint-Reported Metrics](#rtcp-endpoint-reported-metrics) — `rtcp_jitter_milliseconds`, `rtcp_rtt_milliseconds`, `rtcp_loss_fraction_percent`, `rtcp_cumulative_loss_total`, `rtcp_reports_total`
 - [Self-Monitoring Metrics](#self-monitoring-metrics) — `socket_packets_*`, `rtp_dropped_total`, `channel_*`, `parse_errors_total`, `active_trackers`, `active_dialogs`, `build_info`
 - [RFC 6076 Performance Metrics](#rfc-6076-performance-metrics)
   - [SER](#session-establishment-ratio-ser) — Session Establishment Ratio
@@ -824,6 +825,30 @@ These counters are evaluated at dialog teardown (BYE 200 OK or Session-Expires e
 
 > Both metrics rely on a persistent per-dialog RTP record that survives stream TTL expiry,
 > ensuring accurate detection even when RTP streams were cleaned up before dialog teardown.
+
+## RTCP Endpoint-Reported Metrics
+
+RTCP metrics are derived from RTCP Sender/Receiver Reports (RFC 3550 §6) captured by the eBPF filter and correlated to RTP streams by SSRC. They report the **endpoint's own observation** of quality (what the phone experiences, after its jitter buffer and packet concealment) — complementing the passive RTP metrics, which report what the sniffer observes on the wire. RTCP is universal (RFC 3550 mandates it for every RTP sender/receiver), so these metrics cover traffic that VQ (RFC 6035, end-of-call, opt-in) does not.
+
+> **Capture:** RTCP shares V=2 and (for rtcp-mux, RFC 5761) the RTP port with RTP; the eBPF filter distinguishes them by the 8-bit packet-type byte (200–204 for RTCP) and passes the **full** RTCP compound to userspace (RTP keeps a 64-byte header-only snapshot). rtcp-mux works with no extra configuration. Non-mux RTCP (separate port) is captured when the SDP declares it via `a=rtcp` (RFC 3605).
+
+All quality metrics inherit the labels of the correlated RTP stream: `carrier, ua_type, codec, source_country, direction` (identical to the RTP tier — `direction` is `inbound`/`outbound`). An RTCP report block whose SSRC does not match a tracked RTP stream is dropped, consistent with RTP correlation.
+
+`{carrier="...",ua_type="...",codec="...",source_country="...",direction="..."}`
+
+`sip_exporter_rtcp_jitter_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 0.1..500 ms)*: interarrival jitter reported by the receiver (RR block), converted from RTP timestamp units to milliseconds via the stream's clock rate.
+
+`sip_exporter_rtcp_loss_fraction_percent{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 0..100)*: fraction of RTP packets lost since the previous RR, as a percent (0–100). The RR field is an 8-bit ratio (N/256).
+
+`sip_exporter_rtcp_cumulative_loss_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: cumulative packets lost reported by the receiver. The exporter diffs consecutive reports per SSRC (a session reset or 24-bit wrap yields the current value as the delta), so the counter is monotonic and `rate()`-able.
+
+`sip_exporter_rtcp_rtt_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1..5000 ms)*: network round-trip time computed from the RR's LSR/DLSR fields: `RTT = (now_NTP32 − LSR − DLSR) × 1000 / 65536` (RFC 3550 §6.4.1). Skipped when `LSR == 0` (no prior SR) or the result is negative (clock skew). Requires the host clock to be roughly NTP-synchronised.
+
+`sip_exporter_rtcp_reports_total{carrier,ua_type,source_country,direction,type}` *(counter)*: number of RTCP reception report blocks processed for tracked streams. `type` is `sr` (Sender Report, PT 200) or `rr` (Receiver Report, PT 201). Note: no `codec` label (a report describes reception, not a single codec); counted per report block.
+
+> **RTT vs everything else:** RTT has no passive-RTP equivalent — a single sniffer point cannot measure end-to-end RTT from RTP alone. The RTCP-derived RTT is the only source of network round-trip latency in sip-exporter, useful for echo diagnosis and E-model accuracy.
+
+> **Correlation by SSRC:** a report block is matched to the RTP stream sending with its SSRC (destination-first, NAT-robust). On rare SSRC collision (two streams reuse an SSRC within the TTL window) the endpoint hints disambiguate; the loss delta and the labels always attribute to the same stream.
 
 ## System metrics
 

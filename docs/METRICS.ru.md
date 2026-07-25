@@ -17,6 +17,7 @@
 - [Мониторинг ёмкости](#мониторинг-ёмкости) — `sessions_limit`, `sessions_utilization`
 - [Минуты трафика по направлению](#минуты-трафика-по-направлению) — `billable_seconds_total`
 - [Метрики RTP-медиа](#метрики-rtp-медиа) — `rtp_packets_total`, `rtp_mos_score`, `rtp_jitter_milliseconds` и др.
+- [Метрики RTCP (endpoint-reported)](#метрики-rtcp-endpoint-reported) — `rtcp_jitter_milliseconds`, `rtcp_rtt_milliseconds`, `rtcp_loss_fraction_percent`, `rtcp_cumulative_loss_total`, `rtcp_reports_total`
 - [Метрики самомониторинга](#метрики-самомониторинга) — `socket_packets_*`, `rtp_dropped_total`, `channel_*`, `parse_errors_total`, `active_trackers`, `active_dialogs`, `build_info`
 - [Метрики производительности RFC 6076](#метрики-производительности-rfc-6076)
   - [SER](#session-establishment-ratio-ser) — Session Establishment Ratio
@@ -814,6 +815,30 @@ RTP без коррелированного диалога отбрасывае�
 > Обе метрики опираются на персистентную запись RTP по диалогу, переживающую
 > истечение TTL потока, обеспечивая точную детекцию даже когда RTP-потоки
 > были очищены до завершения диалога.
+
+## Метрики RTCP (endpoint-reported)
+
+Метрики RTCP строятся из RTCP Sender/Receiver Report (RFC 3550 §6), захватываемых eBPF-фильтром и коррелируемых с RTP-потоками по SSRC. Они отражают **собственное наблюдение эндпоинта** (что телефон переживает после jitter-буфера и консемента пакетов) — дополняя пассивные RTP-метрики, которые фиксируют то, что сниффер видит в проводе. RTCP универсален (RFC 3550 требует его от каждого RTP-отправителя/получателя), поэтому эти метрики покрывают трафик, который VQ (RFC 6035, конец звонка, opt-in) не покрывает.
+
+> **Захват:** RTCP разделяет V=2 и (при rtcp-mux, RFC 5761) порт с RTP; eBPF-фильтр различает их по 8-битному байту packet-type (200–204 для RTCP) и пропускает **полный** RTCP compound в userspace (RTP остаётся с 64-байтным header-only snapshot). rtcp-mux работает без доп. настройки. Non-mux RTCP (отдельный порт) захватывается, если SDP объявила его через `a=rtcp` (RFC 3605).
+
+Все метрики качества наследуют лейблы correlated-потока: `carrier, ua_type, codec, source_country, direction` (как у RTP-tier — `direction` = `inbound`/`outbound`). Блок RTCP-репорта, чей SSRC не совпал с трекаемым RTP-потоком, дропается (как и RTP без диалога).
+
+`{carrier="...",ua_type="...",codec="...",source_country="...",direction="..."}`
+
+`sip_exporter_rtcp_jitter_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 0.1..500 мс)*: interarrival jitter, отрепорченный приёмником (блок RR), конвертированный из timestamp-единиц RTP в миллисекунды через clock rate потока.
+
+`sip_exporter_rtcp_loss_fraction_percent{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 0..100)*: доля потерянных RTP-пакетов с прошлого RR, в процентах (0–100). Поле RR — 8-битное отношение (N/256).
+
+`sip_exporter_rtcp_cumulative_loss_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: кумулятивная потеря пакетов, отрепорченная приёмником. Экспортёр дифференцирует последовательные репорты по SSRC (сброс сессии или 24-битный wrap даёт текущее значение как delta), поэтому счётчик монотонен и годится для `rate()`.
+
+`sip_exporter_rtcp_rtt_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 1..5000 мс)*: сетевой round-trip time, вычисленный из полей LSR/DLSR блока RR: `RTT = (now_NTP32 − LSR − DLSR) × 1000 / 65536` (RFC 3550 §6.4.1). Пропускается при `LSR == 0` (нет предшествующего SR) или отрицательном результате (clock skew). Требует примерно NTP-синхронизированных часов хоста.
+
+`sip_exporter_rtcp_reports_total{carrier,ua_type,source_country,direction,type}` *(counter)*: количество блоков RTCP reception-report, обработанных для трекаемых потоков. `type` = `sr` (Sender Report, PT 200) или `rr` (Receiver Report, PT 201). Без лейбла `codec` (репорт описывает приём, а не кодек); считается на блок.
+
+> **RTT vs всё прочее:** у RTT нет эквивалента в пассивном RTP — одна точка сниффинга не может измерить end-to-end RTT только из RTP. RTT из RTCP — единственный источник сетевой задержки round-trip в sip-exporter, полезен для диагностики эха и точности E-model.
+
+> **Корреляция по SSRC:** блок репорта сопоставляется с RTP-потоком по его SSRC (destination-first, NAT-robust). При редкой коллизии SSRC (два потока переиспользуют SSRC в окне TTL) дезамбигуация по endpoint'ам; delta потери и лейблы всегда относятся к одному потоку.
 
 ## Системные метрики
 

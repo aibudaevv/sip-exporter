@@ -4718,6 +4718,76 @@
           "type": "timeseries"
         },
         {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisLabel": "", "axisPlacement": "auto", "drawStyle": "line",
+                "fillOpacity": 10, "lineInterpolation": "linear", "lineWidth": 1,
+                "pointSize": 5, "showPoints": "never", "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" }
+              },
+              "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] },
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": { "x": 0, "y": 154, "w": 12, "h": 8 },
+          "id": 320,
+          "options": {
+            "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "histogram_quantile(0.95, sum by (le, carrier, ua_type, source_country, codec) (rate(sip_exporter_rtcp_rtt_milliseconds_bucket{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])))",
+              "legendFormat": "{{carrier}} / {{ua_type}} / {{codec}} p95",
+              "refId": "A"
+            }
+          ],
+          "title": "RTCP Round-Trip Time p95 (endpoint-reported)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisLabel": "", "axisPlacement": "auto", "drawStyle": "line",
+                "fillOpacity": 10, "lineInterpolation": "linear", "lineWidth": 1,
+                "pointSize": 5, "showPoints": "never", "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" }
+              },
+              "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] },
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": { "x": 12, "y": 154, "w": 12, "h": 8 },
+          "id": 321,
+          "options": {
+            "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "histogram_quantile(0.95, sum by (le, carrier, ua_type, source_country, codec) (rate(sip_exporter_rtcp_jitter_milliseconds_bucket{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])))",
+              "legendFormat": "{{carrier}} / {{ua_type}} / {{codec}} p95",
+              "refId": "A"
+            }
+          ],
+          "title": "RTCP Jitter p95 (endpoint-reported)",
+          "type": "timeseries"
+        },
+        {
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"

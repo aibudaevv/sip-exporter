@@ -319,6 +319,27 @@ These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) mea
         annotations:
           summary: "High RTP jitter"
           description: "95th percentile RTP jitter for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}ms. Jitter above 50ms causes audio artifacts and jitter buffer overflows."
+
+      # RTCP Endpoint-Reported Alerts (RFC 3550) — what the endpoint experiences.
+      - alert: SIPRTCPRoundTripHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtcp_rtt_milliseconds_bucket[5m]))) > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High RTCP round-trip time"
+          description: "95th percentile RTT (from RTCP RR LSR/DLSR) for carrier {{ $labels.carrier }} is {{ $value | printf \"%.0f\" }}ms. High RTT causes echo and conversational difficulty; check routing and queuing."
+
+      - alert: SIPRTCPReportedJitterHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtcp_jitter_milliseconds_bucket[5m]))) > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High endpoint-reported jitter (RTCP)"
+          description: "95th percentile RTCP-reported jitter for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}ms. The receiver's own observation exceeds 50ms — its jitter buffer is under stress."
       ```
 
 ### System Health Alerts
