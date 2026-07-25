@@ -52,7 +52,7 @@ type (
 		Duplicate          bool    // packet is a duplicate (same sequence number)
 		Reorder            bool    // packet is out-of-order (seq < maxSeq, not duplicate)
 		Lost               uint64  // packets newly marked lost by this observation
-		DelayVariationMs   float64 // raw per-packet PDV of this forward packet (|arrivalDelta − tsDelta| in ms); 0 for duplicate/reorder
+		DelayVariationMs   float64 // raw per-packet PDV (|arrivalDelta − tsDelta|, ms) of the last forward packet; not updated on duplicate/reorder (only emitted when Counted)
 		StreamPacketsTotal uint64  // stream's total forward-counted packets after this Observe
 		Codec              string  // resolved codec name
 		Carrier            string  // dialog carrier (for metric labels)

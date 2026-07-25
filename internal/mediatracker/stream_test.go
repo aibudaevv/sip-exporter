@@ -268,3 +268,17 @@ func TestStreamState_PDV_NotUpdatedOnReorder(t *testing.T) {
 	require.InDelta(t, 5.0, s.lastPacketDelayVariationMs, 0.0001,
 		"PDV must not update on reorder (unreliable tsDelta)")
 }
+
+func TestStreamState_PDV_ResetOnRestart(t *testing.T) {
+	// Stream restart (huge seq gap > maxGap → SSRC reuse / new flow instance)
+	// resets all counters including PDV (the new flow has no baseline yet).
+	t0 := time.Unix(1000, 0)
+	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
+	s.Observe(newHeader(1, 160), t0)
+	s.Observe(newHeader(2, 320), t0.Add(45*time.Millisecond)) // d=25ms
+	require.InDelta(t, 25.0, s.lastPacketDelayVariationMs, 0.0001, "forward PDV before restart")
+
+	s.Observe(newHeader(2000, 480), t0.Add(50*time.Millisecond)) // seq gap 1998 > maxGap → restart
+	require.InDelta(t, 0.0, s.lastPacketDelayVariationMs, 0.0001, "PDV reset on stream restart")
+	require.Equal(t, uint64(1), s.packetsTotal, "restart resets packetsTotal to 1 (new flow)")
+}

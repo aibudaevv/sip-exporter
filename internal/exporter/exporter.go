@@ -1112,14 +1112,16 @@ func (e *exporter) handleRTP(
 	}
 	if res.Counted {
 		e.services.metricser.UpdateRTPPackets(res.Carrier, res.UAType, res.Codec, res.SourceCountry, res.Direction)
-		e.services.metricser.UpdateRTPPDV(
-			res.Carrier,
-			res.UAType,
-			res.Codec,
-			res.SourceCountry,
-			res.Direction,
-			res.DelayVariationMs,
-		)
+		if res.StreamPacketsTotal > 1 {
+			e.services.metricser.UpdateRTPPDV(
+				res.Carrier,
+				res.UAType,
+				res.Codec,
+				res.SourceCountry,
+				res.Direction,
+				res.DelayVariationMs,
+			)
+		}
 	}
 	if res.Duplicate {
 		e.services.metricser.UpdateRTPDuplicates(res.Carrier, res.UAType, res.Codec, res.SourceCountry, res.Direction)

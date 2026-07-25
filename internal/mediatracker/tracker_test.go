@@ -163,9 +163,12 @@ func TestTracker_Observe_PDVPerPacket(t *testing.T) {
 	require.True(t, resB2.Counted)
 	require.InDelta(t, 0.0, resB2.DelayVariationMs, 0.0001, "stream B perfect spacing → 0ms PDV")
 
-	// Duplicate/reorder packets must not carry a fresh PDV (res.Counted false → exporter skips).
+	// Duplicate/reorder packets must not carry a fresh PDV: res.Counted is false AND
+	// DelayVariationMs stays at the last forward packet's value (stale, never emitted).
 	resDup, _ := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(2, 320), t0.Add(46*time.Millisecond))
 	require.False(t, resDup.Counted, "duplicate seq must not be Counted")
+	require.InDelta(t, 25.0, resDup.DelayVariationMs, 0.0001,
+		"duplicate must not update PDV (stale prior forward value)")
 }
 
 func TestTracker_SnapshotMOSVariants(t *testing.T) {
