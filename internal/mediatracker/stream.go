@@ -18,23 +18,22 @@ const (
 // StreamState tracks per-SSRC RTP statistics: jitter (RFC 3550 A.8),
 // packet loss via sequence-number gaps, and total packet count.
 type StreamState struct {
-	SSRC                 uint32
-	Codec                string
-	clockRate            uint32
-	maxSeq               uint16
-	lastTS               uint32
-	lastArrival          time.Time
-	jitterTicks          float64
-	lastDelayVariationMs float64 // raw per-packet delay variation (PDV) of the last forward packet
-	pdvPending           bool    // a forward packet arrived since the last Snapshot (PDV not yet emitted)
-	packetsTotal         uint64
-	packetsLost          uint64
-	packetsDuplicate     uint64
-	packetsReorder       uint64
-	burstLoss            uint64 // packets lost in burst runs (≥ burstThreshold consecutive)
-	gapLoss              uint64 // packets lost in isolated gaps (< burstThreshold)
-	lossRun              int    // current consecutive loss count (classified on next good packet)
-	hasPrev              bool
+	SSRC                       uint32
+	Codec                      string
+	clockRate                  uint32
+	maxSeq                     uint16
+	lastTS                     uint32
+	lastArrival                time.Time
+	jitterTicks                float64
+	lastPacketDelayVariationMs float64
+	packetsTotal               uint64
+	packetsLost                uint64
+	packetsDuplicate           uint64
+	packetsReorder             uint64
+	burstLoss                  uint64 // packets lost in burst runs (≥ burstThreshold consecutive)
+	gapLoss                    uint64 // packets lost in isolated gaps (< burstThreshold)
+	lossRun                    int    // current consecutive loss count (classified on next good packet)
+	hasPrev                    bool
 }
 
 func newStreamState(ssrc uint32, codec string, clockRate uint32, now time.Time) *StreamState {
@@ -68,8 +67,7 @@ func (s *StreamState) Observe(h rtp.Header, arrival time.Time) {
 		// forward but huge gap → stream restart (e.g. SSRC reuse): reset all
 		// counters — this is a new flow instance, the previous totals are stale.
 		s.jitterTicks = 0
-		s.lastDelayVariationMs = 0
-		s.pdvPending = false
+		s.lastPacketDelayVariationMs = 0
 		s.packetsLost = 0
 		s.packetsDuplicate = 0
 		s.packetsReorder = 0
@@ -81,8 +79,7 @@ func (s *StreamState) Observe(h rtp.Header, arrival time.Time) {
 	case delta > 0:
 		// normal forward — classify previous loss run (burst/gap heuristic)
 		s.classifyLossRun()
-		s.lastDelayVariationMs = s.updateJitter(h, arrival)
-		s.pdvPending = true
+		s.lastPacketDelayVariationMs = s.updateJitter(h, arrival)
 		s.packetsTotal++
 		if delta > 1 {
 			s.packetsLost += uint64(delta - 1)
@@ -130,14 +127,6 @@ func (s *StreamState) JitterMs() float64 {
 		return 0
 	}
 	return s.jitterTicks / float64(s.clockRate) * msPerSec
-}
-
-// DelayVariationMs returns the raw per-packet delay variation (PDV) of the last
-// forward packet in milliseconds — the unsmoothed |arrivalDelta − tsDelta|, as
-// opposed to the EWMA reported by JitterMs. PDV exposes the jitter spikes that
-// the EWMA smooths over.
-func (s *StreamState) DelayVariationMs() float64 {
-	return s.lastDelayVariationMs
 }
 
 // LossRate returns the fraction of lost packets (0..1): lost / (received + lost).

@@ -1111,6 +1111,14 @@ func (e *exporter) handleRTP(
 	}
 	if res.Counted {
 		e.services.metricser.UpdateRTPPackets(res.Carrier, res.UAType, res.Codec, res.SourceCountry, res.Direction)
+		e.services.metricser.UpdateRTPPDV(
+			res.Carrier,
+			res.UAType,
+			res.Codec,
+			res.SourceCountry,
+			res.Direction,
+			res.DelayVariationMs,
+		)
 	}
 	if res.Duplicate {
 		e.services.metricser.UpdateRTPDuplicates(res.Carrier, res.UAType, res.Codec, res.SourceCountry, res.Direction)
@@ -1138,11 +1146,6 @@ func (e *exporter) updateRTPMetrics() {
 	tmp := make(map[aggKey]int)
 	for _, s := range stats {
 		e.services.metricser.UpdateRTPJitter(s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.Direction, s.JitterMs)
-		if s.PDVFresh {
-			e.services.metricser.UpdateRTPPDV(
-				s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.Direction, s.LastDelayVariationMs,
-			)
-		}
 		e.services.metricser.UpdateRTPMOS(s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.Direction, s.MOS)
 		e.services.metricser.UpdateRTPMOSVariants(
 			s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.Direction,

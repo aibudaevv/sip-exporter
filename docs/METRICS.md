@@ -815,7 +815,7 @@ counted; RTP without a correlated dialog is dropped.
 
 `sip_exporter_rtp_jitter_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 0.1..500 ms)*: smoothed interarrival jitter (RFC 3550 A.8).
 
-`sip_exporter_rtp_pdv_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1..500 ms)*: Packet Delay Variation — the **raw** per-packet deviation `|arrivalDelta − tsDelta|` (unsmoothed), exposing the jitter spikes/burstiness that `rtp_jitter_milliseconds` smooths over. Sampled once per second per stream, only when a fresh forward packet arrived in that window (idle streams do not re-enter their last spike). Reorder/duplicate packets do not contribute (their timestamp delta is not a forward delta).
+`sip_exporter_rtp_pdv_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1..500 ms)*: Packet Delay Variation — the **raw** per-packet deviation `|arrivalDelta − tsDelta|` (unsmoothed), **observed per RTP packet** (parity with VoIPMonitor, which buckets each packet's deviation from the expected 20 ms spacing). Unlike `rtp_jitter_milliseconds` (an EWMA that smooths over spikes), PDV is the instantaneous per-packet deviation, so its histogram captures the true delay-variation distribution including transient spikes. Only forward (counted) packets contribute; reorder/duplicate do not (their timestamp delta is not a forward delta).
 
 `sip_exporter_rtp_mos_score{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1.0..5.0)*: MOS-LQ estimated via the ITU-T G.107 E-model with a 60 ms jitter buffer assumption.
 

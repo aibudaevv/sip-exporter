@@ -25,42 +25,41 @@ type (
 
 	// StreamStats is a point-in-time view of an RTP stream, used for metric export.
 	StreamStats struct {
-		SSRC                 uint32
-		Codec                string
-		Carrier              string
-		UAType               string
-		SourceCountry        string
-		Direction            string
-		CallID               string
-		PacketsTotal         uint64
-		PacketsLost          uint64
-		PacketsDuplicate     uint64
-		JitterMs             float64
-		LastDelayVariationMs float64
-		PDVFresh             bool
-		MOS                  float64
-		MOSF1                float64
-		MOSF2                float64
-		MOSAdaptive          float64
-		RFactor              float64
-		BurstLossDensity     float64
-		GapLossDensity       float64
-		LastSeen             time.Time
+		SSRC             uint32
+		Codec            string
+		Carrier          string
+		UAType           string
+		SourceCountry    string
+		Direction        string
+		CallID           string
+		PacketsTotal     uint64
+		PacketsLost      uint64
+		PacketsDuplicate uint64
+		JitterMs         float64
+		MOS              float64
+		MOSF1            float64
+		MOSF2            float64
+		MOSAdaptive      float64
+		RFactor          float64
+		BurstLossDensity float64
+		GapLossDensity   float64
+		LastSeen         time.Time
 	}
 
 	// ObserveResult is the per-packet outcome of an RTP observation.
 	ObserveResult struct {
-		Counted            bool   // packet counted as received (not duplicate/reorder)
-		Duplicate          bool   // packet is a duplicate (same sequence number)
-		Reorder            bool   // packet is out-of-order (seq < maxSeq, not duplicate)
-		Lost               uint64 // packets newly marked lost by this observation
-		StreamPacketsTotal uint64 // stream's total forward-counted packets after this Observe
-		Codec              string // resolved codec name
-		Carrier            string // dialog carrier (for metric labels)
-		UAType             string // dialog UA type (for metric labels)
-		SourceCountry      string // dialog source country (for metric labels)
-		Direction          string // dialog direction (for metric labels)
-		CallID             string // dialog Call-ID (used to clear FAS pending once media is established)
+		Counted            bool    // packet counted as received (not duplicate/reorder)
+		Duplicate          bool    // packet is a duplicate (same sequence number)
+		Reorder            bool    // packet is out-of-order (seq < maxSeq, not duplicate)
+		Lost               uint64  // packets newly marked lost by this observation
+		DelayVariationMs   float64 // raw per-packet PDV of this forward packet (|arrivalDelta − tsDelta| in ms); 0 for duplicate/reorder
+		StreamPacketsTotal uint64  // stream's total forward-counted packets after this Observe
+		Codec              string  // resolved codec name
+		Carrier            string  // dialog carrier (for metric labels)
+		UAType             string  // dialog UA type (for metric labels)
+		SourceCountry      string  // dialog source country (for metric labels)
+		Direction          string  // dialog direction (for metric labels)
+		CallID             string  // dialog Call-ID (used to clear FAS pending once media is established)
 	}
 
 	// RTPDialogResult is the per-dialog RTP summary returned at teardown.
@@ -256,6 +255,7 @@ func (t *Tracker) Observe(
 		Duplicate:          entry.state.packetsDuplicate > prevDup,
 		Reorder:            entry.state.packetsReorder > prevReorder,
 		Lost:               lostDelta,
+		DelayVariationMs:   entry.state.lastPacketDelayVariationMs,
 		StreamPacketsTotal: entry.state.packetsTotal,
 		Codec:              codec,
 		Carrier:            labels.Carrier,
@@ -276,25 +276,21 @@ func (t *Tracker) Snapshot() []StreamStats {
 	for _, e := range t.streams {
 		s := e.state
 		s.classifyLossRun()
-		pdvFresh := s.pdvPending
-		s.pdvPending = false
 		out = append(out, StreamStats{
-			SSRC:                 s.SSRC,
-			Codec:                e.codec,
-			Carrier:              e.labels.Carrier,
-			UAType:               e.labels.UAType,
-			SourceCountry:        e.labels.SourceCountry,
-			Direction:            e.labels.Direction,
-			CallID:               e.labels.CallID,
-			PacketsTotal:         s.packetsTotal,
-			PacketsLost:          s.packetsLost,
-			PacketsDuplicate:     s.packetsDuplicate,
-			JitterMs:             s.JitterMs(),
-			LastDelayVariationMs: s.DelayVariationMs(),
-			PDVFresh:             pdvFresh,
-			BurstLossDensity:     s.BurstLossDensity(),
-			GapLossDensity:       s.GapLossDensity(),
-			LastSeen:             s.lastArrival,
+			SSRC:             s.SSRC,
+			Codec:            e.codec,
+			Carrier:          e.labels.Carrier,
+			UAType:           e.labels.UAType,
+			SourceCountry:    e.labels.SourceCountry,
+			Direction:        e.labels.Direction,
+			CallID:           e.labels.CallID,
+			PacketsTotal:     s.packetsTotal,
+			PacketsLost:      s.packetsLost,
+			PacketsDuplicate: s.packetsDuplicate,
+			JitterMs:         s.JitterMs(),
+			BurstLossDensity: s.BurstLossDensity(),
+			GapLossDensity:   s.GapLossDensity(),
+			LastSeen:         s.lastArrival,
 		})
 	}
 	t.mu.Unlock()

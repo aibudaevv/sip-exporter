@@ -803,7 +803,7 @@ RTP без коррелированного диалога отбрасывае�
 
 `sip_exporter_rtp_jitter_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 0.1..500 мс)*: сглаженный interarrival jitter (RFC 3550 A.8).
 
-`sip_exporter_rtp_pdv_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 1..500 мс)*: Packet Delay Variation — **сырое** per-packet отклонение `|arrivalDelta − tsDelta|` (без сглаживания), выявляет всплески/burstiness jitter'а, которые `rtp_jitter_milliseconds` сглаживает. Сэмплируется раз в секунду на поток, только если за это окно пришёл свежий forward-пакет (простаивающие потоки не ре-наблюдают свой последний spike). Reorder/duplicate не учитываются (их ts-дельта не forward).
+`sip_exporter_rtp_pdv_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 1..500 мс)*: Packet Delay Variation — **сырое** per-packet отклонение `|arrivalDelta − tsDelta|` (без сглаживания), **наблюдается на каждый RTP-пакет** (parity с VoIPMonitor, который бакетирует отклонение каждого пакета от ожидаемого 20 мс интервала). В отличие от `rtp_jitter_milliseconds` (EWMA, сглаживающая всплески), PDV — мгновенное per-packet отклонение, поэтому histogram отражает истинное распределение delay-variation, включая транзиентные всплески. Учитываются только forward (counted) пакеты; reorder/duplicate — нет (их ts-дельта не forward).
 
 `sip_exporter_rtp_mos_score{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 1.0..5.0)*: MOS-LQ, оценённый по ITU-T G.107 E-model с предположением jitter-буфера 60 мс.
 

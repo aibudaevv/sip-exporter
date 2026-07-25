@@ -141,67 +141,31 @@ func TestTracker_SnapshotComputesMOSAndJitter(t *testing.T) {
 	require.Less(t, stats[0].MOS, 4.41) // some impairment from jitter
 }
 
-func TestTracker_SnapshotExposesPerStreamPDV(t *testing.T) {
-	// Two streams with different timing → distinct raw PDV exposed via Snapshot.
+func TestTracker_Observe_PDVPerPacket(t *testing.T) {
+	// Each counted forward packet carries its raw deviation in ObserveResult.DelayVariationMs
+	// (per-packet observation, VoIPMonitor-parity). Two streams → distinct per-packet PDV.
 	tr := NewTracker(30 * time.Second)
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-a"))
 	tr.Register("10.0.0.2", 5004, sampleLabels("call-b"))
 	t0 := time.Unix(1000, 0)
 
-	// Stream A: 2nd packet 45ms late → raw d = 200 ticks = 25.0 ms PDV.
-	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(1, 160), t0)
-	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(2, 320), t0.Add(45*time.Millisecond))
-	// Stream B: perfectly spaced → raw d = 0 → 0.0 ms PDV.
+	// Stream A: baseline + late 2nd packet (arrivalDelta=45ms, tsDelta=20ms → d=25ms).
+	resA1, ok := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(1, 160), t0)
+	require.True(t, ok && resA1.Counted)
+	require.InDelta(t, 0.0, resA1.DelayVariationMs, 0.0001, "first packet has no reference → PDV 0")
+	resA2, _ := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(2, 320), t0.Add(45*time.Millisecond))
+	require.True(t, resA2.Counted)
+	require.InDelta(t, 25.0, resA2.DelayVariationMs, 0.0001, "stream A late packet → 25ms PDV")
+
+	// Stream B: perfectly spaced 2nd packet (arrivalDelta=tsDelta=20ms → d=0).
 	_, _ = tr.Observe("10.0.0.2", 5004, "0.0.0.0", 0, newHeader(1, 160), t0)
-	_, _ = tr.Observe("10.0.0.2", 5004, "0.0.0.0", 0, newHeader(2, 320), t0.Add(20*time.Millisecond))
+	resB2, _ := tr.Observe("10.0.0.2", 5004, "0.0.0.0", 0, newHeader(2, 320), t0.Add(20*time.Millisecond))
+	require.True(t, resB2.Counted)
+	require.InDelta(t, 0.0, resB2.DelayVariationMs, 0.0001, "stream B perfect spacing → 0ms PDV")
 
-	stats := tr.Snapshot()
-	require.Len(t, stats, 2)
-
-	pdvByCall := make(map[string]float64, len(stats))
-	freshByCall := make(map[string]bool, len(stats))
-	for _, s := range stats {
-		pdvByCall[s.CallID] = s.LastDelayVariationMs
-		freshByCall[s.CallID] = s.PDVFresh
-	}
-	require.True(t, freshByCall["call-a"], "fresh forward packet must mark PDVFresh")
-	require.True(t, freshByCall["call-b"])
-	require.InDelta(t, 25.0, pdvByCall["call-a"], 0.0001, "stream A raw PDV (late packet)")
-	require.InDelta(t, 0.0, pdvByCall["call-b"], 0.0001, "stream B raw PDV (perfect spacing)")
-
-	// Second snapshot with NO new packets: PDVFresh must be false for both, so
-	// the exporter will skip PDV and not re-enter the stale 25.0 ms spike.
-	stats = tr.Snapshot()
-	require.Len(t, stats, 2)
-	for _, s := range stats {
-		require.False(t, s.PDVFresh, "no new packets → PDVFresh must be false (no stale re-sampling)")
-	}
-}
-
-func TestTracker_SnapshotPDVFreshResetsAfterNewPacket(t *testing.T) {
-	// After a stale snapshot, a new forward packet must re-arm PDVFresh.
-	tr := NewTracker(30 * time.Second)
-	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
-	t0 := time.Unix(1000, 0)
-
-	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(1, 160), t0)
-	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(2, 320), t0.Add(45*time.Millisecond))
-
-	first := tr.Snapshot()
-	require.Len(t, first, 1)
-	require.True(t, first[0].PDVFresh, "first snapshot sees fresh PDV")
-
-	// Stale snapshot (no new packets).
-	stale := tr.Snapshot()
-	require.Len(t, stale, 1)
-	require.False(t, stale[0].PDVFresh, "no new packets → stale")
-
-	// A new forward packet re-arms PDVFresh.
-	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(3, 480), t0.Add(90*time.Millisecond))
-	rearmed := tr.Snapshot()
-	require.Len(t, rearmed, 1)
-	require.True(t, rearmed[0].PDVFresh, "new forward packet re-arms PDVFresh")
-	require.InDelta(t, 25.0, rearmed[0].LastDelayVariationMs, 0.0001, "90ms arrival vs 160-tick ts delta = 25ms")
+	// Duplicate/reorder packets must not carry a fresh PDV (res.Counted false → exporter skips).
+	resDup, _ := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeader(2, 320), t0.Add(46*time.Millisecond))
+	require.False(t, resDup.Counted, "duplicate seq must not be Counted")
 }
 
 func TestTracker_SnapshotMOSVariants(t *testing.T) {

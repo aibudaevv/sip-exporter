@@ -238,35 +238,33 @@ func TestStreamState_NoLossZeroDensity(t *testing.T) {
 	require.InDelta(t, 0.0, s.GapLossDensity(), 0.0001)
 }
 
-func TestStreamState_DelayVariationRaw(t *testing.T) {
-	// PDV = RAW per-packet deviation (|arrivalDelta - tsDelta|), not the
-	// EWMA-smoothed jitter. Same 3-packet scenario as JitterRFC3550: the last
-	// forward packet has raw d=40 ticks (5.0 ms), while EWMA reports 0.3125 ms.
+func TestStreamState_PDV_PerForwardPacket(t *testing.T) {
+	// PDV (lastPacketDelayVariationMs) = raw |arrivalDelta − tsDelta| of the last
+	// forward packet, observed per-packet. EWMA jitter smooths the same value.
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
 	s.Observe(newHeader(1, 160), t0)
 	s.Observe(newHeader(2, 320), t0.Add(20*time.Millisecond))
-	// pkt3: arrivalDelta=200 ticks (25ms), tsDelta=160, raw d=40 ticks = 5.0 ms
+	// pkt3: arrivalDelta=25ms (200 ticks), tsDelta=20ms (160 ticks), raw d=40 ticks = 5.0 ms
 	s.Observe(newHeader(3, 480), t0.Add(45*time.Millisecond))
 
 	require.InDelta(t, 0.3125, s.JitterMs(), 0.0001, "EWMA jitter sanity check")
-	require.InDelta(t, 5.0, s.DelayVariationMs(), 0.0001,
+	require.InDelta(t, 5.0, s.lastPacketDelayVariationMs, 0.0001,
 		"PDV must be the raw deviation of the last forward packet, not EWMA-smoothed")
 }
 
-func TestStreamState_DelayVariationNotUpdatedOnReorder(t *testing.T) {
-	// Reorder gives an unreliable tsDelta → PDV must NOT update and must keep
-	// the last forward-packet value.
+func TestStreamState_PDV_NotUpdatedOnReorder(t *testing.T) {
+	// Reorder calls updateJitter (EWMA) but must not overwrite the last forward PDV.
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
 	s.Observe(newHeader(1, 160), t0)
-	// forward: arrivalDelta=360, tsDelta=320, raw d=40 ticks = 5.0 ms
+	// forward: arrivalDelta=45ms, tsDelta=40ms (320 ticks), raw d=40 ticks = 5.0 ms
 	s.Observe(newHeader(3, 480), t0.Add(45*time.Millisecond))
-	require.InDelta(t, 5.0, s.DelayVariationMs(), 0.0001, "forward PDV baseline")
+	require.InDelta(t, 5.0, s.lastPacketDelayVariationMs, 0.0001, "forward PDV baseline")
 
 	// reorder (seq 2 < maxSeq 3): PDV must stay at 5.0, not reflect the
 	// distorted reorder timestamp delta.
 	s.Observe(newHeader(2, 320), t0.Add(50*time.Millisecond))
-	require.InDelta(t, 5.0, s.DelayVariationMs(), 0.0001,
+	require.InDelta(t, 5.0, s.lastPacketDelayVariationMs, 0.0001,
 		"PDV must not update on reorder (unreliable tsDelta)")
 }
