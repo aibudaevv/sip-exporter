@@ -175,12 +175,36 @@ func TestParse_BlockCountLiesAboutBlocks(t *testing.T) {
 	require.ErrorIs(t, err, ErrTruncated, "lying RC must not read out of bounds")
 }
 
-func TestParse_CumulativeLost24Bit(t *testing.T) {
-	// Maximum 24-bit value (16777215 = 0xFFFFFF) must round-trip; bit 24 must be dropped.
-	blk := makeBlock(0x1, 0, 0xFFFFFF, 0, 0, 0, 0)
+func TestParse_CumulativeLostMaxPositive(t *testing.T) {
+	// Maximum POSITIVE 24-bit signed value (0x7FFFFF = 8388607) round-trips.
+	blk := makeBlock(0x1, 0, 0x7FFFFF, 0, 0, 0, 0)
 	reports, err := Parse(makeRR(0x2, blk))
 	require.NoError(t, err)
-	require.Equal(t, uint32(0xFFFFFF), reports[0].Blocks[0].CumulativeLost)
+	require.Equal(t, uint32(0x7FFFFF), reports[0].Blocks[0].CumulativeLost)
+}
+
+func TestParse_NegativeCumulativeLostFlooredToZero(t *testing.T) {
+	// RFC 3550 §6.4.1: cumulative number of packets lost is a SIGNED 24-bit field
+	// (negative when duplicates exceed losses). A monitoring loss counter must
+	// never go backwards, so negative values floor to zero instead of being
+	// misread as huge positives (0xFFFFFF = -1 must NOT become 16777215).
+	for _, tc := range []struct {
+		name string
+		raw  uint32
+		want uint32
+	}{
+		{"max negative", 0xFFFFFF, 0}, // -1
+		{"min negative", 0x800000, 0}, // -8388608
+		{"max positive", 0x7FFFFF, 0x7FFFFF},
+		{"zero", 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blk := makeBlock(0x1, 0, tc.raw, 0, 0, 0, 0)
+			reports, err := Parse(makeRR(0x2, blk))
+			require.NoError(t, err)
+			require.Equal(t, tc.want, reports[0].Blocks[0].CumulativeLost)
+		})
+	}
 }
 
 // FuzzParse ensures Parse never panics on arbitrary input AND that successful
@@ -195,7 +219,7 @@ func FuzzParse(f *testing.F) {
 	f.Add(makeRR(0x1, makeBlock(0x2, 0, 0, 0, 0, 0, 0))) // 1-block RR
 	f.Add(makeSR(0x1, 0, 0, 0, 0))                       // 0-block SR
 	f.Add(append(makeSR(0x1, 0, 0, 0, 0), makeRawPT(202, 3)...))
-	f.Add(makeRR(0x3, makeBlock(0x4, 0, 0xFFFFFF, 0, 0, 0, 0))) // max 24-bit cumulative
+	f.Add(makeRR(0x3, makeBlock(0x4, 0, 0xFFFFFF, 0, 0, 0, 0))) // negative cumulative (-1) → floored to 0
 	f.Add(makeRR(0x5, maxReportBlocks(0x6)...))                 // RC=31 (5-bit max report count)
 	f.Add(append(makeRR(0x7, makeBlock(0x8, 0, 0, 0, 0, 0, 0)),
 		makeRR(0x9, makeBlock(0xA, 0, 0, 0, 0, 0, 0))...)) // multi-RR compound
@@ -220,12 +244,13 @@ func FuzzParse(f *testing.F) {
 		if err1 != nil {
 			return
 		}
-		// Structural validity on successful parses: the 24-bit cumulative-lost
-		// field must never exceed 0xFFFFFF regardless of input bytes.
+		// Structural validity on successful parses: the cumulative-lost field
+		// is a signed 24-bit value with negatives floored to 0, so it must lie
+		// in [0, 0x7FFFFF] regardless of input bytes.
 		for _, rep := range r1 {
 			for _, blk := range rep.Blocks {
-				require.LessOrEqual(t, blk.CumulativeLost, uint32(0xFFFFFF),
-					"24-bit cumulative-lost must not exceed 0xFFFFFF")
+				require.LessOrEqual(t, blk.CumulativeLost, uint32(0x7FFFFF),
+					"cumulative-lost must not exceed 0x7FFFFF (negative 24-bit floored to 0)")
 			}
 		}
 	})

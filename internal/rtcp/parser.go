@@ -63,7 +63,7 @@ type Report struct {
 type ReportBlock struct {
 	SSRC           uint32
 	FractionLost   uint8
-	CumulativeLost uint32 // 24-bit field per RFC 3550
+	CumulativeLost uint32 // signed 24-bit per RFC 3550 §6.4.1; negative (duplicates) floored to 0
 	Jitter         uint32
 	LSR            uint32
 	DLSR           uint32
@@ -146,10 +146,19 @@ func parseReport(pkt []byte, pt uint8) (Report, error) {
 // parseReportBlock decodes a 24-byte reception report block. Caller guarantees
 // len(b) >= reportBlockLen.
 func parseReportBlock(b []byte) ReportBlock {
+	// RFC 3550 §6.4.1: cumulative number of packets lost is a SIGNED 24-bit
+	// field (negative when duplicates exceed losses, e.g. 0xFFFFFF = -1). A
+	// monitoring loss counter must never go backwards, so negative values floor
+	// to zero instead of being misread as huge positives.
+	raw := uint32(b[5])<<16 | uint32(b[6])<<8 | uint32(b[7])
+	cumLost := raw
+	if raw&0x800000 != 0 {
+		cumLost = 0
+	}
 	return ReportBlock{
 		SSRC:           binary.BigEndian.Uint32(b[0:4]),
 		FractionLost:   b[4],
-		CumulativeLost: uint32(b[5])<<16 | uint32(b[6])<<8 | uint32(b[7]),
+		CumulativeLost: cumLost,
 		Jitter:         binary.BigEndian.Uint32(b[12:16]),
 		LSR:            binary.BigEndian.Uint32(b[16:20]),
 		DLSR:           binary.BigEndian.Uint32(b[20:24]),
