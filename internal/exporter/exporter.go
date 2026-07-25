@@ -1874,7 +1874,9 @@ func (e *exporter) cleanupInviteSDP() {
 }
 
 // registerMediaEndpoints parses an SDP body and registers each audio media
-// endpoint in the media tracker under the given dialog labels.
+// endpoint in the media tracker under the given dialog labels. When an a=rtcp
+// attribute (RFC 3605) declares a separate RTCP port, that endpoint is also
+// registered in the BPF rtp_endpoints map so non-mux RTCP is captured.
 func (e *exporter) registerMediaEndpoints(body []byte, labels mediatracker.MediaLabels) {
 	for _, m := range sdp.Parse(body) {
 		ml := labels
@@ -1882,6 +1884,9 @@ func (e *exporter) registerMediaEndpoints(body []byte, labels mediatracker.Media
 		ml.ClockRates = m.ClockRates
 		e.mediaTracker.Register(m.IP, m.Port, ml)
 		e.rtpEndpointInsert(m.IP, m.Port)
+		if m.RTCPPort != 0 {
+			e.rtpEndpointInsert(m.IP, m.RTCPPort)
+		}
 		zap.L().Debug("RTP media endpoint registered",
 			zap.String("ip", m.IP), zap.Uint16("port", m.Port),
 			zap.String("call_id", labels.CallID))

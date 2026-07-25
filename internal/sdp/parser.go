@@ -23,6 +23,7 @@ const (
 type Media struct {
 	IP         string           // connection IP (per-media c= || session c= || o= fallback)
 	Port       uint16           // port from m=audio <port>
+	RTCPPort   uint16           // RTCP port from a=rtcp (RFC 3605); 0 when absent (rtcp-mux assumed)
 	Codecs     map[uint8]string // payload type → codec name (from a=rtpmap)
 	ClockRates map[uint8]uint32 // payload type → clock rate Hz (from a=rtpmap)
 }
@@ -117,6 +118,8 @@ scan:
 			inactive = true
 		case strings.HasPrefix(line, "a=rtpmap:"):
 			parseRtpmap(line, media.Codecs, media.ClockRates)
+		case strings.HasPrefix(line, "a=rtcp:"):
+			media.RTCPPort = parseRTCPPort(line)
 		}
 	}
 	consumed := j - start
@@ -187,6 +190,21 @@ func parseRtpmap(line string, codecs map[uint8]string, clocks map[uint8]uint32) 
 	}
 	codecs[uint8(pt)] = codec
 	clocks[uint8(pt)] = uint32(clock)
+}
+
+// parseRTCPPort parses "a=rtcp:<port>[ <nettype> <addrtype> <addr>]" (RFC 3605)
+// and returns the port. Returns 0 on a missing or invalid port.
+func parseRTCPPort(line string) uint16 {
+	rest := strings.TrimPrefix(line, "a=rtcp:")
+	fields := strings.Fields(rest)
+	if len(fields) < 1 {
+		return 0
+	}
+	port, err := strconv.Atoi(fields[0])
+	if err != nil || port <= 0 || port > 65535 {
+		return 0
+	}
+	return uint16(port)
 }
 
 // detectIPVer returns "IP4" for IPv4 literals and "IP6" otherwise.
