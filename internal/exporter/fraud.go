@@ -334,6 +334,22 @@ func (t *fasTracker) clearIfAnswerMedia(callID string, ep fasEndpoint, packetsTo
 // byeFloor equals fasByeFloor for plain RTP but the full deadline (threshold +
 // fasSRTPGrace) for DTLS-SRTP, so a WebRTC call failing ICE and hanging up does
 // not false-positive during the setup window.
+// reportFAS increments the FAS counter and logs a structured warning. path is
+// "sweep" (periodic threshold timeout) or "bye" (teardown with no media). Must
+// be called under t.mu.
+func (t *fasTracker) reportFAS(callID string, e fasEntry, path string, metricser service.Metricser) {
+	metricser.FasCall(e.carrier, e.uaType, e.sourceCountry, e.direction)
+	zap.L().Warn("FAS suspected: answered call with no answer-side RTP",
+		zap.String("path", path),
+		zap.String("call_id", callID),
+		zap.String("carrier", e.carrier),
+		zap.String("ua_type", e.uaType),
+		zap.String("source_country", e.sourceCountry),
+		zap.String("direction", e.direction),
+		zap.Duration("duration", t.now().Sub(e.createdAt)),
+	)
+}
+
 func (t *fasTracker) finalizeOnBye(callID string, metricser service.Metricser) {
 	if t == nil || callID == "" {
 		return
@@ -345,15 +361,7 @@ func (t *fasTracker) finalizeOnBye(callID string, metricser service.Metricser) {
 		return
 	}
 	if t.now().After(e.byeFloor) {
-		metricser.FasCall(e.carrier, e.uaType, e.sourceCountry, e.direction)
-		zap.L().Warn("FAS suspected at BYE: answered call ended with no answer-side RTP",
-			zap.String("call_id", callID),
-			zap.String("carrier", e.carrier),
-			zap.String("ua_type", e.uaType),
-			zap.String("source_country", e.sourceCountry),
-			zap.String("direction", e.direction),
-			zap.Duration("duration", t.now().Sub(e.createdAt)),
-		)
+		t.reportFAS(callID, e, "bye", metricser)
 	}
 	delete(t.entries, callID)
 	delete(t.offer, callID)
@@ -368,15 +376,7 @@ func (t *fasTracker) sweep(metricser service.Metricser) {
 	now := t.now()
 	for callID, e := range t.entries {
 		if now.After(e.deadline) {
-			metricser.FasCall(e.carrier, e.uaType, e.sourceCountry, e.direction)
-			zap.L().Warn("FAS suspected: 200 OK received but no answer-side RTP within threshold",
-				zap.String("call_id", callID),
-				zap.String("carrier", e.carrier),
-				zap.String("ua_type", e.uaType),
-				zap.String("source_country", e.sourceCountry),
-				zap.String("direction", e.direction),
-				zap.Duration("threshold", e.deadline.Sub(e.createdAt)),
-			)
+			t.reportFAS(callID, e, "sweep", metricser)
 			delete(t.entries, callID)
 			delete(t.offer, callID)
 		}
