@@ -1138,7 +1138,7 @@ func (e *exporter) handleRTCP(
 			reportType = "sr"
 		}
 		for _, blk := range rep.Blocks {
-			ctx, ok := e.mediaTracker.LookupBySSRC(blk.SSRC, sIP, srcPort, dIP, dstPort)
+			ctx, lossDelta, ok := e.mediaTracker.RecordRTCP(blk.SSRC, blk.CumulativeLost, sIP, srcPort, dIP, dstPort)
 			if !ok {
 				continue
 			}
@@ -1149,8 +1149,9 @@ func (e *exporter) handleRTCP(
 				rtcpJitterMs(blk.Jitter, ctx.ClockRate))
 			e.services.metricser.UpdateRTCPLossFraction(carrier, uaType, codec, sourceCountry, direction,
 				float64(blk.FractionLost)/fracLostScale*percentScale)
-			if delta := e.mediaTracker.RecordRTCPLoss(blk.SSRC, blk.CumulativeLost, sIP, srcPort, dIP, dstPort); delta > 0 {
-				e.services.metricser.UpdateRTCPCumulativeLoss(carrier, uaType, codec, sourceCountry, direction, delta)
+			if lossDelta > 0 {
+				e.services.metricser.UpdateRTCPCumulativeLoss(carrier, uaType, codec, sourceCountry, direction,
+					lossDelta)
 			}
 			if blk.LSR != 0 {
 				rttUnits := nowNTP - blk.LSR - blk.DLSR

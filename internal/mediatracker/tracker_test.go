@@ -437,7 +437,25 @@ func TestTracker_LookupBySSRC_CollisionDisambiguates(t *testing.T) {
 	require.Equal(t, "carrier-a", ctx.Labels.Carrier)
 }
 
-func TestTracker_RecordRTCPLoss(t *testing.T) {
+// TestTracker_LookupBySSRC_CollisionNoMatchReturnsFalse verifies the D1 fix on
+// the read path: a colliding SSRC whose RTCP endpoints match none of the
+// tracked streams must not resolve to an arbitrary stream.
+func TestTracker_LookupBySSRC_CollisionNoMatchReturnsFalse(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, MediaLabels{Carrier: "carrier-a", CallID: "call-1",
+		SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000}})
+	tr.Register("10.0.0.2", 5006, MediaLabels{Carrier: "carrier-b", CallID: "call-2",
+		SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000}})
+	t0 := time.Unix(1000, 0)
+	const ssrc uint32 = 0xABCDEFFF
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), t0)
+	_, _ = tr.Observe("10.0.0.2", 5006, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), t0)
+
+	_, ok := tr.LookupBySSRC(ssrc, "5.5.5.5", 0, "6.6.6.6", 0)
+	require.False(t, ok, "ambiguous SSRC without endpoint match must not mis-attribute")
+}
+
+func TestTracker_RecordRTCP(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
 	t0 := time.Unix(1000, 0)
@@ -448,18 +466,68 @@ func TestTracker_RecordRTCPLoss(t *testing.T) {
 	const epSrcIP, epSrcPort = "9.9.9.9", uint16(0)
 	const epDstIP, epDstPort = "10.0.0.1", uint16(5004)
 
-	// First RR: cumulative=10 → delta=10 (first observation, prev was 0).
-	require.Equal(t, uint64(10), tr.RecordRTCPLoss(ssrc, 10, epSrcIP, epSrcPort, epDstIP, epDstPort))
+	// First RR: cumulative=10 → establishes baseline, delta=0 (no rate() spike at
+	// hot start). RecordRTCP returns context and delta from one call; the atomic
+	// one-lock guarantee (no TOCTOU between lookup and update) is structural in
+	// RecordRTCP itself, not exercised by this synchronous test.
+	ctx, delta, ok := tr.RecordRTCP(ssrc, 10, epSrcIP, epSrcPort, epDstIP, epDstPort)
+	require.True(t, ok)
+	require.Zero(t, delta, "first observation establishes baseline, emits no delta")
+	require.Equal(t, "carrier-a", ctx.Labels.Carrier, "context resolves from the same stream")
+	require.Equal(t, "PCMU", ctx.Codec)
+
 	// Second RR: cumulative=15 → delta=5.
-	require.Equal(t, uint64(5), tr.RecordRTCPLoss(ssrc, 15, epSrcIP, epSrcPort, epDstIP, epDstPort))
+	_, delta, ok = tr.RecordRTCP(ssrc, 15, epSrcIP, epSrcPort, epDstIP, epDstPort)
+	require.True(t, ok)
+	require.Equal(t, uint64(5), delta)
+
 	// 24-bit wrap / session reset: cumulative=3 (< 15) → delta=3 (treated as fresh).
-	require.Equal(t, uint64(3), tr.RecordRTCPLoss(ssrc, 3, epSrcIP, epSrcPort, epDstIP, epDstPort))
+	_, delta, ok = tr.RecordRTCP(ssrc, 3, epSrcIP, epSrcPort, epDstIP, epDstPort)
+	require.True(t, ok)
+	require.Equal(t, uint64(3), delta)
+
 	// No change → delta 0.
-	require.Equal(t, uint64(0), tr.RecordRTCPLoss(ssrc, 3, epSrcIP, epSrcPort, epDstIP, epDstPort))
-	// First observation with cumulative=0 → delta 0 (boundary: loss-less start).
-	require.Equal(t, uint64(0), tr.RecordRTCPLoss(0xBEEF1234, 0, epSrcIP, epSrcPort, epDstIP, epDstPort))
-	// Unknown SSRC → 0.
-	require.Equal(t, uint64(0), tr.RecordRTCPLoss(0xDEADBEEF, 99, epSrcIP, epSrcPort, epDstIP, epDstPort))
+	_, delta, ok = tr.RecordRTCP(ssrc, 3, epSrcIP, epSrcPort, epDstIP, epDstPort)
+	require.True(t, ok)
+	require.Zero(t, delta)
+
+	// Unknown SSRC → ok=false (uncorrelated report).
+	_, _, ok = tr.RecordRTCP(0xDEADBEEF, 99, epSrcIP, epSrcPort, epDstIP, epDstPort)
+	require.False(t, ok)
+}
+
+// TestTracker_RecordRTCP_UniqueSSRCResolvesWithoutEndpointMatch verifies the D1
+// middle-ground: when an SSRC is unique (one stream), RTCP resolves even if its
+// endpoints match no registered endpoint (NAT/remapped port) — there is no
+// collision to mis-attribute.
+func TestTracker_RecordRTCP_UniqueSSRCResolvesWithoutEndpointMatch(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+	const ssrc uint32 = 0x11223344
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), t0)
+
+	_, _, ok := tr.RecordRTCP(ssrc, 5, "5.5.5.5", 0, "6.6.6.6", 0)
+	require.True(t, ok, "unique SSRC resolves even without an endpoint match")
+}
+
+// TestTracker_RecordRTCP_AmbiguousSSRCWithoutMatchIsOrphan verifies the D1 fix:
+// when multiple streams share an SSRC and the RTCP endpoints match none of them,
+// the report is uncorrelated (ok=false) rather than mis-attributed to an
+// arbitrary stream's labels.
+func TestTracker_RecordRTCP_AmbiguousSSRCWithoutMatchIsOrphan(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, MediaLabels{Carrier: "carrier-a", CallID: "call-1",
+		SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000}})
+	tr.Register("10.0.0.2", 5006, MediaLabels{Carrier: "carrier-b", CallID: "call-2",
+		SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000}})
+	t0 := time.Unix(1000, 0)
+	const ssrc uint32 = 0xABCDEFFF
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), t0)
+	_, _ = tr.Observe("10.0.0.2", 5006, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), t0)
+
+	_, _, ok := tr.RecordRTCP(ssrc, 5, "5.5.5.5", 0, "6.6.6.6", 0)
+	require.False(t, ok, "ambiguous SSRC without endpoint match must not mis-attribute")
 }
 
 func TestTracker_LookupBySSRC_RemovedOnUnregister(t *testing.T) {

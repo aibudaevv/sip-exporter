@@ -98,8 +98,9 @@ func TestHandleRTCP_ReceiverReport(t *testing.T) {
 	registerRTPStream(t, e, ssrc)
 
 	// jitter=1600 ticks → 200 ms at clockRate 8000; fracLost=26 → 26/256*100 ≈ 10.16%;
-	// cumLost=5 (first observation → delta 5); LSR 5 s in the past, DLSR=0x10000 (1 s)
-	// → RTT = 5 − 1 = 4 s (exercises DLSR subtraction, not just LSR).
+	// cumLost=5 (first observation → baseline, emits no cumulative-loss delta);
+	// LSR 5 s in the past, DLSR=0x10000 (1 s) → RTT = 5 − 1 = 4 s (exercises
+	// DLSR subtraction, not just LSR).
 	lsr := nowNTP32(time.Now().Add(-5 * time.Second))
 	rr := buildRR(buildRTCPBlock(ssrc, 26, 5, 100, 1600, lsr, 0x00010000))
 
@@ -117,13 +118,36 @@ func TestHandleRTCP_ReceiverReport(t *testing.T) {
 	require.Equal(t, 1, mm.rtcpLossFracCalls)
 	require.InDelta(t, 26.0/256*100, mm.rtcpLossFracVal, 0.01)
 
-	require.Equal(t, 1, mm.rtcpCumLossCalls)
-	require.Equal(t, uint64(5), mm.rtcpCumLossVal)
+	// First RR establishes the cumulative-loss baseline — no delta emitted (D3).
+	require.Zero(t, mm.rtcpCumLossCalls, "first RR establishes baseline, emits no cumulative-loss delta")
 
 	// RTT = (now - LSR - DLSR) ≈ 5 s − 1 s DLSR = 4 s; allow generous slack for timing.
 	require.Equal(t, 1, mm.rtcpRTTCalls)
 	require.Greater(t, mm.rtcpRTTVal, 3500.0)
 	require.Less(t, mm.rtcpRTTVal, 4500.0)
+}
+
+// TestHandleRTCP_CumulativeLossDeltaOnSecondReport proves the D3 baseline + delta
+// semantics through the full handler: the first RR establishes the baseline (no
+// cumulative-loss emit), the second emits the delta between cumulative values.
+func TestHandleRTCP_CumulativeLossDeltaOnSecondReport(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newRTCPTestExporter(mm)
+	const ssrc uint32 = 0xAAAA0006
+	registerRTPStream(t, e, ssrc)
+
+	// First RR: cumulative=5 → baseline, no cumulative-loss delta emitted.
+	rr1 := buildRR(buildRTCPBlock(ssrc, 0, 5, 0, 0, 0, 0))
+	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr1)
+	require.NoError(t, err)
+	require.Zero(t, mm.rtcpCumLossCalls, "first RR establishes baseline")
+
+	// Second RR: cumulative=8 → delta=3 emitted.
+	rr2 := buildRR(buildRTCPBlock(ssrc, 0, 8, 0, 0, 0, 0))
+	_, err = e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr2)
+	require.NoError(t, err)
+	require.Equal(t, 1, mm.rtcpCumLossCalls)
+	require.Equal(t, uint64(3), mm.rtcpCumLossVal)
 }
 
 func TestHandleRTCP_RTTSkippedWhenLSRZero(t *testing.T) {

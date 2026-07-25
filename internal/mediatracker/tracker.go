@@ -103,6 +103,7 @@ type (
 		labels       MediaLabels
 		codec        string
 		rtcpPrevLoss uint32 // last RTCP cumulative-lost seen for this SSRC (delta tracking)
+		rtcpLossSeen bool   // whether an RTCP RR has established the loss baseline
 	}
 
 	// RTCPContext is the resolved context of an RTP stream needed to emit RTCP
@@ -351,8 +352,14 @@ func (t *Tracker) removeSSRCIndex(key streamKey) {
 // the tracked RTP stream sending with that SSRC, enabling RTCP↔RTP correlation.
 // When multiple streams share an SSRC (reuse across endpoints), the RTCP packet's
 // endpoints disambiguate — destination first (NAT-robust, mirroring lookupLabels),
-// then source; absent a match, the first tracked stream for that SSRC is returned
-// (rare collision fallback). Returns false if no stream tracks the SSRC.
+// then source. A unique SSRC resolves even without an endpoint match; an ambiguous
+// SSRC (collision) without a matching endpoint returns false (cannot attribute
+// safely). Returns false if no stream tracks the SSRC.
+//
+// Read-only: use this when you need just the context. The RTCP metric hot path
+// uses RecordRTCP, which resolves the context and records the loss delta under a
+// single lock (do NOT pair this lookup with a separate mutation — that reintroduces
+// a TOCTOU window).
 func (t *Tracker) LookupBySSRC(
 	ssrc uint32,
 	srcIP string, srcPort uint16,
@@ -367,37 +374,47 @@ func (t *Tracker) LookupBySSRC(
 	return rtcpContext(e), true
 }
 
-// RecordRTCPLoss records an RTCP RR cumulative-lost observation for an SSRC and
-// returns the delta since the previous RR — the amount to add to the
-// rtcp_cumulative_loss_total counter. Stream selection mirrors LookupBySSRC
-// (endpoint-disambiguated) so loss and labels attribute to the same stream. A
-// 24-bit wrap or session reset (current less than previous) yields the current
-// value as the delta. Returns 0 when the SSRC is unknown or the delta is zero.
-func (t *Tracker) RecordRTCPLoss(
+// RecordRTCP records an RTCP RR observation for an SSRC and atomically returns
+// the resolved stream context together with the cumulative-loss delta since the
+// previous RR — the amount to add to rtcp_cumulative_loss_total. Performing the
+// lookup and the delta update under a single lock guarantees the labels and the
+// delta attribute to the SAME stream (no TOCTOU window where Cleanup could
+// remove or replace the stream between a separate lookup and update). The first
+// observation establishes the baseline and returns a zero delta (avoiding a
+// rate() spike from cumulative-0 at hot start). A 24-bit wrap or session reset
+// (current less than previous) yields the current value as the delta. Returns
+// ok=false when the SSRC is untracked or cannot be attributed unambiguously
+// (caller counts it as an uncorrelated report).
+func (t *Tracker) RecordRTCP(
 	ssrc uint32, cumulative uint32,
 	srcIP string, srcPort uint16,
 	dstIP string, dstPort uint16,
-) uint64 {
+) (RTCPContext, uint64, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	e := t.selectStream(ssrc, srcIP, srcPort, dstIP, dstPort)
 	if e == nil {
-		return 0
+		return RTCPContext{}, 0, false
 	}
 	var delta uint64
-	if cumulative >= e.rtcpPrevLoss {
+	switch {
+	case !e.rtcpLossSeen:
+		e.rtcpLossSeen = true
+	case cumulative >= e.rtcpPrevLoss:
 		delta = uint64(cumulative - e.rtcpPrevLoss)
-	} else {
-		// 24-bit wrap or new session: count the reported cumulative as fresh loss.
-		delta = uint64(cumulative)
+	default:
+		delta = uint64(cumulative) // 24-bit wrap or session reset
 	}
 	e.rtcpPrevLoss = cumulative
-	return delta
+	return rtcpContext(e), delta, true
 }
 
 // selectStream finds the tracked stream for an SSRC, disambiguating collisions by
-// the packet's endpoints (destination first, then source), falling back to the
-// first tracked stream for the SSRC. Caller holds t.mu. Returns nil if untracked.
+// the RTCP packet's endpoints (destination first, then source). A unique SSRC
+// (one stream) resolves even without an endpoint match — there is no collision
+// to mis-attribute. An ambiguous SSRC (collision) without a matching endpoint
+// returns nil so the caller counts the report as uncorrelated rather than
+// attributing it to an arbitrary stream's labels. Caller holds t.mu.
 func (t *Tracker) selectStream(
 	ssrc uint32,
 	srcIP string, srcPort uint16,
@@ -420,7 +437,14 @@ func (t *Tracker) selectStream(
 			}
 		}
 	}
-	return t.streams[keys[0]]
+	if len(keys) == 1 {
+		// Unique SSRC: no collision possible, safe to attribute.
+		if e, found := t.streams[keys[0]]; found {
+			return e
+		}
+	}
+	// Ambiguous SSRC without an endpoint match: cannot attribute safely.
+	return nil
 }
 
 // rtcpContext builds the RTCP correlation context from a stream entry.

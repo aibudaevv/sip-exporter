@@ -840,7 +840,7 @@ All quality metrics inherit the labels of the correlated RTP stream: `carrier, u
 
 `sip_exporter_rtcp_loss_fraction_percent{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 0..100)*: fraction of RTP packets lost since the previous RR, as a percent (0–100). The RR field is an 8-bit ratio (N/256).
 
-`sip_exporter_rtcp_cumulative_loss_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: cumulative packets lost reported by the receiver. The exporter diffs consecutive reports per SSRC (a session reset or 24-bit wrap yields the current value as the delta), so the counter is monotonic and `rate()`-able.
+`sip_exporter_rtcp_cumulative_loss_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: cumulative packets lost reported by the receiver. The exporter diffs consecutive reports per SSRC: the **first** report for an SSRC establishes the baseline and emits no delta (so the counter reflects only losses observed since the exporter began tracking the stream, not the absolute cumulative total the endpoint carries), and a session reset or 24-bit wrap yields the current value as the delta. The counter is monotonic and `rate()`-able.
 
 `sip_exporter_rtcp_rtt_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1..5000 ms)*: network round-trip time computed from the RR's LSR/DLSR fields: `RTT = (now_NTP32 − LSR − DLSR) × 1000 / 65536` (RFC 3550 §6.4.1). Skipped when `LSR == 0` (no prior SR) or the result is negative (clock skew). Requires the host clock to be roughly NTP-synchronised.
 
