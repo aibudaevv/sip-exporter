@@ -900,6 +900,7 @@ sum by (iface) (rate(sip_exporter_socket_packets_received_total[5m]))
 | `l4` | UDP | Not UDP packet or UDP header too short |
 | `sip` | SIP | No SIP payload, packet too small, or unrecognized method |
 | `vq` | Voice Quality | Failed to parse RFC 6035 VQ report body |
+| `rtcp` | RTCP | Malformed/truncated RTCP compound; valid SR/RR prefix before the error is still salvaged |
 
 **PromQL examples:**
 ```promql

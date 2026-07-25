@@ -74,6 +74,8 @@ type mockMetricser struct {
 	rtpDuplicateCalls         int
 	rtpOutOfOrderCalls        int
 	rtpDroppedCount           int
+	parseErrorCalls           int
+	parseErrorType            string
 	rtcpJitterCalls           int
 	rtcpJitterVal             float64
 	rtcpLossFracCalls         int
@@ -210,7 +212,10 @@ func (m *mockMetricser) SystemError() {
 	m.systemErrorCalled = true
 }
 
-func (m *mockMetricser) ParseError(string)                  {}
+func (m *mockMetricser) ParseError(errorType string) {
+	m.parseErrorCalls++
+	m.parseErrorType = errorType
+}
 func (m *mockMetricser) SocketStats(_ []service.SocketStat) {}
 func (m *mockMetricser) RTPDropped()                        { m.rtpDroppedCount++ }
 func (m *mockMetricser) UpdateChannelLength(int)            {}

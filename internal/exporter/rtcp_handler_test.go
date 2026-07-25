@@ -208,3 +208,25 @@ func TestHandleRTCP_RTTSkippedOnClockSkew(t *testing.T) {
 	require.Zero(t, mm.rtcpRTTCalls, "negative RTT from clock skew must be skipped")
 	require.Equal(t, 1, mm.rtcpReportCalls, "report is still counted")
 }
+
+// TestHandleRTCP_PartialCompoundProcessesValidPrefix proves that a single
+// malformed trailing sub-packet does not blind the whole compound: rtcp.Parse
+// returns the valid SR/RR prefix together with the error, and the handler
+// salvages that prefix (emits its metrics) while counting the parse error.
+func TestHandleRTCP_PartialCompoundProcessesValidPrefix(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newRTCPTestExporter(mm)
+	const ssrc uint32 = 0xAAAA0007
+	registerRTPStream(t, e, ssrc)
+
+	// Valid RR (correlated SSRC) followed by a trailing sub-packet whose declared
+	// length overruns the buffer → Parse returns the RR prefix + ErrTruncated.
+	rr := buildRR(buildRTCPBlock(ssrc, 0, 0, 0, 0, 0, 0))
+	badTail := []byte{0x80, 202, 0xFF, 0xFF} // SDES, length=65535 → overruns payload
+	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, append(rr, badTail...))
+	require.NoError(t, err, "a partial parse is not a handler error")
+
+	require.Equal(t, 1, mm.rtcpReportCalls, "valid RR prefix must be salvaged and counted")
+	require.Equal(t, 1, mm.parseErrorCalls, "the trailing parse error must be counted")
+	require.Equal(t, "rtcp", mm.parseErrorType)
+}

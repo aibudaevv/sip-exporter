@@ -1127,7 +1127,12 @@ func (e *exporter) handleRTCP(
 ) (string, error) {
 	reports, err := rtcp.Parse(payload)
 	if err != nil {
-		zap.L().Debug("RTCP parse skipped", zap.Error(err))
+		// A malformed trailing sub-packet still yields the valid SR/RR prefix;
+		// salvage it rather than letting one bad tail blind the whole compound.
+		e.services.metricser.ParseError("rtcp")
+		zap.L().Debug("RTCP parse error", zap.Error(err))
+	}
+	if len(reports) == 0 {
 		return "", nil
 	}
 	nowNTP := nowNTP32(time.Now())

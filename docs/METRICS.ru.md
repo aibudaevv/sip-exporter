@@ -887,6 +887,7 @@ rate(sip_exporter_socket_packets_dropped_total[5m])
 | `l4` | UDP | Не UDP-пакет или UDP-заголовок слишком короткий |
 | `sip` | SIP | Нет SIP-payload, пакет слишком мал или нераспознанный метод |
 | `vq` | Voice Quality | Не удалось разобрать тело VQ-отчёта RFC 6035 |
+| `rtcp` | RTCP | Битый/усечённый RTCP-compound; валидный SR/RR-префикс до ошибки всё равно salvaged |
 
 **Примеры PromQL:**
 ```promql
