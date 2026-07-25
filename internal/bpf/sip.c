@@ -8,15 +8,21 @@
 #define SIP_MAX_PORTS 3  // must match maxPortsPerInterface in internal/config/config.go
 
 // RTCP packet types (RFC 3550 §6): SR=200, RR=201, SDES=202, BYE=203, APP=204.
-// RTP and RTCP share V=2 on the same port (rtcp-mux, RFC 5761); the 8-bit PT
-// byte (UDP payload byte[1]) distinguishes them (RTP PT <= 127, RTCP 200-204).
+// RTP and RTCP share V=2 on the same port (rtcp-mux, RFC 5761). They are told
+// apart by the UDP payload's packet-type byte (byte[1]): RTCP uses 200-204. The
+// ranges are disjoint ONLY because RFC 5761 §4 forbids RTP payload types 64-95
+// under rtcp-mux — otherwise an RTP packet with the marker bit set and PT in
+// {72..76} would yield byte[1] in {200..204}. A non-matching byte[1] here is
+// treated as RTP and keeps the small header-only snapshot.
 #define RTCP_PT_MIN 200
 #define RTCP_PT_MAX 204
 
 // Snapshot size returned to userspace for a matched RTP endpoint. RTP needs only
 // its 12-byte header (64 bytes is ample incl. L2/L3/L4 headers); RTCP compounds
-// must arrive whole, so they bypass this cap (see the PT peek below).
+// must arrive whole, so they bypass this cap (see the PT peek below) but are
+// themselves capped at the Ethernet MTU — every real RTCP compound fits.
 #define RTP_SNAPSHOT_CAP 64
+#define RTCP_SNAPSHOT_CAP 1500
 
 // Map for SIP ports (configured from userspace)
 struct {
@@ -141,7 +147,11 @@ int bpf_socket_filter(struct __sk_buff *skb) {
         __u8 pt = 0;
         if (bpf_skb_load_bytes(skb, payload_off + 1, &pt, 1) == 0 &&
             pt >= RTCP_PT_MIN && pt <= RTCP_PT_MAX) {
-            return skb->len;  // RTCP — full compound
+            // RTCP — full compound, capped at the MTU as defense-in-depth against
+            // oversized packets (legitimate RTCP always fits a single Ethernet frame).
+            __u32 rtcp_snap = skb->len;
+            if (rtcp_snap > RTCP_SNAPSHOT_CAP) rtcp_snap = RTCP_SNAPSHOT_CAP;
+            return rtcp_snap;
         }
         __u32 snap = skb->len;
         if (snap > RTP_SNAPSHOT_CAP) snap = RTP_SNAPSHOT_CAP;
