@@ -209,6 +209,27 @@ func TestHandleRTCP_RTTSkippedOnClockSkew(t *testing.T) {
 	require.Equal(t, 1, mm.rtcpReportCalls, "report is still counted")
 }
 
+// TestHandleRTCP_RTTSkippedWhenDLSRExceedsElapsed exercises the negative-RTT
+// clamp via a path distinct from clock skew: LSR is valid (in the past) but DLSR
+// exceeds the elapsed time since LSR, so now-LSR-DLSR < 0. This is the same
+// int32(rttUnits) <= 0 guard, reached from an implausibly-large DLSR rather than
+// a future LSR.
+func TestHandleRTCP_RTTSkippedWhenDLSRExceedsElapsed(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newRTCPTestExporter(mm)
+	const ssrc uint32 = 0xAAAA0008
+	registerRTPStream(t, e, ssrc)
+
+	lsr := nowNTP32(time.Now().Add(-5 * time.Second)) // LSR 5 s ago (valid)
+	dlsr := uint32(10 * 65536)                        // 10 s in 1/65536 units — exceeds elapsed
+	rr := buildRR(buildRTCPBlock(ssrc, 0, 0, 0, 0, lsr, dlsr))
+	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr)
+	require.NoError(t, err)
+
+	require.Zero(t, mm.rtcpRTTCalls, "negative RTT from DLSR exceeding elapsed must be skipped")
+	require.Equal(t, 1, mm.rtcpReportCalls, "report is still counted")
+}
+
 // TestHandleRTCP_PartialCompoundProcessesValidPrefix proves that a single
 // malformed trailing sub-packet does not blind the whole compound: rtcp.Parse
 // returns the valid SR/RR prefix together with the error, and the handler

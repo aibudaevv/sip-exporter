@@ -1147,6 +1147,8 @@ func (e *exporter) handleRTCP(
 			ctx, lossDelta, ok := e.mediaTracker.RecordRTCP(blk.SSRC, blk.CumulativeLost, sIP, srcPort, dIP, dstPort)
 			if !ok {
 				e.services.metricser.UpdateRTCPOrphan()
+				zap.L().Debug("RTCP orphan: SSRC not tracked at this endpoint",
+					zap.Uint32("ssrc", blk.SSRC), zap.String("src", sIP), zap.String("dst", dIP))
 				continue
 			}
 			carrier, uaType, codec := ctx.Labels.Carrier, ctx.Labels.UAType, ctx.Codec
