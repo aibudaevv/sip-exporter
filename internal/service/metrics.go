@@ -149,6 +149,12 @@ type (
 		rtpOneWayCalls     *prometheus.CounterVec
 		sessionsMissingRTP *prometheus.CounterVec
 		rtpActiveStreams   *prometheus.GaugeVec
+
+		rtcpJitter         *prometheus.HistogramVec
+		rtcpLossFraction   *prometheus.HistogramVec
+		rtcpCumulativeLoss *prometheus.CounterVec
+		rtcpRTT            *prometheus.HistogramVec
+		rtcpReports        *prometheus.CounterVec
 		// Single-writer: read+written only from sipDialogMetricsUpdate goroutine.
 		prevRTPKeys map[string][]string
 
@@ -209,6 +215,11 @@ type (
 		UpdateRTPActiveStreams(counts []LabeledCount)
 		OneWayCall(carrier, uaType, sourceCountry, direction string)
 		MissingRTP(carrier, uaType, sourceCountry, direction string)
+		UpdateRTCPJitter(carrier, uaType, codec, sourceCountry, direction string, jitterMs float64)
+		UpdateRTCPLossFraction(carrier, uaType, codec, sourceCountry, direction string, fractionPercent float64)
+		UpdateRTCPCumulativeLoss(carrier, uaType, codec, sourceCountry, direction string, lostDelta uint64)
+		UpdateRTCPRTT(carrier, uaType, codec, sourceCountry, direction string, rttMs float64)
+		UpdateRTCPReport(carrier, uaType, sourceCountry, direction, reportType string)
 		SystemError()
 		ParseError(errorType string)
 		SocketStats(stats []SocketStat)
@@ -284,6 +295,7 @@ func newMetricserWithRegistry(reg *prometheus.Registry) Metricser {
 	m.initVQHistograms(reg)
 	registerRatioCollectors(m, reg)
 	m.initRTPMetrics(reg)
+	m.initRTCPMetrics(reg)
 	m.initSelfMetrics(reg)
 	return m
 }
@@ -662,6 +674,36 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 	m.rtpActiveStreams = newGaugeVecWithRegistry(
 		"sip_exporter_rtp_active_streams",
 		"Number of active RTP streams correlated with SIP dialogs", rl, reg)
+}
+
+func (m *metrics) initRTCPMetrics(reg *prometheus.Registry) {
+	jitterBuckets := []float64{0.1, 0.5, 1, 5, 10, 20, 50, 100, 200, 500}
+	msBuckets := []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000}
+	percentBuckets := []float64{0, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100}
+	rl := []string{"carrier", "ua_type", "codec", "source_country", "direction"}
+	m.rtcpJitter = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_rtcp_jitter_milliseconds",
+		Help:    "RTCP endpoint-reported interarrival jitter in milliseconds (RFC 3550 §6.4.1 RR block)",
+		Buckets: jitterBuckets,
+	}, rl, reg)
+	m.rtcpLossFraction = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_rtcp_loss_fraction_percent",
+		Help:    "RTCP endpoint-reported fraction-lost since last RR, percent (0-100, RFC 3550 §6.4.1)",
+		Buckets: percentBuckets,
+	}, rl, reg)
+	m.rtcpCumulativeLoss = newCounterVecWithRegistry(
+		"sip_exporter_rtcp_cumulative_loss_total",
+		"RTCP endpoint-reported cumulative packets lost (delta since previous RR; RFC 3550 §6.4.1)",
+		rl, reg)
+	m.rtcpRTT = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_rtcp_rtt_milliseconds",
+		Help:    "Round-trip time computed from RTCP RR LSR/DLSR (RFC 3550 §6.4.1)",
+		Buckets: msBuckets,
+	}, rl, reg)
+	rlReports := []string{"carrier", "ua_type", "source_country", "direction", "type"}
+	m.rtcpReports = newCounterVecWithRegistry(
+		"sip_exporter_rtcp_reports_total",
+		"RTCP SR/RR reports received (type=sr|rr)", rlReports, reg)
 }
 
 func registerRatioCollectors(m *metrics, reg *prometheus.Registry) {
@@ -1140,6 +1182,39 @@ func (m *metrics) UpdateRTPOutOfOrder(carrier, uaType, codec, sourceCountry, dir
 
 func (m *metrics) UpdateRTPJitter(carrier, uaType, codec, sourceCountry, direction string, jitterMs float64) {
 	m.rtpJitter.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(jitterMs)
+}
+
+func (m *metrics) UpdateRTCPJitter(carrier, uaType, codec, sourceCountry, direction string, jitterMs float64) {
+	m.rtcpJitter.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(jitterMs)
+}
+
+func (m *metrics) UpdateRTCPLossFraction(
+	carrier, uaType, codec, sourceCountry, direction string,
+	fractionPercent float64,
+) {
+	m.rtcpLossFraction.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(fractionPercent)
+}
+
+// UpdateRTCPCumulativeLoss records the increase in endpoint-reported cumulative
+// packet loss since the previous RR for the SSRC. lostDelta is the difference
+// between the current RR's cumulative-lost field and the previous one; passing
+// the raw cumulative total double-counts. A zero delta is ignored (no empty series).
+func (m *metrics) UpdateRTCPCumulativeLoss(
+	carrier, uaType, codec, sourceCountry, direction string,
+	lostDelta uint64,
+) {
+	if lostDelta == 0 {
+		return
+	}
+	m.rtcpCumulativeLoss.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Add(float64(lostDelta))
+}
+
+func (m *metrics) UpdateRTCPRTT(carrier, uaType, codec, sourceCountry, direction string, rttMs float64) {
+	m.rtcpRTT.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(rttMs)
+}
+
+func (m *metrics) UpdateRTCPReport(carrier, uaType, sourceCountry, direction, reportType string) {
+	m.rtcpReports.WithLabelValues(carrier, uaType, sourceCountry, direction, reportType).Inc()
 }
 
 func (m *metrics) UpdateRTPMOS(carrier, uaType, codec, sourceCountry, direction string, mos float64) {
