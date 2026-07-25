@@ -2498,6 +2498,61 @@ func TestFAS_Reinvite_SRTP_ExtendsDeadline(t *testing.T) {
 		"byeFloor must track the extended deadline for SRTP")
 }
 
+// TestFAS_ConcurrentSweepClearBye verifies thread safety of fasTracker under
+// concurrent access from the three goroutines that touch it in production:
+// sipDialogMetricsUpdate (sweep), readPackets/handleRTP (clearIfAnswerMedia),
+// and readPackets/handleBye200OK (finalizeOnBye). Run with -race.
+func TestFAS_ConcurrentSweepClearBye(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Hour)
+
+	e.storeInviteSDP("call-1", []byte(fasSdpOffer))
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
+	)
+
+	var wg sync.WaitGroup
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 200 {
+				e.fasTracker.sweep(mm)
+				e.fasTracker.clearIfAnswerMedia("call-1", fasEndpoint{ip: "10.0.0.2", port: 5004}, 5)
+				e.fasTracker.finalizeOnBye("call-1", mm)
+			}
+		}()
+	}
+	wg.Wait()
+	// No data-race panic under -race = PASS. fasCalls may be 0 or 1 depending
+	// on which goroutine wins the entry — the test verifies safety, not value.
+}
+
+// TestFAS_SweepThenClear_NoDoubleFire verifies that dialog-expiry cleanup
+// calling fasTracker.clear after sweep already fired does NOT double-increment
+// fasCalls (sweep deleted the entry; clear is a no-op).
+func TestFAS_SweepThenClear_NoDoubleFire(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, 100*time.Millisecond)
+
+	t0 := time.Unix(1_700_000_000, 0)
+	e.fasTracker.SetNow(func() time.Time { return t0 })
+
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
+	)
+
+	// Advance past deadline → sweep fires.
+	e.fasTracker.SetNow(func() time.Time { return t0.Add(200 * time.Millisecond) })
+	e.fasTracker.sweep(mm)
+	require.Equal(t, 1, mm.fasCalls)
+
+	// Dialog expiry cleanup → clear must NOT double-fire.
+	e.fasTracker.clear("call-1")
+	require.Equal(t, 1, mm.fasCalls, "clear after sweep must not double-fire")
+	require.Empty(t, e.fasTracker.entries)
+}
+
 func TestHandleMessage_ReINVITE_ExcludedFromBurst(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
