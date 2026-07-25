@@ -38,6 +38,7 @@ var (
 const (
 	ethPAll                   = 0x0003
 	readBufSize               = 65536
+	tsCmsgLen                 = 16 // sizeof struct timespec (SCM_TIMESTAMPNS payload) on 64-bit linux
 	defaultRegisterTTL        = 60 * time.Second
 	defaultInviteTTL          = 60 * time.Second
 	defaultOptionsTTL         = 60 * time.Second
@@ -152,6 +153,7 @@ type (
 		data    []byte
 		iface   string
 		pkttype uint8
+		ts      time.Time // kernel SO_TIMESTAMPNS receive time (zero → fallback to time.Now())
 	}
 	rtpEndpointKey struct {
 		IP   uint32
@@ -183,6 +185,7 @@ type (
 		pktSrcIP              string
 		pktIface              string
 		pktType               uint8
+		pktTimestamp          time.Time // packet capture timestamp (SO_TIMESTAMPNS) for PDV
 		registerScanTracker   *registerScanTracker
 		inviteBurstTracker    *inviteBurstTracker
 		fasTracker            *fasTracker
@@ -436,6 +439,10 @@ func createSocketForInterface(ifaceName string, progFD int, ignoreOutgoing bool)
 
 	if err = unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_ATTACH_BPF, progFD); err != nil {
 		return 0, fmt.Errorf("failed to attach BPF program: %w", err)
+	}
+
+	if err = unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_TIMESTAMPNS, 1); err != nil {
+		return 0, fmt.Errorf("failed to set SO_TIMESTAMPNS: %w", err)
 	}
 
 	zap.L().Info("eBPF program attached to AF_PACKET socket",
@@ -697,6 +704,7 @@ func (e *exporter) readPackets() {
 			}
 			e.pktIface = pkt.iface
 			e.pktType = pkt.pkttype
+			e.pktTimestamp = pkt.ts
 			if errType, err := e.parseRawPacket(pkt.data); err != nil {
 				e.services.metricser.SystemError()
 				e.services.metricser.ParseError(errType)
@@ -738,13 +746,36 @@ func (e *exporter) handleReadError(err error) bool {
 	return false
 }
 
+// parseTimestampNS extracts the kernel SO_TIMESTAMPNS receive timestamp from a
+// Recvmsg out-of-band buffer. Returns the zero time when the cmsg is absent or
+// malformed so the caller falls back to time.Now(). Uses encoding/binary (not
+// unsafe) to stay go-vet -unsafeptr clean.
+func parseTimestampNS(oob []byte) time.Time {
+	if len(oob) == 0 {
+		return time.Time{}
+	}
+	msgs, err := unix.ParseSocketControlMessage(oob)
+	if err != nil {
+		return time.Time{}
+	}
+	for _, m := range msgs {
+		if m.Header.Level == unix.SOL_SOCKET && m.Header.Type == unix.SCM_TIMESTAMPNS && len(m.Data) >= tsCmsgLen {
+			sec := int64(binary.NativeEndian.Uint64(m.Data[0:8]))
+			nsec := int64(binary.NativeEndian.Uint64(m.Data[8:16]))
+			return time.Unix(sec, nsec)
+		}
+	}
+	return time.Time{}
+}
+
 func (e *exporter) readSocket(idx int) {
 	defer e.wg.Done()
 	entry := e.socks[idx]
 	buf := make([]byte, readBufSize)
+	oob := make([]byte, unix.CmsgSpace(tsCmsgLen))
 
 	for {
-		n, from, err := unix.Recvfrom(entry.fd, buf, 0)
+		n, oobn, _, from, err := unix.Recvmsg(entry.fd, buf, oob, 0)
 		if err != nil {
 			if e.handleReadError(err) {
 				return
@@ -764,6 +795,7 @@ func (e *exporter) readSocket(idx int) {
 		pkt := e.acquireBuf()
 		pkt.data = append(pkt.data[:0], buf[:n]...)
 		pkt.iface = entry.iface
+		pkt.ts = parseTimestampNS(oob[:oobn])
 		if sa, ok := from.(*unix.SockaddrLinklayer); ok {
 			pkt.pkttype = sa.Pkttype
 		} else {
@@ -1102,7 +1134,11 @@ func (e *exporter) handleRTP(
 	if header.PayloadType > maxStaticRTPPayloadType && header.PayloadType < minDynamicRTPPayloadType {
 		return "", nil
 	}
-	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, dstIP.String(), dstPort, header, time.Now())
+	arrival := e.pktTimestamp
+	if arrival.IsZero() {
+		arrival = time.Now() // direct test invocation without a captured socket timestamp
+	}
+	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, dstIP.String(), dstPort, header, arrival)
 	if !ok {
 		// No correlated media endpoint for this flow → drop.
 		return "", nil
