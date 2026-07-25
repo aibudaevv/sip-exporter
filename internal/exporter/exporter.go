@@ -622,6 +622,7 @@ func (e *exporter) updateTrackerSizes() {
 	e.services.metricser.UpdateTrackerSize("invite", inviteCount)
 	e.services.metricser.UpdateTrackerSize("options", optionsCount)
 	e.services.metricser.UpdateTrackerSize("bye", byeCount)
+	e.services.metricser.UpdateTrackerSize("fas", e.fasTracker.Size())
 	e.services.metricser.UpdateTrackerSize("rtp", e.mediaTracker.StreamCount())
 }
 

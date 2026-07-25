@@ -41,8 +41,8 @@
 - 🏷️ **Метрики по типам устройств** — классификация User-Agent для всех SIP-метрик
 - 🌍 **Гео-обогащение** — лейблы `source_country` (GeoIP) и `destination_country` (E.164 prefix) в SIP-метриках
 - 📞 **Качество голоса (RFC 6035)** — MOS, джиттер, потери пакетов из SIP PUBLISH/NOTIFY
-- 🎧 **Анализ RTP-медиа** — джиттер, потери и MOS (E-model G.107) из RTP-потоков, скоррелированных с SIP-диалогами, без захвата голосового payload (только заголовок)
-- 🛡️ **Детекция фрода** — сигналы сканирования регистраций, всплесков INVITE и перехвата аккаунтов (смена страны)
+- 🎧 **Анализ RTP-медиа** — джиттер, потери, MOS (E-model G.107) и Packet Delay Variation (PDV, per-packet, VoIPMonitor-parity) из RTP-потоков, скоррелированных с SIP-диалогами, без захвата голосового payload (только заголовок)
+- 🛡️ **Детекция фрода** — сигналы сканирования регистраций, всплесков INVITE, перехвата аккаунтов (смена страны) и False Answer Supervision (FAS)
 
 ## Быстрый старт
 
@@ -131,7 +131,8 @@ docker pull frzq/sip-exporter:latest
 - **Активные сессии** — количество активных SIP-диалогов в реальном времени
 - **Метрики RFC 6076** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, PDD, PBD
 - **Метрики качества голоса RFC 6035** — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
-- **Метрики RTP-медиа** — `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_active_streams` (лейблы: `carrier,ua_type,codec,source_country`)
+- **Метрики RTP-медиа** — `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_jitter_milliseconds`, `rtp_pdv_milliseconds` (per-packet Packet Delay Variation), `rtp_mos_score`, `rtp_active_streams` (лейблы: `carrier,ua_type,codec,source_country,direction`)
+- **Фрод-сигналы** — `fas_calls_total` (False Answer Supervision: 200 OK без RTP в течение threshold), `register_scan_total`, `invite_burst_total`, `register_country_change_total`
 - **Диагностика** — `sip_retransmission_total` (ретрансмиссии по SIP Timer A), `rtp_out_of_order_total` (нарушение порядка RTP-пакетов), `short_calls_total` (звонки короче 20/60/180 секунд)
 
 Полный справочник с формулами, примерами и привязкой к RFC: [docs/METRICS.ru.md](docs/METRICS.ru.md)

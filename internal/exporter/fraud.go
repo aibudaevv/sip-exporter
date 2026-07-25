@@ -200,6 +200,15 @@ func (t *fasTracker) clear(callID string) {
 	delete(t.entries, callID)
 }
 
+func (t *fasTracker) Size() int {
+	if t == nil {
+		return 0
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.entries)
+}
+
 func (t *fasTracker) sweep(metricser service.Metricser) {
 	if t == nil {
 		return

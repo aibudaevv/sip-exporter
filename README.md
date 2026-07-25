@@ -44,8 +44,8 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - 🌍 **Geo-enrichment** — `source_country` (GeoIP) and `destination_country` (E.164 prefix) labels on SIP metrics
 - 🔀 **Traffic direction** — `inbound`/`outbound` label on all metrics via kernel `pkttype`, zero-config
 - 📞 **Voice quality (RFC 6035)** — MOS scores, jitter, packet loss from SIP PUBLISH/NOTIFY
-- 🎧 **RTP media analysis** — jitter, packet loss, and MOS (E-model G.107) from RTP streams correlated with SIP dialogs, with no voice payload captured (header-only)
-- 🛡️ **Fraud detection** — registration scan, INVITE burst, and account-takeover (country change) signals ([docs/fraud-detection.md](docs/fraud-detection.md))
+- 🎧 **RTP media analysis** — jitter, packet loss, MOS (E-model G.107), and Packet Delay Variation (PDV, per-packet, VoIPMonitor-parity) from RTP streams correlated with SIP dialogs, with no voice payload captured (header-only)
+- 🛡️ **Fraud detection** — registration scan, INVITE burst, account-takeover (country change), and False Answer Supervision (FAS) signals ([docs/fraud-detection.md](docs/fraud-detection.md))
 
 ## Quick Start
 
@@ -126,6 +126,7 @@ Environment variables:
 * `SIP_EXPORTER_FRAUD_REGISTER_SCAN_WINDOW` - registration scan rolling window (default 60s)
 * `SIP_EXPORTER_FRAUD_INVITE_BURST_THRESHOLD` - INVITE burst fraud: INVITEs from one source to trigger the signal (default 100)
 * `SIP_EXPORTER_FRAUD_INVITE_BURST_WINDOW` - INVITE burst rolling window (default 60s)
+* `SIP_EXPORTER_FRAUD_FAS_THRESHOLD` - False Answer Supervision: seconds after a 200 OK with no observed RTP to trigger the signal (default 10s)
 * `SIP_EXPORTER_TELEMETRY` - anonymous usage telemetry, opt-out with `false` (default true)
 
 The container must run with `--privileged` and `--network host` (eBPF requires `CAP_BPF` and access to the network interface). See [Security](docs/SECURITY.md) for details on why this is safe.
@@ -140,7 +141,8 @@ All metrics are exposed at `/metrics` in Prometheus exposition format. Most SIP 
 - **Active sessions** — real-time count of active SIP dialogs
 - **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, PDD, PBD
 - **RFC 6035 voice quality metrics** — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
-- **RTP media metrics** — `sip_exporter_rtp_packets_total`, `sip_exporter_rtp_packets_lost_total`, `sip_exporter_rtp_jitter_milliseconds`, `sip_exporter_rtp_mos_score`, `sip_exporter_rtp_active_streams` (labels: `carrier,ua_type,codec,source_country,direction`)
+- **RTP media metrics** — `sip_exporter_rtp_packets_total`, `sip_exporter_rtp_packets_lost_total`, `sip_exporter_rtp_jitter_milliseconds`, `sip_exporter_rtp_pdv_milliseconds` (per-packet Packet Delay Variation), `sip_exporter_rtp_mos_score`, `sip_exporter_rtp_active_streams` (labels: `carrier,ua_type,codec,source_country,direction`)
+- **Fraud signals** — `sip_exporter_fas_calls_total` (False Answer Supervision: 200 OK with no RTP within threshold), `sip_exporter_register_scan_total`, `sip_exporter_invite_burst_total`, `sip_exporter_register_country_change_total`
 - **Diagnostics** — `sip_exporter_sip_retransmission_total` (SIP Timer A retransmissions), `sip_exporter_rtp_out_of_order_total` (out-of-sequence RTP packets), `sip_exporter_short_calls_total` (calls shorter than 20/60/180 seconds)
 
 Full reference with formulas, examples, and RFC section mapping: [docs/METRICS.md](docs/METRICS.md)
