@@ -126,3 +126,20 @@ func TestParse_MulticastConnAddress(t *testing.T) {
 	require.Len(t, media, 1)
 	require.Equal(t, "224.2.1.1", media[0].IP, "multicast TTL/count suffix must be stripped")
 }
+
+func TestParse_SRTP_Fingerprint(t *testing.T) {
+	body := []byte("v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\nc=IN IP4 10.0.0.1\r\n" +
+		"t=0 0\r\nm=audio 5004 RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\n" +
+		"a=fingerprint:sha-256 AB:CD:01:02\r\na=setup:actpass\r\n")
+	media := Parse(body)
+	require.Len(t, media, 1)
+	require.True(t, media[0].SRTP, "a=fingerprint must set SRTP flag")
+}
+
+func TestParse_NoSRTP_ForPlainRTP(t *testing.T) {
+	body := []byte("v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\nc=IN IP4 10.0.0.1\r\n" +
+		"t=0 0\r\nm=audio 5004 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n")
+	media := Parse(body)
+	require.Len(t, media, 1)
+	require.False(t, media[0].SRTP, "plain RTP must not set SRTP flag")
+}

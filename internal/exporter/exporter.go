@@ -1508,19 +1508,22 @@ func (e *exporter) handleInvite200OK(
 	var offerEndpoints []fasEndpoint
 	mediaEndpoints := 0
 	if offerSDP, ok := e.takeInviteSDP(callID); ok {
-		eps := e.registerMediaEndpoints(offerSDP, labels)
+		eps, _ := e.registerMediaEndpoints(offerSDP, labels)
 		mediaEndpoints += len(eps)
 		for _, ep := range eps {
 			offerEndpoints = append(offerEndpoints, fasEndpoint{ip: ep.IP, port: ep.Port})
 		}
 	}
+	answerSRTP := false
 	if isSDPContentType(packet.ContentType) {
-		mediaEndpoints += len(e.registerMediaEndpoints(packet.Body, labels))
+		eps, srtp := e.registerMediaEndpoints(packet.Body, labels)
+		mediaEndpoints += len(eps)
+		answerSRTP = srtp
 	}
 	if !isReinvite && mediaEndpoints > 0 {
 		e.fasTracker.store(callID, fasEntry{
 			carrier: carrier, uaType: uaType, sourceCountry: sourceCountry, direction: direction,
-		}, offerEndpoints)
+		}, offerEndpoints, answerSRTP)
 	}
 	return nil
 }
@@ -1943,8 +1946,12 @@ func (e *exporter) cleanupInviteSDP() {
 // registerMediaEndpoints parses an SDP body and registers each audio media
 // endpoint in the media tracker under the given dialog labels. Returns the
 // number of endpoints registered (0 for held/inactive/IPv6 SDP).
-func (e *exporter) registerMediaEndpoints(body []byte, labels mediatracker.MediaLabels) []mediatracker.MediaEndpoint {
+func (e *exporter) registerMediaEndpoints(
+	body []byte,
+	labels mediatracker.MediaLabels,
+) ([]mediatracker.MediaEndpoint, bool) {
 	var endpoints []mediatracker.MediaEndpoint
+	srtp := false
 	for _, m := range sdp.Parse(body) {
 		ml := labels
 		ml.SDPCodecs = m.Codecs
@@ -1955,8 +1962,11 @@ func (e *exporter) registerMediaEndpoints(body []byte, labels mediatracker.Media
 			zap.String("ip", m.IP), zap.Uint16("port", m.Port),
 			zap.String("call_id", labels.CallID))
 		endpoints = append(endpoints, mediatracker.MediaEndpoint{IP: m.IP, Port: m.Port})
+		if m.SRTP {
+			srtp = true
+		}
 	}
-	return endpoints
+	return endpoints, srtp
 }
 
 // ipPortToKey converts an IP address string and port to a BPF map key.

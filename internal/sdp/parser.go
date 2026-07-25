@@ -25,6 +25,7 @@ type Media struct {
 	Port       uint16           // port from m=audio <port>
 	Codecs     map[uint8]string // payload type → codec name (from a=rtpmap)
 	ClockRates map[uint8]uint32 // payload type → clock rate Hz (from a=rtpmap)
+	SRTP       bool             // DTLS-SRTP fingerprint present (a=fingerprint): media setup needs extra time
 }
 
 // Parse parses an SDP body and returns the active audio media descriptions.
@@ -115,6 +116,8 @@ scan:
 			mediaIP = ip
 		case line == "a=inactive":
 			inactive = true
+		case strings.HasPrefix(line, "a=fingerprint"):
+			media.SRTP = true
 		case strings.HasPrefix(line, "a=rtpmap:"):
 			parseRtpmap(line, media.Codecs, media.ClockRates)
 		}

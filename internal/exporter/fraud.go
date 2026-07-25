@@ -13,6 +13,11 @@ const registerScanMaxEntriesPerIP = 10000
 
 const fasMediaPacketsThreshold = 2
 
+// fasSRTPGrace extends the FAS threshold for calls whose answer SDP carries a
+// DTLS-SRTP fingerprint (a=fingerprint): ICE/DTLS setup delays first media by
+// up to ~15 s after the 200 OK, which would otherwise false-positive.
+const fasSRTPGrace = 15 * time.Second
+
 type registerScanTracker struct {
 	mu        sync.Mutex
 	threshold int
@@ -161,6 +166,7 @@ func (t *inviteBurstTracker) cleanup() {
 
 type fasEntry struct {
 	createdAt     time.Time
+	deadline      time.Time // createdAt + threshold (+ fasSRTPGrace when SRTP); sweep fires after this
 	carrier       string
 	uaType        string
 	sourceCountry string
@@ -196,13 +202,19 @@ func newFasTracker(threshold time.Duration) *fasTracker {
 	}
 }
 
-func (t *fasTracker) store(callID string, e fasEntry, offerEndpoints []fasEndpoint) {
+func (t *fasTracker) store(callID string, e fasEntry, offerEndpoints []fasEndpoint, srtp bool) {
 	if t == nil || callID == "" {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	e.createdAt = time.Now()
+	now := time.Now()
+	e.createdAt = now
+	deadline := now.Add(t.threshold)
+	if srtp {
+		deadline = deadline.Add(fasSRTPGrace)
+	}
+	e.deadline = deadline
 	t.entries[callID] = e
 	if len(offerEndpoints) > 0 {
 		set := make(map[fasEndpoint]struct{}, len(offerEndpoints))
@@ -265,9 +277,9 @@ func (t *fasTracker) sweep(metricser service.Metricser) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	cutoff := time.Now().Add(-t.threshold)
+	now := time.Now()
 	for callID, e := range t.entries {
-		if e.createdAt.Before(cutoff) {
+		if now.After(e.deadline) {
 			metricser.FasCall(e.carrier, e.uaType, e.sourceCountry, e.direction)
 			zap.L().Warn("FAS suspected: 200 OK received but no answer-side RTP within threshold",
 				zap.String("call_id", callID),
@@ -275,7 +287,7 @@ func (t *fasTracker) sweep(metricser service.Metricser) {
 				zap.String("ua_type", e.uaType),
 				zap.String("source_country", e.sourceCountry),
 				zap.String("direction", e.direction),
-				zap.Duration("threshold", t.threshold),
+				zap.Duration("threshold", e.deadline.Sub(e.createdAt)),
 			)
 			delete(t.entries, callID)
 			delete(t.offer, callID)

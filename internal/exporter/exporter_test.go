@@ -2039,6 +2039,7 @@ func TestFasTracker_SignalsAfterThreshold(t *testing.T) {
 		"call-1",
 		fasEntry{carrier: "carrier-a", uaType: "yealink", sourceCountry: "US", direction: "inbound"},
 		nil,
+		false,
 	)
 	require.Zero(t, mm.fasCalls, "immediately after 200 OK, FAS must not fire")
 
@@ -2059,6 +2060,7 @@ func TestFasTracker_NoSignalBeforeThreshold(t *testing.T) {
 		"call-1",
 		fasEntry{carrier: "carrier-a", uaType: "yealink", sourceCountry: "US", direction: "inbound"},
 		nil,
+		false,
 	)
 	tracker.sweep(mm)
 	require.Zero(t, mm.fasCalls, "entry younger than threshold must not fire")
@@ -2073,6 +2075,7 @@ func TestFasTracker_ClearPreventsSignal(t *testing.T) {
 		"call-1",
 		fasEntry{carrier: "carrier-a", uaType: "yealink", sourceCountry: "US", direction: "inbound"},
 		nil,
+		false,
 	)
 	tracker.clear("call-1")
 	time.Sleep(90 * time.Millisecond)
@@ -2089,6 +2092,7 @@ func TestFasTracker_PreservesLabelsOnFire(t *testing.T) {
 		"call-1",
 		fasEntry{carrier: "carrier-b", uaType: "grandstream", sourceCountry: "DE", direction: "outbound"},
 		nil,
+		false,
 	)
 	time.Sleep(70 * time.Millisecond)
 	tracker.sweep(mm)
@@ -2106,7 +2110,12 @@ func TestFasTracker_NilTrackerSafe(t *testing.T) {
 	mm := &mockMetricser{}
 	var tracker *fasTracker
 
-	tracker.store("call-1", fasEntry{carrier: "carrier", uaType: "ua", sourceCountry: "US", direction: "inbound"}, nil)
+	tracker.store(
+		"call-1",
+		fasEntry{carrier: "carrier", uaType: "ua", sourceCountry: "US", direction: "inbound"},
+		nil,
+		false,
+	)
 	tracker.clear("call-1")
 	tracker.sweep(mm)
 	require.Zero(t, mm.fasCalls, "nil tracker must be no-op")
@@ -2283,6 +2292,34 @@ func TestFAS_ByeBeforeThresholdPreventsFire(t *testing.T) {
 	time.Sleep(90 * time.Millisecond)
 	e.fasTracker.sweep(mm)
 	require.Zero(t, mm.fasCalls, "short call without RTP (BYE before threshold) must not be misreported as FAS")
+}
+
+// TestFAS_SRTP_ExtendsThreshold verifies the DTLS-SRTP grace: a call whose
+// answer SDP carries a=fingerprint does NOT fire FAS at the base threshold, but
+// does fire after base+grace (S11-6 / F2).
+func TestFAS_SRTP_ExtendsThreshold(t *testing.T) {
+	mm := &mockMetricser{}
+	base := 60 * time.Millisecond
+	e := newFasTestExporter(mm, base)
+
+	const srtpSDP = "v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\nc=IN IP4 10.0.0.1\r\n" +
+		"t=0 0\r\nm=audio 5004 RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\n" +
+		"a=fingerprint:sha-256 AB:CD:01:02\r\na=setup:actpass\r\n"
+
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", srtpSDP), false),
+	)
+	require.Len(t, e.fasTracker.entries, 1)
+
+	// At base threshold, an SRTP call must NOT fire yet (grace still running).
+	time.Sleep(base + 20*time.Millisecond)
+	e.fasTracker.sweep(mm)
+	require.Zero(t, mm.fasCalls, "SRTP call must not fire within base threshold (grace active)")
+
+	// After base + grace, with no RTP, FAS fires.
+	time.Sleep(fasSRTPGrace)
+	e.fasTracker.sweep(mm)
+	require.Equal(t, 1, mm.fasCalls, "SRTP call must fire after base+grace with no RTP")
 }
 
 func TestFAS_ReinviteDoesNotOpenPending(t *testing.T) {
