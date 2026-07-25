@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const fasE2EThreshold = 3 * time.Second
+
 // TestFAS_NoRTPFiresAfterThreshold verifies the FAS detection happy path
 // end-to-end: a SIP dialog is established with SDP (media endpoints registered),
 // but no RTP flows. After the FAS threshold, sip_exporter_fas_calls_total must
@@ -23,7 +25,7 @@ func TestFAS_NoRTPFiresAfterThreshold(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 	endpoint := startExporterWithExtraEnv(context.Background(), t, httpPort, uasSIP, testInterface, "",
-		map[string]string{"SIP_EXPORTER_FRAUD_FAS_THRESHOLD": "3s"})
+		map[string]string{"SIP_EXPORTER_FRAUD_FAS_THRESHOLD": fasE2EThreshold.String()})
 
 	wait := startSippContainers(context.Background(), t,
 		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
@@ -33,7 +35,7 @@ func TestFAS_NoRTPFiresAfterThreshold(t *testing.T) {
 		return getMetricByLabel(t, endpoint, "sip_exporter_sessions") >= 1
 	}, 10*time.Second, 200*time.Millisecond, "dialog must be established (200 OK)")
 
-	// No RTP injected → after the 3s threshold + ≤1s sweep tick, FAS must fire.
+	// No RTP injected → after the threshold + ≤1s sweep tick, FAS must fire.
 	require.Eventually(t, func() bool {
 		return getMetricByLabel(t, endpoint, "sip_exporter_fas_calls_total") >= 1
 	}, 20*time.Second, 500*time.Millisecond,
@@ -52,7 +54,7 @@ func TestFAS_RTPPreventsFire(t *testing.T) {
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 	uacMediaNum, _ := strconv.Atoi(uacMedia)
 	endpoint := startExporterWithExtraEnv(context.Background(), t, httpPort, uasSIP, testInterface, "",
-		map[string]string{"SIP_EXPORTER_FRAUD_FAS_THRESHOLD": "3s"})
+		map[string]string{"SIP_EXPORTER_FRAUD_FAS_THRESHOLD": fasE2EThreshold.String()})
 
 	wait := startSippContainers(context.Background(), t,
 		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
@@ -66,7 +68,7 @@ func TestFAS_RTPPreventsFire(t *testing.T) {
 	sendControlledRTP(t, uacMediaNum, []uint16{1, 2, 3, 4, 5})
 
 	// Wait past the threshold so a pending entry would have fired if not cleared.
-	time.Sleep(6 * time.Second)
+	time.Sleep(2 * fasE2EThreshold)
 
 	// FAS must NOT have fired: the metric is absent (counters only appear after
 	// the first increment; getMetricByLabel returns 0 when no sample is present).

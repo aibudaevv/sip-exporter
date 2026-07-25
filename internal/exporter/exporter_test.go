@@ -2035,7 +2035,10 @@ func TestFasTracker_SignalsAfterThreshold(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newFasTracker(60 * time.Millisecond)
 
-	tracker.store("call-1", "carrier-a", "yealink", "US", "inbound")
+	tracker.store(
+		"call-1",
+		fasEntry{carrier: "carrier-a", uaType: "yealink", sourceCountry: "US", direction: "inbound"},
+	)
 	require.Zero(t, mm.fasCalls, "immediately after 200 OK, FAS must not fire")
 
 	tracker.sweep(mm)
@@ -2051,7 +2054,10 @@ func TestFasTracker_NoSignalBeforeThreshold(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newFasTracker(time.Second)
 
-	tracker.store("call-1", "carrier-a", "yealink", "US", "inbound")
+	tracker.store(
+		"call-1",
+		fasEntry{carrier: "carrier-a", uaType: "yealink", sourceCountry: "US", direction: "inbound"},
+	)
 	tracker.sweep(mm)
 	require.Zero(t, mm.fasCalls, "entry younger than threshold must not fire")
 	require.Len(t, tracker.entries, 1, "entry must remain pending")
@@ -2061,7 +2067,10 @@ func TestFasTracker_ClearPreventsSignal(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newFasTracker(60 * time.Millisecond)
 
-	tracker.store("call-1", "carrier-a", "yealink", "US", "inbound")
+	tracker.store(
+		"call-1",
+		fasEntry{carrier: "carrier-a", uaType: "yealink", sourceCountry: "US", direction: "inbound"},
+	)
 	tracker.clear("call-1")
 	time.Sleep(90 * time.Millisecond)
 	tracker.sweep(mm)
@@ -2073,7 +2082,10 @@ func TestFasTracker_PreservesLabelsOnFire(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newFasTracker(50 * time.Millisecond)
 
-	tracker.store("call-1", "carrier-b", "grandstream", "DE", "outbound")
+	tracker.store(
+		"call-1",
+		fasEntry{carrier: "carrier-b", uaType: "grandstream", sourceCountry: "DE", direction: "outbound"},
+	)
 	time.Sleep(70 * time.Millisecond)
 	tracker.sweep(mm)
 
@@ -2090,7 +2102,7 @@ func TestFasTracker_NilTrackerSafe(t *testing.T) {
 	mm := &mockMetricser{}
 	var tracker *fasTracker
 
-	tracker.store("call-1", "carrier", "ua", "US", "inbound")
+	tracker.store("call-1", fasEntry{carrier: "carrier", uaType: "ua", sourceCountry: "US", direction: "inbound"})
 	tracker.clear("call-1")
 	tracker.sweep(mm)
 	require.Zero(t, mm.fasCalls, "nil tracker must be no-op")

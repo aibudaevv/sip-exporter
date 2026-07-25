@@ -81,10 +81,6 @@ func (s *StreamState) Observe(h rtp.Header, arrival time.Time) {
 	case delta > 0:
 		// normal forward — classify previous loss run (burst/gap heuristic)
 		s.classifyLossRun()
-		// PDV is a raw (undamped) measurement, so only forward packets with a
-		// well-defined forward timestamp delta contribute; jitter's EWMA damps
-		// the same value, but PDV would inject a distorted spike from reorder
-		// (backward ts delta) directly.
 		s.lastDelayVariationMs = s.updateJitter(h, arrival)
 		s.pdvPending = true
 		s.packetsTotal++
@@ -125,7 +121,6 @@ func (s *StreamState) updateJitter(h rtp.Header, arrival time.Time) float64 {
 		d = -d
 	}
 	s.jitterTicks += (float64(d) - s.jitterTicks) / jitterGain
-	// Return the raw deviation in ms (PDV); the caller decides whether to keep it.
 	return float64(d) / float64(s.clockRate) * msPerSec
 }
 

@@ -36,8 +36,8 @@ type (
 		PacketsLost          uint64
 		PacketsDuplicate     uint64
 		JitterMs             float64
-		LastDelayVariationMs float64 // raw PDV (unsmoothed) of the last forward packet
-		PDVFresh             bool    // a forward packet arrived since the previous Snapshot (PDV is a fresh sample, not a stale re-read)
+		LastDelayVariationMs float64
+		PDVFresh             bool
 		MOS                  float64
 		MOSF1                float64
 		MOSF2                float64

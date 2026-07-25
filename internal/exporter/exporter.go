@@ -1106,8 +1106,6 @@ func (e *exporter) handleRTP(
 		// No correlated media endpoint for this flow → drop.
 		return "", nil
 	}
-	// Require ≥ fasMediaPacketsThreshold forward packets before cancelling FAS:
-	// a single stray/spoofed RTP packet must not mask a media-less call.
 	if res.StreamPacketsTotal >= fasMediaPacketsThreshold {
 		e.fasTracker.clear(res.CallID)
 	}
@@ -1140,9 +1138,6 @@ func (e *exporter) updateRTPMetrics() {
 	tmp := make(map[aggKey]int)
 	for _, s := range stats {
 		e.services.metricser.UpdateRTPJitter(s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.Direction, s.JitterMs)
-		// PDV is a raw instantaneous value, not an EWMA: emit only when a fresh
-		// forward packet arrived since the previous snapshot, otherwise an idle
-		// stream would re-enter its last spike every tick until TTL expiry.
 		if s.PDVFresh {
 			e.services.metricser.UpdateRTPPDV(
 				s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.Direction, s.LastDelayVariationMs,
@@ -1476,7 +1471,9 @@ func (e *exporter) handleInvite200OK(
 		mediaEndpoints += e.registerMediaEndpoints(packet.Body, labels)
 	}
 	if !isReinvite && mediaEndpoints > 0 {
-		e.fasTracker.store(callID, carrier, uaType, sourceCountry, direction)
+		e.fasTracker.store(callID, fasEntry{
+			carrier: carrier, uaType: uaType, sourceCountry: sourceCountry, direction: direction,
+		})
 	}
 	return nil
 }

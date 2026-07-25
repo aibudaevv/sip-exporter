@@ -9,9 +9,6 @@ import (
 
 const registerScanMaxEntriesPerIP = 10000
 
-// fasMediaPacketsThreshold is the minimum forward-RTP-packet count required to
-// consider media established and cancel a pending FAS check. A single packet is
-// not enough evidence (could be stray/spoofed); real media reaches this in ~20ms.
 const fasMediaPacketsThreshold = 2
 
 type registerScanTracker struct {
@@ -160,8 +157,6 @@ func (t *inviteBurstTracker) cleanup() {
 	}
 }
 
-// fasEntry records a call awaiting media: a non-re-INVITE 200 OK was received
-// for a dialog that registered media endpoints, and RTP has not yet been seen.
 type fasEntry struct {
 	createdAt     time.Time
 	carrier       string
@@ -170,11 +165,6 @@ type fasEntry struct {
 	direction     string
 }
 
-// fasTracker detects suspected False Answer Supervision: a 200 OK starts a
-// pending entry, the first observed RTP packet for the call clears it, and a
-// background sweep emits sip_exporter_fas_calls_total for any entry that outlives
-// the threshold. Distinct from sessions_missing_rtp_total (a teardown metric):
-// FAS is a real-time signal N seconds after answer.
 type fasTracker struct {
 	mu        sync.Mutex
 	threshold time.Duration
@@ -191,25 +181,16 @@ func newFasTracker(threshold time.Duration) *fasTracker {
 	}
 }
 
-// store marks a call as pending media. Called at 200 OK (non-re-INVITE) only when
-// at least one media endpoint was registered (SDP not held).
-func (t *fasTracker) store(callID, carrier, uaType, sourceCountry, direction string) {
+func (t *fasTracker) store(callID string, e fasEntry) {
 	if t == nil || callID == "" {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.entries[callID] = fasEntry{
-		createdAt:     time.Now(),
-		carrier:       carrier,
-		uaType:        uaType,
-		sourceCountry: sourceCountry,
-		direction:     direction,
-	}
+	e.createdAt = time.Now()
+	t.entries[callID] = e
 }
 
-// clear drops a pending entry. Called when RTP is observed for the call, or at
-// dialog teardown (BYE/expiry) so a fast call without RTP is not misreported.
 func (t *fasTracker) clear(callID string) {
 	if t == nil || callID == "" {
 		return
@@ -219,8 +200,6 @@ func (t *fasTracker) clear(callID string) {
 	delete(t.entries, callID)
 }
 
-// sweep emits fas_calls_total for every entry older than the threshold and
-// removes it. Called from the 1-second background tick.
 func (t *fasTracker) sweep(metricser service.Metricser) {
 	if t == nil {
 		return
