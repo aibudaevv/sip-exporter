@@ -219,6 +219,12 @@ func TestRTP_MetricsFromSIPpStream(t *testing.T) {
 		return getRTPMetric(t, endpoint, "sip_exporter_rtp_mos_score_count") > 0
 	}, 10*time.Second, 500*time.Millisecond, "rtp_mos histogram must have samples")
 
+	// PDV histogram must have samples (S11-1): emitted on the same 1s snapshot as
+	// jitter/MOS, but only for streams with a fresh forward packet (PDVFresh gate).
+	require.Eventually(t, func() bool {
+		return getRTPMetric(t, endpoint, "sip_exporter_rtp_pdv_milliseconds_count") > 0
+	}, 10*time.Second, 500*time.Millisecond, "rtp_pdv histogram must have samples")
+
 	// MOS must be in a sane range for clean G.711 (E-model ~3.9-4.4).
 	mosSum := getRTPMetric(t, endpoint, "sip_exporter_rtp_mos_score_sum")
 	mosCount := getRTPMetric(t, endpoint, "sip_exporter_rtp_mos_score_count")
