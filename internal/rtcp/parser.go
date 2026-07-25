@@ -48,13 +48,12 @@ var (
 	ErrTruncated = errors.New("RTCP compound truncated: declared length exceeds payload")
 )
 
-// Report is one parsed SR or RR sub-packet. SenderSSRC identifies the reporter;
-// Blocks carries per-source reception statistics. The SR sender info (NTP/RTP
-// timestamps, packet/octet counts) is skipped — no current metric consumes it.
+// Report is one parsed SR or RR sub-packet. Blocks carries per-source reception
+// statistics. The SR sender info (NTP/RTP timestamps, packet/octet counts) and
+// the reporter SSRC are skipped — no current metric consumes them.
 type Report struct {
-	Type       uint8 // PTSenderReport or PTReceiverReport
-	SenderSSRC uint32
-	Blocks     []ReportBlock
+	Type   uint8 // PTSenderReport or PTReceiverReport
+	Blocks []ReportBlock
 }
 
 // ReportBlock is one reception report block (RFC 3550 §6.4.1) describing the
@@ -65,7 +64,6 @@ type ReportBlock struct {
 	SSRC           uint32
 	FractionLost   uint8
 	CumulativeLost uint32 // 24-bit field per RFC 3550
-	ExtHighestSeq  uint32
 	Jitter         uint32
 	LSR            uint32
 	DLSR           uint32
@@ -131,9 +129,8 @@ func parseReport(pkt []byte, pt uint8) (Report, error) {
 	}
 
 	rep := Report{
-		Type:       pt,
-		SenderSSRC: binary.BigEndian.Uint32(pkt[4:8]),
-		Blocks:     make([]ReportBlock, 0, rc),
+		Type:   pt,
+		Blocks: make([]ReportBlock, 0, rc),
 	}
 	off := blockStart
 	for range rc {
@@ -153,7 +150,6 @@ func parseReportBlock(b []byte) ReportBlock {
 		SSRC:           binary.BigEndian.Uint32(b[0:4]),
 		FractionLost:   b[4],
 		CumulativeLost: uint32(b[5])<<16 | uint32(b[6])<<8 | uint32(b[7]),
-		ExtHighestSeq:  binary.BigEndian.Uint32(b[8:12]),
 		Jitter:         binary.BigEndian.Uint32(b[12:16]),
 		LSR:            binary.BigEndian.Uint32(b[16:20]),
 		DLSR:           binary.BigEndian.Uint32(b[20:24]),

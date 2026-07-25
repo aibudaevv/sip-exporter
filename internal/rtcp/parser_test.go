@@ -82,14 +82,12 @@ func TestParse_ReceiverReport(t *testing.T) {
 
 	r := reports[0]
 	require.Equal(t, PTReceiverReport, r.Type)
-	require.Equal(t, uint32(0xDEADBEEF), r.SenderSSRC)
 	require.Len(t, r.Blocks, 1)
 
 	b := r.Blocks[0]
 	require.Equal(t, uint32(0x11111111), b.SSRC)
 	require.Equal(t, uint8(10), b.FractionLost)
 	require.Equal(t, uint32(1500), b.CumulativeLost, "24-bit cumulative lost")
-	require.Equal(t, uint32(0x2222), b.ExtHighestSeq)
 	require.Equal(t, uint32(250), b.Jitter)
 	require.Equal(t, uint32(0x83B4A5C9), b.LSR)
 	require.Equal(t, uint32(0x00001000), b.DLSR)
@@ -103,7 +101,6 @@ func TestParse_SenderReport(t *testing.T) {
 
 	r := reports[0]
 	require.Equal(t, PTSenderReport, r.Type)
-	require.Equal(t, uint32(0xCAFEBABE), r.SenderSSRC)
 	require.Len(t, r.Blocks, 1, "SR carries its reception report blocks after sender info")
 	require.Equal(t, uint32(0x22222222), r.Blocks[0].SSRC)
 }
@@ -133,7 +130,6 @@ func TestParse_ZeroBlockCount(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, reports, 1)
 	require.Empty(t, reports[0].Blocks)
-	require.Equal(t, uint32(0x1), reports[0].SenderSSRC)
 }
 
 func TestParse_SDESOnlyReturnsNoReports(t *testing.T) {
