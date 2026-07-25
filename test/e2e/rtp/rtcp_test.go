@@ -61,6 +61,61 @@ func TestRTCP_NonMux_LegacyPort(t *testing.T) {
 		"RTCP injected to the legacy port+1 must be captured (S12-14 synthesis)")
 }
 
+// rtcpAttrPort is the explicit RTCP port declared via a=rtcp in
+// uas_rtcp_attr.xml (RFC 3605). SIPp has no [rtcp_port] template keyword, so the
+// scenario carries a fixed port; the test reserves it with a dummy listener so a
+// collision fails loudly rather than producing a silent capture miss.
+const rtcpAttrPort = 16008
+
+// TestRTCP_ExplicitAttrPort probes the S12-1c explicit a=rtcp capture path
+// (RFC 3605): when the SDP declares a=rtcp:<port>, the exporter registers that
+// port in the BPF map. RTCP injected to that explicit port (which is NEITHER the
+// RTP port NOR port+1) must be captured and correlated by SSRC. This closes the
+// S12-12 acceptance gap — TestRTCP_NonMux_LegacyPort covers only the legacy
+// port+1 (default) branch, not the m.RTCPPort != 0 branch.
+func TestRTCP_ExplicitAttrPort(t *testing.T) {
+	ports := allocatePortsN(5)
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
+	uasMediaNum, err := strconv.Atoi(uasMedia)
+	require.NoError(t, err)
+
+	// Reserve the fixed a=rtcp port early (fail fast on collision). SIPp does not
+	// bind the RTCP port; this dummy also lets the loopback RTCP packet complete
+	// the PACKET_HOST receive cycle the exporter — with PACKET_IGNORE_OUTGOING — sees.
+	dummy, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: rtcpAttrPort})
+	require.NoError(t, err, "rtcpAttrPort %d must be free", rtcpAttrPort)
+	defer dummy.Close()
+
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
+
+	wait := startSippContainers(
+		context.Background(), t,
+		"uas_rtcp_attr.xml", "uac_rtp.xml",
+		uasSIP, uacSIP, uasMedia, uacMedia,
+		"127.0.0.1", "127.0.0.1",
+	)
+
+	require.Eventually(t, func() bool {
+		return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
+	}, 15*time.Second, 500*time.Millisecond, "RTP must flow before injecting RTCP")
+
+	// Inject RTP to the RTP port (establishes the stream under testSSRC), then
+	// RTCP to the explicit a=rtcp port (NOT the RTP port, NOT port+1).
+	sendRTPWithSSRC(t, uasMediaNum, testSSRC, 20)
+	time.Sleep(300 * time.Millisecond)
+	sendRTCPRR(t, rtcpAttrPort, testSSRC, 0)
+	time.Sleep(100 * time.Millisecond)
+	sendRTCPRR(t, rtcpAttrPort, testSSRC, 5)
+	time.Sleep(300 * time.Millisecond)
+
+	wait()
+
+	require.Eventually(t, func() bool {
+		return getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) > 0
+	}, 10*time.Second, 500*time.Millisecond,
+		"RTCP injected to the explicit a=rtcp port must be captured (RFC 3605)")
+}
+
 // allocateMediaPortWithAdjacent finds a UDP port whose adjacent port+1 is also
 // free and returns it. The legacy RTCP port (RFC 3550 §9) is port+1, which the
 // test binds as a dummy listener; both must be free at allocation time.
