@@ -1140,6 +1140,7 @@ func (e *exporter) handleRTCP(
 		for _, blk := range rep.Blocks {
 			ctx, lossDelta, ok := e.mediaTracker.RecordRTCP(blk.SSRC, blk.CumulativeLost, sIP, srcPort, dIP, dstPort)
 			if !ok {
+				e.services.metricser.UpdateRTCPOrphan()
 				continue
 			}
 			carrier, uaType, codec := ctx.Labels.Carrier, ctx.Labels.UAType, ctx.Codec

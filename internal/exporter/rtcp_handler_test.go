@@ -176,6 +176,7 @@ func TestHandleRTCP_UncorrelatedSSRCDropped(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Zero(t, mm.rtcpReportCalls, "uncorrelated SSRC must not emit metrics")
+	require.Equal(t, 1, mm.rtcpOrphanCalls, "uncorrelated SSRC must increment the orphan counter")
 }
 
 func TestHandleRTCP_SenderReportType(t *testing.T) {

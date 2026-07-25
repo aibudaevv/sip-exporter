@@ -64,3 +64,16 @@ func TestRTCP_Reports(t *testing.T) {
 	require.InDelta(t, 2.0, ds.GetCounter().GetValue(), 0.01)
 	require.InDelta(t, 1.0, dr.GetCounter().GetValue(), 0.01)
 }
+
+// TestRTCP_OrphanReports verifies the uncorrelated-RTCP counter: report blocks
+// whose SSRC cannot be matched to a tracked stream are counted here, giving
+// visibility into SSRC/SDP registration health. The counter is label-less.
+func TestRTCP_OrphanReports(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.UpdateRTCPOrphan()
+	m.UpdateRTCPOrphan()
+
+	var dm dto.Metric
+	require.NoError(t, m.rtcpOrphanReports.Write(&dm))
+	require.InDelta(t, 2.0, dm.GetCounter().GetValue(), 0.01)
+}

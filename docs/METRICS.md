@@ -846,6 +846,8 @@ All quality metrics inherit the labels of the correlated RTP stream: `carrier, u
 
 `sip_exporter_rtcp_reports_total{carrier,ua_type,source_country,direction,type}` *(counter)*: number of RTCP reception report blocks processed for tracked streams. `type` is `sr` (Sender Report, PT 200) or `rr` (Receiver Report, PT 201). Note: no `codec` label (a report describes reception, not a single codec); counted per report block.
 
+`sip_exporter_rtcp_orphan_reports_total` *(counter, label-less)*: RTCP reception report blocks whose SSRC could not be correlated to a tracked RTP stream (the SSRC is unknown, or two streams collide on the SSRC and the report's endpoints match neither). A non-zero rate indicates SDP/SSRC registration gaps or RTCP arriving for calls the exporter does not track. Label-less because the stream — and thus its carrier/codec context — is unknown.
+
 > **RTT vs everything else:** RTT has no passive-RTP equivalent — a single sniffer point cannot measure end-to-end RTT from RTP alone. The RTCP-derived RTT is the only source of network round-trip latency in sip-exporter, useful for echo diagnosis and E-model accuracy.
 
 > **Correlation by SSRC:** a report block is matched to the RTP stream sending with its SSRC (destination-first, NAT-robust). On rare SSRC collision (two streams reuse an SSRC within the TTL window) the endpoint hints disambiguate; the loss delta and the labels always attribute to the same stream.

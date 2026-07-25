@@ -836,6 +836,8 @@ RTP без коррелированного диалога отбрасывае�
 
 `sip_exporter_rtcp_reports_total{carrier,ua_type,source_country,direction,type}` *(counter)*: количество блоков RTCP reception-report, обработанных для трекаемых потоков. `type` = `sr` (Sender Report, PT 200) или `rr` (Receiver Report, PT 201). Без лейбла `codec` (репорт описывает приём, а не кодек); считается на блок.
 
+`sip_exporter_rtcp_orphan_reports_total` *(counter, без лейблов)*: блоки RTCP reception-report, чей SSRC не удалось сопоставить с трекаемым RTP-потоком (SSRC неизвестен, либо два потока коллизируют на SSRC и endpoint'ы репорта не совпадают ни с одним). Ненулевой `rate()` указывает на проблемы регистрации SDP/SSRC или на RTCP для звонков, которые экспортёр не отслеживает. Без лейблов — поток (и его carrier/codec-контекст) неизвестен.
+
 > **RTT vs всё прочее:** у RTT нет эквивалента в пассивном RTP — одна точка сниффинга не может измерить end-to-end RTT только из RTP. RTT из RTCP — единственный источник сетевой задержки round-trip в sip-exporter, полезен для диагностики эха и точности E-model.
 
 > **Корреляция по SSRC:** блок репорта сопоставляется с RTP-потоком по его SSRC (destination-first, NAT-robust). При редкой коллизии SSRC (два потока переиспользуют SSRC в окне TTL) дезамбигуация по endpoint'ам; delta потери и лейблы всегда относятся к одному потоку.

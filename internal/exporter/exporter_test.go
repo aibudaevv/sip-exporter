@@ -86,6 +86,7 @@ type mockMetricser struct {
 	rtcpReportType            string
 	rtcpReportCarrier         string
 	rtcpReportDirection       string
+	rtcpOrphanCalls           int
 }
 
 func (m *mockMetricser) UpdateSessions(_ []service.LabeledCount) {}
@@ -269,6 +270,9 @@ func (m *mockMetricser) UpdateRTCPReport(carrier, _, _, direction, reportType st
 	m.rtcpReportType = reportType
 	m.rtcpReportCarrier = carrier
 	m.rtcpReportDirection = direction
+}
+func (m *mockMetricser) UpdateRTCPOrphan() {
+	m.rtcpOrphanCalls++
 }
 
 type dialogCreateArgs struct {
@@ -4069,6 +4073,7 @@ func (m *carrierTrackingMetricser) UpdateRTCPCumulativeLoss(string, string, stri
 }
 func (m *carrierTrackingMetricser) UpdateRTCPRTT(string, string, string, string, string, float64) {}
 func (m *carrierTrackingMetricser) UpdateRTCPReport(string, string, string, string, string)       {}
+func (m *carrierTrackingMetricser) UpdateRTCPOrphan()                                             {}
 
 // ==================== SIP message builders for MC/DC tests ====================
 

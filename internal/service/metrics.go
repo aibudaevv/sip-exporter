@@ -155,6 +155,7 @@ type (
 		rtcpCumulativeLoss *prometheus.CounterVec
 		rtcpRTT            *prometheus.HistogramVec
 		rtcpReports        *prometheus.CounterVec
+		rtcpOrphanReports  prometheus.Counter
 		// Single-writer: read+written only from sipDialogMetricsUpdate goroutine.
 		prevRTPKeys map[string][]string
 
@@ -220,6 +221,7 @@ type (
 		UpdateRTCPCumulativeLoss(carrier, uaType, codec, sourceCountry, direction string, lostDelta uint64)
 		UpdateRTCPRTT(carrier, uaType, codec, sourceCountry, direction string, rttMs float64)
 		UpdateRTCPReport(carrier, uaType, sourceCountry, direction, reportType string)
+		UpdateRTCPOrphan()
 		SystemError()
 		ParseError(errorType string)
 		SocketStats(stats []SocketStat)
@@ -705,6 +707,11 @@ func (m *metrics) initRTCPMetrics(reg *prometheus.Registry) {
 		"sip_exporter_rtcp_reports_total",
 		"RTCP SR/RR reception report blocks received for tracked streams (type=sr|rr; counted per block)",
 		rlReports,
+		reg,
+	)
+	m.rtcpOrphanReports = newCounterWithRegistry(
+		"sip_exporter_rtcp_orphan_reports_total",
+		"RTCP reception report blocks whose SSRC could not be correlated to a tracked RTP stream (no carrier labels: the stream is unknown)",
 		reg,
 	)
 }
@@ -1218,6 +1225,13 @@ func (m *metrics) UpdateRTCPRTT(carrier, uaType, codec, sourceCountry, direction
 
 func (m *metrics) UpdateRTCPReport(carrier, uaType, sourceCountry, direction, reportType string) {
 	m.rtcpReports.WithLabelValues(carrier, uaType, sourceCountry, direction, reportType).Inc()
+}
+
+// UpdateRTCPOrphan counts an RTCP report block whose SSRC could not be
+// correlated to a tracked RTP stream (uncorrelated/orphan). Label-less because
+// the stream — and thus its carrier/codec context — is unknown.
+func (m *metrics) UpdateRTCPOrphan() {
+	m.rtcpOrphanReports.Inc()
 }
 
 func (m *metrics) UpdateRTPMOS(carrier, uaType, codec, sourceCountry, direction string, mos float64) {
