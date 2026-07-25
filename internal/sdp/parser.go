@@ -116,7 +116,8 @@ scan:
 			mediaIP = ip
 		case line == "a=inactive":
 			inactive = true
-		case strings.HasPrefix(line, "a=fingerprint"):
+		case strings.HasPrefix(line, "a=fingerprint"),
+			strings.HasPrefix(line, "a=crypto:"):
 			media.SRTP = true
 		case strings.HasPrefix(line, "a=rtpmap:"):
 			parseRtpmap(line, media.Codecs, media.ClockRates)

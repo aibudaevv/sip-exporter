@@ -136,6 +136,15 @@ func TestParse_SRTP_Fingerprint(t *testing.T) {
 	require.True(t, media[0].SRTP, "a=fingerprint must set SRTP flag")
 }
 
+func TestParse_SRTP_SDES_Crypto(t *testing.T) {
+	body := []byte("v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\nc=IN IP4 10.0.0.1\r\n" +
+		"t=0 0\r\nm=audio 5004 RTP/SAVP 0\r\na=rtpmap:0 PCMU/8000\r\n" +
+		"a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:d0RmdmcmVCspeEc3QGZiNWpVLF1hJXBSFRPaaHs=\r\n")
+	media := Parse(body)
+	require.Len(t, media, 1)
+	require.True(t, media[0].SRTP, "a=crypto (SDES-SRTP) must set SRTP flag")
+}
+
 func TestParse_NoSRTP_ForPlainRTP(t *testing.T) {
 	body := []byte("v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\nc=IN IP4 10.0.0.1\r\n" +
 		"t=0 0\r\nm=audio 5004 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n")
