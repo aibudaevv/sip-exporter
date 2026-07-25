@@ -404,10 +404,12 @@ func TestTracker_LookupBySSRC(t *testing.T) {
 	_, ok := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), t0)
 	require.True(t, ok)
 
-	labels, ok := tr.LookupBySSRC(ssrc, "9.9.9.9", 0, "10.0.0.1", 5004)
+	ctx, ok := tr.LookupBySSRC(ssrc, "9.9.9.9", 0, "10.0.0.1", 5004)
 	require.True(t, ok, "tracked SSRC must resolve")
-	require.Equal(t, "call-1", labels.CallID)
-	require.Equal(t, "carrier-a", labels.Carrier)
+	require.Equal(t, "call-1", ctx.Labels.CallID)
+	require.Equal(t, "carrier-a", ctx.Labels.Carrier)
+	require.Equal(t, "PCMU", ctx.Codec, "codec must resolve for RTCP metric labels")
+	require.Equal(t, uint32(8000), ctx.ClockRate, "clock rate must resolve for jitter conversion")
 
 	_, ok = tr.LookupBySSRC(0x99999999, "9.9.9.9", 0, "10.0.0.1", 5004)
 	require.False(t, ok, "unknown SSRC must not resolve")
@@ -425,14 +427,39 @@ func TestTracker_LookupBySSRC_CollisionDisambiguates(t *testing.T) {
 	_, _ = tr.Observe("10.0.0.2", 5006, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), t0)
 
 	// RTCP matching the second stream's endpoint must resolve to carrier-b.
-	labels, ok := tr.LookupBySSRC(ssrc, "9.9.9.9", 0, "10.0.0.2", 5006)
+	ctx, ok := tr.LookupBySSRC(ssrc, "9.9.9.9", 0, "10.0.0.2", 5006)
 	require.True(t, ok)
-	require.Equal(t, "carrier-b", labels.Carrier, "must disambiguate to the dst-matched stream")
+	require.Equal(t, "carrier-b", ctx.Labels.Carrier, "must disambiguate to the dst-matched stream")
 
 	// Matching the first stream's endpoint must resolve to carrier-a.
-	labels, ok = tr.LookupBySSRC(ssrc, "9.9.9.9", 0, "10.0.0.1", 5004)
+	ctx, ok = tr.LookupBySSRC(ssrc, "9.9.9.9", 0, "10.0.0.1", 5004)
 	require.True(t, ok)
-	require.Equal(t, "carrier-a", labels.Carrier)
+	require.Equal(t, "carrier-a", ctx.Labels.Carrier)
+}
+
+func TestTracker_RecordRTCPLoss(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+	const ssrc uint32 = 0xCAFED00D
+	_, ok := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), t0)
+	require.True(t, ok)
+	// Endpoint matching the stream (dst-first), consistent with LookupBySSRC.
+	const epSrcIP, epSrcPort = "9.9.9.9", uint16(0)
+	const epDstIP, epDstPort = "10.0.0.1", uint16(5004)
+
+	// First RR: cumulative=10 → delta=10 (first observation, prev was 0).
+	require.Equal(t, uint64(10), tr.RecordRTCPLoss(ssrc, 10, epSrcIP, epSrcPort, epDstIP, epDstPort))
+	// Second RR: cumulative=15 → delta=5.
+	require.Equal(t, uint64(5), tr.RecordRTCPLoss(ssrc, 15, epSrcIP, epSrcPort, epDstIP, epDstPort))
+	// 24-bit wrap / session reset: cumulative=3 (< 15) → delta=3 (treated as fresh).
+	require.Equal(t, uint64(3), tr.RecordRTCPLoss(ssrc, 3, epSrcIP, epSrcPort, epDstIP, epDstPort))
+	// No change → delta 0.
+	require.Equal(t, uint64(0), tr.RecordRTCPLoss(ssrc, 3, epSrcIP, epSrcPort, epDstIP, epDstPort))
+	// First observation with cumulative=0 → delta 0 (boundary: loss-less start).
+	require.Equal(t, uint64(0), tr.RecordRTCPLoss(0xBEEF1234, 0, epSrcIP, epSrcPort, epDstIP, epDstPort))
+	// Unknown SSRC → 0.
+	require.Equal(t, uint64(0), tr.RecordRTCPLoss(0xDEADBEEF, 99, epSrcIP, epSrcPort, epDstIP, epDstPort))
 }
 
 func TestTracker_LookupBySSRC_RemovedOnUnregister(t *testing.T) {

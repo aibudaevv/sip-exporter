@@ -99,9 +99,18 @@ type (
 
 	// streamEntry bundles a stream state with its correlation labels.
 	streamEntry struct {
-		state  *StreamState
-		labels MediaLabels
-		codec  string
+		state        *StreamState
+		labels       MediaLabels
+		codec        string
+		rtcpPrevLoss uint32 // last RTCP cumulative-lost seen for this SSRC (delta tracking)
+	}
+
+	// RTCPContext is the resolved context of an RTP stream needed to emit RTCP
+	// metrics for a report block that names the stream's SSRC.
+	RTCPContext struct {
+		Labels    MediaLabels
+		Codec     string
+		ClockRate uint32
 	}
 )
 
@@ -338,22 +347,65 @@ func (t *Tracker) removeSSRCIndex(key streamKey) {
 	}
 }
 
-// LookupBySSRC resolves an SSRC (carried in an RTCP report block) to the labels of
+// LookupBySSRC resolves an SSRC (carried in an RTCP report block) to the context of
 // the tracked RTP stream sending with that SSRC, enabling RTCP↔RTP correlation.
 // When multiple streams share an SSRC (reuse across endpoints), the RTCP packet's
-// endpoints disambiguate — destination first (NAT-robust), then source — mirroring
-// lookupLabels; absent a match, the first tracked stream for that SSRC is returned
+// endpoints disambiguate — destination first (NAT-robust, mirroring lookupLabels),
+// then source; absent a match, the first tracked stream for that SSRC is returned
 // (rare collision fallback). Returns false if no stream tracks the SSRC.
 func (t *Tracker) LookupBySSRC(
 	ssrc uint32,
 	srcIP string, srcPort uint16,
 	dstIP string, dstPort uint16,
-) (MediaLabels, bool) {
+) (RTCPContext, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	e := t.selectStream(ssrc, srcIP, srcPort, dstIP, dstPort)
+	if e == nil {
+		return RTCPContext{}, false
+	}
+	return rtcpContext(e), true
+}
+
+// RecordRTCPLoss records an RTCP RR cumulative-lost observation for an SSRC and
+// returns the delta since the previous RR — the amount to add to the
+// rtcp_cumulative_loss_total counter. Stream selection mirrors LookupBySSRC
+// (endpoint-disambiguated) so loss and labels attribute to the same stream. A
+// 24-bit wrap or session reset (current less than previous) yields the current
+// value as the delta. Returns 0 when the SSRC is unknown or the delta is zero.
+func (t *Tracker) RecordRTCPLoss(
+	ssrc uint32, cumulative uint32,
+	srcIP string, srcPort uint16,
+	dstIP string, dstPort uint16,
+) uint64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	e := t.selectStream(ssrc, srcIP, srcPort, dstIP, dstPort)
+	if e == nil {
+		return 0
+	}
+	var delta uint64
+	if cumulative >= e.rtcpPrevLoss {
+		delta = uint64(cumulative - e.rtcpPrevLoss)
+	} else {
+		// 24-bit wrap or new session: count the reported cumulative as fresh loss.
+		delta = uint64(cumulative)
+	}
+	e.rtcpPrevLoss = cumulative
+	return delta
+}
+
+// selectStream finds the tracked stream for an SSRC, disambiguating collisions by
+// the packet's endpoints (destination first, then source), falling back to the
+// first tracked stream for the SSRC. Caller holds t.mu. Returns nil if untracked.
+func (t *Tracker) selectStream(
+	ssrc uint32,
+	srcIP string, srcPort uint16,
+	dstIP string, dstPort uint16,
+) *streamEntry {
 	keys, ok := t.ssrcIndex[ssrc]
 	if !ok || len(keys) == 0 {
-		return MediaLabels{}, false
+		return nil
 	}
 	for _, ep := range []endpointKey{
 		{ip: dstIP, port: dstPort},
@@ -364,14 +416,16 @@ func (t *Tracker) LookupBySSRC(
 				continue
 			}
 			if e, found := t.streams[k]; found {
-				return e.labels, true
+				return e
 			}
 		}
 	}
-	if e, found := t.streams[keys[0]]; found {
-		return e.labels, true
-	}
-	return MediaLabels{}, false
+	return t.streams[keys[0]]
+}
+
+// rtcpContext builds the RTCP correlation context from a stream entry.
+func rtcpContext(e *streamEntry) RTCPContext {
+	return RTCPContext{Labels: e.labels, Codec: e.codec, ClockRate: e.state.clockRate}
 }
 
 // StreamCount returns the number of active RTP streams.
