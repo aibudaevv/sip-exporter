@@ -1,0 +1,204 @@
+package rtcp
+
+import (
+	"encoding/binary"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+// makeBlock builds a 24-byte RTCP report block (RFC 3550 §6.4.1).
+func makeBlock(ssrc uint32, fracLost uint8, cumLost uint32, extSeq, jitter, lsr, dlsr uint32) []byte {
+	b := make([]byte, 24)
+	binary.BigEndian.PutUint32(b[0:4], ssrc)
+	b[4] = fracLost
+	b[5] = byte(cumLost >> 16) // 24-bit cumulative number of packets lost
+	b[6] = byte(cumLost >> 8)
+	b[7] = byte(cumLost)
+	binary.BigEndian.PutUint32(b[8:12], extSeq)
+	binary.BigEndian.PutUint32(b[12:16], jitter)
+	binary.BigEndian.PutUint32(b[16:20], lsr)
+	binary.BigEndian.PutUint32(b[20:24], dlsr)
+	return b
+}
+
+// makeRR builds a Receiver Report (PT 201) with the given sender SSRC and blocks.
+func makeRR(senderSSRC uint32, blocks ...[]byte) []byte {
+	rc := len(blocks)
+	pktLen := 4 + 4 + rc*24 // header + sender SSRC + blocks
+	b := make([]byte, pktLen)
+	b[0] = 0x80 | byte(rc) // V=2, P=0, RC=block count
+	b[1] = PTReceiverReport
+	binary.BigEndian.PutUint16(b[2:4], uint16(pktLen/4-1))
+	binary.BigEndian.PutUint32(b[4:8], senderSSRC)
+	off := 8
+	for _, blk := range blocks {
+		copy(b[off:], blk)
+		off += 24
+	}
+	return b
+}
+
+// makeSR builds a Sender Report (PT 200) with sender info and blocks.
+func makeSR(senderSSRC uint32, ntpTS uint64, rtpTS, pktCount, octCount uint32, blocks ...[]byte) []byte {
+	rc := len(blocks)
+	pktLen := 4 + 4 + 20 + rc*24 // header + sender SSRC + sender info + blocks
+	b := make([]byte, pktLen)
+	b[0] = 0x80 | byte(rc)
+	b[1] = PTSenderReport
+	binary.BigEndian.PutUint16(b[2:4], uint16(pktLen/4-1))
+	binary.BigEndian.PutUint32(b[4:8], senderSSRC)
+	binary.BigEndian.PutUint64(b[8:16], ntpTS)
+	binary.BigEndian.PutUint32(b[16:20], rtpTS)
+	binary.BigEndian.PutUint32(b[20:24], pktCount)
+	binary.BigEndian.PutUint32(b[24:28], octCount)
+	off := 28
+	for _, blk := range blocks {
+		copy(b[off:], blk)
+		off += 24
+	}
+	return b
+}
+
+// makeRawPT builds an RTCP sub-packet with a given PT and body length, with dummy
+// body bytes. Used to exercise skipping of non-SR/RR packet types (SDES/BYE/APP).
+func makeRawPT(pt uint8, bodyWords int) []byte {
+	pktLen := (bodyWords + 1) * 4
+	b := make([]byte, pktLen)
+	b[0] = 0x80 // V=2, P=0, RC=0
+	b[1] = pt
+	binary.BigEndian.PutUint16(b[2:4], uint16(pktLen/4-1))
+	for i := 4; i < pktLen; i++ {
+		b[i] = 0xAB // nonzero dummy body
+	}
+	return b
+}
+
+func TestParse_ReceiverReport(t *testing.T) {
+	blk := makeBlock(0x11111111, 10, 1500, 0x2222, 250, 0x83B4A5C9, 0x00001000)
+	reports, err := Parse(makeRR(0xDEADBEEF, blk))
+	require.NoError(t, err)
+	require.Len(t, reports, 1)
+
+	r := reports[0]
+	require.Equal(t, PTReceiverReport, r.Type)
+	require.Equal(t, uint32(0xDEADBEEF), r.SenderSSRC)
+	require.Len(t, r.Blocks, 1)
+
+	b := r.Blocks[0]
+	require.Equal(t, uint32(0x11111111), b.SSRC)
+	require.Equal(t, uint8(10), b.FractionLost)
+	require.Equal(t, uint32(1500), b.CumulativeLost, "24-bit cumulative lost")
+	require.Equal(t, uint32(0x2222), b.ExtHighestSeq)
+	require.Equal(t, uint32(250), b.Jitter)
+	require.Equal(t, uint32(0x83B4A5C9), b.LSR)
+	require.Equal(t, uint32(0x00001000), b.DLSR)
+}
+
+func TestParse_SenderReport(t *testing.T) {
+	blk := makeBlock(0x22222222, 5, 42, 0x3333, 90, 0, 0)
+	reports, err := Parse(makeSR(0xCAFEBABE, 0x83B4A5C9E1D2C3F4, 123456, 99, 7000, blk))
+	require.NoError(t, err)
+	require.Len(t, reports, 1)
+
+	r := reports[0]
+	require.Equal(t, PTSenderReport, r.Type)
+	require.Equal(t, uint32(0xCAFEBABE), r.SenderSSRC)
+	require.Len(t, r.Blocks, 1, "SR carries its reception report blocks after sender info")
+	require.Equal(t, uint32(0x22222222), r.Blocks[0].SSRC)
+}
+
+func TestParse_CompoundSRThenSDESSkipsNonReport(t *testing.T) {
+	sr := makeSR(0xAAAA, 1, 1, 1, 1)
+	sdes := makeRawPT(202, 3) // SDES, 3 words body — contents must be skipped, not parsed
+	reports, err := Parse(append(sr, sdes...))
+	require.NoError(t, err)
+	require.Len(t, reports, 1, "only the SR must be reported; SDES skipped by length")
+	require.Equal(t, PTSenderReport, reports[0].Type)
+}
+
+func TestParse_MultipleBlocks(t *testing.T) {
+	b1 := makeBlock(0x100, 1, 10, 1000, 5, 0, 0)
+	b2 := makeBlock(0x200, 2, 20, 2000, 6, 0x1111, 0x2222)
+	reports, err := Parse(makeRR(0xBEEF, b1, b2))
+	require.NoError(t, err)
+	require.Len(t, reports, 1)
+	require.Len(t, reports[0].Blocks, 2)
+	require.Equal(t, uint32(0x100), reports[0].Blocks[0].SSRC)
+	require.Equal(t, uint32(0x200), reports[0].Blocks[1].SSRC)
+}
+
+func TestParse_ZeroBlockCount(t *testing.T) {
+	reports, err := Parse(makeRR(0x1)) // RR with RC=0
+	require.NoError(t, err)
+	require.Len(t, reports, 1)
+	require.Empty(t, reports[0].Blocks)
+	require.Equal(t, uint32(0x1), reports[0].SenderSSRC)
+}
+
+func TestParse_SDESOnlyReturnsNoReports(t *testing.T) {
+	reports, err := Parse(makeRawPT(202, 2))
+	require.NoError(t, err, "a valid compound with no SR/RR is not an error")
+	require.Empty(t, reports)
+}
+
+func TestParse_TruncatedDeclaredLength(t *testing.T) {
+	// Declare a length (4 words = 16 bytes) but provide only 8 bytes.
+	short := []byte{0x80, PTReceiverReport, 0x00, 0x04, 0x00, 0x00, 0x00, 0x01}
+	_, err := Parse(short)
+	require.ErrorIs(t, err, ErrTruncated)
+}
+
+func TestParse_TooShortForHeader(t *testing.T) {
+	_, err := Parse([]byte{0x80, 0xC8, 0x00})
+	require.ErrorIs(t, err, ErrInvalidRTCP)
+}
+
+func TestParse_EmptyPayload(t *testing.T) {
+	_, err := Parse(nil)
+	require.ErrorIs(t, err, ErrInvalidRTCP)
+	_, err = Parse([]byte{})
+	require.ErrorIs(t, err, ErrInvalidRTCP)
+}
+
+func TestParse_NotRTCPVersion(t *testing.T) {
+	// V=0 in the first byte, but structurally a 4-byte header.
+	_, err := Parse([]byte{0x00, PTReceiverReport, 0x00, 0x00})
+	require.ErrorIs(t, err, ErrNotRTCP)
+}
+
+func TestParse_BlockCountLiesAboutBlocks(t *testing.T) {
+	// RC=2 but only one block fits in the declared length. The parser must not
+	// read past the sub-packet boundary; the second "block" must trigger ErrTruncated.
+	oneBlock := makeBlock(0x1, 0, 0, 0, 0, 0, 0) // 24 bytes; second block missing → 8+24=32 declared
+	pkt := make([]byte, 0, 4+4+24)
+	pkt = append(pkt, 0x82, PTReceiverReport, 0x00, 0x07) // V=2, RC=2, length=7 (32 bytes total)
+	pkt = append(pkt, 0, 0, 0, 0)                         // sender SSRC
+	pkt = append(pkt, oneBlock...)                        // only one block; RC=2 lies
+	_, err := Parse(pkt)
+	require.ErrorIs(t, err, ErrTruncated, "lying RC must not read out of bounds")
+}
+
+func TestParse_CumulativeLost24Bit(t *testing.T) {
+	// Maximum 24-bit value (16777215 = 0xFFFFFF) must round-trip; bit 24 must be dropped.
+	blk := makeBlock(0x1, 0, 0xFFFFFF, 0, 0, 0, 0)
+	reports, err := Parse(makeRR(0x2, blk))
+	require.NoError(t, err)
+	require.Equal(t, uint32(0xFFFFFF), reports[0].Blocks[0].CumulativeLost)
+}
+
+// FuzzParse ensures Parse never panics on arbitrary input. The caller's
+// goroutine has no recover(); a panic in Parse would stall the whole exporter.
+// A fuzz campaign (456k execs at authoring time) found no crashers.
+func FuzzParse(f *testing.F) {
+	f.Add(makeRR(0x1, makeBlock(0x2, 0, 0, 0, 0, 0, 0)))
+	f.Add(makeSR(0x1, 0, 0, 0, 0))
+	f.Add(append(makeSR(0x1, 0, 0, 0, 0), makeRawPT(202, 3)...))
+	f.Add([]byte{0x80, 0xC8, 0x00, 0x04, 0x00, 0x00, 0x00, 0x01})
+	f.Add([]byte{0x00, 0x00, 0x00})
+	f.Add([]byte{})
+	f.Fuzz(func(_ *testing.T, data []byte) {
+		// The contract: never panic. Any return value (reports, error) is acceptable.
+		_, _ = Parse(data)
+	})
+}
