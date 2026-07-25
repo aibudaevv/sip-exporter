@@ -9,61 +9,65 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSPD_SuccessfulCalls(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
+func TestSPD(t *testing.T) {
+	type sippRun struct {
+		uas, uac string
+		count    int
+	}
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 50, env)
+	tests := []struct {
+		name      string
+		carrier   bool
+		scenarios []sippRun
+		wantZero  bool
+	}{
+		{"SuccessfulCalls", false, []sippRun{{"uas_100.xml", "uac_100.xml", 50}}, false},
+		{"NoCompletedCalls", false, []sippRun{{"uas_0.xml", "uac_0.xml", 50}}, true},
+		{"Mixed", false, []sippRun{{"uas_100.xml", "uac_100.xml", 30}, {"uas_0.xml", "uac_0.xml", 20}}, false},
+		{"WithCarrierConfig", true, []sippRun{{"uas_100.xml", "uac_100.xml", 50}}, false},
+	}
 
-	spd := getSPD(t, env.endpoint)
-	t.Logf("SPD = %.4f seconds", spd)
-	require.Greater(t, spd, 0.0, "SPD should be greater than 0 after successful calls")
-	require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_spd_count"), 0.0, "SPD histogram should have observations")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
 
-	waitForSessionsZero(t, env.endpoint)
-}
+			var env *testEnv
+			if tt.carrier {
+				env = newTestEnvWithCarriers(ctx, t)
+			} else {
+				env = newTestEnv(ctx, t)
+			}
 
-func TestSPD_NoCompletedCalls(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
+			for _, s := range tt.scenarios {
+				runSippScenario(ctx, t, s.uas, s.uac, s.count, env)
+			}
 
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 50, env)
+			if tt.wantZero {
+				require.False(t, metricExists(t, env.endpoint, "sip_exporter_spd_count"),
+					"SPD histogram should be absent when no sessions completed")
+			}
 
-	spd := getSPD(t, env.endpoint)
-	t.Logf("SPD = %.4f seconds", spd)
-	require.Equal(t, 0.0, spd, "SPD should be 0 when no sessions completed")
-
-	waitForSessionsZero(t, env.endpoint)
-}
-
-func TestSPD_Mixed(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 30, env)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 20, env)
-
-	spd := getSPD(t, env.endpoint)
-	t.Logf("SPD = %.4f seconds", spd)
-	require.Greater(t, spd, 0.0, "SPD should be greater than 0 when some sessions completed")
-
-	waitForSessionsZero(t, env.endpoint)
-}
-
-// TestSPD_WithCarrierConfig verifies SPD per-carrier.
-func TestSPD_WithCarrierConfig(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnvWithCarriers(ctx, t)
-
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 50, env)
-
-	spd := env.getSPDByCarrier(t)
-	t.Logf("SPD{carrier=%q} = %.4f seconds", env.carrier, spd)
-	require.Greater(t, spd, 0.0, "SPD should be greater than 0 after successful calls")
-
-	env.waitForSessionsZeroByCarrier(t)
+			if tt.carrier {
+				carrierLabel := `carrier="` + env.carrier + `"`
+				require.True(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_spd_count", carrierLabel),
+					"SPD histogram should exist for carrier %q", env.carrier)
+				spd := env.getSPDByCarrier(t)
+				t.Logf("SPD{carrier=%q} = %.4f seconds", env.carrier, spd)
+				require.Greater(t, spd, 0.0, "SPD should be > 0 after successful calls")
+				env.waitForSessionsZeroByCarrier(t)
+			} else {
+				spd := getSPD(t, env.endpoint)
+				t.Logf("SPD = %.4f seconds", spd)
+				if tt.wantZero {
+					require.Equal(t, 0.0, spd, "SPD should be 0 when no sessions completed")
+				} else {
+					require.Greater(t, spd, 0.0, "SPD should be > 0 after successful calls")
+					require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_spd_count"), 0.0,
+						"SPD histogram should have observations")
+				}
+				waitForSessionsZero(t, env.endpoint)
+			}
+		})
+	}
 }

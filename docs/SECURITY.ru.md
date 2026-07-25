@@ -6,9 +6,9 @@ SIP-exporter использует **eBPF** (extended Berkeley Packet Filter), п
 
 | Capability | Зачем нужна | Место в коде |
 |---|---|---|
-| `CAP_BPF` (или `CAP_SYS_ADMIN`) | Загрузка eBPF-программы в ядро через syscall `bpf()` | `exporter.go:120` — `ebpf.LoadCollection()` |
-| `CAP_NET_RAW` | Создание raw-сокета `AF_PACKET` (`SOCK_RAW`) | `exporter.go:148` — `unix.Socket(AF_PACKET, SOCK_RAW, ...)` |
-| `CAP_NET_ADMIN` | Привязка eBPF-фильтра к сокету, настройка буфера сокета | `exporter.go:186` — `SO_ATTACH_BPF`, `exporter.go:155` — `SO_RCVBUF` |
+| `CAP_BPF` (или `CAP_SYS_ADMIN`) | Загрузка eBPF-программы в ядро через syscall `bpf()` | `exporter.go:326` — `ebpf.LoadCollection()` |
+| `CAP_NET_RAW` | Создание raw-сокета `AF_PACKET` (`SOCK_RAW`) | `exporter.go:378` — `unix.Socket(AF_PACKET, SOCK_RAW, ...)` |
+| `CAP_NET_ADMIN` | Привязка eBPF-фильтра к сокету, настройка буфера сокета | `exporter.go:434` — `SO_ATTACH_BPF`, `exporter.go:390-391` — `SO_RCVBUFFORCE`→`SO_RCVBUF` |
 
 Эти capabilities доступны только root (`UID 0`), поэтому требуется `--privileged`.
 
@@ -26,7 +26,7 @@ SIP-exporter использует **eBPF** (extended Berkeley Packet Filter), п
 4. **Парсит** SIP-заголовки (метод, статус, Call-ID, From/To tags, CSeq, Session-Expires) и RTP-заголовки (12 байт: версия, payload type, sequence, timestamp, SSRC)
 5. **Экспортирует** метрики в Prometheus через HTTP-эндпоинт `/metrics`
 
-Всё. Никакой модификации пакетов, инъекции трафика, перенаправления сети, правил iptables/nftables или записи в файловую систему (кроме stdout/stderr для логов).
+Всё. Никакой модификации пакетов, инъекции трафика, перенаправления сети, правил iptables/nftables. (Экспортёр всё же делает один исходящий HTTPS telemetry-маяк и записывает один файл с telemetry-ID — см. раздел [Телеметрия](#телеметрия) ниже.)
 
 > **Особенность мульти-интерфейса:** Отдельная BPF-коллекция загружается для каждого интерфейса при старте; каждая программа подключается к своему сокету `AF_PACKET` через `SO_ATTACH_BPF`. Maps `sip_ports` и `rtp_endpoints` — per-collection, у каждого интерфейса свои правила фильтрации.
 
@@ -37,7 +37,23 @@ SIP-exporter использует **eBPF** (extended Berkeley Packet Filter), п
 - **Не** пишет в файловую систему хоста — все volumes подключены как `:ro` (только чтение)
 - **Не** обращается к другим контейнерам, процессам или системным ресурсам
 - **Не** открывает входящие порты, кроме `/metrics` на настроенном HTTP-порту (по умолчанию 2112)
-- **Не** устанавливает исходящие сетевые соединения
+- **Не** устанавливает исходящие сетевые соединения **кроме** опционального telemetry-маяка (см. [Телеметрия](#телеметрия))
+
+## Телеметрия
+
+По умолчанию SIP-exporter отправляет **анонимный telemetry-маяк** мейнтейнерам проекта, чтобы учитывать количество инсталляций. Эта функция **включена по умолчанию** (`SIP_EXPORTER_TELEMETRY=true`) и работает как фоновая горутина, запускаемая безусловно при старте (`cmd/main.go`).
+
+- **Эндпоинт:** HTTPS GET на `https://telemetry.sip-exporter.com/v1/beacon` (`SIP_EXPORTER_TELEMETRY_URL`).
+- **Частота:** один раз при старте, затем каждые **24 часа** (`internal/telemetry/telemetry.go`).
+- **Payload** (URL query-параметры, `internal/telemetry/beacon.go`):
+  - `anon_id` — постоянный случайный UUID v4 (см. ниже), **не** производный от какого-либо хост-, пользовательского или сетевого идентификатора
+  - `version` — версия сборки экспортёра
+  - `os` — `runtime.GOOS` (напр. `linux`)
+  - `arch` — `runtime.GOARCH` (напр. `amd64`)
+  - `uptime` — uptime процесса в секундах
+- **Файл с постоянным ID:** анонимный ID хранится в `/var/lib/sip-exporter/anon_id` (`SIP_EXPORTER_TELEMETRY_ID_FILE`), mode `0600`, и переиспользуется между перезапусками. Файл содержит только UUID плюс короткий поясняющий комментарий; удаление файла регенерирует новый случайный ID. Никаких телефонных номеров, IP-адресов, имён хостов или SIP/RTP-данных никогда не отправляется.
+
+**Чтобы полностью отключить телеметрию:** `SIP_EXPORTER_TELEMETRY=false`. Чтобы перенаправить маяки на собственный эндпоинт (напр. для аудита в изолированной среде), задайте `SIP_EXPORTER_TELEMETRY_URL`. Чтобы изменить расположение файла с ID, задайте `SIP_EXPORTER_TELEMETRY_ID_FILE`.
 
 ## Данные в лейблах Prometheus
 
@@ -61,11 +77,13 @@ SIP-exporter выводит лейблы метрик из содержимог�
 | Слой | Детали |
 |---|---|
 | Базовый образ | `alpine:3.22` — минимальный (~5 МБ) |
-| Runtime-зависимости | `libelf` (для eBPF), `bash` (для healthcheck) |
-| Приложение | Один статически слинкованный бинарник на Go |
+| Runtime-зависимости | `libelf` (для eBPF), `bash` (для healthcheck), `libssl3` + `libcrypto3` (TLS-библиотеки) |
+| Приложение | Один динамически слинкованный бинарник на Go |
 | Volumes | `/etc/localtime:ro`, `/etc/timezone:ro` — только чтение часового пояса |
 | Сеть | Только HTTP-эндпоинт `/metrics` (порт 2112 по умолчанию) |
 | Процессы | Один процесс, нет shell, нет демонов |
+
+> **Замечание по безопасности — неаутентифицированные эндпоинты:** `/metrics` и `/health` регистрируются без middleware аутентификации или авторизации (`internal/server/server.go:100-101`). Любой, кто может достучаться до порта `2112`, может прочитать все экспортируемые метрики. В недоверенных сетях привяжите HTTP-listener к `localhost` (или приватному интерфейсу), закройте порт `2112` файрволом либо поставьте перед ним reverse-proxy с аутентификацией.
 
 ## Аудит eBPF-кода
 

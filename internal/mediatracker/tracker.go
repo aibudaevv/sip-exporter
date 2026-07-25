@@ -17,6 +17,7 @@ type (
 		Carrier       string
 		UAType        string
 		SourceCountry string
+		Direction     string
 		CallID        string
 		SDPCodecs     map[uint8]string // payload type → codec name (from SDP a=rtpmap)
 		ClockRates    map[uint8]uint32 // payload type → clock rate (Hz, from SDP)
@@ -29,6 +30,7 @@ type (
 		Carrier          string
 		UAType           string
 		SourceCountry    string
+		Direction        string
 		CallID           string
 		PacketsTotal     uint64
 		PacketsLost      uint64
@@ -54,6 +56,7 @@ type (
 		Carrier       string // dialog carrier (for metric labels)
 		UAType        string // dialog UA type (for metric labels)
 		SourceCountry string // dialog source country (for metric labels)
+		Direction     string // dialog direction (for metric labels)
 	}
 
 	// RTPDialogResult is the per-dialog RTP summary returned at teardown.
@@ -253,6 +256,7 @@ func (t *Tracker) Observe(
 		Carrier:       labels.Carrier,
 		UAType:        labels.UAType,
 		SourceCountry: labels.SourceCountry,
+		Direction:     labels.Direction,
 	}, true
 }
 
@@ -272,6 +276,7 @@ func (t *Tracker) Snapshot() []StreamStats {
 			Carrier:          e.labels.Carrier,
 			UAType:           e.labels.UAType,
 			SourceCountry:    e.labels.SourceCountry,
+			Direction:        e.labels.Direction,
 			CallID:           e.labels.CallID,
 			PacketsTotal:     s.packetsTotal,
 			PacketsLost:      s.packetsLost,

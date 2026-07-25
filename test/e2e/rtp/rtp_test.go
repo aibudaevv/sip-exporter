@@ -410,6 +410,8 @@ func TestRTP_UncorrelatedDropped(t *testing.T) {
 		"uncorrelated RTP must NOT reach the socket (strict SDP-driven BPF drops it)")
 
 	// No RTP metrics counted.
+	require.False(t, metricLineExists(t, endpoint, "sip_exporter_rtp_packets_total"),
+		"uncorrelated RTP must be dropped (no rtp_packets_total metric line)")
 	require.Equal(t, 0.0, getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total"),
 		"uncorrelated RTP must be dropped (no rtp_packets_total)")
 }

@@ -30,7 +30,7 @@ groups:
           description: "SIP Exporter instance {{ $labels.instance }} has been down for more than 1 minute."
 
       - alert: SIPHighServerErrorRate
-        expr: sip_exporter_isa > 50
+        expr: avg(sip_exporter_isa) > 50
         for: 1m
         labels:
           severity: critical
@@ -40,7 +40,7 @@ groups:
           runbook_url: "https://wiki.example.com/runbooks/sip-high-server-error-rate"
 
       - alert: SIPSessionEstablishmentCritical
-        expr: sip_exporter_ser < 20
+        expr: avg(sip_exporter_ser) < 20
         for: 2m
         labels:
           severity: critical
@@ -49,6 +49,8 @@ groups:
           description: "Session Establishment Ratio is {{ $value | printf \"%.1f\" }}%. Most calls are failing to establish."
           runbook_url: "https://wiki.example.com/runbooks/sip-ser-low"
 ```
+
+> **Note:** The `runbook_url` values above (and throughout this guide) are illustrative placeholders using the example host `wiki.example.com`. The shipped `alerts.yml` carries no `runbook_url`. Replace them with your operator's real runbook location before deploying.
 
 ### Warning Alerts
 
@@ -72,7 +74,7 @@ groups:
           description: "95th percentile registration delay is {{ $value | printf \"%.0f\" }}ms. Network or registrar performance issues."
 
       - alert: SIPSessionEstablishmentLow
-        expr: sip_exporter_ser < 50 and sip_exporter_ser >= 20
+        expr: avg(sip_exporter_ser) < 50 and avg(sip_exporter_ser) >= 20
         for: 5m
         labels:
           severity: warning
@@ -184,7 +186,7 @@ These alerts detect suspicious SIP patterns: account takeover, registration enum
           severity: warning
         annotations:
           summary: "Registration country change detected"
-          description: "A user re-registered from a different country on {{ $labels.carrier }}. Possible account takeover."
+          description: "A user re-registered from a different country on {{ $labels.carrier }} ({{ $labels.source_country }}). Possible account takeover."
 
       - alert: SIPRegistrationScan
         expr: rate(sip_exporter_register_scan_total[5m]) > 0
@@ -272,7 +274,7 @@ These alerts monitor voice quality metrics extracted from SIP PUBLISH/NOTIFY wit
 
 ### RTP Media Alerts
 
-These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) measured passively from RTP headers (RFC 3550). Metrics are labeled by `carrier`, `ua_type`, `codec`, and `source_country`.
+These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) measured passively from RTP headers (RFC 3550). Metrics are labeled by `carrier`, `ua_type`, `codec`, `source_country`, and `direction`.
 
 ```yaml
       - alert: RTPPacketLossHigh
@@ -318,6 +320,21 @@ These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) mea
           summary: "High RTP jitter"
           description: "95th percentile RTP jitter for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}ms. Jitter above 50ms causes audio artifacts and jitter buffer overflows."
       ```
+
+### System Health Alerts
+
+These alerts monitor the SIP Exporter's own health — kernel socket buffer drops that indicate the exporter cannot keep up with packet ingestion (`sip_exporter_socket_packets_dropped_total`).
+
+```yaml
+      - alert: SIPPacketDropHigh
+        expr: rate(sip_exporter_socket_packets_dropped_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High packet drop rate"
+          description: "Kernel socket is dropping {{ $value | printf \"%.1f\" }} packets/sec. Increase socket buffer or reduce traffic."
+```
 
 ### Info Alerts
 
@@ -506,7 +523,7 @@ receivers:
 Use alert silences during maintenance windows:
 
 ```bash
-amtool silence add alertname=SIPHighServerErrorRate duration=2h comment="Planned maintenance"
+amtool silence add --duration=2h --comment="Planned maintenance" alertname=SIPHighServerErrorRate
 ```
 
 ### Threshold Tuning
@@ -540,7 +557,7 @@ scrape_configs:
 
 ### Metric Cardinality
 
-The SIP Exporter exposes ~65 metrics with `carrier`, `ua_type`, and `source_country` labels. RTP metrics additionally carry a `codec` label (typically 3-8 codecs). Cardinality equals the number of configured carriers × UA types × source countries × (for RTP) active codecs. Without a carriers config and without GeoIP, `source_country="unknown"` (cardinality = 1); enabling GeoIP or setting `carrier.country` increases cardinality by the number of distinct source countries observed.
+The SIP Exporter exposes ~115 metrics with `carrier`, `ua_type`, and `source_country` labels. RTP metrics additionally carry a `codec` label (typically 3-8 codecs). Cardinality equals the number of configured carriers × UA types × source countries × (for RTP) active codecs. Without a carriers config and without GeoIP, `source_country="unknown"` (cardinality = 1); enabling GeoIP or setting `carrier.country` increases cardinality by the number of distinct source countries observed.
 
 ### Dashboard Organization
 

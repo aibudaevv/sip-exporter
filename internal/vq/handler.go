@@ -7,7 +7,7 @@ import "go.uber.org/zap"
 // Metricser is the subset of the service metrics interface needed by this
 // package to record VQ report data and parsing errors.
 type Metricser interface {
-	UpdateVQReport(carrier, uaType, sourceCountry string, report *SessionReport)
+	UpdateVQReport(carrier, uaType, sourceCountry, direction string, report *SessionReport)
 	SystemError()
 	ParseError(errorType string)
 }
@@ -24,7 +24,7 @@ func NewHandler(metricser Metricser) *Handler {
 
 // HandleVQReport parses a VQ-RTCPXR body and updates metrics. Logs a warning
 // and increments error counters on parse failure.
-func (h *Handler) HandleVQReport(body []byte, carrier, uaType, sourceCountry string) {
+func (h *Handler) HandleVQReport(body []byte, carrier, uaType, sourceCountry, direction string) {
 	report, err := ParseReport(body)
 	if err != nil {
 		zap.L().Warn("failed to parse vq-rtcpxr report", zap.Error(err))
@@ -32,5 +32,5 @@ func (h *Handler) HandleVQReport(body []byte, carrier, uaType, sourceCountry str
 		h.metricser.ParseError("vq")
 		return
 	}
-	h.metricser.UpdateVQReport(carrier, uaType, sourceCountry, report)
+	h.metricser.UpdateVQReport(carrier, uaType, sourceCountry, direction, report)
 }

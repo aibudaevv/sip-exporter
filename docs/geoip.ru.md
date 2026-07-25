@@ -6,7 +6,7 @@
 дополнительной кардинальности. 
 
 Семантика лейблов, приоритет разрешения и примеры PromQL — в
-[docs/METRICS.md > Geo-Enrichment Labels](METRICS.md#geo-enrichment-labels).
+[METRICS.ru.md > Лейблы геообогащения](METRICS.ru.md#лейблы-геообогащения).
 
 ---
 

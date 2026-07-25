@@ -12,7 +12,6 @@ import (
 func TestSER_AllScenarios(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	env := newSharedTestEnv(ctx, t)
 
 	tests := []struct {
 		name        string
@@ -20,47 +19,28 @@ func TestSER_AllScenarios(t *testing.T) {
 		uacScenario string
 		callCount   int
 		wantSER     float64
+		wantExists  bool
 	}{
-		{
-			name:        "100_percent",
-			uasScenario: "uas_100.xml",
-			uacScenario: "uac_100.xml",
-			callCount:   100,
-			wantSER:     100.0,
-		},
-		{
-			name:        "0_percent",
-			uasScenario: "uas_0.xml",
-			uacScenario: "uac_0.xml",
-			callCount:   100,
-			wantSER:     0.0,
-		},
-		{
-			name:        "redirect",
-			uasScenario: "uas_redirect.xml",
-			uacScenario: "uac_redirect.xml",
-			callCount:   100,
-			wantSER:     0.0,
-		},
-		{
-			name:        "no_invite",
-			uasScenario: "uas_no_invite.xml",
-			uacScenario: "uac_no_invite.xml",
-			callCount:   100,
-			wantSER:     0.0,
-		},
+		{"100_percent", "uas_100.xml", "uac_100.xml", 100, 100.0, true},
+		{"0_percent", "uas_0.xml", "uac_0.xml", 100, 0.0, true},
+		{"redirect", "uas_redirect.xml", "uac_redirect.xml", 100, 0.0, true},
+		{"no_invite", "uas_no_invite.xml", "uac_no_invite.xml", 100, 0.0, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env.restart(t)
-			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
+			t.Parallel()
+			env := newTestEnv(ctx, t)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
 
+			if tt.wantExists {
+				require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"))
+			} else {
+				require.False(t, metricExists(t, env.endpoint, "sip_exporter_ser"),
+					"SER metric should be absent when no INVITEs")
+			}
 			ser := getSER(t, env.endpoint)
 			t.Logf("SER = %.2f (want %.2f)", ser, tt.wantSER)
-			if tt.uacScenario != "uac_no_invite.xml" {
-				require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"))
-			}
 			require.InDelta(t, tt.wantSER, ser, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)
@@ -68,45 +48,65 @@ func TestSER_AllScenarios(t *testing.T) {
 	}
 }
 
-// TestSER_Mixed tests mixed scenario: some calls successful, some rejected.
 func TestSER_Mixed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	env := newTestEnv(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 140, env)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 60, env)
+	type sippRun struct {
+		uas, uac string
+		count    int
+	}
 
-	ser := getSER(t, env.endpoint)
-	t.Logf("SER = %.2f (want %.2f)", ser, 70.0)
-	require.InDelta(t, 70.0, ser, ratioDelta)
+	tests := []struct {
+		name         string
+		runs         []sippRun
+		successCount int
+		denomCount   int
+	}{
+		{
+			"Mixed",
+			[]sippRun{{"uas_100.xml", "uac_100.xml", 140}, {"uas_0.xml", "uac_0.xml", 60}},
+			140, 200,
+		},
+		{
+			"Mixed3xx",
+			[]sippRun{{"uas_redirect.xml", "uac_redirect.xml", 100}, {"uas_100.xml", "uac_100.xml", 100}},
+			100, 100,
+		},
+		{
+			"Concurrent",
+			[]sippRun{
+				{"uas_100.xml", "uac_100.xml", 120},
+				{"uas_0.xml", "uac_0.xml", 40},
+				{"uas_redirect.xml", "uac_redirect.xml", 40},
+			},
+			120, 160,
+		},
+	}
 
-	waitForSessionsZero(t, env.endpoint)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			env := newTestEnv(ctx, t)
+
+			for _, r := range tt.runs {
+				runSippScenario(ctx, t, r.uas, r.uac, r.count, env)
+			}
+
+			require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"))
+			ser := getSER(t, env.endpoint)
+			wantSER := float64(tt.successCount) / float64(tt.denomCount) * percentScale
+			t.Logf("SER = %.2f (want %.2f)", ser, wantSER)
+			require.InDelta(t, wantSER, ser, ratioDelta)
+
+			waitForSessionsZero(t, env.endpoint)
+		})
+	}
 }
 
-// TestSER_Mixed3xx tests that 3xx responses are correctly excluded from denominator.
-// 100 redirect (3xx) + 100 successful (200 OK) → SER = 100% (all non-3xx successful).
-func TestSER_Mixed3xx(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 100, env)
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 100, env)
-
-	ser := getSER(t, env.endpoint)
-	t.Logf("SER = %.2f (want %.2f)", ser, 100.0)
-	require.InDelta(t, 100.0, ser, ratioDelta)
-
-	waitForSessionsZero(t, env.endpoint)
-}
-
-// TestSER_WithCarrierConfig verifies SER is computed per-carrier when carriers.yaml is configured.
-// On loopback with carrier config, all traffic gets carrier="loopback-carrier".
 func TestSER_WithCarrierConfig(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	env := newSharedTestEnvWithCarriers(ctx, t)
 
 	tests := []struct {
 		name        string
@@ -115,30 +115,19 @@ func TestSER_WithCarrierConfig(t *testing.T) {
 		callCount   int
 		wantSER     float64
 	}{
-		{
-			name:        "100_percent",
-			uasScenario: "uas_100.xml",
-			uacScenario: "uac_100.xml",
-			callCount:   100,
-			wantSER:     100.0,
-		},
-		{
-			name:        "0_percent",
-			uasScenario: "uas_0.xml",
-			uacScenario: "uac_0.xml",
-			callCount:   100,
-			wantSER:     0.0,
-		},
+		{"100_percent", "uas_100.xml", "uac_100.xml", 100, 100.0},
+		{"0_percent", "uas_0.xml", "uac_0.xml", 100, 0.0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env.restart(t)
-			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, &env.testEnv)
+			t.Parallel()
+			env := newTestEnvWithCarriers(ctx, t)
+			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
 
+			require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"))
 			ser := env.getSERByCarrier(t)
 			t.Logf("SER{carrier=%q} = %.2f (want %.2f)", env.carrier, ser, tt.wantSER)
-			require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"))
 			require.InDelta(t, tt.wantSER, ser, ratioDelta)
 
 			env.waitForSessionsZeroByCarrier(t)
@@ -146,35 +135,20 @@ func TestSER_WithCarrierConfig(t *testing.T) {
 	}
 }
 
-// TestSER_MixedWithCarrierConfig verifies SER per-carrier for mixed traffic.
 func TestSER_MixedWithCarrierConfig(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	env := newTestEnvWithCarriers(ctx, t)
 
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 140, env)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 60, env)
+	const successCount = 140
+	const failCount = 60
+	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", successCount, env)
+	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", failCount, env)
 
 	ser := env.getSERByCarrier(t)
-	t.Logf("SER{carrier=%q} = %.2f (want %.2f)", env.carrier, ser, 70.0)
-	require.InDelta(t, 70.0, ser, ratioDelta)
+	wantSER := float64(successCount) / float64(successCount+failCount) * percentScale
+	t.Logf("SER{carrier=%q} = %.2f (want %.2f)", env.carrier, ser, wantSER)
+	require.InDelta(t, wantSER, ser, ratioDelta)
 
 	env.waitForSessionsZeroByCarrier(t)
-}
-
-// TestSER_ConcurrentRequests verifies SER with concurrent INVITE traffic.
-func TestSER_ConcurrentRequests(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	env := newTestEnv(ctx, t)
-
-	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 120, env)
-	runSippScenario(ctx, t, "uas_0.xml", "uac_0.xml", 40, env)
-	runSippScenario(ctx, t, "uas_redirect.xml", "uac_redirect.xml", 40, env)
-
-	ser := getSER(t, env.endpoint)
-	t.Logf("SER = %.2f%%", ser)
-	require.InDelta(t, 75.0, ser, ratioDelta)
-
-	waitForSessionsZero(t, env.endpoint)
 }

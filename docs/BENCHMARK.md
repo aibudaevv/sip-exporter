@@ -12,7 +12,7 @@ Load testing results for sip-exporter, measuring packet capture reliability unde
 | SIPp | pbertera/sipp:latest |
 | Interface | loopback (`lo`) |
 | Socket buffer | 4 MB (`SO_RCVBUFFORCE`, falls back to `SO_RCVBUF` without `CAP_NET_ADMIN`) |
-| Go | 1.25.11 |
+| Go | 1.25.12 |
 
 ## Methodology
 
@@ -36,7 +36,6 @@ Complete SIP dialog lifecycle: INVITE → 100 → 180 → 200 → ACK → BYE �
 | 1,400 | ~16,500 | 7.0-10.7% | 9.5-12.7% | 9.1-14.7 MB | 0.00% | 3/3 |
 | 1,600 | ~18,800 | 8.2-11.8% | 11.0-13.4% | 8.4-16.7 MB | 0.00% | 3/3 |
 | 1,800 | ~21,200 | 7.5-11.0% | 9.4-14.6% | 9.0-16.5 MB | 0.00% | 3/3 |
-| 2,000 | ~23,600 | 6.0-11.3% | 9.6-15.1% | 8.6-16.6 MB | 0.00% | 3/3 |
 
 ## Results: INVITE Flood (raw PPS)
 
@@ -118,11 +117,11 @@ Verifies that scaling from 1 to N network interfaces is **linear** on packet thr
 
 - **Packets received** scales **exactly linearly**: 1,000 → 2,000 → 3,000. Each interface delivers its 1,000 INVITEs independently with zero cross-interface loss.
 - **Actual PPS** scales **near-linearly**: N=2 = 2.33× N=1, N=3 = 2.80× N=1. The sub-1.0× ratio at N=3 reflects SIPp container startup amortisation, not exporter saturation (CPU stays under 1.3% peak).
-- **CPU** scales **sub-linearly**: 0.51% → 0.78% → 0.76% avg (N=3 ≈ N=2 due to measurement granularity). The shared parser/channel/pipeline amortises across sockets — one BPF program, one Go channel, one tracker map set.
+- **CPU** scales **sub-linearly**: 0.51% → 0.78% → 0.76% avg (N=3 ≈ N=2 due to measurement granularity). The shared parser/channel/pipeline amortises across sockets — one BPF program source loaded once per NIC (N kernel collections + N eBPF maps for N interfaces), a single Go channel, and a single userspace tracker/dialog set.
 - **Memory** stays flat at ~15-17 MB across all N (kernel-side receive buffers add ~4 MiB per socket, but userspace RSS does not grow proportionally).
 - **Zero packet loss, zero errors** at every N — the AF_PACKET → channel → parser pipeline has no contention point at N≤3.
 
-**Conclusion:** multi-interface capture adds ~0.25% CPU and ~1 MiB RAM per additional NIC. The shared infrastructure (single BPF collection, single Go channel, single set of trackers) is **not** a bottleneck — sub-linear CPU/memory scaling is preserved up to N=3.
+**Conclusion:** multi-interface capture adds ~0.25% CPU and ~1 MiB RAM per additional NIC. The shared infrastructure (one BPF program source loaded per NIC into N kernel collections + N eBPF maps, but a single Go channel and a single userspace tracker/dialog set) is **not** a bottleneck — sub-linear CPU/memory scaling is preserved up to N=3.
 
 ## GOMAXPROCS Comparison: 1 Core vs 8 Cores
 
@@ -139,7 +138,6 @@ Full Call Flow benchmark comparing single-core vs multi-core execution. 3 runs p
 | 1,400 | ~16,400 | 5.6-6.4% | 7.2-8.5% | 7.7-9.5 MB | 0.00% | 3/3 |
 | 1,600 | ~18,900 | 5.8-6.5% | 8.2-8.9% | 7.5-9.7 MB | 0.00% | 3/3 |
 | 1,800 | ~21,000 | 5.5-7.2% | 7.8-9.6% | 7.5-11.6 MB | 0.00% | 2/3 |
-| 2,000 | ~23,600 | 5.0-7.1% | 7.1-9.2% | 7.6-12.1 MB | 0.00% | 3/3 |
 
 ### GOMAXPROCS=8 (all cores)
 
@@ -152,23 +150,22 @@ Full Call Flow benchmark comparing single-core vs multi-core execution. 3 runs p
 | 1,400 | ~16,400 | 6.4-7.1% | 9.0-9.8% | 11.7-16.9 MB | 0.00% | 3/3 |
 | 1,600 | ~18,800 | 6.3-7.8% | 10.8-11.3% | 12.3-16.0 MB | 0.00% | 3/3 |
 | 1,800 | ~21,300 | 6.5-8.9% | 9.9-10.5% | 11.1-16.4 MB | 0.00% | 3/3 |
-| 2,000 | ~23,600 | 6.7-8.6% | 10.2-12.2% | 11.9-15.3 MB | 0.00% | 3/3 |
 
 ### Summary
 
 | Metric | GOMAXPROCS=1 | GOMAXPROCS=8 |
 |--------|-------------|-------------|
-| Max stable CPS | 1,600 (2/3 at 1800) | 2,000 (3/3 all rates) |
-| CPU avg @ 2000 CPS | 5.0-7.1% | 6.7-8.6% |
-| CPU peak @ 2000 CPS | 7.1-9.2% | 10.2-12.2% |
-| RAM @ 2000 CPS | 7.6-12.1 MB | 11.9-15.3 MB |
+| Max stable CPS | 1,600 (2/3 at 1800) | 1,800 (3/3 all rates) |
+| CPU avg @ 1800 CPS | 5.5-7.2% | 6.5-8.9% |
+| CPU peak @ 1800 CPS | 7.8-9.6% | 9.9-10.5% |
+| RAM @ 1800 CPS | 7.5-11.6 MB | 11.1-16.4 MB |
 | RAM overhead | baseline | +50-60% |
 
-Single-core uses less RAM and CPU (no synchronization overhead between goroutines), but is less stable at high rates (1800+ CPS). Multi-core provides stable 0% loss at all rates up to 2000 CPS at the cost of higher resource usage.
+Single-core uses less RAM and CPU (no synchronization overhead between goroutines), but is less stable at high rates (1800+ CPS). Multi-core provides stable 0% loss at all rates up to 1800 CPS at the cost of higher resource usage.
 
 ## Scrape Performance Under Load
 
-HTTP GET `/metrics` response time while processing 2000 CPS (14,000 PPS). 50 sequential scrapes at 100ms intervals.
+HTTP GET `/metrics` response time while processing 2000 CPS (14,000 PPS). 50 scrapes at 100ms spacing.
 
 | Metric | Value |
 |--------|-------|
@@ -224,7 +221,7 @@ Memory overhead per active SIP dialog. Dialog map stores `map[string]dialogEntry
 | 1,627 | 14.9 MB | 5.0 MB | ~3 KB |
 | 4,064 | 12.5 MB | 2.5 MB | < 1 KB |
 
-Per-dialog overhead is within GC measurement noise. Even 4,000+ active dialogs add < 7 MB to total memory. The theoretical per-dialog cost is ~112 bytes per `dialogEntry` (two `time.Time` + four `string` fields + map bucket overhead), but container-level memory measurement includes Go runtime overhead that obscures per-entry costs.
+Per-dialog overhead is within GC measurement noise. Even 4,000+ active dialogs add < 7 MB to total memory. The theoretical per-dialog cost is ~144 bytes per `dialogEntry` (two `time.Time` + six `string` fields incl. `destinationCountry` and `direction` + map bucket overhead), but container-level memory measurement includes Go runtime overhead that obscures per-entry costs.
 
 **Practical conclusion:** dialog storage is negligible. Plan for ~10 MB base + 1-2 MB per 1,000 active dialogs as a conservative estimate.
 
@@ -240,7 +237,7 @@ Memory overhead per active RTP stream. Each stream stores a `StreamState` struct
 | 413 | 14.7 MB | 7.3 MB | ~19 KB |
 | 1,030 | 12.2 MB | 4.9 MB | ~5 KB |
 
-Same pattern as dialogs: container-level memory measurement includes Go runtime overhead that dominates at low counts. The theoretical per-stream cost is ~96 bytes for the `StreamState` struct plus ~130 bytes for the `streamEntry` wrapper and map overhead. Streams expire after the configured TTL (default 30s), bounding memory under SSRC reuse.
+Same pattern as dialogs: container-level memory measurement includes Go runtime overhead that dominates at low counts. The theoretical per-stream cost is ~136 bytes for the `StreamState` struct plus ~130 bytes for the `streamEntry` wrapper and map overhead. Streams expire after the configured TTL (default 30s), bounding memory under SSRC reuse.
 
 **Practical conclusion:** RTP stream storage is negligible. Even 1,000+ active streams add < 7 MB to total memory.
 
@@ -252,7 +249,7 @@ Per-packet performance of the RTP processing pipeline (header parse + media trac
 |-----------|------|--------|-------------|
 | `BenchmarkParseHeader` | ~5 ns/op | 0 | RTP header parse (12 bytes → struct) |
 | `BenchmarkTracker_Observe_1000Streams` | ~203 ns/op | 0 | Per-packet Observe across 1000 concurrent streams (worst case) |
-| `BenchmarkTracker_Snapshot_1000Streams` | ~66 µs/op | 1 (128 KB) | Periodic metrics export (Snapshot over 1000 streams) |
+| `BenchmarkTracker_Snapshot_1000Streams` | ~66 µs/op | 1 (227 KB) | Periodic metrics export (Snapshot over 1000 streams) |
 
 ### Throughput Estimate
 
@@ -262,19 +259,19 @@ With SIP-vs-RTP channel priority (RTP uses non-blocking send), RTP packets are d
 
 ### Memory Per RTP Stream
 
-Each active RTP stream stores a `StreamState` struct (~96 bytes) plus `streamEntry` wrapper and map overhead. The Snapshot call allocates a `[]StreamStats` slice proportional to the number of active streams (128 KB for 1000 streams — one allocation).
+Each active RTP stream stores a `StreamState` struct (~136 bytes) plus `streamEntry` wrapper and map overhead. The Snapshot call allocates a `[]StreamStats` slice proportional to the number of active streams (227 KB for 1000 streams — one allocation).
 
 | Active Streams | Snapshot Allocation | Per-Stream Cost |
 |---------------|--------------------:|----------------:|
-| 100 | ~13 KB | ~128 bytes |
-| 1,000 | ~128 KB | ~128 bytes |
-| 10,000 | ~1.3 MB | ~128 bytes |
+| 100 | ~23 KB | ~232 bytes |
+| 1,000 | ~227 KB | ~232 bytes |
+| 10,000 | ~2.3 MB | ~232 bytes |
 
 Streams expire after the configured TTL (default 30s, `SIP_EXPORTER_RTP_STREAM_TTL`), bounding memory under SSRC reuse.
 
 ## Geo-Enrichment & Label Resolution Micro-Benchmarks
 
-Per-packet cost of label resolution (`carrier`, `ua_type`, `source_country`, `destination_country`, `caller_host`, `called_host`) including the MaxMind GeoIP lookup. Measured with `go test -bench` on the same i7-8665U (8 logical cores), Go 1.25.11, 3 runs, using the MaxMind GeoLite2-Country **test** database (`test/e2e/data/GeoIP2-Country-Test.mmdb`).
+Per-packet cost of label resolution (`carrier`, `ua_type`, `source_country`, `destination_country`, `caller_host`, `called_host`) including the MaxMind GeoIP lookup. Measured with `go test -bench` on the same i7-8665U (8 logical cores), Go 1.25.12, 3 runs, using the MaxMind GeoLite2-Country **test** database (`test/e2e/data/GeoIP2-Country-Test.mmdb`).
 
 ### Packet parse + label resolution (`BenchmarkParseRawPacket_INVITE_Labels`)
 
@@ -314,6 +311,13 @@ go test -run='^$' -bench='BenchmarkParseRawPacket_INVITE_Labels' -benchmem ./int
 # Prometheus counter cost
 go test -run='^$' -bench='BenchmarkRequest_INVITE|BenchmarkRequest_REGISTER|BenchmarkInvite200OK' \
   -benchmem ./internal/service/
+
+# RTP header parse
+go test -run='^$' -bench='BenchmarkParseHeader' -benchmem ./internal/rtp/
+
+# RTP media tracker (observe + snapshot)
+go test -run='^$' -bench='BenchmarkTracker_Observe_1000Streams|BenchmarkTracker_Snapshot_1000Streams' \
+  -benchmem ./internal/mediatracker/
 ```
 
 ## Minimum System Requirements
@@ -339,13 +343,13 @@ Key parameters for sizing:
 # Build Docker image
 make docker_build
 
-# Run all load tests (sequential, ~5 min)
+# Run all load tests (whole package, sequential — includes TestBenchmark_* tests)
 SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(cat VERSION) \
-  go test -tags=e2e -v -count=1 -timeout 30m -run 'TestLoad' ./test/e2e/load/...
+  go test -tags=e2e -v -count=1 -timeout 30m ./test/e2e/load/...
 
 # Run specific test
 SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(cat VERSION) \
-  go test -tags=e2e -v -count=1 -timeout 5m -run 'TestLoad_FullCallFlow/rate_2000' ./test/e2e/load/...
+  go test -tags=e2e -v -count=1 -timeout 5m -run 'TestLoad_FullCallFlow/rate_1800' ./test/e2e/load/...
 
 # Run with single core (test scheduler sensitivity)
 SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(cat VERSION) SIP_EXPORTER_E2E_GOMAXPROCS=1 \
@@ -353,5 +357,5 @@ SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(cat VERSION) SIP_EXPORTER_E2E_GOMAXPROCS=1
 
 # Run with GC trace
 SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(cat VERSION) SIP_EXPORTER_E2E_GODEBUG=gctrace=1 \
-  go test -tags=e2e -v -count=1 -timeout 5m -run 'TestLoad_FullCallFlow/rate_2000' ./test/e2e/load/...
+  go test -tags=e2e -v -count=1 -timeout 5m -run 'TestLoad_FullCallFlow/rate_1800' ./test/e2e/load/...
 ```

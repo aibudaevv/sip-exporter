@@ -156,8 +156,8 @@ func TestSIPRetransmission_MetricObserved(t *testing.T) {
 
 	waitForMetricStable(t, env.endpoint)
 
-	require.True(t, metricExists(t, env.endpoint, "sip_exporter_sip_retransmission_total"),
-		"sip_retransmission_total must exist after INVITE retransmissions")
+	require.True(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_sip_retransmission_total", `method="INVITE"`),
+		"sip_retransmission_total{method=INVITE} must exist after INVITE retransmissions")
 
 	retrans := getMetricWithLabel(t, env.endpoint, "sip_exporter_sip_retransmission_total", `method="INVITE"`)
 	t.Logf("sip_retransmission_total{method=INVITE} = %.0f (sent %d retransmissions)", retrans, retransCount)

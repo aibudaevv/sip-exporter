@@ -28,7 +28,7 @@ func newRegisterScanTracker(threshold int, window time.Duration) *registerScanTr
 }
 
 func (t *registerScanTracker) record(
-	srcIP, aor, carrier, sourceCountry string,
+	srcIP, aor, carrier, sourceCountry, direction string,
 	metricser service.Metricser,
 ) {
 	if t == nil || srcIP == "" || aor == "" {
@@ -56,7 +56,7 @@ func (t *registerScanTracker) record(
 	}
 
 	if len(t.entries[srcIP]) >= t.threshold {
-		metricser.RegisterScan(carrier, sourceCountry)
+		metricser.RegisterScan(carrier, sourceCountry, direction)
 	}
 }
 
@@ -100,7 +100,7 @@ func newInviteBurstTracker(threshold int, window time.Duration) *inviteBurstTrac
 }
 
 func (t *inviteBurstTracker) record(
-	srcIP, carrier, sourceCountry string,
+	srcIP, carrier, sourceCountry, direction string,
 	metricser service.Metricser,
 ) {
 	if t == nil || srcIP == "" {
@@ -128,7 +128,7 @@ func (t *inviteBurstTracker) record(
 	t.entries[srcIP] = entries
 
 	if len(entries) >= t.threshold {
-		metricser.InviteBurst(carrier, sourceCountry)
+		metricser.InviteBurst(carrier, sourceCountry, direction)
 	}
 }
 

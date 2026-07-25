@@ -14,7 +14,7 @@ type mockMetricser struct {
 	lastReport        *SessionReport
 }
 
-func (m *mockMetricser) UpdateVQReport(carrier, uaType, _ string, report *SessionReport) {
+func (m *mockMetricser) UpdateVQReport(carrier, uaType, _, _ string, report *SessionReport) {
 	m.vqReportCalled = true
 	m.lastCarrier = carrier
 	m.lastUAType = uaType
@@ -32,7 +32,7 @@ func TestHandler_FullReport(t *testing.T) {
 	h := NewHandler(mock)
 
 	body := []byte("VQSessionReport: CallTerm\r\nMOSLQ=4.5 NLR=0.50\r\n")
-	h.HandleVQReport(body, "carrier-a", "yealink", "US")
+	h.HandleVQReport(body, "carrier-a", "yealink", "US", "")
 
 	require.True(t, mock.vqReportCalled)
 	require.False(t, mock.systemErrorCalled)
@@ -50,7 +50,7 @@ func TestHandler_PartialReport(t *testing.T) {
 	h := NewHandler(mock)
 
 	body := []byte("VQSessionReport: CallTerm\r\nMOSLQ=3.2\r\n")
-	h.HandleVQReport(body, "carrier-b", "polycom", "US")
+	h.HandleVQReport(body, "carrier-b", "polycom", "US", "")
 
 	require.True(t, mock.vqReportCalled)
 	require.False(t, mock.systemErrorCalled)
@@ -64,7 +64,7 @@ func TestHandler_InvalidBody(t *testing.T) {
 	mock := &mockMetricser{}
 	h := NewHandler(mock)
 
-	h.HandleVQReport([]byte("invalid"), "carrier-a", "yealink", "US")
+	h.HandleVQReport([]byte("invalid"), "carrier-a", "yealink", "US", "")
 
 	require.True(t, mock.systemErrorCalled)
 	require.False(t, mock.vqReportCalled)
@@ -74,7 +74,7 @@ func TestHandler_EmptyBody(t *testing.T) {
 	mock := &mockMetricser{}
 	h := NewHandler(mock)
 
-	h.HandleVQReport([]byte{}, "carrier-a", "yealink", "US")
+	h.HandleVQReport([]byte{}, "carrier-a", "yealink", "US", "")
 
 	require.True(t, mock.systemErrorCalled)
 	require.False(t, mock.vqReportCalled)
@@ -84,7 +84,7 @@ func TestHandler_NilBody(t *testing.T) {
 	mock := &mockMetricser{}
 	h := NewHandler(mock)
 
-	h.HandleVQReport(nil, "carrier-a", "yealink", "US")
+	h.HandleVQReport(nil, "carrier-a", "yealink", "US", "")
 
 	require.True(t, mock.systemErrorCalled)
 	require.False(t, mock.vqReportCalled)
@@ -95,7 +95,7 @@ func TestHandler_CarrierLabel(t *testing.T) {
 	h := NewHandler(mock)
 
 	body := []byte("VQSessionReport: CallTerm\r\nMOSLQ=4.0\r\n")
-	h.HandleVQReport(body, "mobile-operator", "yealink", "US")
+	h.HandleVQReport(body, "mobile-operator", "yealink", "US", "")
 
 	require.True(t, mock.vqReportCalled)
 	require.Equal(t, "mobile-operator", mock.lastCarrier)
@@ -106,7 +106,7 @@ func TestHandler_UATypeLabel(t *testing.T) {
 	h := NewHandler(mock)
 
 	body := []byte("VQSessionReport: CallTerm\r\nMOSLQ=4.0\r\n")
-	h.HandleVQReport(body, "carrier-a", "cisco", "US")
+	h.HandleVQReport(body, "carrier-a", "cisco", "US", "")
 
 	require.True(t, mock.vqReportCalled)
 	require.Equal(t, "cisco", mock.lastUAType)

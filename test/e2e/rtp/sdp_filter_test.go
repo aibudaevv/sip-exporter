@@ -211,8 +211,10 @@ func TestSDPFilter_EntryLifecycle(t *testing.T) {
 			if tt.afterBye {
 				wait()
 				require.Eventually(t, func() bool {
-					return getMetricByLabel(t, endpoint, "sip_exporter_sessions",
-						labelCarrier, labelUAType) == 0
+					return metricLineExists(t, endpoint, "sip_exporter_sessions",
+						labelCarrier, labelUAType) &&
+						getMetricByLabel(t, endpoint, "sip_exporter_sessions",
+							labelCarrier, labelUAType) == 0
 				}, 10*time.Second, 200*time.Millisecond, "dialog must be torn down")
 			}
 

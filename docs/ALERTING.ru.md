@@ -30,7 +30,7 @@ groups:
           description: "Инстанс SIP Exporter {{ $labels.instance }} недоступен более 1 минуты."
 
       - alert: SIPHighServerErrorRate
-        expr: sip_exporter_isa > 50
+        expr: avg(sip_exporter_isa) > 50
         for: 1m
         labels:
           severity: critical
@@ -40,7 +40,7 @@ groups:
           runbook_url: "https://wiki.example.com/runbooks/sip-high-server-error-rate"
 
       - alert: SIPSessionEstablishmentCritical
-        expr: sip_exporter_ser < 20
+        expr: avg(sip_exporter_ser) < 20
         for: 2m
         labels:
           severity: critical
@@ -49,6 +49,8 @@ groups:
           description: "Session Establishment Ratio составляет {{ $value | printf \"%.1f\" }}%. Большинство вызовов не устанавливается."
           runbook_url: "https://wiki.example.com/runbooks/sip-ser-low"
 ```
+
+> **Примечание:** Значения `runbook_url` выше (и далее в этом руководстве) — иллюстративные заглушки с примером хоста `wiki.example.com`. Поставляемый `alerts.yml` не содержит `runbook_url`. Замените их на реальные расположения runbook вашего оператора перед развёртыванием.
 
 ### Warning-алерты
 
@@ -72,7 +74,7 @@ groups:
           description: "95-й перцентиль задержки регистрации — {{ $value | printf \"%.0f\" }}мс. Проблемы производительности сети или регистратора."
 
       - alert: SIPSessionEstablishmentLow
-        expr: sip_exporter_ser < 50 and sip_exporter_ser >= 20
+        expr: avg(sip_exporter_ser) < 50 and avg(sip_exporter_ser) >= 20
         for: 5m
         labels:
           severity: warning
@@ -111,6 +113,32 @@ groups:
         annotations:
           summary: "Высокая доля зависших SIP-диалогов"
           description: "Более половины сессий, установленных за последние 30 минут, всё ещё активны на операторе {{ $labels.carrier }}. Возможны проблемы с таймаутом Session-Expires или отсутствуют сообщения BYE."
+
+      - alert: SIPRetransmissionRateHigh
+        expr: |
+          sum by (carrier) (rate(sip_exporter_sip_retransmission_total[5m]))
+          / on (carrier)
+            clamp_min(sum by (carrier) (rate(sip_exporter_invite_total[5m])), 1)
+          * 100 > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Высокий rate ретрансляций SIP"
+          description: "Более 10% запросов INVITE являются ретрансляциями на операторе {{ $labels.carrier }}. Указывает на потери пакетов на UDP-транспорте или неработающий SIP-сервер."
+
+      - alert: ShortCallsSpike
+        expr: |
+          sum by (carrier) (rate(sip_exporter_short_calls_total{threshold="20"}[5m]))
+          / on (carrier)
+            clamp_min(sum by (carrier) (rate(sip_exporter_sdc_total[5m])), 1)
+          * 100 > 30
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Всплеск коротких звонков (< 20 с)"
+          description: "Более 30% завершённых сессий у оператора {{ $labels.carrier }} короче 20 секунд. Возможны проблемы с качеством звонков, брошенные вызовы или toll fraud."
       ```
 
 ### Алерты здоровья регистраций
@@ -158,7 +186,7 @@ groups:
           severity: warning
         annotations:
           summary: "Обнаружена смена страны регистрации"
-          description: "Пользователь перерегистрировался из другой страны на {{ $labels.carrier }}. Возможный перехват аккаунта."
+          description: "Пользователь перерегистрировался из другой страны на {{ $labels.carrier }} ({{ $labels.source_country }}). Возможный перехват аккаунта."
 
       - alert: SIPRegistrationScan
         expr: rate(sip_exporter_register_scan_total[5m]) > 0
@@ -246,7 +274,7 @@ groups:
 
 ### Алерты RTP-медиа
 
-Эти алерты мониторят качество RTP-потоков в реальном времени (jitter, потери пакетов, MOS), измеряемое пассивно из заголовков RTP (RFC 3550). Метрики размечены лейблами `carrier`, `ua_type`, `codec` и `source_country`.
+Эти алерты мониторят качество RTP-потоков в реальном времени (jitter, потери пакетов, MOS), измеряемое пассивно из заголовков RTP (RFC 3550). Метрики размечены лейблами `carrier`, `ua_type`, `codec`, `source_country` и `direction`.
 
 ```yaml
       - alert: RTPPacketLossHigh
@@ -291,6 +319,21 @@ groups:
         annotations:
           summary: "Высокий RTP jitter"
           description: "95-й перцентиль RTP jitter для оператора {{ $labels.carrier }} — {{ $value | printf \"%.1f\" }}мс. Jitter выше 50мс вызывает артефакты аудио и переполнение jitter buffer."
+      ```
+
+### Алерты здоровья системы
+
+Эти алерты мониторят собственное здоровье SIP Exporter — потери в буфере kernel socket, которые указывают, что экспортёр не успевает за приёмом пакетов (`sip_exporter_socket_packets_dropped_total`).
+
+```yaml
+      - alert: SIPPacketDropHigh
+        expr: rate(sip_exporter_socket_packets_dropped_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Высокий rate потерь пакетов"
+          description: "Kernel socket отбрасывает {{ $value | printf \"%.1f\" }} пакетов/с. Увеличьте буфер сокета или снизьте трафик."
 ```
 
 ### Info-алерты
@@ -480,7 +523,7 @@ receivers:
 Используйте silence во время сервисных окон:
 
 ```bash
-amtool silence add alertname=SIPHighServerErrorRate duration=2h comment="Плановое обслуживание"
+amtool silence add --duration=2h --comment="Плановое обслуживание" alertname=SIPHighServerErrorRate
 ```
 
 ### Настройка порогов
@@ -514,7 +557,7 @@ scrape_configs:
 
 ### Кардинальность метрик
 
-SIP Exporter экспортирует ~65 метрик с лейблами `carrier`, `ua_type` и `source_country`. RTP-метрики также имеют лейбл `codec` (обычно 3-8 кодеков). Кардинальность равна числу настроенных операторов × типов UA × исходных стран × (для RTP) активных кодеков. Без конфигурации операторов и без GeoIP `source_country="unknown"` (кардинальность = 1); включение GeoIP или настройка `carrier.country` увеличивает кардинальность на число наблюдаемых исходных стран.
+SIP Exporter экспортирует ~115 метрик с лейблами `carrier`, `ua_type` и `source_country`. RTP-метрики также имеют лейбл `codec` (обычно 3-8 кодеков). Кардинальность равна числу настроенных операторов × типов UA × исходных стран × (для RTP) активных кодеков. Без конфигурации операторов и без GeoIP `source_country="unknown"` (кардинальность = 1); включение GeoIP или настройка `carrier.country` увеличивает кардинальность на число наблюдаемых исходных стран.
 
 ### Организация дашбордов
 
