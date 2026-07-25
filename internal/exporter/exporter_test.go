@@ -2038,6 +2038,7 @@ func TestFasTracker_SignalsAfterThreshold(t *testing.T) {
 	tracker.store(
 		"call-1",
 		fasEntry{carrier: "carrier-a", uaType: "yealink", sourceCountry: "US", direction: "inbound"},
+		nil,
 	)
 	require.Zero(t, mm.fasCalls, "immediately after 200 OK, FAS must not fire")
 
@@ -2057,6 +2058,7 @@ func TestFasTracker_NoSignalBeforeThreshold(t *testing.T) {
 	tracker.store(
 		"call-1",
 		fasEntry{carrier: "carrier-a", uaType: "yealink", sourceCountry: "US", direction: "inbound"},
+		nil,
 	)
 	tracker.sweep(mm)
 	require.Zero(t, mm.fasCalls, "entry younger than threshold must not fire")
@@ -2070,6 +2072,7 @@ func TestFasTracker_ClearPreventsSignal(t *testing.T) {
 	tracker.store(
 		"call-1",
 		fasEntry{carrier: "carrier-a", uaType: "yealink", sourceCountry: "US", direction: "inbound"},
+		nil,
 	)
 	tracker.clear("call-1")
 	time.Sleep(90 * time.Millisecond)
@@ -2085,6 +2088,7 @@ func TestFasTracker_PreservesLabelsOnFire(t *testing.T) {
 	tracker.store(
 		"call-1",
 		fasEntry{carrier: "carrier-b", uaType: "grandstream", sourceCountry: "DE", direction: "outbound"},
+		nil,
 	)
 	time.Sleep(70 * time.Millisecond)
 	tracker.sweep(mm)
@@ -2102,7 +2106,7 @@ func TestFasTracker_NilTrackerSafe(t *testing.T) {
 	mm := &mockMetricser{}
 	var tracker *fasTracker
 
-	tracker.store("call-1", fasEntry{carrier: "carrier", uaType: "ua", sourceCountry: "US", direction: "inbound"})
+	tracker.store("call-1", fasEntry{carrier: "carrier", uaType: "ua", sourceCountry: "US", direction: "inbound"}, nil)
 	tracker.clear("call-1")
 	tracker.sweep(mm)
 	require.Zero(t, mm.fasCalls, "nil tracker must be no-op")
@@ -2115,6 +2119,11 @@ const (
 		"c=IN IP4 10.0.0.1\r\nt=0 0\r\nm=audio 5004 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n"
 	fasSdpHeld = "v=0\r\no=- 1 1 IN IP4 0.0.0.0\r\ns=-\r\n" +
 		"c=IN IP4 0.0.0.0\r\nt=0 0\r\nm=audio 5004 RTP/AVP 0\r\n"
+	// fasSdpOffer is the INVITE offer (caller side) advertising 10.0.0.2:5004,
+	// distinct from the answer (fasSdpNormal, 10.0.0.1:5004) so FAS answer-side
+	// gating can distinguish which side sent media.
+	fasSdpOffer = "v=0\r\no=- 1 1 IN IP4 10.0.0.2\r\ns=-\r\n" +
+		"c=IN IP4 10.0.0.2\r\nt=0 0\r\nm=audio 5004 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n"
 )
 
 func newFasTestExporter(mm *mockMetricser, fasThreshold time.Duration) *exporter {
@@ -2185,8 +2194,9 @@ func TestFAS_RTPBeforeThresholdPreventsFire(t *testing.T) {
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
 	)
 
-	// Two forward RTP packets for the registered endpoint (10.0.0.1:5004) → media
-	// established (≥2) → FAS pending cleared. A single packet would NOT clear it.
+	// No INVITE offer SDP was cached (inviteSDP empty) → FAS cannot tell which
+	// side sent media → legacy fallback: any media clears. Two forward packets
+	// for the registered endpoint (10.0.0.1:5004) → media established (≥2) → cleared.
 	_, err := e.handleRTP(net.ParseIP("10.0.0.2"), 5004, net.ParseIP("10.0.0.1"), 5004, fasRTPPacket(1))
 	require.NoError(t, err)
 	_, err = e.handleRTP(net.ParseIP("10.0.0.2"), 5004, net.ParseIP("10.0.0.1"), 5004, fasRTPPacket(2))
@@ -2196,6 +2206,46 @@ func TestFAS_RTPBeforeThresholdPreventsFire(t *testing.T) {
 	time.Sleep(90 * time.Millisecond)
 	e.fasTracker.sweep(mm)
 	require.Zero(t, mm.fasCalls, "established media before threshold must prevent FAS")
+}
+
+// TestFAS_CallerRTPDoesNotClear is the core S11-4 regression: when both offer
+// (caller) and answer (callee) media endpoints are registered, RTP from the
+// calling side (arriving at the answer endpoint) must NOT defeat FAS — only
+// answer-side media (arriving at the offer endpoint) clears it. This prevents a
+// fraudster's false 200 OK from being masked by the victim's own upstream RTP.
+func TestFAS_CallerRTPDoesNotClear(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, 60*time.Millisecond)
+
+	// Cache the INVITE offer SDP (caller endpoint 10.0.0.2:5004) so the 200 OK
+	// registers BOTH sides and FAS can gate by originating side.
+	e.storeInviteSDP("call-1", []byte(fasSdpOffer))
+
+	require.NoError(
+		t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
+	)
+	require.Len(t, e.fasTracker.entries, 1, "200 OK with media endpoints must open a FAS pending entry")
+	require.Len(t, e.fasTracker.offer["call-1"], 1, "offer endpoint must be tracked for side gating")
+
+	// Caller (offer side) sends media TO the answer endpoint 10.0.0.1:5004 → the
+	// stream is keyed by the answer endpoint (dst-first correlation) → NOT an
+	// offer endpoint → FAS must survive even after ≥2 forward packets.
+	for _, seq := range []uint16{1, 2, 3} {
+		_, err := e.handleRTP(net.ParseIP("10.0.0.2"), 5004, net.ParseIP("10.0.0.1"), 5004, fasRTPPacket(seq))
+		require.NoError(t, err)
+	}
+	require.Len(t, e.fasTracker.entries, 1,
+		"caller-side RTP (arriving at answer endpoint) must not clear FAS")
+
+	// Answer side (callee) sends media TO the offer endpoint 10.0.0.2:5004 → the
+	// stream is keyed by the offer endpoint → answer-side media confirmed → clears.
+	for _, seq := range []uint16{1, 2} {
+		_, err := e.handleRTP(net.ParseIP("10.0.0.1"), 5004, net.ParseIP("10.0.0.2"), 5004, fasRTPPacket(seq))
+		require.NoError(t, err)
+	}
+	require.Empty(t, e.fasTracker.entries,
+		"answer-side RTP (arriving at offer endpoint) must clear FAS")
 }
 
 func TestFAS_SingleRTPDoesNotClear(t *testing.T) {

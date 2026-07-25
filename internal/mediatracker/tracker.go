@@ -54,6 +54,8 @@ type (
 		Lost               uint64  // packets newly marked lost by this observation
 		DelayVariationMs   float64 // raw per-packet PDV (|arrivalDelta − tsDelta|, ms) of the last forward packet; not updated on duplicate/reorder (only emitted when Counted)
 		StreamPacketsTotal uint64  // stream's total forward-counted packets after this Observe
+		MatchedIP          string  // IP of the correlated media endpoint the stream is keyed by (dst-first, then src)
+		MatchedPort        uint16  // port of the correlated media endpoint (companion of MatchedIP)
 		Codec              string  // resolved codec name
 		Carrier            string  // dialog carrier (for metric labels)
 		UAType             string  // dialog UA type (for metric labels)
@@ -257,6 +259,8 @@ func (t *Tracker) Observe(
 		Lost:               lostDelta,
 		DelayVariationMs:   entry.state.lastPacketDelayVariationMs,
 		StreamPacketsTotal: entry.state.packetsTotal,
+		MatchedIP:          ep.ip,
+		MatchedPort:        ep.port,
 		Codec:              codec,
 		Carrier:            labels.Carrier,
 		UAType:             labels.UAType,

@@ -4,6 +4,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/aibudaevv/sip-exporter/internal/service"
 )
 
@@ -165,10 +167,22 @@ type fasEntry struct {
 	direction     string
 }
 
+// fasEndpoint identifies a media endpoint (IP:port) registered from SDP, used to
+// gate FAS clearing by the originating SDP side (offer vs answer).
+type fasEndpoint struct {
+	ip   string
+	port uint16
+}
+
 type fasTracker struct {
 	mu        sync.Mutex
 	threshold time.Duration
 	entries   map[string]fasEntry
+	// offer holds the offer-side media endpoints (from the INVITE SDP) per
+	// Call-ID. Answer-side media is detected by its arrival at an offer endpoint
+	// (callee→caller); only such media defeats FAS. When empty for a call (INVITE
+	// SDP was not cached), the side is unknown and any media clears (legacy).
+	offer map[string]map[fasEndpoint]struct{}
 }
 
 func newFasTracker(threshold time.Duration) *fasTracker {
@@ -178,10 +192,11 @@ func newFasTracker(threshold time.Duration) *fasTracker {
 	return &fasTracker{
 		threshold: threshold,
 		entries:   make(map[string]fasEntry),
+		offer:     make(map[string]map[fasEndpoint]struct{}),
 	}
 }
 
-func (t *fasTracker) store(callID string, e fasEntry) {
+func (t *fasTracker) store(callID string, e fasEntry, offerEndpoints []fasEndpoint) {
 	if t == nil || callID == "" {
 		return
 	}
@@ -189,6 +204,13 @@ func (t *fasTracker) store(callID string, e fasEntry) {
 	defer t.mu.Unlock()
 	e.createdAt = time.Now()
 	t.entries[callID] = e
+	if len(offerEndpoints) > 0 {
+		set := make(map[fasEndpoint]struct{}, len(offerEndpoints))
+		for _, ep := range offerEndpoints {
+			set[ep] = struct{}{}
+		}
+		t.offer[callID] = set
+	}
 }
 
 func (t *fasTracker) clear(callID string) {
@@ -198,6 +220,7 @@ func (t *fasTracker) clear(callID string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.entries, callID)
+	delete(t.offer, callID)
 }
 
 func (t *fasTracker) Size() int {
@@ -207,6 +230,33 @@ func (t *fasTracker) Size() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return len(t.entries)
+}
+
+// clearIfAnswerMedia clears the FAS pending entry for callID once the answering
+// side has sent ≥ fasMediaPacketsThreshold forward RTP packets. Answer-side media
+// arrives at a registered offer-side endpoint (callee→caller), so a stream keyed
+// by an offer endpoint proves the answer side sent media. When no offer endpoints
+// are tracked (INVITE offer SDP not cached), the side is unknown and any media
+// clears the entry (legacy fallback, avoids new false FAS alerts).
+func (t *fasTracker) clearIfAnswerMedia(callID string, ep fasEndpoint, packetsTotal uint64) {
+	if t == nil || callID == "" || packetsTotal < fasMediaPacketsThreshold {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if _, ok := t.entries[callID]; !ok {
+		return
+	}
+	offer, hasOffer := t.offer[callID]
+	if !hasOffer || len(offer) == 0 {
+		delete(t.entries, callID)
+		delete(t.offer, callID)
+		return
+	}
+	if _, isOffer := offer[ep]; isOffer {
+		delete(t.entries, callID)
+		delete(t.offer, callID)
+	}
 }
 
 func (t *fasTracker) sweep(metricser service.Metricser) {
@@ -219,7 +269,16 @@ func (t *fasTracker) sweep(metricser service.Metricser) {
 	for callID, e := range t.entries {
 		if e.createdAt.Before(cutoff) {
 			metricser.FasCall(e.carrier, e.uaType, e.sourceCountry, e.direction)
+			zap.L().Warn("FAS suspected: 200 OK received but no answer-side RTP within threshold",
+				zap.String("call_id", callID),
+				zap.String("carrier", e.carrier),
+				zap.String("ua_type", e.uaType),
+				zap.String("source_country", e.sourceCountry),
+				zap.String("direction", e.direction),
+				zap.Duration("threshold", t.threshold),
+			)
 			delete(t.entries, callID)
+			delete(t.offer, callID)
 		}
 	}
 }

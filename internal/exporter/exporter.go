@@ -1107,10 +1107,10 @@ func (e *exporter) handleRTP(
 		// No correlated media endpoint for this flow → drop.
 		return "", nil
 	}
-	if res.StreamPacketsTotal >= fasMediaPacketsThreshold {
-		e.fasTracker.clear(res.CallID)
-	}
 	if res.Counted {
+		e.fasTracker.clearIfAnswerMedia(
+			res.CallID, fasEndpoint{ip: res.MatchedIP, port: res.MatchedPort}, res.StreamPacketsTotal,
+		)
 		e.services.metricser.UpdateRTPPackets(res.Carrier, res.UAType, res.Codec, res.SourceCountry, res.Direction)
 		if res.StreamPacketsTotal > 1 {
 			e.services.metricser.UpdateRTPPDV(
@@ -1469,17 +1469,22 @@ func (e *exporter) handleInvite200OK(
 	labels := mediatracker.MediaLabels{
 		Carrier: carrier, UAType: uaType, SourceCountry: sourceCountry, CallID: callID, Direction: direction,
 	}
+	var offerEndpoints []fasEndpoint
 	mediaEndpoints := 0
 	if offerSDP, ok := e.takeInviteSDP(callID); ok {
-		mediaEndpoints += e.registerMediaEndpoints(offerSDP, labels)
+		eps := e.registerMediaEndpoints(offerSDP, labels)
+		mediaEndpoints += len(eps)
+		for _, ep := range eps {
+			offerEndpoints = append(offerEndpoints, fasEndpoint{ip: ep.IP, port: ep.Port})
+		}
 	}
 	if isSDPContentType(packet.ContentType) {
-		mediaEndpoints += e.registerMediaEndpoints(packet.Body, labels)
+		mediaEndpoints += len(e.registerMediaEndpoints(packet.Body, labels))
 	}
 	if !isReinvite && mediaEndpoints > 0 {
 		e.fasTracker.store(callID, fasEntry{
 			carrier: carrier, uaType: uaType, sourceCountry: sourceCountry, direction: direction,
-		})
+		}, offerEndpoints)
 	}
 	return nil
 }
@@ -1902,8 +1907,8 @@ func (e *exporter) cleanupInviteSDP() {
 // registerMediaEndpoints parses an SDP body and registers each audio media
 // endpoint in the media tracker under the given dialog labels. Returns the
 // number of endpoints registered (0 for held/inactive/IPv6 SDP).
-func (e *exporter) registerMediaEndpoints(body []byte, labels mediatracker.MediaLabels) int {
-	count := 0
+func (e *exporter) registerMediaEndpoints(body []byte, labels mediatracker.MediaLabels) []mediatracker.MediaEndpoint {
+	var endpoints []mediatracker.MediaEndpoint
 	for _, m := range sdp.Parse(body) {
 		ml := labels
 		ml.SDPCodecs = m.Codecs
@@ -1913,9 +1918,9 @@ func (e *exporter) registerMediaEndpoints(body []byte, labels mediatracker.Media
 		zap.L().Debug("RTP media endpoint registered",
 			zap.String("ip", m.IP), zap.Uint16("port", m.Port),
 			zap.String("call_id", labels.CallID))
-		count++
+		endpoints = append(endpoints, mediatracker.MediaEndpoint{IP: m.IP, Port: m.Port})
 	}
-	return count
+	return endpoints
 }
 
 // ipPortToKey converts an IP address string and port to a BPF map key.
