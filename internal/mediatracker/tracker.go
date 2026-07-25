@@ -93,30 +93,42 @@ type (
 	// Tracker keeps per-flow RTP statistics and correlates RTP flows to SIP
 	// dialogs via the media-endpoint map (IP:port → labels) populated from SDP.
 	Tracker struct {
-		mu      sync.Mutex
-		streams map[streamKey]*streamEntry
-		media   map[endpointKey]MediaLabels
-		callRTP map[string]map[endpointKey]struct{} // per-CallID endpoints that ever had RTP (TTL-independent)
-		ttl     time.Duration
-		now     func() time.Time
+		mu        sync.Mutex
+		streams   map[streamKey]*streamEntry
+		media     map[endpointKey]MediaLabels
+		callRTP   map[string]map[endpointKey]struct{} // per-CallID endpoints that ever had RTP (TTL-independent)
+		ssrcIndex map[uint32][]streamKey              // SSRC → stream keys (multi-valued: an SSRC may be reused across endpoints)
+		ttl       time.Duration
+		now       func() time.Time
 	}
 
 	// streamEntry bundles a stream state with its correlation labels.
 	streamEntry struct {
-		state  *StreamState
-		labels MediaLabels
-		codec  string
+		state        *StreamState
+		labels       MediaLabels
+		codec        string
+		rtcpPrevLoss uint32 // last RTCP cumulative-lost seen for this SSRC (delta tracking)
+		rtcpLossSeen bool   // whether an RTCP RR has established the loss baseline
+	}
+
+	// RTCPContext is the resolved context of an RTP stream needed to emit RTCP
+	// metrics for a report block that names the stream's SSRC.
+	RTCPContext struct {
+		Labels    MediaLabels
+		Codec     string
+		ClockRate uint32
 	}
 )
 
 // NewTracker creates a Tracker that expires idle streams after ttl.
 func NewTracker(ttl time.Duration) *Tracker {
 	return &Tracker{
-		streams: make(map[streamKey]*streamEntry),
-		media:   make(map[endpointKey]MediaLabels),
-		callRTP: make(map[string]map[endpointKey]struct{}),
-		ttl:     ttl,
-		now:     time.Now,
+		streams:   make(map[streamKey]*streamEntry),
+		media:     make(map[endpointKey]MediaLabels),
+		callRTP:   make(map[string]map[endpointKey]struct{}),
+		ssrcIndex: make(map[uint32][]streamKey),
+		ttl:       ttl,
+		now:       time.Now,
 	}
 }
 
@@ -166,6 +178,7 @@ func (t *Tracker) Unregister(callID string) (RTPDialogResult, []MediaEndpoint) {
 
 	for k, e := range t.streams {
 		if e.labels.CallID == callID {
+			t.removeSSRCIndex(k)
 			delete(t.streams, k)
 		}
 	}
@@ -235,6 +248,7 @@ func (t *Tracker) Observe(
 			codec:  codec,
 		}
 		t.streams[key] = entry
+		t.ssrcIndex[h.SSRC] = append(t.ssrcIndex[h.SSRC], key)
 		if t.callRTP[labels.CallID] == nil {
 			t.callRTP[labels.CallID] = make(map[endpointKey]struct{})
 		}
@@ -323,9 +337,129 @@ func (t *Tracker) Cleanup() {
 	now := t.now()
 	for key, e := range t.streams {
 		if now.Sub(e.state.lastArrival) > t.ttl {
+			t.removeSSRCIndex(key)
 			delete(t.streams, key)
 		}
 	}
+}
+
+// removeSSRCIndex drops a stream key from the SSRC index. Caller holds t.mu.
+func (t *Tracker) removeSSRCIndex(key streamKey) {
+	keys := t.ssrcIndex[key.ssrc]
+	for i, k := range keys {
+		if k == key {
+			if len(keys) == 1 {
+				delete(t.ssrcIndex, key.ssrc)
+				return
+			}
+			t.ssrcIndex[key.ssrc] = append(keys[:i], keys[i+1:]...)
+			return
+		}
+	}
+}
+
+// LookupBySSRC resolves an SSRC (carried in an RTCP report block) to the context of
+// the tracked RTP stream sending with that SSRC, enabling RTCP↔RTP correlation.
+// When multiple streams share an SSRC (reuse across endpoints), the RTCP packet's
+// endpoints disambiguate — destination first (NAT-robust, mirroring lookupLabels),
+// then source. A unique SSRC resolves even without an endpoint match; an ambiguous
+// SSRC (collision) without a matching endpoint returns false (cannot attribute
+// safely). Returns false if no stream tracks the SSRC.
+//
+// Read-only: use this when you need just the context. The RTCP metric hot path
+// uses RecordRTCP, which resolves the context and records the loss delta under a
+// single lock (do NOT pair this lookup with a separate mutation — that reintroduces
+// a TOCTOU window).
+func (t *Tracker) LookupBySSRC(
+	ssrc uint32,
+	srcIP string, srcPort uint16,
+	dstIP string, dstPort uint16,
+) (RTCPContext, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	e := t.selectStream(ssrc, srcIP, srcPort, dstIP, dstPort)
+	if e == nil {
+		return RTCPContext{}, false
+	}
+	return rtcpContext(e), true
+}
+
+// RecordRTCP records an RTCP RR observation for an SSRC and atomically returns
+// the resolved stream context together with the cumulative-loss delta since the
+// previous RR — the amount to add to rtcp_cumulative_loss_total. Performing the
+// lookup and the delta update under a single lock guarantees the labels and the
+// delta attribute to the SAME stream (no TOCTOU window where Cleanup could
+// remove or replace the stream between a separate lookup and update). The first
+// observation establishes the baseline and returns a zero delta (avoiding a
+// rate() spike from cumulative-0 at hot start). A 24-bit wrap or session reset
+// (current less than previous) yields the current value as the delta. Returns
+// ok=false when the SSRC is untracked or cannot be attributed unambiguously
+// (caller counts it as an uncorrelated report).
+func (t *Tracker) RecordRTCP(
+	ssrc uint32, cumulative uint32,
+	srcIP string, srcPort uint16,
+	dstIP string, dstPort uint16,
+) (RTCPContext, uint64, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	e := t.selectStream(ssrc, srcIP, srcPort, dstIP, dstPort)
+	if e == nil {
+		return RTCPContext{}, 0, false
+	}
+	var delta uint64
+	switch {
+	case !e.rtcpLossSeen:
+		e.rtcpLossSeen = true
+	case cumulative >= e.rtcpPrevLoss:
+		delta = uint64(cumulative - e.rtcpPrevLoss)
+	default:
+		delta = uint64(cumulative) // 24-bit wrap or session reset
+	}
+	e.rtcpPrevLoss = cumulative
+	return rtcpContext(e), delta, true
+}
+
+// selectStream finds the tracked stream for an SSRC, disambiguating collisions by
+// the RTCP packet's endpoints (destination first, then source). A unique SSRC
+// (one stream) resolves even without an endpoint match — there is no collision
+// to mis-attribute. An ambiguous SSRC (collision) without a matching endpoint
+// returns nil so the caller counts the report as uncorrelated rather than
+// attributing it to an arbitrary stream's labels. Caller holds t.mu.
+func (t *Tracker) selectStream(
+	ssrc uint32,
+	srcIP string, srcPort uint16,
+	dstIP string, dstPort uint16,
+) *streamEntry {
+	keys, ok := t.ssrcIndex[ssrc]
+	if !ok || len(keys) == 0 {
+		return nil
+	}
+	for _, ep := range []endpointKey{
+		{ip: dstIP, port: dstPort},
+		{ip: srcIP, port: srcPort},
+	} {
+		for _, k := range keys {
+			if k.endpoint != ep {
+				continue
+			}
+			if e, found := t.streams[k]; found {
+				return e
+			}
+		}
+	}
+	if len(keys) == 1 {
+		// Unique SSRC: no collision possible, safe to attribute.
+		if e, found := t.streams[keys[0]]; found {
+			return e
+		}
+	}
+	// Ambiguous SSRC without an endpoint match: cannot attribute safely.
+	return nil
+}
+
+// rtcpContext builds the RTCP correlation context from a stream entry.
+func rtcpContext(e *streamEntry) RTCPContext {
+	return RTCPContext{Labels: e.labels, Codec: e.codec, ClockRate: e.state.clockRate}
 }
 
 // StreamCount returns the number of active RTP streams.

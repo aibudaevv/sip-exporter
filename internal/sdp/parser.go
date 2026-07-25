@@ -23,6 +23,9 @@ const (
 type Media struct {
 	IP         string           // connection IP (per-media c= || session c= || o= fallback)
 	Port       uint16           // port from m=audio <port>
+	RTCPPort   uint16           // RTCP port from a=rtcp (RFC 3605); 0 when absent
+	RTCPAddr   string           // unicast RTCP address from a=rtcp (RFC 3605); "" when absent or IPv6 (capture is IPv4-only)
+	RTCPMux    bool             // a=rtcp-mux (RFC 5761): RTCP multiplexed on the RTP port
 	Codecs     map[uint8]string // payload type → codec name (from a=rtpmap)
 	ClockRates map[uint8]uint32 // payload type → clock rate Hz (from a=rtpmap)
 	SRTP       bool             // DTLS-SRTP fingerprint present (a=fingerprint): media setup needs extra time
@@ -121,6 +124,10 @@ scan:
 			media.SRTP = true
 		case strings.HasPrefix(line, "a=rtpmap:"):
 			parseRtpmap(line, media.Codecs, media.ClockRates)
+		case strings.HasPrefix(line, "a=rtcp:"):
+			media.RTCPPort, media.RTCPAddr = parseRTCPAttr(line)
+		case line == "a=rtcp-mux":
+			media.RTCPMux = true
 		}
 	}
 	consumed := j - start
@@ -191,6 +198,29 @@ func parseRtpmap(line string, codecs map[uint8]string, clocks map[uint8]uint32) 
 	}
 	codecs[uint8(pt)] = codec
 	clocks[uint8(pt)] = uint32(clock)
+}
+
+// parseRTCPAttr parses "a=rtcp:<port>[ <nettype> <addrtype> <addr>]" (RFC 3605)
+// and returns the port and, when present, the unicast RTCP address. RTCP may
+// live on a different host than the c= connection address; only IPv4 addresses
+// are captured (the eBPF path is IPv4-only), so IPv6 addrtypes are ignored. The
+// port is 0 on a missing/invalid value; the address is "" when absent.
+func parseRTCPAttr(line string) (uint16, string) {
+	rest := strings.TrimPrefix(line, "a=rtcp:")
+	fields := strings.Fields(rest)
+	if len(fields) < 1 {
+		return 0, ""
+	}
+	p, err := strconv.Atoi(fields[0])
+	if err != nil || p <= 0 || p > 65535 {
+		return 0, ""
+	}
+	port := uint16(p)
+	addr := ""
+	if len(fields) >= 4 && fields[1] == "IN" && fields[2] == ipVerIPv4 {
+		addr = fields[3]
+	}
+	return port, addr
 }
 
 // detectIPVer returns "IP4" for IPv4 literals and "IP6" otherwise.

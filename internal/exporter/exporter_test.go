@@ -77,6 +77,21 @@ type mockMetricser struct {
 	rtpDuplicateCalls         int
 	rtpOutOfOrderCalls        int
 	rtpDroppedCount           int
+	parseErrorCalls           int
+	parseErrorType            string
+	rtcpJitterCalls           int
+	rtcpJitterVal             float64
+	rtcpLossFracCalls         int
+	rtcpLossFracVal           float64
+	rtcpCumLossCalls          int
+	rtcpCumLossVal            uint64
+	rtcpRTTCalls              int
+	rtcpRTTVal                float64
+	rtcpReportCalls           int
+	rtcpReportType            string
+	rtcpReportCarrier         string
+	rtcpReportDirection       string
+	rtcpOrphanCalls           int
 }
 
 func (m *mockMetricser) UpdateSessions(_ []service.LabeledCount) {}
@@ -207,7 +222,10 @@ func (m *mockMetricser) SystemError() {
 	m.systemErrorCalled = true
 }
 
-func (m *mockMetricser) ParseError(string)                  {}
+func (m *mockMetricser) ParseError(errorType string) {
+	m.parseErrorCalls++
+	m.parseErrorType = errorType
+}
 func (m *mockMetricser) SocketStats(_ []service.SocketStat) {}
 func (m *mockMetricser) RTPDropped()                        { m.rtpDroppedCount++ }
 func (m *mockMetricser) UpdateChannelLength(int)            {}
@@ -246,6 +264,32 @@ func (m *mockMetricser) UpdateRTPLossDistribution(string, string, string, string
 func (m *mockMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount) {}
 func (m *mockMetricser) OneWayCall(string, string, string, string)       {}
 func (m *mockMetricser) MissingRTP(string, string, string, string)       {}
+
+func (m *mockMetricser) UpdateRTCPJitter(_, _, _, _, _ string, jitterMs float64) {
+	m.rtcpJitterCalls++
+	m.rtcpJitterVal = jitterMs
+}
+func (m *mockMetricser) UpdateRTCPLossFraction(_, _, _, _, _ string, fractionPercent float64) {
+	m.rtcpLossFracCalls++
+	m.rtcpLossFracVal = fractionPercent
+}
+func (m *mockMetricser) UpdateRTCPCumulativeLoss(_, _, _, _, _ string, lostDelta uint64) {
+	m.rtcpCumLossCalls++
+	m.rtcpCumLossVal = lostDelta
+}
+func (m *mockMetricser) UpdateRTCPRTT(_, _, _, _, _ string, rttMs float64) {
+	m.rtcpRTTCalls++
+	m.rtcpRTTVal = rttMs
+}
+func (m *mockMetricser) UpdateRTCPReport(carrier, _, _, direction, reportType string) {
+	m.rtcpReportCalls++
+	m.rtcpReportType = reportType
+	m.rtcpReportCarrier = carrier
+	m.rtcpReportDirection = direction
+}
+func (m *mockMetricser) UpdateRTCPOrphan() {
+	m.rtcpOrphanCalls++
+}
 
 type dialogCreateArgs struct {
 	expiresAt          time.Time
@@ -4564,6 +4608,16 @@ func (m *carrierTrackingMetricser) UpdateRTPLossDistribution(string, string, str
 func (m *carrierTrackingMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount) {}
 func (m *carrierTrackingMetricser) OneWayCall(string, string, string, string)       {}
 func (m *carrierTrackingMetricser) MissingRTP(string, string, string, string)       {}
+
+func (m *carrierTrackingMetricser) UpdateRTCPJitter(string, string, string, string, string, float64) {
+}
+func (m *carrierTrackingMetricser) UpdateRTCPLossFraction(string, string, string, string, string, float64) {
+}
+func (m *carrierTrackingMetricser) UpdateRTCPCumulativeLoss(string, string, string, string, string, uint64) {
+}
+func (m *carrierTrackingMetricser) UpdateRTCPRTT(string, string, string, string, string, float64) {}
+func (m *carrierTrackingMetricser) UpdateRTCPReport(string, string, string, string, string)       {}
+func (m *carrierTrackingMetricser) UpdateRTCPOrphan()                                             {}
 
 // ==================== SIP message builders for MC/DC tests ====================
 

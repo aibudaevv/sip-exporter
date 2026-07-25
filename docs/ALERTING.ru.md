@@ -338,6 +338,49 @@ groups:
         annotations:
           summary: "Высокая Packet Delay Variation RTP"
           description: "95-й перцентиль сырого PDV для оператора {{ $labels.carrier }} — {{ $value | printf \"%.1f\" }}мс. PDV выявляет bursty-всплески задержки, которые сглаженный jitter усредняет — значения выше 100мс указывают на устойчивую вариацию задержки, переполняющую jitter buffer."
+
+      # Алерты RTCP (RFC 3550) — что эндпоинт переживает сам.
+      - alert: SIPRTCPRoundTripHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtcp_rtt_milliseconds_bucket[5m]))) > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Высокий RTT из RTCP"
+          description: "95-й перцентиль RTT (из LSR/DLSR блока RR) для оператора {{ $labels.carrier }} — {{ $value | printf \"%.0f\" }}мс. Высокий RTT вызывает эхо и затрудняет диалог; проверьте маршрутизацию и очереди."
+
+      - alert: SIPRTCPReportedJitterHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtcp_jitter_milliseconds_bucket[5m]))) > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Высокий endpoint-reported jitter (RTCP)"
+          description: "95-й перцентиль отрепорченного через RTCP jitter для оператора {{ $labels.carrier }} — {{ $value | printf \"%.1f\" }}мс. Собственное наблюдение приёмника превышает 50мс — его jitter-буфер в напряжении."
+
+      - alert: SIPRTCPReportedLossHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtcp_loss_fraction_percent_bucket[5m]))) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Высокая endpoint-reported потеря (RTCP)"
+          description: "95-й перцентиль отрепорченной через RTCP доли потерь для оператора {{ $labels.carrier }} — {{ $value | printf \"%.1f\" }}%. Приёмник теряет >5% пакетов — самый прямой QoE-сигнал; проверьте медиа-путь."
+
+      - alert: SIPRTCPSilence
+        expr: |
+          (sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m])) > 10)
+          unless
+          (sum by (carrier) (rate(sip_exporter_rtcp_reports_total[5m])) > 0)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RTCP не поступает при текучем RTP (оператор {{ $labels.carrier }})"
+          description: "RTP-пакеты идут для оператора {{ $labels.carrier }}, но RTCP-репорты не поступают примерно 15 минут (5-минутное окно rate плюс 10-минутная выдержка). RTCP обязателен (RFC 3550) — его отсутствие означает, что RTCP фильтруется, эндпоинты его не шлют, либо сломан захват/регистрация (проверьте sip_exporter_rtcp_orphan_reports_total)."
       ```
 
 ### Алерты здоровья системы
