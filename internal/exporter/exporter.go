@@ -1130,6 +1130,14 @@ func (e *exporter) updateRTPMetrics() {
 	tmp := make(map[aggKey]int)
 	for _, s := range stats {
 		e.services.metricser.UpdateRTPJitter(s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.Direction, s.JitterMs)
+		// PDV is a raw instantaneous value, not an EWMA: emit only when a fresh
+		// forward packet arrived since the previous snapshot, otherwise an idle
+		// stream would re-enter its last spike every tick until TTL expiry.
+		if s.PDVFresh {
+			e.services.metricser.UpdateRTPPDV(
+				s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.Direction, s.LastDelayVariationMs,
+			)
+		}
 		e.services.metricser.UpdateRTPMOS(s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.Direction, s.MOS)
 		e.services.metricser.UpdateRTPMOSVariants(
 			s.Carrier, s.UAType, s.Codec, s.SourceCountry, s.Direction,

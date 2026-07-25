@@ -139,6 +139,7 @@ type (
 		rtpDuplicate       *prometheus.CounterVec
 		rtpOutOfOrder      *prometheus.CounterVec
 		rtpJitter          *prometheus.HistogramVec
+		rtpPDV             *prometheus.HistogramVec
 		rtpMOS             *prometheus.HistogramVec
 		rtpMOSF1           *prometheus.HistogramVec
 		rtpMOSF2           *prometheus.HistogramVec
@@ -201,6 +202,7 @@ type (
 		UpdateRTPDuplicates(carrier, uaType, codec, sourceCountry, direction string)
 		UpdateRTPOutOfOrder(carrier, uaType, codec, sourceCountry, direction string)
 		UpdateRTPJitter(carrier, uaType, codec, sourceCountry, direction string, jitterMs float64)
+		UpdateRTPPDV(carrier, uaType, codec, sourceCountry, direction string, pdvMs float64)
 		UpdateRTPMOS(carrier, uaType, codec, sourceCountry, direction string, mos float64)
 		UpdateRTPMOSVariants(carrier, uaType, codec, sourceCountry, direction string, f1, f2, adapt float64)
 		UpdateRTPRFactor(carrier, uaType, codec, sourceCountry, direction string, rFactor float64)
@@ -596,6 +598,7 @@ func (m *metrics) initVQHistograms(reg *prometheus.Registry) {
 
 func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 	jitterBuckets := []float64{0.1, 0.5, 1, 5, 10, 20, 50, 100, 200, 500}
+	pdvBuckets := []float64{1, 5, 10, 25, 50, 70, 90, 120, 150, 200, 300, 500}
 	mosBuckets := []float64{1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0}
 	rFactorBuckets := []float64{10, 20, 30, 40, 50, 60, 70, 80, 85, 90, 93, 100}
 	lossDensityBuckets := []float64{10, 25, 50, 75, 100}
@@ -616,6 +619,11 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 		Name:    "sip_exporter_rtp_jitter_milliseconds",
 		Help:    "RTP interarrival jitter in milliseconds (RFC 3550 A.8)",
 		Buckets: jitterBuckets,
+	}, rl, reg)
+	m.rtpPDV = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_rtp_pdv_milliseconds",
+		Help:    "RTP Packet Delay Variation in milliseconds: raw per-packet deviation (|arrivalDelta - tsDelta|), exposing jitter spikes smoothed by rtp_jitter_milliseconds",
+		Buckets: pdvBuckets,
 	}, rl, reg)
 	m.rtpMOS = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_rtp_mos_score",
@@ -1140,6 +1148,10 @@ func (m *metrics) UpdateRTPOutOfOrder(carrier, uaType, codec, sourceCountry, dir
 
 func (m *metrics) UpdateRTPJitter(carrier, uaType, codec, sourceCountry, direction string, jitterMs float64) {
 	m.rtpJitter.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(jitterMs)
+}
+
+func (m *metrics) UpdateRTPPDV(carrier, uaType, codec, sourceCountry, direction string, pdvMs float64) {
+	m.rtpPDV.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(pdvMs)
 }
 
 func (m *metrics) UpdateRTPMOS(carrier, uaType, codec, sourceCountry, direction string, mos float64) {

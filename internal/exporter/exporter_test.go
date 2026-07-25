@@ -226,6 +226,7 @@ func (m *mockMetricser) UpdateRTPOutOfOrder(_, _, _, _, _ string) {
 	m.rtpOutOfOrderCalls++
 }
 func (m *mockMetricser) UpdateRTPJitter(string, string, string, string, string, float64) {}
+func (m *mockMetricser) UpdateRTPPDV(string, string, string, string, string, float64)    {}
 func (m *mockMetricser) UpdateRTPMOS(string, string, string, string, string, float64)    {}
 func (m *mockMetricser) UpdateRTPMOSVariants(string, string, string, string, string, float64, float64, float64) {
 }
@@ -4013,6 +4014,7 @@ func (m *carrierTrackingMetricser) UpdateRTPLoss(string, string, string, string,
 func (m *carrierTrackingMetricser) UpdateRTPDuplicates(string, string, string, string, string)      {}
 func (m *carrierTrackingMetricser) UpdateRTPOutOfOrder(string, string, string, string, string)      {}
 func (m *carrierTrackingMetricser) UpdateRTPJitter(string, string, string, string, string, float64) {}
+func (m *carrierTrackingMetricser) UpdateRTPPDV(string, string, string, string, string, float64)    {}
 func (m *carrierTrackingMetricser) UpdateRTPMOS(string, string, string, string, string, float64)    {}
 func (m *carrierTrackingMetricser) UpdateRTPMOSVariants(
 	string, string, string, string, string, float64, float64, float64,
