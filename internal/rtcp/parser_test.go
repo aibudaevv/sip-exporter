@@ -187,18 +187,59 @@ func TestParse_CumulativeLost24Bit(t *testing.T) {
 	require.Equal(t, uint32(0xFFFFFF), reports[0].Blocks[0].CumulativeLost)
 }
 
-// FuzzParse ensures Parse never panics on arbitrary input. The caller's
-// goroutine has no recover(); a panic in Parse would stall the whole exporter.
-// A fuzz campaign (456k execs at authoring time) found no crashers.
+// FuzzParse ensures Parse never panics on arbitrary input AND that successful
+// parses are deterministic and structurally valid. The caller's packet-consuming
+// goroutine has no recover(); a panic would stall the whole exporter. Beyond the
+// "no panic" contract, the fuzzer verifies: (1) parsing the same input twice
+// yields identical results (rules out uninitialized-memory reads), and (2) on a
+// successful parse every block's 24-bit cumulative-lost field fits in 24 bits
+// (catches extraction off-by-ones that don't crash).
 func FuzzParse(f *testing.F) {
-	f.Add(makeRR(0x1, makeBlock(0x2, 0, 0, 0, 0, 0, 0)))
-	f.Add(makeSR(0x1, 0, 0, 0, 0))
+	// Seeds: valid compounds, edge cases, and structural traps.
+	f.Add(makeRR(0x1, makeBlock(0x2, 0, 0, 0, 0, 0, 0))) // 1-block RR
+	f.Add(makeSR(0x1, 0, 0, 0, 0))                       // 0-block SR
 	f.Add(append(makeSR(0x1, 0, 0, 0, 0), makeRawPT(202, 3)...))
-	f.Add([]byte{0x80, 0xC8, 0x00, 0x04, 0x00, 0x00, 0x00, 0x01})
-	f.Add([]byte{0x00, 0x00, 0x00})
-	f.Add([]byte{})
-	f.Fuzz(func(_ *testing.T, data []byte) {
-		// The contract: never panic. Any return value (reports, error) is acceptable.
-		_, _ = Parse(data)
+	f.Add(makeRR(0x3, makeBlock(0x4, 0, 0xFFFFFF, 0, 0, 0, 0))) // max 24-bit cumulative
+	f.Add(makeRR(0x5, maxReportBlocks(0x6)...))                 // RC=31 (5-bit max report count)
+	f.Add(append(makeRR(0x7, makeBlock(0x8, 0, 0, 0, 0, 0, 0)),
+		makeRR(0x9, makeBlock(0xA, 0, 0, 0, 0, 0, 0))...)) // multi-RR compound
+	f.Add(append(append(makeRR(0xB, makeBlock(0xC, 0, 0, 0, 0, 0, 0)),
+		makeRawPT(203, 2)...), makeRawPT(204, 2)...)) // RR+BYE+APP
+	f.Add([]byte{0x80, 0xC8, 0x00, 0x04, 0x00, 0x00, 0x00, 0x01}) // truncated-declared-length RR
+	// P=1 (padding bit set), RC=0: parser ignores P and advances by length.
+	f.Add([]byte{0xA0, PTReceiverReport, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0, 0, 0, 0})
+	f.Add([]byte{0x80, PTReceiverReport, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}) // lengthWords=0 (pktLen=4)
+	// Valid RR followed by a sub-packet with V=0 (parser does not re-check version
+	// on trailing sub-packets — exercises iteration by length past non-V2 tails).
+	f.Add(append(makeRR(0xD, makeBlock(0xE, 0, 0, 0, 0, 0, 0)),
+		[]byte{0x00, 202, 0x00, 0x01, 0xAB, 0xAB, 0xAB, 0xAB}...))
+	f.Add([]byte{0x00, 0x00, 0x00}) // short zeros
+	f.Add([]byte{})                 // empty
+	f.Fuzz(func(t *testing.T, data []byte) {
+		r1, err1 := Parse(data)
+		r2, err2 := Parse(data)
+		// Determinism: the same input must produce the same outcome every time.
+		require.Equal(t, err1 != nil, err2 != nil, "error-ness must be deterministic")
+		require.Equal(t, r1, r2, "parsed reports must be deterministic")
+		if err1 != nil {
+			return
+		}
+		// Structural validity on successful parses: the 24-bit cumulative-lost
+		// field must never exceed 0xFFFFFF regardless of input bytes.
+		for _, rep := range r1 {
+			for _, blk := range rep.Blocks {
+				require.LessOrEqual(t, blk.CumulativeLost, uint32(0xFFFFFF),
+					"24-bit cumulative-lost must not exceed 0xFFFFFF")
+			}
+		}
 	})
+}
+
+// maxReportBlocks returns 31 report blocks (the 5-bit RC maximum) for fuzz seeds.
+func maxReportBlocks(ssrc uint32) [][]byte {
+	blocks := make([][]byte, 31)
+	for i := range blocks {
+		blocks[i] = makeBlock(ssrc+uint32(i), 0, 0, 0, 0, 0, 0)
+	}
+	return blocks
 }
