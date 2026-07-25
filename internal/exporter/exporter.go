@@ -1525,6 +1525,9 @@ func (e *exporter) handleInvite200OK(
 			carrier: carrier, uaType: uaType, sourceCountry: sourceCountry, direction: direction,
 		}, offerEndpoints, answerSRTP)
 	}
+	if isReinvite {
+		e.fasTracker.updateOffer(callID, offerEndpoints, answerSRTP)
+	}
 	return nil
 }
 

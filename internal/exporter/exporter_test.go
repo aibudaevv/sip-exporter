@@ -2133,6 +2133,13 @@ const (
 	// gating can distinguish which side sent media.
 	fasSdpOffer = "v=0\r\no=- 1 1 IN IP4 10.0.0.2\r\ns=-\r\n" +
 		"c=IN IP4 10.0.0.2\r\nt=0 0\r\nm=audio 5004 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n"
+	// fasSdpOffer2 is a re-INVITE offer with a changed caller endpoint (NAT
+	// remap / codec renegotiation), used to verify FAS offer-update on re-INVITE.
+	fasSdpOffer2 = "v=0\r\no=- 1 1 IN IP4 10.0.0.3\r\ns=-\r\n" +
+		"c=IN IP4 10.0.0.3\r\nt=0 0\r\nm=audio 5004 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n"
+	fasSdpSRTP = "v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\n" +
+		"c=IN IP4 10.0.0.1\r\nt=0 0\r\nm=audio 5004 RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\n" +
+		"a=fingerprint:sha-256 AB:CD:01:02\r\na=setup:actpass\r\n"
 )
 
 func newFasTestExporter(mm *mockMetricser, fasThreshold time.Duration) *exporter {
@@ -2426,6 +2433,66 @@ func TestFAS_ReinviteDoesNotOpenPending(t *testing.T) {
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), true),
 	)
 	require.Empty(t, e.fasTracker.entries, "re-INVITE refreshes a dialog, not a new answer → no FAS pending")
+}
+
+// TestFAS_Reinvite_UpdatesOfferEndpoints verifies that a re-INVITE changing the
+// caller's media endpoint updates the FAS offer map — otherwise answer-side
+// media arriving at the new endpoint would NOT clear FAS (stale offer).
+func TestFAS_Reinvite_UpdatesOfferEndpoints(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Hour)
+
+	// Initial call: INVITE offer 10.0.0.2:5004 → 200 OK answer 10.0.0.1:5004.
+	e.storeInviteSDP("call-1", []byte(fasSdpOffer))
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
+	)
+	require.Contains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: "10.0.0.2", port: 5004},
+		"initial offer endpoint must be tracked")
+
+	// Re-INVITE: caller changes endpoint to 10.0.0.3:5004.
+	e.storeInviteSDP("call-1", []byte(fasSdpOffer2))
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), true),
+	)
+
+	require.Contains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: "10.0.0.3", port: 5004},
+		"re-INVITE must update offer to the new endpoint")
+	require.NotContains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: "10.0.0.2", port: 5004},
+		"stale offer endpoint must be replaced")
+
+	// Answer-side media at the NEW offer endpoint must clear FAS.
+	for _, seq := range []uint16{1, 2} {
+		_, err := e.handleRTP(net.ParseIP("10.0.0.1"), 5004, net.ParseIP("10.0.0.3"), 5004, fasRTPPacket(seq))
+		require.NoError(t, err)
+	}
+	require.Empty(t, e.fasTracker.entries, "answer-side RTP at re-INVITE offer endpoint must clear FAS")
+}
+
+// TestFAS_Reinvite_SRTP_ExtendsDeadline verifies that a re-INVITE upgrading
+// plain-RTP to SRTP extends the FAS deadline by the grace window — otherwise
+// the sweep fires on the original (too-short) plain-RTP deadline.
+func TestFAS_Reinvite_SRTP_ExtendsDeadline(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, 100*time.Millisecond)
+
+	// Initial call with plain RTP: deadline = now + 100ms (no grace).
+	e.storeInviteSDP("call-1", []byte(fasSdpOffer))
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
+	)
+	origDeadline := e.fasTracker.entries["call-1"].deadline
+
+	// Re-INVITE upgrades to SRTP: deadline must extend by fasSRTPGrace.
+	e.storeInviteSDP("call-1", []byte(fasSdpOffer))
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpSRTP), true),
+	)
+	newDeadline := e.fasTracker.entries["call-1"].deadline
+	require.True(t, newDeadline.After(origDeadline.Add(fasSRTPGrace-time.Second)),
+		"re-INVITE to SRTP must extend deadline by ~fasSRTPGrace")
+	require.True(t, newDeadline.Equal(e.fasTracker.entries["call-1"].byeFloor),
+		"byeFloor must track the extended deadline for SRTP")
 }
 
 func TestHandleMessage_ReINVITE_ExcludedFromBurst(t *testing.T) {

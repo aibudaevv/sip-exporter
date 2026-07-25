@@ -237,6 +237,39 @@ func (t *fasTracker) store(callID string, e fasEntry, offerEndpoints []fasEndpoi
 	}
 }
 
+// updateOffer replaces the offer endpoints for an existing FAS entry and extends
+// the deadline when the re-INVITE answer indicates SRTP. No-op when the entry was
+// already cleared (media established or sweep fired). The timer is NOT reset —
+// the callee had time to send media before the re-INVITE.
+func (t *fasTracker) updateOffer(callID string, offerEndpoints []fasEndpoint, srtp bool) {
+	if t == nil || callID == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	e, ok := t.entries[callID]
+	if !ok {
+		return
+	}
+	if len(offerEndpoints) > 0 {
+		set := make(map[fasEndpoint]struct{}, len(offerEndpoints))
+		for _, ep := range offerEndpoints {
+			set[ep] = struct{}{}
+		}
+		t.offer[callID] = set
+	} else {
+		delete(t.offer, callID)
+	}
+	if srtp {
+		graceDeadline := e.createdAt.Add(t.threshold + fasSRTPGrace)
+		if e.deadline.Before(graceDeadline) {
+			e.deadline = graceDeadline
+			e.byeFloor = graceDeadline
+		}
+	}
+	t.entries[callID] = e
+}
+
 func (t *fasTracker) clear(callID string) {
 	if t == nil || callID == "" {
 		return
