@@ -17,7 +17,7 @@
 - [Мониторинг ёмкости](#мониторинг-ёмкости) — `sessions_limit`, `sessions_utilization`
 - [Минуты трафика по направлению](#минуты-трафика-по-направлению) — `billable_seconds_total`
 - [Метрики RTP-медиа](#метрики-rtp-медиа) — `rtp_packets_total`, `rtp_mos_score`, `rtp_jitter_milliseconds` и др.
-- [Метрики самомониторинга](#метрики-самомониторинга) — `socket_packets_*`, `channel_*`, `parse_errors_total`, `active_trackers`, `active_dialogs`, `build_info`
+- [Метрики самомониторинга](#метрики-самомониторинга) — `socket_packets_*`, `rtp_dropped_total`, `channel_*`, `parse_errors_total`, `active_trackers`, `active_dialogs`, `build_info`
 - [Метрики производительности RFC 6076](#метрики-производительности-rfc-6076)
   - [SER](#session-establishment-ratio-ser) — Session Establishment Ratio
   - [SEER](#session-establishment-effectiveness-ratio-seer) — Session Establishment Effectiveness Ratio
@@ -31,6 +31,7 @@
   - [SPD](#session-process-duration-spd) — Session Process Duration
   - [TTR](#time-to-first-response-ttr) — Time to First Response
   - [PDD](#post-dial-delay-pdd) — Post Dial Delay
+  - [PBD](#post-bye-delay-pbd) — Post Bye Delay
   - [ORD](#options-response-delay-ord) — OPTIONS Response Delay
   - [LRD](#location-registration-delay-lrd) — Location Registration Delay
 - [Метрики качества голоса (RFC 6035)](#метрики-качества-голоса-rfc-6035) — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
@@ -45,6 +46,7 @@ SIP-метрики используют многоуровневую модел�
 | `carrier` | Базовый (все SIP) | Имя оператора из конфига | Source IP → CIDR-маппинг, разрешается при запросе |
 | `ua_type` | Базовый (все SIP) | Тип UA из конфига | `User-Agent` → regex-маппинг, разрешается при запросе |
 | `source_country` | Базовый (все SIP) | ISO 3166-1 alpha-2 | Страна вызывающего устройства. См. [Лейблы геообогащения](#лейблы-геообогащения) |
+| `direction` | Базовый (все SIP) | `inbound` или `outbound` | Направление трафика с точки зрения сервера. См. [Лейбл direction](#лейбл-direction) |
 | `destination_country` | Только INVITE | ISO alpha-2 или `"unknown"` | Страна назначения по префиксу номера E.164. См. [Лейблы геообогащения](#лейблы-геообогащения) |
 | `caller_host` | Только INVITE (**opt-in**) | IP или домен | Хост-часть SIP URI из заголовка `From` |
 | `called_host` | Только INVITE (**opt-in**) | IP или домен | Хост-часть SIP URI из заголовка `To` |
@@ -54,21 +56,24 @@ SIP-метрики используют многоуровневую модел�
 > | Уровень | Метрики | Полный набор лейблов |
 > |---------|---------|----------------------|
 > | **Системные** | `packets_total`, `system_error_total`, самомониторинг | *(нет)* |
-> | **Базовый** | Все SIP-запросы, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD, VQ-отчёты, sessions, `reinvite_total`, здоровье регистраций (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country` |
+> | **Базовый** | Все SIP-запросы, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD/PBD, VQ-отчёты, sessions, `reinvite_total`, здоровье регистраций (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country, direction` |
 > | **Ошибки рег.** | `register_failure_total` | `carrier, ua_type, source_country, code` |
-> | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country` |
-> | **RTP-диалог** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country` |
-> | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, destination_country, caller_host, called_host` |
-> | **Фрод** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country` |
+> | **Ретрансляции** | `sip_retransmission_total` | `carrier, ua_type, source_country, method` |
+> | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_out_of_order_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country, direction` |
+> | **RTP-диалог** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country, direction` |
+> | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, direction, destination_country, caller_host, called_host, iface` |
+> | **Фрод** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country, direction` |
+> | **Короткие вызовы** | `short_calls_total` | `carrier, ua_type, source_country, threshold` |
+> | **Трафик** | `billable_seconds_total` | `carrier, destination_country, direction` |
 > | **Ёмкость** | `sessions_limit`, `sessions_utilization` | `carrier` |
 
 `carrier` и `ua_type` по умолчанию `"other"`, если не настроены или нет совпадения. `source_country` по умолчанию `"unknown"`, если ни `carrier.country`, ни GeoIP-БД недоступны.
 
 **Пример:**
 ```
-sip_exporter_invite_total{carrier="carrier-a",ua_type="yealink",source_country="RU",destination_country="US",caller_host="10.1.5.20",called_host="sip.example.com"} 1523
-sip_exporter_200_total{carrier="carrier-a",ua_type="yealink",source_country="RU"} 847
-sip_exporter_ser{carrier="carrier-a",ua_type="yealink",source_country="RU"} 95.2
+sip_exporter_invite_total{carrier="carrier-a",ua_type="yealink",source_country="RU",direction="inbound",destination_country="US",caller_host="10.1.5.20",called_host="sip.example.com",iface="ens3"} 1523
+sip_exporter_200_total{carrier="carrier-a",ua_type="yealink",source_country="RU",direction="inbound"} 847
+sip_exporter_ser{carrier="carrier-a",ua_type="yealink",source_country="RU",direction="inbound"} 95.2
 ```
 
 ### Метрики БЕЗ лейблов `carrier` и `ua_type`
@@ -189,9 +194,9 @@ BYE                     | 10.0.1.5   | carrier-A         | IP (запрос)
 
 Результат:
   invite_total{carrier="carrier-A",ua_type="yealink"} += 1
-  invite200OK_total{carrier="carrier-A",ua_type="yealink"} += 1
+  invite_200_total{carrier="carrier-A",ua_type="yealink"} += 1
   sessions{carrier="carrier-A",ua_type="yealink"} = N
-  sessionCompleted_total{carrier="carrier-A",ua_type="yealink"} += 1
+  sdc_total{carrier="carrier-A",ua_type="yealink"} += 1
   SER{carrier="carrier-A",ua_type="yealink"} корректен
 
 Метрики carrier-B: только счётчики ответов для нетрекаемых пакетов (если есть)
@@ -437,6 +442,66 @@ sip_exporter_invite_total{...,destination_country="GB"} 50
 |------------|--------------|----------|
 | `SIP_EXPORTER_HOST_LABELS` | `false` | Включить `caller_host`/`called_host` на `invite_total` / `invite_200_total`. По умолчанию выключено (неограниченная кардинальность). |
 
+### iface
+
+Имя сетевого интерфейса (напр. `ens3`, `tun0`, `lo`), на котором захвачен пакет. Берётся из `SIP_EXPORTER_INTERFACE` — каждый мониторимый NIC создаёт отдельные серии метрик.
+
+- **Метрики**: `invite_total`, `invite_200_total`, `socket_packets_received_total`, `socket_packets_dropped_total`
+- **Всегда включён** (без config-toggle): лейбл заполняется всегда, когда экспортёр захватывает трафик
+- **Кардинальность**: +1 серия на NIC на метрику (пренебрежимо мало — обычно 1–3 NIC)
+- **Use case**: пер-NIC аномалии (rate отброса на одном интерфейсе, INVITE-флуд на другом), агрегация по IP на одном NIC
+
+**Примеры PromQL:**
+```promql
+# Rate INVITE по интерфейсам
+sum by (iface) (rate(sip_exporter_invite_total[5m]))
+
+# Rate отброса на конкретном NIC
+rate(sip_exporter_socket_packets_dropped_total{iface="ens3"}[5m])
+```
+
+### Лейбл direction
+
+Лейбл `direction` классифицирует трафик как `inbound` или `outbound` с точки зрения сервера. Он определяется автоматически по полю `pkttype` ядра — **без конфигурации**.
+
+**Как это работает:**
+
+Ядро Linux присваивает каждому пакету `pkttype` при доставке в AF_PACKET-сокет:
+
+| pkttype | Значение | Направление запроса | Направление ответа |
+|---------|----------|---------------------|--------------------|
+| `PACKET_HOST` (0) | Пакет, пришедший на наш интерфейс (RX) | `inbound` | `outbound` |
+| `PACKET_OUTGOING` (4) | Пакет, отправленный нами (TX) | `outbound` | `inbound` |
+
+Для ответов направление инвертируется: ответ, пришедший на наш интерфейс, означает, что это ответ на наш исходящий запрос, и наоборот. Ответы на INVITE наследуют направление от исходного INVITE через invite-трекер, обеспечивая согласованность в пределах вызова.
+
+**Семантика:**
+
+- `inbound` — кто-то звонит нам (входящие вызовы, регистрации от устройств, OPTIONS от пиров)
+- `outbound` — мы звоним вовне (исходящие вызовы, исходящие регистрации, исходящие OPTIONS)
+
+Все пакеты в пределах одного вызова несут одинаковое значение `direction`.
+
+**Требования:**
+
+- `SIP_EXPORTER_IGNORE_OUTGOING=false` (по умолчанию) — должны захватываться и RX-, и TX-пакеты. При `IgnoreOutgoing=true` TX-пакеты фильтруются и `direction` схлопывается в `inbound` для всех вызовов (только ответы появляются как `outbound` из-за инверсии).
+- На loopback (`lo`) обычно используется `IgnoreOutgoing=true` для предотвращения дублирования пакетов, что означает, что `direction` не может различить inbound/outbound. Для осмысленного анализа направления используйте физический NIC или veth-пару.
+
+**Примеры PromQL:**
+```promql
+# ASR отдельно для входящих и исходящих вызовов
+sum by (direction) (sip_exporter_asr)
+
+# Rate INVITE по направлениям
+sum by (direction) (rate(sip_exporter_invite_total[5m]))
+
+# Доля неудач входящих вызовов
+sum(rate(sip_exporter_480_total{direction="inbound"}[5m]))
+  / sum(rate(sip_exporter_invite_total{direction="inbound"}[5m]))
+```
+
+**Влияние на кардинальность:** +1 лейбл × 2 значения = 2× комбинаций. Типично: 5 операторов × 3 UA-типов × 10 стран × 2 направления = 300 серий на метрику.
+
 ### SER по направлению (PromQL)
 
 Ratio-метрики (SER, SEER, ISA, SCR) несут `source_country`, но **не** `destination_country` (контроль кардинальности). Чтобы вычислить SER для конкретного направления, используйте PromQL на сырых счётчиках INVITE:
@@ -494,7 +559,9 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 `sip_exporter_update_total{carrier="...",ua_type="..."}`: общее количество полученных SIP UPDATE-запросов.  
 `sip_exporter_message_total{carrier="...",ua_type="..."}`: общее количество полученных SIP MESSAGE-запросов.
 
-`sip_exporter_invite_200_total{carrier,ua_type,source_country,destination_country,caller_host,called_host}`: общее количество ответов `200 OK` на INVITE-запросы (успешные установления вызовов). Это числитель для [SER по направлению](#ser-по-направлению-promql) в PromQL. Несёт полный набор из 6 лейблов — как `invite_total`.
+`sip_exporter_sip_retransmission_total{carrier="...",ua_type="...",method="INVITE"}` *(counter)*: общее количество ретранслированных SIP-запросов, обнаруженных через Timer A (RFC 3261 §17.1.1.2). Ретрансляция идентифицируется, когда дубликат INVITE с тем же Call-ID приходит в пределах окна TTL invite-трекера (60с) без активного диалога. Сейчас только для INVITE; лейбл `method` зарезервирован для будущего обобщения на REGISTER/OPTIONS.
+
+`sip_exporter_invite_200_total{carrier,ua_type,source_country,destination_country,caller_host,called_host,iface}`: общее количество ответов `200 OK` на INVITE-запросы (успешные установления вызовов). Это числитель для [SER по направлению](#ser-по-направлению-promql) в PromQL. Несёт полный набор из 8 лейблов — как `invite_total`, включая `iface`.
 
 ## Метрики SIP-ответов (по кодам статуса)
 
@@ -531,14 +598,14 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 
 ## Здоровье регистраций
 
-Метрики регистраций отслеживают полный жизненный цикл SIP-регистраций (RFC 3261 §10): исходы успеха/неудачи, вычисляемый success ratio и количество активных регистраций. Все разбиты по `carrier,ua_type,source_country`.
+Метрики регистраций отслеживают полный жизненный цикл SIP-регистраций (RFC 3261 §10): исходы успеха/неудачи, вычисляемый success ratio и количество активных регистраций. Все разбиты по `carrier,ua_type,source_country,direction`.
 
 | Метрика | Тип | Лейблы | Описание |
 |---------|-----|--------|----------|
-| `sip_exporter_register_success_total` | counter | `carrier,ua_type,source_country` | Ответы REGISTER со статусом `200 OK` |
+| `sip_exporter_register_success_total` | counter | `carrier,ua_type,source_country,direction` | Ответы REGISTER со статусом `200 OK` |
 | `sip_exporter_register_failure_total` | counter | `carrier,ua_type,source_country,code` | Ответы REGISTER со статусом `3xx/4xx/5xx/6xx`, по коду |
-| `sip_exporter_register_success_ratio` | gauge | `carrier,ua_type,source_country` | `200 OK / (200 OK + терминальные ошибки) × 100` |
-| `sip_exporter_active_registrations` | gauge | `carrier,ua_type,source_country` | Активные регистрации (отслеживание по Expires-TTL) |
+| `sip_exporter_register_success_ratio` | gauge | `carrier,ua_type,source_country,direction` | `200 OK / (200 OK + терминальные ошибки) × 100` |
+| `sip_exporter_active_registrations` | gauge | `carrier,ua_type,source_country,direction` | Активные регистрации (отслеживание по Expires-TTL) |
 
 ### register_success_ratio
 
@@ -573,13 +640,13 @@ topk(5, sum by (code) (rate(sip_exporter_register_failure_total[5m])))
 
 ## Детекция фрода
 
-Сигналы фрода детектируют подозрительные паттерны: сканирование регистраций (один IP регистрирует множество аккаунтов), географическую невозможность (тот же аккаунт из разных стран) и флуд INVITE (один IP отправляет всплеск вызовов). Все разбиты по `carrier,source_country` — `ua_type` намеренно опущен, т.к. атакующие варьируют User-Agent.
+Сигналы фрода детектируют подозрительные паттерны: сканирование регистраций (один IP регистрирует множество аккаунтов), географическую невозможность (тот же аккаунт из разных стран) и флуд INVITE (один IP отправляет всплеск вызовов). Все разбиты по `carrier,source_country,direction` — `ua_type` намеренно опущен, т.к. атакующие варьируют User-Agent.
 
 | Метрика | Тип | Лейблы | Описание |
 |---------|-----|--------|----------|
-| `sip_exporter_register_country_change_total` | counter | `carrier,source_country` | Количество смен страны регистрации (сигнал перехвата аккаунта) |
-| `sip_exporter_register_scan_total` | counter | `carrier,source_country` | Сигналы сканирования регистраций (один IP регистрирует N+ уникальных AOR за окно) |
-| `sip_exporter_invite_burst_total` | counter | `carrier,source_country` | Сигналы всплеска INVITE (один IP отправляет N+ INVITE за окно) |
+| `sip_exporter_register_country_change_total` | counter | `carrier,source_country,direction` | Количество смен страны регистрации (сигнал перехвата аккаунта) |
+| `sip_exporter_register_scan_total` | counter | `carrier,source_country,direction` | Сигналы сканирования регистраций (один IP регистрирует N+ уникальных AOR за окно) |
+| `sip_exporter_invite_burst_total` | counter | `carrier,source_country,direction` | Сигналы всплеска INVITE (один IP отправляет N+ INVITE за окно) |
 
 ### register_country_change_total
 
@@ -655,6 +722,19 @@ sessions_limits:
 sip_exporter_sessions_utilization > 90
 ```
 
+## Счётчики коротких вызовов
+
+`sip_exporter_short_calls_total{carrier="...",ua_type="...",threshold="20|60|180"}` *(counter)*: завершённые сессии с длительностью меньше порога (20, 60 или 180 секунд). Одна сессия может инкрементировать несколько порогов (напр., 15-секундный вызов инкрементирует `threshold="20"`, `"60"` и `"180"`). Короткие вызовы свидетельствуют о брошенных вызовах, плохом качестве или потенциальном toll-fraud.
+
+**Примеры PromQL:**
+```promql
+# Rate коротких вызовов (< 20с) как процент завершённых сессий
+rate(sip_exporter_short_calls_total{threshold="20"}[5m]) / rate(sip_exporter_sdc_total[5m]) * 100
+
+# Абсолютное количество вызовов короче 60с по операторам
+sum by (carrier) (rate(sip_exporter_short_calls_total{threshold="60"}[1h]))
+```
+
 ## Минуты трафика по направлению
 
 `sip_exporter_billable_seconds_total{carrier="...",destination_country="..."}` *(counter)*: суммарные секунды завершённых сессий по направлениям, накапливаются при разрыве сессии (BYE 200 OK или истечение Session-Expires). Сессии с `Duration <= 0` (clock-skew, мгновенный разрыв) не учитываются. `destination_country` резолвится из вызываемого номера (E.164 prefix-matching) на этапе INVITE 200 OK и хранится на протяжении жизни диалога.
@@ -684,29 +764,31 @@ RTP без коррелированного диалога отбрасывае�
 
 `{carrier="...",ua_type="...",codec="...",source_country="..."}` — `codec` — это имя payload type из SDP `a=rtpmap` (напр. `PCMU`, `PCMA`, `opus`) со статичной fallback-таблицей (RFC 3551). `source_country` наследуется от SIP-диалога (разрешается в момент INVITE).
 
-`sip_exporter_rtp_packets_total{carrier,ua_type,codec,source_country}` *(counter)*: общее количество наблюдённых RTP-пакетов.
+`sip_exporter_rtp_packets_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: общее количество наблюдённых RTP-пакетов.
 
-`sip_exporter_rtp_packets_lost_total{carrier,ua_type,codec,source_country}` *(counter)*: пакеты, обнаруженные как потерянные по разрывам sequence number в RTP.
+`sip_exporter_rtp_packets_lost_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: пакеты, обнаруженные как потерянные по разрывам sequence number в RTP.
 
-`sip_exporter_rtp_duplicate_packets_total{carrier,ua_type,codec,source_country}` *(counter)*: дубликаты RTP-пакетов (тот же sequence number, что у предыдущего — ретрансляция или медиа-петля).
+`sip_exporter_rtp_duplicate_packets_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: дубликаты RTP-пакетов (тот же sequence number, что у предыдущего — ретрансляция или медиа-петля).
 
-`sip_exporter_rtp_jitter_milliseconds{carrier,ua_type,codec,source_country}` *(histogram, бакеты 0.1..500 мс)*: сглаженный interarrival jitter (RFC 3550 A.8).
+`sip_exporter_rtp_out_of_order_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: обнаруженные out-of-order RTP-пакеты (sequence number меньше maxSeq, не дубликат). Высокие значения указывают на сетевые перестановки, которые могут переполнить jitter-буферы.
 
-`sip_exporter_rtp_mos_score{carrier,ua_type,codec,source_country}` *(histogram, бакеты 1.0..5.0)*: MOS-LQ, оценённый по ITU-T G.107 E-model с предположением jitter-буфера 60 мс.
+`sip_exporter_rtp_jitter_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 0.1..500 мс)*: сглаженный interarrival jitter (RFC 3550 A.8).
 
-`sip_exporter_rtp_mos_f1{carrier,ua_type,codec,source_country}` *(histogram, бакеты 1.0..5.0)*: MOS-LQ со строгим jitter-буфером (50 мс) — моделирует низколатентные эндпоинты с меньшей толерантностью к jitter.
+`sip_exporter_rtp_mos_score{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 1.0..5.0)*: MOS-LQ, оценённый по ITU-T G.107 E-model с предположением jitter-буфера 60 мс.
 
-`sip_exporter_rtp_mos_f2{carrier,ua_type,codec,source_country}` *(histogram, бакеты 1.0..5.0)*: MOS-LQ с щедрым jitter-буфером (200 мс) — моделирует управляемые эндпоинты с глубокими буферами.
+`sip_exporter_rtp_mos_f1{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 1.0..5.0)*: MOS-LQ со строгим jitter-буфером (50 мс) — моделирует низколатентные эндпоинты с меньшей толерантностью к jitter.
 
-`sip_exporter_rtp_mos_adaptive{carrier,ua_type,codec,source_country}` *(histogram, бакеты 1.0..5.0)*: MOS-LQ с адаптивным jitter-буфером (500 мс) — моделирует адаптивные эндпоинты, поглощающие значительный jitter.
+`sip_exporter_rtp_mos_f2{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 1.0..5.0)*: MOS-LQ с щедрым jitter-буфером (200 мс) — моделирует управляемые эндпоинты с глубокими буферами.
 
-`sip_exporter_rtp_r_factor{carrier,ua_type,codec,source_country}` *(histogram, бакеты 10..100)*: E-model R-factor (ITU-T G.107), диапазон 0–100. Базовая оценка качества до преобразования R→MOS.
+`sip_exporter_rtp_mos_adaptive{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 1.0..5.0)*: MOS-LQ с адаптивным jitter-буфером (500 мс) — моделирует адаптивные эндпоинты, поглощающие значительный jitter.
 
-`sip_exporter_rtp_burst_loss_density{carrier,ua_type,codec,source_country}` *(histogram, бакеты 10..100)*: доля потерянных пакетов, пришедшихся на burst-серии (≥ 3 последовательных потерь), диапазон 0–100.
+`sip_exporter_rtp_r_factor{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 10..100)*: E-model R-factor (ITU-T G.107), диапазон 0–100. Базовая оценка качества до преобразования R→MOS.
 
-`sip_exporter_rtp_gap_loss_density{carrier,ua_type,codec,source_country}` *(histogram, бакеты 10..100)*: доля потерянных пакетов, пришедшихся на изолированные gap (< 3 последовательных потерь), диапазон 0–100.
+`sip_exporter_rtp_burst_loss_density{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 10..100)*: доля потерянных пакетов, пришедшихся на burst-серии (≥ 3 последовательных потерь), диапазон 0–100.
 
-`sip_exporter_rtp_active_streams{carrier,ua_type,codec,source_country}` *(gauge)*: количество активных RTP-потоков. Сэмплируется раз в секунду; простаивающие потоки истекают через 30 с.
+`sip_exporter_rtp_gap_loss_density{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 10..100)*: доля потерянных пакетов, пришедшихся на изолированные gap (< 3 последовательных потерь), диапазон 0–100.
+
+`sip_exporter_rtp_active_streams{carrier,ua_type,codec,source_country,direction}` *(gauge)*: количество активных RTP-потоков. Сэмплируется раз в секунду; простаивающие потоки истекают через 30 с.
 
 > MOS и R-factor сэмплируются по каждому потоку раз в секунду; E-model использует
 > кодековые Ie/Bpl факторы из G.113. Неизвестные кодеки получают консервативное
@@ -723,7 +805,7 @@ RTP без коррелированного диалога отбрасывае�
 
 ### Метрики качества RTP-диалога
 
-Эти счётчики вычисляются при завершении диалога (BYE 200 OK или истечение Session-Expires) и несут только `carrier, ua_type, source_country` (без лейбла `codec` — они описывают диалог, а не отдельный поток).
+Эти счётчики вычисляются при завершении диалога (BYE 200 OK или истечение Session-Expires) и несут только `carrier, ua_type, source_country, direction` (без лейбла `codec` — они описывают диалог, а не отдельный поток).
 
 `sip_exporter_rtp_oneway_calls_total{carrier,ua_type,source_country}` *(counter)*: диалоги, где 2+ медиа-эндпоинта были зарегистрированы (SDP от обеих сторон), но RTP наблюдался только в одном направлении.
 
@@ -803,7 +885,7 @@ sip_exporter_channel_length / sip_exporter_channel_capacity > 0.8
 
 ### Активные трекеры
 
-`sip_exporter_active_trackers{type="register|invite|options|rtp"}` показывает количество записей в каждой карте трекеров. Трекеры `register`/`invite`/`options` хранят временные метки для измерения round-trip задержек (RRD, TTR, ORD, LRD) и очищаются через 60 секунд. Трекер `rtp` содержит активные RTP-медиапотоки (коррелированные с SIP-диалогами) и истекает простаивающие потоки через 30 секунд.
+`sip_exporter_active_trackers{type="register|invite|options|bye|rtp"}` показывает количество записей в каждой карте трекеров. Трекеры `register`/`invite`/`options`/`bye` хранят временные метки для измерения round-trip задержек (RRD, TTR, ORD, LRD, PBD) и очищаются через 60 секунд. Трекер `rtp` содержит активные RTP-медиапотоки (коррелированные с SIP-диалогами) и истекает простаивающие потоки через 30 секунд.
 
 **Примеры PromQL:**
 ```promql
@@ -1141,6 +1223,23 @@ rate(sip_exporter_pdd_sum[5m]) / rate(sip_exporter_pdd_count[5m])
 
 ---
 
+### Post Bye Delay (PBD)
+
+`sip_exporter_pbd{carrier="...",ua_type="...",source_country="..."}` *(histogram, бакеты 1..5000 мс)*: задержка в миллисекундах между BYE-запросом и соответствующим ответом `200 OK BYE`. Измеряет, как быстро эндпоинт разрывает сессию после завершения вызова. Высокий PBD указывает на задержки обработки SBC/медиа-шлюза или конкуренцию за ресурсы.
+
+**Бакеты:** 1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000 мс.
+
+**Примеры PromQL:**
+```promql
+# Средний PBD
+rate(sip_exporter_pbd_sum[5m]) / rate(sip_exporter_pbd_count[5m])
+
+# 95-й перцентиль
+histogram_quantile(0.95, rate(sip_exporter_pbd_bucket[5m]))
+```
+
+---
+
 ### Answer Seizure Ratio (ASR)
 
 `sip_exporter_asr{carrier="...",ua_type="..."}`: процент INVITE-запросов, получивших ответ 200 OK.
@@ -1365,13 +1464,14 @@ SIP-эндпоинт → PUBLISH/NOTIFY → Сеть → eBPF-захват → S
 
 ### Разрешение лейблов
 
-Все VQ-метрики включают лейблы `carrier`, `ua_type` и `source_country`, разрешённые из SIP PUBLISH/NOTIFY-пакета:
+Все VQ-метрики включают лейблы `carrier`, `ua_type`, `source_country` и `direction`, разрешённые из SIP PUBLISH/NOTIFY-пакета:
 
 | Лейбл | Разрешение |
 |-------|------------|
 | `carrier` | Source IP PUBLISH/NOTIFY-запроса → CIDR-маппинг по `carriers.yaml` |
 | `ua_type` | Заголовок `User-Agent` PUBLISH/NOTIFY-запроса → regex-маппинг по `user_agents.yaml` |
 | `source_country` | Source IP → GeoIP/carrier.country (тот же приоритет, что у всех метрик) |
+| `direction` | `inbound`/`outbound` по `pkttype` PUBLISH/NOTIFY-запроса (как у остальных метрик) |
 
 В отличие от метрик установления вызова (INVITE/BYE), где carrier разрешается из INVITE и распространяется через трекеры, VQ-метрики используют carrier/ua_type из PUBLISH/NOTIFY-запроса напрямую. Это связано с тем, что VQ-отчёты отправляются **после** завершения вызова и могут приходить от устройства, отличного от инициатора вызова (напр., SBC, генерирующий отчёты для всех проксируемых вызовов).
 

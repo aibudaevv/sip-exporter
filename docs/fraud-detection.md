@@ -1,6 +1,6 @@
 # Fraud Detection
 
-> **Version:** sip-exporter v1.3.3+
+> **Version:** sip-exporter v1.6.0
 >
 > sip-exporter provides **signal-only** fraud detection. It does not block or
 > intercept traffic. It exports Prometheus counter/gauge metrics that increment
@@ -19,7 +19,7 @@ theft — with four detection signals:
 | INVITE Burst | `invite_burst_total` | counter | Toll-fraud onset / SIP flood DDoS |
 | Sessions Utilization | `sessions_utilization` | gauge | Capacity exhaustion / contract breach |
 
-All counters use `{carrier,source_country}` labels. The source IP is used
+All counters use `{carrier,source_country,direction}` labels. The source IP is used
 internally for threshold tracking but is **never exposed** as a Prometheus label.
 
 ---
@@ -28,7 +28,7 @@ internally for threshold tracking but is **never exposed** as a Prometheus label
 
 ### Registration Scan
 
-`sip_exporter_register_scan_total{carrier,source_country}` — counter
+`sip_exporter_register_scan_total{carrier,source_country,direction}` — counter
 
 Detects a single source IP registering many unique SIP accounts (AORs) within a
 sliding window. Catches compromised PBX enrolling extensions, account farms, or
@@ -44,7 +44,7 @@ registrations 1–9 → no signal; 10th unique AOR → counter +1; 11–15 → +
 
 ### Registration Country Change
 
-`sip_exporter_register_country_change_total{carrier,source_country}` — counter
+`sip_exporter_register_country_change_total{carrier,source_country,direction}` — counter
 
 Detects the same AOR re-registering from a different country — account takeover
 signal. No configuration needed (uses existing GeoIP/carrier country config).
@@ -54,7 +54,7 @@ Same AOR from GE again → no signal.
 
 ### INVITE Burst
 
-`sip_exporter_invite_burst_total{carrier,source_country}` — counter
+`sip_exporter_invite_burst_total{carrier,source_country,direction}` — counter
 
 Detects a single IP sending initial INVITEs at abnormally high rate — toll-fraud
 or SIP flood. Re-INVITEs within an existing dialog are excluded (counted
@@ -121,7 +121,7 @@ sessions_limits:
 
 # Registration country change → account takeover
 - alert: SIPRegistrationCountryChange
-  expr: sip_exporter_register_country_change_total > 0 unless on (carrier, source_country) (sip_exporter_register_country_change_total offset 5m > 0)
+  expr: sip_exporter_register_country_change_total > 0 unless on (carrier, source_country, direction) (sip_exporter_register_country_change_total offset 5m > 0)
   for: 0m
   labels:
     severity: warning

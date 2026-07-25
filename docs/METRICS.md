@@ -17,7 +17,7 @@ All metrics are exposed at `/metrics` endpoint in Prometheus exposition format.
 - [Capacity Monitoring](#capacity-monitoring) — `sessions_limit`, `sessions_utilization`
 - [Traffic Minutes by Destination](#traffic-minutes-by-destination) — `billable_seconds_total`
 - [RTP Media Metrics](#rtp-media-metrics) — `rtp_packets_total`, `rtp_mos_score`, `rtp_jitter_milliseconds`, etc.
-- [Self-Monitoring Metrics](#self-monitoring-metrics) — `socket_packets_*`, `channel_*`, `parse_errors_total`, `active_trackers`, `active_dialogs`, `build_info`
+- [Self-Monitoring Metrics](#self-monitoring-metrics) — `socket_packets_*`, `rtp_dropped_total`, `channel_*`, `parse_errors_total`, `active_trackers`, `active_dialogs`, `build_info`
 - [RFC 6076 Performance Metrics](#rfc-6076-performance-metrics)
   - [SER](#session-establishment-ratio-ser) — Session Establishment Ratio
   - [SEER](#session-establishment-effectiveness-ratio-seer) — Session Establishment Effectiveness Ratio
@@ -31,6 +31,7 @@ All metrics are exposed at `/metrics` endpoint in Prometheus exposition format.
   - [SPD](#session-process-duration-spd) — Session Process Duration
   - [TTR](#time-to-first-response-ttr) — Time to First Response
   - [PDD](#post-dial-delay-pdd) — Post Dial Delay
+  - [PBD](#post-bye-delay-pbd) — Post Bye Delay
   - [ORD](#options-response-delay-ord) — OPTIONS Response Delay
   - [LRD](#location-registration-delay-lrd) — Location Registration Delay
 - [Voice Quality Metrics (RFC 6035)](#voice-quality-metrics-rfc-6035) — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
@@ -56,13 +57,13 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 > |------|---------|----------------|
 > | **System** | `packets_total`, `system_error_total`, self-monitoring | *(none)* |
 > | **Base** | All SIP requests, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD/PBD, VQ reports, sessions, `reinvite_total`, registration health (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country, direction` |
-> | **Reg failure** | `register_failure_total` | `carrier, ua_type, source_country, direction, code` |
-> | **Retransmission** | `sip_retransmission_total` | `carrier, ua_type, source_country, direction, method` |
+> | **Reg failure** | `register_failure_total` | `carrier, ua_type, source_country, code` |
+> | **Retransmission** | `sip_retransmission_total` | `carrier, ua_type, source_country, method` |
 > | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_out_of_order_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country, direction` |
 > | **RTP dialog** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country, direction` |
 > | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, direction, destination_country, caller_host, called_host, iface` |
 > | **Fraud** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country, direction` |
-> | **Short calls** | `short_calls_total` | `carrier, ua_type, source_country, direction, threshold` |
+> | **Short calls** | `short_calls_total` | `carrier, ua_type, source_country, threshold` |
 > | **Traffic** | `billable_seconds_total` | `carrier, destination_country, direction` |
 > | **Capacity** | `sessions_limit`, `sessions_utilization` | `carrier` |
 
@@ -193,9 +194,9 @@ BYE                     | 10.0.1.5   | carrier-A         | IP (request)
 
 Result:
   invite_total{carrier="carrier-A",ua_type="yealink"} += 1
-  invite200OK_total{carrier="carrier-A",ua_type="yealink"} += 1
+  invite_200_total{carrier="carrier-A",ua_type="yealink"} += 1
   sessions{carrier="carrier-A",ua_type="yealink"} = N
-  sessionCompleted_total{carrier="carrier-A",ua_type="yealink"} += 1
+  sdc_total{carrier="carrier-A",ua_type="yealink"} += 1
   SER{carrier="carrier-A",ua_type="yealink"} is correct
 
 Carrier-B metrics: only response counters for non-tracked packets (if any)
@@ -446,7 +447,7 @@ The host part of the `From` and `To` SIP URIs, respectively. Extracted during pa
 The network interface name (e.g. `ens3`, `tun0`, `lo`) on which the packet was captured. Populated from `SIP_EXPORTER_INTERFACE` — each monitored NIC produces separate metric series.
 
 - **Metrics**: `invite_total`, `invite_200_total`, `socket_packets_received_total`, `socket_packets_dropped_total`
-- **Always on** (no config toggle): the label is populated whenever the exporter captures traffic, with an empty value only if no interface is configured
+- **Always on** (no config toggle): the label is populated whenever the exporter captures traffic
 - **Cardinality**: +1 series per NIC per metric (negligible — typically 1–3 NICs)
 - **Use case**: per-NIC anomaly detection (drop rate on one interface, INVITE flood on another), aggregation across IPs on the same NIC
 
@@ -483,7 +484,7 @@ All packets within the same call carry the same `direction` value.
 
 **Requirements:**
 
-- `SIP_EXPORTER_IGNORE_OUTGOING=false` (default) — both RX and TX packets must be captured. With `IgnoreOutgoing=true`, TX packets are filtered and `direction` collapses to `inbound` for all calls (only non-INVITE responses appear as `outbound` due to inversion).
+- `SIP_EXPORTER_IGNORE_OUTGOING=false` (default) — both RX and TX packets must be captured. With `IgnoreOutgoing=true`, TX packets are filtered and `direction` collapses to `inbound` for all calls (only responses appear as `outbound` due to inversion).
 - On loopback (`lo`), `IgnoreOutgoing=true` is typically used to prevent packet duplication, which means `direction` cannot distinguish inbound/outbound. For meaningful direction analysis, use a physical NIC or veth pair.
 
 **PromQL examples:**
@@ -562,7 +563,7 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 
 `sip_exporter_sip_retransmission_total{carrier="...",ua_type="...",method="INVITE"}` *(counter)*: total number of retransmitted SIP requests detected via Timer A (RFC 3261 §17.1.1.2). A retransmission is identified when a duplicate INVITE with the same Call-ID arrives within the invite tracker TTL window (60s) without an active dialog. Currently INVITE-only; the `method` label is reserved for future generalization to REGISTER/OPTIONS.
 
-`sip_exporter_invite_200_total{carrier,ua_type,source_country,destination_country,caller_host,called_host,iface}`: total number of `200 OK` responses to INVITE requests (successful call establishments). This is the numerator for [SER-by-destination](#ser-by-destination-promql) PromQL calculations. Carries the full 7-label set — same as `invite_total`, including `iface`.
+`sip_exporter_invite_200_total{carrier,ua_type,source_country,destination_country,caller_host,called_host,iface}`: total number of `200 OK` responses to INVITE requests (successful call establishments). This is the numerator for [SER-by-destination](#ser-by-destination-promql) PromQL calculations. Carries the full 8-label set — same as `invite_total`, including `iface`.
 
 ## SIP response metrics (by status code)
 
@@ -599,14 +600,14 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 
 ## Registration Health
 
-Registration metrics track the full lifecycle of SIP registrations (RFC 3261 §10): success/failure outcomes, a computed success ratio, and the count of currently active registrations. All are scoped per `carrier,ua_type,source_country`.
+Registration metrics track the full lifecycle of SIP registrations (RFC 3261 §10): success/failure outcomes, a computed success ratio, and the count of currently active registrations. All are scoped per `carrier,ua_type,source_country,direction`.
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `sip_exporter_register_success_total` | counter | `carrier,ua_type,source_country` | REGISTER responses with status `200 OK` |
+| `sip_exporter_register_success_total` | counter | `carrier,ua_type,source_country,direction` | REGISTER responses with status `200 OK` |
 | `sip_exporter_register_failure_total` | counter | `carrier,ua_type,source_country,code` | REGISTER responses with status `3xx/4xx/5xx/6xx`, by code |
-| `sip_exporter_register_success_ratio` | gauge | `carrier,ua_type,source_country` | `200 OK / (200 OK + terminal failures) × 100` |
-| `sip_exporter_active_registrations` | gauge | `carrier,ua_type,source_country` | Currently active registrations (Expires-TTL tracked) |
+| `sip_exporter_register_success_ratio` | gauge | `carrier,ua_type,source_country,direction` | `200 OK / (200 OK + terminal failures) × 100` |
+| `sip_exporter_active_registrations` | gauge | `carrier,ua_type,source_country,direction` | Currently active registrations (Expires-TTL tracked) |
 
 ### register_success_ratio
 
@@ -641,13 +642,13 @@ topk(5, sum by (code) (rate(sip_exporter_register_failure_total[5m])))
 
 ## Fraud Detection
 
-Fraud signals detect suspicious patterns: registration scanning (one IP registering many accounts), geographic impossibility (same account from different countries), and INVITE flooding (one IP sending a burst of calls). All are scoped per `carrier,source_country` — `ua_type` is intentionally omitted because attackers vary their User-Agent.
+Fraud signals detect suspicious patterns: registration scanning (one IP registering many accounts), geographic impossibility (same account from different countries), and INVITE flooding (one IP sending a burst of calls). All are scoped per `carrier,source_country,direction` — `ua_type` is intentionally omitted because attackers vary their User-Agent.
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `sip_exporter_register_country_change_total` | counter | `carrier,source_country` | Times a user re-registered from a different country (account-takeover signal) |
-| `sip_exporter_register_scan_total` | counter | `carrier,source_country` | Registration scan signals (one IP registering N+ unique AORs within a time window) |
-| `sip_exporter_invite_burst_total` | counter | `carrier,source_country` | INVITE burst signals (one IP sending N+ INVITEs within a time window) |
+| `sip_exporter_register_country_change_total` | counter | `carrier,source_country,direction` | Times a user re-registered from a different country (account-takeover signal) |
+| `sip_exporter_register_scan_total` | counter | `carrier,source_country,direction` | Registration scan signals (one IP registering N+ unique AORs within a time window) |
+| `sip_exporter_invite_burst_total` | counter | `carrier,source_country,direction` | INVITE burst signals (one IP sending N+ INVITEs within a time window) |
 
 ### register_country_change_total
 
@@ -775,31 +776,31 @@ counted; RTP without a correlated dialog is dropped.
 
 `{carrier="...",ua_type="...",codec="...",source_country="..."}` — `codec` is the RTP payload-type name resolved from SDP `a=rtpmap` (e.g. `PCMU`, `PCMA`, `opus`) with a static fallback table (RFC 3551). `source_country` is inherited from the SIP dialog (resolved at INVITE time).
 
-`sip_exporter_rtp_packets_total{carrier,ua_type,codec,source_country}` *(counter)*: total number of RTP packets observed.
+`sip_exporter_rtp_packets_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: total number of RTP packets observed.
 
-`sip_exporter_rtp_packets_lost_total{carrier,ua_type,codec,source_country}` *(counter)*: packets detected as lost via RTP sequence-number gaps.
+`sip_exporter_rtp_packets_lost_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: packets detected as lost via RTP sequence-number gaps.
 
-`sip_exporter_rtp_duplicate_packets_total{carrier,ua_type,codec,source_country}` *(counter)*: duplicate RTP packets detected (same sequence number as the previous packet, indicating retransmission or media loop).
+`sip_exporter_rtp_duplicate_packets_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: duplicate RTP packets detected (same sequence number as the previous packet, indicating retransmission or media loop).
 
-`sip_exporter_rtp_out_of_order_total{carrier,ua_type,codec,source_country}` *(counter)*: out-of-order RTP packets detected (sequence number less than maxSeq, not a duplicate). High values indicate network reordering that can overwhelm jitter buffers.
+`sip_exporter_rtp_out_of_order_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: out-of-order RTP packets detected (sequence number less than maxSeq, not a duplicate). High values indicate network reordering that can overwhelm jitter buffers.
 
-`sip_exporter_rtp_jitter_milliseconds{carrier,ua_type,codec,source_country}` *(histogram, buckets 0.1..500 ms)*: smoothed interarrival jitter (RFC 3550 A.8).
+`sip_exporter_rtp_jitter_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 0.1..500 ms)*: smoothed interarrival jitter (RFC 3550 A.8).
 
-`sip_exporter_rtp_mos_score{carrier,ua_type,codec,source_country}` *(histogram, buckets 1.0..5.0)*: MOS-LQ estimated via the ITU-T G.107 E-model with a 60 ms jitter buffer assumption.
+`sip_exporter_rtp_mos_score{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1.0..5.0)*: MOS-LQ estimated via the ITU-T G.107 E-model with a 60 ms jitter buffer assumption.
 
-`sip_exporter_rtp_mos_f1{carrier,ua_type,codec,source_country}` *(histogram, buckets 1.0..5.0)*: MOS-LQ with a strict jitter buffer (50 ms) — models low-latency endpoints that tolerate less jitter.
+`sip_exporter_rtp_mos_f1{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1.0..5.0)*: MOS-LQ with a strict jitter buffer (50 ms) — models low-latency endpoints that tolerate less jitter.
 
-`sip_exporter_rtp_mos_f2{carrier,ua_type,codec,source_country}` *(histogram, buckets 1.0..5.0)*: MOS-LQ with a generous jitter buffer (200 ms) — models managed endpoints with deeper buffers.
+`sip_exporter_rtp_mos_f2{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1.0..5.0)*: MOS-LQ with a generous jitter buffer (200 ms) — models managed endpoints with deeper buffers.
 
-`sip_exporter_rtp_mos_adaptive{carrier,ua_type,codec,source_country}` *(histogram, buckets 1.0..5.0)*: MOS-LQ with an adaptive jitter buffer (500 ms) — models adaptive endpoints that absorb significant jitter.
+`sip_exporter_rtp_mos_adaptive{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1.0..5.0)*: MOS-LQ with an adaptive jitter buffer (500 ms) — models adaptive endpoints that absorb significant jitter.
 
-`sip_exporter_rtp_r_factor{carrier,ua_type,codec,source_country}` *(histogram, buckets 10..100)*: E-model R-factor (ITU-T G.107), range 0–100. Underlying quality score before the R→MOS transform.
+`sip_exporter_rtp_r_factor{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 10..100)*: E-model R-factor (ITU-T G.107), range 0–100. Underlying quality score before the R→MOS transform.
 
-`sip_exporter_rtp_burst_loss_density{carrier,ua_type,codec,source_country}` *(histogram, buckets 10..100)*: percentage of lost packets that occurred in burst runs (≥ 3 consecutive losses), range 0–100.
+`sip_exporter_rtp_burst_loss_density{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 10..100)*: percentage of lost packets that occurred in burst runs (≥ 3 consecutive losses), range 0–100.
 
-`sip_exporter_rtp_gap_loss_density{carrier,ua_type,codec,source_country}` *(histogram, buckets 10..100)*: percentage of lost packets that occurred in isolated gaps (< 3 consecutive losses), range 0–100.
+`sip_exporter_rtp_gap_loss_density{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 10..100)*: percentage of lost packets that occurred in isolated gaps (< 3 consecutive losses), range 0–100.
 
-`sip_exporter_rtp_active_streams{carrier,ua_type,codec,source_country}` *(gauge)*: number of active RTP streams. Sampled once per second; idle streams expire after 30 s.
+`sip_exporter_rtp_active_streams{carrier,ua_type,codec,source_country,direction}` *(gauge)*: number of active RTP streams. Sampled once per second; idle streams expire after 30 s.
 
 > MOS and R-factor are sampled per stream once per second; the E-model uses G.113 codec Ie/Bpl
 > factors. Unknown codecs get a conservative default (Ie=10). Burst/gap density uses a simplified
@@ -815,7 +816,7 @@ counted; RTP without a correlated dialog is dropped.
 
 ### RTP Dialog Quality Metrics
 
-These counters are evaluated at dialog teardown (BYE 200 OK or Session-Expires expiry) and carry only `carrier, ua_type, source_country` (no `codec` label — they describe the dialog, not a single stream).
+These counters are evaluated at dialog teardown (BYE 200 OK or Session-Expires expiry) and carry `carrier, ua_type, source_country, direction` (no `codec` label — they describe the dialog, not a single stream).
 
 `sip_exporter_rtp_oneway_calls_total{carrier,ua_type,source_country}` *(counter)*: dialogs where 2+ media endpoints were registered (SDP from both parties) but RTP was observed in only one direction.
 
@@ -897,7 +898,7 @@ sip_exporter_channel_length / sip_exporter_channel_capacity > 0.8
 
 ### Active Trackers
 
-`sip_exporter_active_trackers{type="register|invite|options|rtp"}` shows the number of entries in each tracker map. The `register`/`invite`/`options` trackers store timestamps for measuring round-trip delays (RRD, TTR, ORD, LRD) and are cleaned up after 60 seconds. The `rtp` tracker holds active RTP media streams (correlated with SIP dialogs) and expires idle streams after 30 seconds.
+`sip_exporter_active_trackers{type="register|invite|options|bye|rtp"}` shows the number of entries in each tracker map. The `register`/`invite`/`options`/`bye` trackers store timestamps for measuring round-trip delays (RRD, TTR, ORD, LRD, PBD) and are cleaned up after 60 seconds. The `rtp` tracker holds active RTP media streams (correlated with SIP dialogs) and expires idle streams after 30 seconds.
 
 **PromQL examples:**
 ```promql
@@ -1476,13 +1477,14 @@ If the body fails to parse, the exporter increments `sip_exporter_system_error_t
 
 ### Label Resolution
 
-All VQ metrics include `carrier`, `ua_type`, and `source_country` labels, resolved from the SIP PUBLISH/NOTIFY packet itself:
+All VQ metrics include `carrier`, `ua_type`, `source_country`, and `direction` labels, resolved from the SIP PUBLISH/NOTIFY packet itself:
 
 | Label | Resolution |
 |-------|-----------|
 | `carrier` | Source IP of the PUBLISH/NOTIFY request → CIDR matching against `carriers.yaml` |
 | `ua_type` | `User-Agent` header of the PUBLISH/NOTIFY request → regex matching against `user_agents.yaml` |
 | `source_country` | Source IP → GeoIP/carrier.country lookup (same precedence as all other metrics) |
+| `direction` | `inbound`/`outbound` from the `pkttype` of the PUBLISH/NOTIFY request (same as other metrics) |
 
 Unlike call setup metrics (INVITE/BYE) where carrier is resolved from the INVITE and propagated through trackers, VQ metrics use the carrier/ua_type of the PUBLISH/NOTIFY request directly. This is because VQ reports are sent **after** the call ends and may come from a different device than the one that initiated the call (e.g., an SBC generating reports for all calls it proxies).
 

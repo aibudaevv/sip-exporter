@@ -6,9 +6,9 @@ SIP-exporter uses **eBPF** (extended Berkeley Packet Filter) attached to `AF_PAC
 
 | Capability | Why it's needed | Code reference |
 |---|---|---|
-| `CAP_BPF` (or `CAP_SYS_ADMIN`) | Load eBPF program into kernel via `bpf()` syscall | `exporter.go:120` — `ebpf.LoadCollection()` |
-| `CAP_NET_RAW` | Create `AF_PACKET` raw socket (`SOCK_RAW`) | `exporter.go:148` — `unix.Socket(AF_PACKET, SOCK_RAW, ...)` |
-| `CAP_NET_ADMIN` | Attach eBPF filter to socket, set socket buffer size | `exporter.go:186` — `SO_ATTACH_BPF`, `exporter.go:155` — `SO_RCVBUF` |
+| `CAP_BPF` (or `CAP_SYS_ADMIN`) | Load eBPF program into kernel via `bpf()` syscall | `exporter.go:326` — `ebpf.LoadCollection()` |
+| `CAP_NET_RAW` | Create `AF_PACKET` raw socket (`SOCK_RAW`) | `exporter.go:378` — `unix.Socket(AF_PACKET, SOCK_RAW, ...)` |
+| `CAP_NET_ADMIN` | Attach eBPF filter to socket, set socket buffer size | `exporter.go:434` — `SO_ATTACH_BPF`, `exporter.go:390-391` — `SO_RCVBUFFORCE`→`SO_RCVBUF` |
 
 These capabilities are only available to root (`UID 0`), hence `--privileged`.
 
@@ -26,7 +26,7 @@ The container performs **read-only packet inspection**:
 4. **Parses** SIP headers (method, status, Call-ID, From/To tags, CSeq, Session-Expires) and RTP headers (12 bytes: version, payload type, sequence, timestamp, SSRC)
 5. **Exports** metrics to Prometheus via `/metrics` HTTP endpoint
 
-That's it. No packet modification, no packet injection, no network redirection, no iptables/nftables rules, no filesystem writes (except stdout/stderr for logs).
+That's it. No packet modification, no packet injection, no network redirection, no iptables/nftables rules. (The exporter does make one outbound HTTPS telemetry beacon and write one telemetry ID file — see [Telemetry](#telemetry) below.)
 
 > **Multi-interface note:** A separate BPF collection is loaded per interface at startup; each program is attached to its own `AF_PACKET` socket via `SO_ATTACH_BPF`. Maps `sip_ports` and `rtp_endpoints` are per-collection — each interface has independent filtering rules.
 
@@ -37,7 +37,23 @@ That's it. No packet modification, no packet injection, no network redirection, 
 - Does **not** write to the host filesystem — volumes are `:ro` (read-only)
 - Does **not** access other containers, processes, or system resources
 - Does **not** open any inbound ports except `/metrics` on the configured HTTP port (default 2112)
-- Does **not** make outbound network connections
+- Does **not** make outbound network connections **except** the optional telemetry beacon (see [Telemetry](#telemetry))
+
+## Telemetry
+
+By default, SIP-exporter sends an **anonymous telemetry beacon** to the project maintainers so installations can be counted. This is **enabled by default** (`SIP_EXPORTER_TELEMETRY=true`) and runs as a background goroutine started unconditionally at startup (`cmd/main.go`).
+
+- **Endpoint:** HTTPS GET to `https://telemetry.sip-exporter.com/v1/beacon` (`SIP_EXPORTER_TELEMETRY_URL`).
+- **Frequency:** once at startup, then every **24 hours** (`internal/telemetry/telemetry.go`).
+- **Payload** (URL query parameters, `internal/telemetry/beacon.go`):
+  - `anon_id` — a persistent random UUID v4 (see below), **not** derived from any host, user, or network identifier
+  - `version` — exporter build version
+  - `os` — `runtime.GOOS` (e.g. `linux`)
+  - `arch` — `runtime.GOARCH` (e.g. `amd64`)
+  - `uptime` — process uptime in seconds
+- **Persistent ID file:** the anonymous ID is stored at `/var/lib/sip-exporter/anon_id` (`SIP_EXPORTER_TELEMETRY_ID_FILE`), mode `0600`, and reused across restarts. The file contains only the UUID plus a short explanatory comment; deleting it regenerates a new random ID. No phone numbers, IPs, hostnames, or SIP/RTP data are ever sent.
+
+**To disable telemetry entirely:** `SIP_EXPORTER_TELEMETRY=false`. To redirect beacons to your own endpoint (e.g. for air-gapped auditing), set `SIP_EXPORTER_TELEMETRY_URL`. To change the ID file location, set `SIP_EXPORTER_TELEMETRY_ID_FILE`.
 
 ## Data Exposed in Prometheus Labels
 
@@ -61,11 +77,13 @@ SIP-exporter derives metric labels from packet content, but no **phone numbers**
 | Layer | Details |
 |---|---|
 | Base image | `alpine:3.22` — minimal (~5 MB) |
-| Runtime dependencies | `libelf` (for eBPF), `bash` (for healthcheck) |
-| Application | Single statically-linked Go binary |
+| Runtime dependencies | `libelf` (for eBPF), `bash` (for healthcheck), `libssl3` + `libcrypto3` (TLS libraries) |
+| Application | Single dynamically-linked Go binary |
 | Volumes | `/etc/localtime:ro`, `/etc/timezone:ro` — read-only timezone files |
 | Network | Only `/metrics` HTTP endpoint (default port 2112) |
 | Processes | Single process, no shell, no daemon |
+
+> **Security note — unauthenticated endpoints:** `/metrics` and `/health` are registered without any authentication or authorization middleware (`internal/server/server.go:100-101`). Anyone who can reach port `2112` can read all exported metrics. On untrusted networks, bind the HTTP listener to `localhost` (or a private interface), firewall port `2112`, or place a reverse proxy with authentication in front of it.
 
 ## eBPF Code Audit
 

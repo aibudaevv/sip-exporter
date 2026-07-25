@@ -23,6 +23,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - [Performance](#performance)
 - [Install](#install)
 - [Metrics](#metrics)
+- [Fraud Detection](#fraud-detection)
 - [Security](docs/SECURITY.md)
 - [Development](#development)
 - [Benchmark](#benchmark)
@@ -44,7 +45,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - 🔀 **Traffic direction** — `inbound`/`outbound` label on all metrics via kernel `pkttype`, zero-config
 - 📞 **Voice quality (RFC 6035)** — MOS scores, jitter, packet loss from SIP PUBLISH/NOTIFY
 - 🎧 **RTP media analysis** — jitter, packet loss, and MOS (E-model G.107) from RTP streams correlated with SIP dialogs, with no voice payload captured (header-only)
-- 🛡️ **Fraud detection** — registration scan, INVITE burst, and account-takeover (country change) signals
+- 🛡️ **Fraud detection** — registration scan, INVITE burst, and account-takeover (country change) signals ([docs/fraud-detection.md](docs/fraud-detection.md))
 
 ## Quick Start
 
@@ -73,7 +74,7 @@ docker compose up -d
 curl http://localhost:2112/metrics
 ```
 
-Access metrics at `http://localhost:2112/metrics`.
+Access metrics at `http://localhost:2112/metrics`. A `/health` endpoint is also exposed (returns `200 OK` when alive, `503` otherwise) — used by the Dockerfile `HEALTHCHECK` and suitable for orchestrator liveness/readiness probes.
 
 ## Core Technology
 
@@ -120,6 +121,11 @@ Environment variables:
 * `SIP_EXPORTER_GEOIP_COUNTRY_DB` - path to MaxMind GeoLite2-Country.mmdb for `source_country` label (optional)
 * `SIP_EXPORTER_LOCAL_COUNTRY_CODE` - ISO alpha-2 country code for domestic phone-number fallback in `destination_country` (optional, e.g. `RU`)
 * `SIP_EXPORTER_HOST_LABELS` - enable `caller_host`/`called_host` labels on INVITE metrics (default `false`; opt-in — unbounded cardinality, enable only on trusted/bounded deployments)
+* `SIP_EXPORTER_SESSIONS_LIMITS` - path to sessions limits YAML config (optional, per-carrier concurrent-session caps and utilization metrics)
+* `SIP_EXPORTER_FRAUD_REGISTER_SCAN_THRESHOLD` - registration scan: unique accounts (AoR) registered (200 OK) from one source IP to trigger the signal (default 10)
+* `SIP_EXPORTER_FRAUD_REGISTER_SCAN_WINDOW` - registration scan rolling window (default 60s)
+* `SIP_EXPORTER_FRAUD_INVITE_BURST_THRESHOLD` - INVITE burst fraud: INVITEs from one source to trigger the signal (default 100)
+* `SIP_EXPORTER_FRAUD_INVITE_BURST_WINDOW` - INVITE burst rolling window (default 60s)
 * `SIP_EXPORTER_TELEMETRY` - anonymous usage telemetry, opt-out with `false` (default true)
 
 The container must run with `--privileged` and `--network host` (eBPF requires `CAP_BPF` and access to the network interface). See [Security](docs/SECURITY.md) for details on why this is safe.
@@ -128,14 +134,14 @@ The container must run with `--privileged` and `--network host` (eBPF requires `
 
 ## Metrics
 
-All metrics are exposed at `/metrics` in Prometheus exposition format. All SIP metrics include `carrier`, `ua_type`, and `source_country` labels for multi-dimensional analysis. INVITE metrics additionally carry an `iface` label identifying the network interface that captured the traffic. The exporter provides:
+All metrics are exposed at `/metrics` in Prometheus exposition format. Most SIP metrics include `carrier`, `ua_type`, and `source_country` labels for multi-dimensional analysis (exceptions: `sip_exporter_sessions_limit` carries only `carrier`; `sip_exporter_billable_seconds_total` carries `carrier`, `destination_country`, `direction`). INVITE metrics additionally carry an `iface` label identifying the network interface that captured the traffic. The exporter provides:
 
 - **Traffic counters** — SIP request types (INVITE, re-INVITE, BYE, REGISTER, etc.) and response status codes (100–606)
 - **Active sessions** — real-time count of active SIP dialogs
 - **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, PDD, PBD
 - **RFC 6035 voice quality metrics** — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
-- **RTP media metrics** — `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_active_streams` (labels: `carrier,ua_type,codec,source_country`)
-- **Diagnostics** — `sip_retransmission_total` (SIP Timer A retransmissions), `rtp_out_of_order_total` (out-of-sequence RTP packets), `short_calls_total` (calls shorter than 20/60/180 seconds)
+- **RTP media metrics** — `sip_exporter_rtp_packets_total`, `sip_exporter_rtp_packets_lost_total`, `sip_exporter_rtp_jitter_milliseconds`, `sip_exporter_rtp_mos_score`, `sip_exporter_rtp_active_streams` (labels: `carrier,ua_type,codec,source_country,direction`)
+- **Diagnostics** — `sip_exporter_sip_retransmission_total` (SIP Timer A retransmissions), `sip_exporter_rtp_out_of_order_total` (out-of-sequence RTP packets), `sip_exporter_short_calls_total` (calls shorter than 20/60/180 seconds)
 
 Full reference with formulas, examples, and RFC section mapping: [docs/METRICS.md](docs/METRICS.md)
 
@@ -362,11 +368,22 @@ sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
 
 See [docs/METRICS.md](docs/METRICS.md) for the full RTP reference, formulas, and label resolution.
 
+## Fraud Detection
+
+The exporter emits signals for common toll-fraud patterns, exposed as Prometheus counters/gauges:
+
+- **Registration scan** — many unique accounts (AoR) registered (200 OK) from one source IP in a short window (tunable via `SIP_EXPORTER_FRAUD_REGISTER_SCAN_THRESHOLD` / `_WINDOW`)
+- **INVITE burst** — abnormal INVITE rate from one source (tunable via `SIP_EXPORTER_FRAUD_INVITE_BURST_THRESHOLD` / `_WINDOW`)
+- **Account takeover** — a subscriber places calls from a country different from previously observed
+
+Full setup, metrics reference, and alerting guidance: [docs/fraud-detection.md](docs/fraud-detection.md)
+
 ## Development
 
 ### Requirements
 - Go 1.25+
 - Clang/LLVM (for eBPF compilation)
+- golangci-lint v2.7.1 and goimports (for `make lint` / `make imports`)
 - Linux kernel with eBPF support
 - Root privileges (required for eBPF and packet socket)
 
@@ -382,8 +399,8 @@ See [docs/METRICS.md](docs/METRICS.md) for the full RTP reference, formulas, and
 
 Test suite:
 - **Unit tests** — MC/DC standard, all business logic covered
-- **158 E2E tests** — real SIP traffic via SIPp + testcontainers-go, validates all RFC 6076, RFC 6035, and RTP metrics
-- **13 load tests** — PPS throughput, VQ reports, concurrent sessions, memory stability, GC pauses, scrape latency
+- **120+ table-driven E2E cases** — real SIP traffic via SIPp + testcontainers-go, validates all RFC 6076, RFC 6035, and RTP metrics
+- **11 load tests** — PPS throughput, VQ reports, concurrent sessions, memory stability, GC pauses, scrape latency
 
 ## Benchmark
 
