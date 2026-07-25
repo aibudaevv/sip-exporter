@@ -4,7 +4,14 @@ package e2e
 
 import (
 	"context"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -42,27 +49,26 @@ func TestTrafficDirection_Inbound(t *testing.T) {
 	waitForSessionsZero(t, env.endpoint)
 }
 
-// TestTrafficDirection_Outbound verifies that on a veth pair with
-// IgnoreOutgoing=false, SIP requests sent by UAC are classified as outbound
-// via pkttype (PACKET_OUTGOING). This is the discriminating test: on lo with
-// IgnoreOutgoing=true, all packets are PACKET_HOST → inbound. Only on a real
-// (or virtual) interface can we observe PACKET_OUTGOING.
+// TestTrafficDirection_Outbound verifies that on a veth pair bridging to an
+// isolated network namespace (pause container), SIP requests sent by a
+// host-side UAC are classified as outbound via pkttype (PACKET_OUTGOING).
 //
-// veth0a (10.10.0.1) ← exporter captures here (IgnoreOutgoing=false)
-// veth0b (10.10.0.2) ← UAS listens here
+// setupVethNetns creates: sipns0 (host, 10.210.0.1) + sipns1 (pause netns,
+// 10.210.0.2). Unlike setupVethPair (both ends in host netns → kernel local
+// routing sends traffic via lo → 0 packets visible on the veth), the netns
+// approach ensures traffic genuinely traverses the veth pair.
 //
-// UAC binds to 10.10.0.1 (veth0a) → sends INVITE to 10.10.0.2 (veth0b).
-// INVITE is TX on veth0a → PACKET_OUTGOING → outbound.
-// UAS responds from 10.10.0.2 → RX on veth0a → PACKET_HOST → INVITE responses
-// are overridden from inviteTracker → outbound.
+// UAC (host, 10.210.0.1) → INVITE → sipns0 TX (PACKET_OUTGOING) → sipns1 → UAS.
+// UAS (netns, 10.210.0.2) → 200 OK → sipns1 → sipns0 RX (PACKET_HOST, overridden
+// from inviteTracker) → UAC.
 func TestTrafficDirection_Outbound(t *testing.T) {
 	ctx := context.Background()
-	setupVethPair(t)
+	pauseID := setupVethNetns(t)
 
 	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
 
 	extraEnv := map[string]string{
-		"SIP_EXPORTER_INTERFACE":       veth0aName,
+		"SIP_EXPORTER_INTERFACE":       nsVethHost,
 		"SIP_EXPORTER_IGNORE_OUTGOING": "false",
 	}
 	endpoint, container := startExporterWithConfigAndUA(
@@ -70,14 +76,66 @@ func TestTrafficDirection_Outbound(t *testing.T) {
 	)
 	registerExporterCleanup(t, container, exporterHTTPPort)
 
-	env := &testEnv{
-		endpoint:       endpoint,
-		sippPort:       sippPort,
-		sippClientPort: sippClientPort,
+	callCount := 10
+
+	uasPath := absScenarioPath(t, "uas_100.xml")
+	sippVol := filepath.Dir(uasPath)
+
+	sippCtx, sippCancel := context.WithTimeout(ctx, 60*time.Second)
+	defer sippCancel()
+
+	// UAS in pause netns (nsGuestIP = 10.210.0.2) — detached.
+	uasStart := exec.CommandContext(sippCtx, "docker", "run", "-d",
+		"--network", "container:"+pauseID,
+		"-v", sippVol+":/scenarios:ro",
+		sippImage,
+		"-sf", "/scenarios/uas_100.xml",
+		"-i", nsGuestIP,
+		"-p", sippPort,
+		"-m", strconv.Itoa(callCount),
+		"-nr", "-nostdin",
+	)
+	uasIDBytes, err := uasStart.Output()
+	require.NoError(t, err, "failed to start UAS in netns")
+	uasID := strings.TrimSpace(string(uasIDBytes))
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", uasID).Run() })
+
+	time.Sleep(1 * time.Second)
+
+	// UAC in host netns (nsHostIP = 10.210.0.1) → sends to nsGuestIP:sippPort.
+	// TX on sipns0 = PACKET_OUTGOING → direction=outbound.
+	uacCmd := exec.CommandContext(sippCtx, "docker", "run", "--rm",
+		"--network", "host",
+		"-v", sippVol+":/scenarios:ro",
+		sippImage,
+		"-sf", "/scenarios/uac_100.xml",
+		"-i", nsHostIP,
+		"-p", sippClientPort,
+		"-m", strconv.Itoa(callCount),
+		"-nr",
+		nsGuestIP+":"+sippPort,
+	)
+	if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
+		uacCmd.Stdout = &testWriter{t}
+		uacCmd.Stderr = &testWriter{t}
+	} else {
+		uacCmd.Stdout = io.Discard
+		uacCmd.Stderr = io.Discard
+	}
+	require.NoError(t, uacCmd.Run(), "SIPp UAC failed")
+
+	// Wait for UAS to exit, then log its output.
+	require.Eventually(t, func() bool {
+		out, err := exec.Command("docker", "inspect", "-f", "{{.State.Running}}", uasID).Output()
+		return err == nil && strings.TrimSpace(string(out)) == "false"
+	}, 30*time.Second, 500*time.Millisecond, "UAS container did not exit")
+
+	if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
+		uasLogs, _ := exec.Command("docker", "logs", uasID).CombinedOutput()
+		t.Logf("UAS logs:\n%s", strings.TrimSpace(string(uasLogs)))
 	}
 
-	callCount := 10
-	runSippScenarioWithIPs(ctx, t, "uas_100.xml", "uac_100.xml", callCount, env, veth0bIP, veth0aIP)
+	waitForMetricStable(t, endpoint)
 
 	outboundLabel := `direction="outbound"`
 

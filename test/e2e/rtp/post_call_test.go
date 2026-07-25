@@ -28,10 +28,9 @@ func metricLineExists(t *testing.T, endpoint, metricName string, labelSubstrings
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 
-	prefix := metricName + "{"
 	for _, line := range strings.Split(string(body), "\n") {
 		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, prefix) {
+		if !strings.HasPrefix(trimmed, metricName+"{") && !strings.HasPrefix(trimmed, metricName+" ") {
 			continue
 		}
 		matches := true
@@ -108,12 +107,12 @@ func TestRTP_MetricsAfterCallCompletion(t *testing.T) {
 		"rtp_mos histogram must retain samples after call ends")
 
 	// --- Assert: no spurious loss on clean G.711a ---
+	// The lost counter is created lazily on the first detected gap; for
+	// clean traffic the series is absent and the scraped value is 0.
 	require.True(t,
-		metricLineExists(t, endpoint, "sip_exporter_rtp_packets_lost_total", rtpLabels...),
-		"rtp_packets_lost_total must be present after call")
-	require.InDelta(t, 0.0,
-		getMetricByLabel(t, endpoint, "sip_exporter_rtp_packets_lost_total", rtpLabels...), 0.01,
-		"no RTP loss expected on clean G.711a stream")
+		!metricLineExists(t, endpoint, "sip_exporter_rtp_packets_lost_total", rtpLabels...) ||
+			getMetricByLabel(t, endpoint, "sip_exporter_rtp_packets_lost_total", rtpLabels...) == 0,
+		"no spurious RTP loss should be detected on clean G.711a")
 
 	// --- Assert: dialogs cleaned up ---
 	require.True(t,

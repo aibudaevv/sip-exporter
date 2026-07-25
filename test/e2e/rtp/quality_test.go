@@ -14,14 +14,30 @@ import (
 )
 
 // sendControlledRTP sends RTP packets with specific sequence numbers to
-// 127.0.0.1:port. The port must already be bound by SIPp's -mp so packets
-// complete the loopback receive cycle (captured by the exporter's AF_PACKET
-// socket with PACKET_IGNORE_OUTGOING). SSRC is fixed so the media tracker
-// creates a single stream entry.
+// 127.0.0.1:port. A local UDP listener is bound on the target port when
+// possible (SIPp's -mp may already hold it): this forces the packet to
+// complete the loopback receive cycle (PACKET_HOST) which the exporter's
+// AF_PACKET socket with PACKET_IGNORE_OUTGOING captures reliably.
+// SSRC is fixed so the media tracker creates a single stream entry.
 func sendControlledRTP(t *testing.T, port int, seqNums []uint16) {
 	t.Helper()
 
 	addr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port}
+
+	listener, lerr := net.ListenUDP("udp4", addr)
+	if lerr == nil {
+		defer listener.Close()
+		go func() {
+			buf := make([]byte, 1500)
+			for {
+				_ = listener.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+				if _, _, e := listener.ReadFromUDP(buf); e != nil {
+					return
+				}
+			}
+		}()
+	}
+
 	sender, err := net.DialUDP("udp4", nil, addr)
 	require.NoError(t, err)
 	defer sender.Close()
@@ -178,7 +194,10 @@ func TestRTP_TeardownMetrics(t *testing.T) {
 			}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
 
 			if tt.rtpSeqs != nil {
-				sendControlledRTP(t, uasMediaNum, tt.rtpSeqs)
+				for range 3 {
+					sendControlledRTP(t, uasMediaNum, tt.rtpSeqs)
+					time.Sleep(500 * time.Millisecond)
+				}
 			}
 
 			if tt.waitFirst {
