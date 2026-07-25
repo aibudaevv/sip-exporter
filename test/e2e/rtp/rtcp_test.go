@@ -212,6 +212,38 @@ func sendRTCPRR(t *testing.T, port int, ssrc, cumLost uint32) {
 	require.NoError(t, err)
 }
 
+// sendRTCPSR injects a single RTCP Sender Report (RFC 3550 §6.4.1, PT 200) for
+// ssrc to 127.0.0.1:port. Structure: header(4) + sender SSRC(4) + sender
+// info(20) + one report block(24) = 52 bytes. The sender info is left zeroed
+// (the exporter does not consume it); the report block carries the same fields
+// as an RR so correlation + quality metrics fire. cumLost sets the 24-bit
+// cumulative-lost field.
+func sendRTCPSR(t *testing.T, port int, ssrc, cumLost uint32) {
+	t.Helper()
+	addr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port}
+	conn, err := net.DialUDP("udp4", nil, addr)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	pkt := make([]byte, 52)
+	pkt[0] = 0x81                                    // V=2, P=0, RC=1 (one report block)
+	pkt[1] = 200                                     // PT = SR
+	binary.BigEndian.PutUint16(pkt[2:4], 12)         // length = 52/4 - 1
+	binary.BigEndian.PutUint32(pkt[4:8], 0x5A5A5A5A) // sender SSRC
+	// sender info [8:28] left zeroed (NTP/RTP-ts/pkt/octet counts unused).
+	binary.BigEndian.PutUint32(pkt[28:32], ssrc) // reported source SSRC
+	pkt[32] = 10                                 // fraction lost (10/256 ≈ 3.9%)
+	pkt[33] = byte(cumLost >> 16)                // 24-bit cumulative lost
+	pkt[34] = byte(cumLost >> 8)
+	pkt[35] = byte(cumLost)
+	binary.BigEndian.PutUint32(pkt[40:44], 1600)                                      // jitter ticks → 200 ms at 8000 Hz
+	binary.BigEndian.PutUint32(pkt[44:48], pastNTP32(time.Now().Add(-5*time.Second))) // LSR
+	binary.BigEndian.PutUint32(pkt[48:52], 0)                                         // DLSR
+
+	_, err = conn.Write(pkt)
+	require.NoError(t, err)
+}
+
 // TestRTCP_MetricsFromInjectedRR proves the full RTCP path end to end: SIPp
 // establishes a real SIP dialog (SDP → media endpoint registered, UAS media socket
 // bound); the test then injects its own RTP (deterministic SSRC) so the exporter
@@ -273,4 +305,91 @@ func TestRTCP_MetricsFromInjectedRR(t *testing.T) {
 	avgRTT := rttSum / rttCount
 	require.Greater(t, avgRTT, 4000.0, "RTT should be ~5000ms (LSR 5s ago, DLSR=0)")
 	require.Less(t, avgRTT, 6000.0, "RTT should be ~5000ms (LSR 5s ago, DLSR=0)")
+
+	// Loss-fraction value check (not just count): the RR carries fracLost=10 →
+	// 10/256*100 ≈ 3.9%. Proves the fracLost byte extraction + scale end-to-end,
+	// not merely that an observation landed (guards against a byte-offset regression).
+	lossSum := getRTPMetric(t, endpoint, "sip_exporter_rtcp_loss_fraction_percent_sum")
+	lossCount := getRTPMetric(t, endpoint, "sip_exporter_rtcp_loss_fraction_percent_count")
+	require.Greater(t, lossCount, 0.0)
+	avgLoss := lossSum / lossCount
+	require.InDelta(t, 10.0/256*100, avgLoss, 0.5, "loss fraction should be ~3.9%% (fracLost=10)")
+}
+
+// TestRTCP_SenderReportCaptured proves the SR (PT 200) path end to end. SR is
+// the dominant RTCP type from active senders, but the prior e2e suite injected
+// only RR. The SR carries its report blocks after a 20-byte sender-info block;
+// this test confirms the exporter parses past the sender info, correlates the
+// block by SSRC, and labels the report type=sr.
+func TestRTCP_SenderReportCaptured(t *testing.T) {
+	ports := allocatePortsN(6)
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
+	uasMediaNum, err := strconv.Atoi(uasMedia)
+	require.NoError(t, err)
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
+
+	wait := startSippContainers(
+		context.Background(), t,
+		"uas_rtp.xml", "uac_rtp.xml",
+		uasSIP, uacSIP, uasMedia, uacMedia,
+		"127.0.0.1", "127.0.0.1",
+	)
+
+	require.Eventually(t, func() bool {
+		return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
+	}, 15*time.Second, 500*time.Millisecond, "RTP must flow before injecting RTCP")
+
+	sendRTPWithSSRC(t, uasMediaNum, testSSRC, 20)
+	time.Sleep(300 * time.Millisecond)
+	sendRTCPSR(t, uasMediaNum, testSSRC, 0)
+	time.Sleep(300 * time.Millisecond)
+
+	wait()
+
+	require.Eventually(t, func() bool {
+		return getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="sr"`) > 0
+	}, 10*time.Second, 500*time.Millisecond,
+		"RTCP Sender Report (PT 200) must be captured and labelled type=sr")
+}
+
+// TestRTCP_BothDirections proves per-stream SSRC isolation: a single dialog has
+// two media legs, each emitting RTCP for a distinct SSRC. Both RRs must
+// correlate independently — a bug in the rtcpLossSeen baseline (shared state
+// across streams) would cross-contaminate the two legs. RTCP is injected to each
+// leg's RTP port (rtcp-mux capture path) for two different SSRCs.
+func TestRTCP_BothDirections(t *testing.T) {
+	ports := allocatePortsN(6)
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
+	uasMediaNum, err := strconv.Atoi(uasMedia)
+	require.NoError(t, err)
+	uacMediaNum, err := strconv.Atoi(uacMedia)
+	require.NoError(t, err)
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
+
+	wait := startSippContainers(
+		context.Background(), t,
+		"uas_rtp.xml", "uac_rtp.xml",
+		uasSIP, uacSIP, uasMedia, uacMedia,
+		"127.0.0.1", "127.0.0.1",
+	)
+
+	require.Eventually(t, func() bool {
+		return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
+	}, 15*time.Second, 500*time.Millisecond, "RTP must flow before injecting RTCP")
+
+	const ssrcA uint32 = 0xCAFEBABE
+	const ssrcB uint32 = 0xDEADBEEF
+	sendRTPWithSSRC(t, uasMediaNum, ssrcA, 20)
+	sendRTPWithSSRC(t, uacMediaNum, ssrcB, 20)
+	time.Sleep(300 * time.Millisecond)
+	sendRTCPRR(t, uasMediaNum, ssrcA, 0)
+	sendRTCPRR(t, uacMediaNum, ssrcB, 0)
+	time.Sleep(300 * time.Millisecond)
+
+	wait()
+
+	require.Eventually(t, func() bool {
+		return getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) >= 2
+	}, 10*time.Second, 500*time.Millisecond,
+		"RTCP from both legs must be captured (per-stream SSRC isolation)")
 }
