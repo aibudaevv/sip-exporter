@@ -13,10 +13,10 @@ All metrics are exposed at `/metrics` endpoint in Prometheus exposition format.
 - [SIP Request Metrics](#sip-request-metrics) — `invite_total`, `reinvite_total`, `register_total`, `bye_total`, etc.
 - [SIP Response Metrics](#sip-response-metrics-by-status-code) — `100_total`…`606_total`
 - [Registration Health](#registration-health) — `register_success_total`, `register_failure_total`, `register_success_ratio`, `active_registrations`
-- [Fraud Detection](#fraud-detection) — `register_scan_total`, `invite_burst_total`, `register_country_change_total`
+- [Fraud Detection](#fraud-detection) — `register_scan_total`, `invite_burst_total`, `register_country_change_total`, `fas_calls_total`
 - [Capacity Monitoring](#capacity-monitoring) — `sessions_limit`, `sessions_utilization`
 - [Traffic Minutes by Destination](#traffic-minutes-by-destination) — `billable_seconds_total`
-- [RTP Media Metrics](#rtp-media-metrics) — `rtp_packets_total`, `rtp_mos_score`, `rtp_jitter_milliseconds`, etc.
+- [RTP Media Metrics](#rtp-media-metrics) — `rtp_packets_total`, `rtp_mos_score`, `rtp_jitter_milliseconds`, `rtp_pdv_milliseconds`, etc.
 - [Self-Monitoring Metrics](#self-monitoring-metrics) — `socket_packets_*`, `rtp_dropped_total`, `channel_*`, `parse_errors_total`, `active_trackers`, `active_dialogs`, `build_info`
 - [RFC 6076 Performance Metrics](#rfc-6076-performance-metrics)
   - [SER](#session-establishment-ratio-ser) — Session Establishment Ratio
@@ -59,10 +59,11 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 > | **Base** | All SIP requests, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD/PBD, VQ reports, sessions, `reinvite_total`, registration health (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country, direction` |
 > | **Reg failure** | `register_failure_total` | `carrier, ua_type, source_country, code` |
 > | **Retransmission** | `sip_retransmission_total` | `carrier, ua_type, source_country, method` |
-> | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_out_of_order_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country, direction` |
+> | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_out_of_order_total`, `rtp_jitter_milliseconds`, `rtp_pdv_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country, direction` |
 > | **RTP dialog** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country, direction` |
 > | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, direction, destination_country, caller_host, called_host, iface` |
 > | **Fraud** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country, direction` |
+> | **Fraud (call-level)** | `fas_calls_total` | `carrier, ua_type, source_country, direction` |
 > | **Short calls** | `short_calls_total` | `carrier, ua_type, source_country, threshold` |
 > | **Traffic** | `billable_seconds_total` | `carrier, destination_country, direction` |
 > | **Capacity** | `sessions_limit`, `sessions_utilization` | `carrier` |
@@ -642,13 +643,14 @@ topk(5, sum by (code) (rate(sip_exporter_register_failure_total[5m])))
 
 ## Fraud Detection
 
-Fraud signals detect suspicious patterns: registration scanning (one IP registering many accounts), geographic impossibility (same account from different countries), and INVITE flooding (one IP sending a burst of calls). All are scoped per `carrier,source_country,direction` — `ua_type` is intentionally omitted because attackers vary their User-Agent.
+Fraud signals detect suspicious patterns: registration scanning (one IP registering many accounts), geographic impossibility (same account from different countries), INVITE flooding (one IP sending a burst of calls), and False Answer Supervision (answered calls that never carry media). The signaling heuristics are scoped per `carrier,source_country,direction` — `ua_type` is intentionally omitted because attackers vary their User-Agent. **FAS is the exception**: it is a call-level signal measured at the 200 OK, where the answering endpoint's `ua_type` is meaningful, so it carries the full `carrier,ua_type,source_country,direction` set.
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
 | `sip_exporter_register_country_change_total` | counter | `carrier,source_country,direction` | Times a user re-registered from a different country (account-takeover signal) |
 | `sip_exporter_register_scan_total` | counter | `carrier,source_country,direction` | Registration scan signals (one IP registering N+ unique AORs within a time window) |
 | `sip_exporter_invite_burst_total` | counter | `carrier,source_country,direction` | INVITE burst signals (one IP sending N+ INVITEs within a time window) |
+| `sip_exporter_fas_calls_total` | counter | `carrier,ua_type,source_country,direction` | Suspected False Answer Supervision: 200 OK on a media-bearing dialog with no RTP within the threshold |
 
 ### register_country_change_total
 
@@ -690,6 +692,33 @@ Incremented for each **INVITE request** (excluding re-INVITEs) from a single sou
 # Toll-fraud or DDoS via INVITE flood
 rate(sip_exporter_invite_burst_total[5m])
 ```
+
+### fas_calls_total
+
+Incremented when a call is **answered** (non-re-INVITE 200 OK on a dialog that registered media endpoints from SDP) but **no RTP is observed within the threshold window** — a real-time False Answer Supervision signal. The answering side starts billing without delivering media.
+
+This is distinct from `sessions_missing_rtp_total` (a **teardown** metric, evaluated at BYE/expiry and may arrive much later): FAS is an **early, real-time** signal `threshold` seconds after answer.
+
+- Pending entry is created at the 200 OK (only when SDP registered ≥1 media endpoint; held SDP `c=0.0.0.0` is excluded — no media is expected).
+- It is cleared once **≥2 forward RTP packets** reach the dialog's media endpoint (a single stray/spoofed packet must not mask a media-less call).
+- It is also cleared at dialog teardown (BYE / Session-Expires expiry), so a short call that never had media is not misreported.
+
+| Config | Env var | Default |
+|--------|---------|---------|
+| Threshold | `SIP_EXPORTER_FRAUD_FAS_THRESHOLD` | `10s` |
+
+```promql
+# False Answer Supervision — answered calls that never carried media
+rate(sip_exporter_fas_calls_total[5m])
+```
+
+#### FAS limitations
+
+This is a **signaling-only heuristic**. True FAS detection requires decoding the audio stream and recognizing ringing/two-tone patterns in the "answered" media (e.g. Europe/UK ringing tones) — out of scope for a Prometheus exporter (won't fix). Known limitations:
+
+- **Adversarial defeat is inherent.** A party that controls the answering endpoint can send a short RTP burst (≥2 packets) to cancel the signal. The ≥2-packet gate only raises the bar against accidental/coincidental clears, not a determined adversary.
+- **Re-INVITE un-hold blind spot.** If the initial 200 OK carried held SDP (`c=0.0.0.0`, no pending entry created) and a later re-INVITE offers real media, the call is never FAS-tracked. Rare (hold→unhold without any prior RTP).
+- **No audio-content analysis.** A fraudster streaming silence or comfort noise passes the media-established check.
 
 ## Capacity Monitoring
 
@@ -785,6 +814,8 @@ counted; RTP without a correlated dialog is dropped.
 `sip_exporter_rtp_out_of_order_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: out-of-order RTP packets detected (sequence number less than maxSeq, not a duplicate). High values indicate network reordering that can overwhelm jitter buffers.
 
 `sip_exporter_rtp_jitter_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 0.1..500 ms)*: smoothed interarrival jitter (RFC 3550 A.8).
+
+`sip_exporter_rtp_pdv_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1..500 ms)*: Packet Delay Variation — the **raw** per-packet deviation `|arrivalDelta − tsDelta|` (unsmoothed), exposing the jitter spikes/burstiness that `rtp_jitter_milliseconds` smooths over. Sampled once per second per stream, only when a fresh forward packet arrived in that window (idle streams do not re-enter their last spike). Reorder/duplicate packets do not contribute (their timestamp delta is not a forward delta).
 
 `sip_exporter_rtp_mos_score{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1.0..5.0)*: MOS-LQ estimated via the ITU-T G.107 E-model with a 60 ms jitter buffer assumption.
 

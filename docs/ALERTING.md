@@ -206,6 +206,15 @@ These alerts detect suspicious SIP patterns: account takeover, registration enum
           summary: "INVITE burst detected"
           description: "Single IP is sending an unusually high rate of INVITEs on {{ $labels.carrier }} from {{ $labels.source_country }}. Possible toll fraud, DDoS, or traffic pump."
 
+      - alert: SIPFalseAnswerSupervision
+        expr: rate(sip_exporter_fas_calls_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "False Answer Supervision suspected"
+          description: "Answered calls on {{ $labels.carrier }} (ua_type={{ $labels.ua_type }}, {{ $labels.source_country }}, {{ $labels.direction }}) carried no RTP within the FAS threshold. Possible billing fraud — the answering side starts billing without delivering media."
+
       - alert: SIPSessionCapacityExhaustion
         expr: sip_exporter_sessions_utilization > 90
         for: 5m
@@ -319,6 +328,16 @@ These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) mea
         annotations:
           summary: "High RTP jitter"
           description: "95th percentile RTP jitter for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}ms. Jitter above 50ms causes audio artifacts and jitter buffer overflows."
+
+      - alert: RTPPDVHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtp_pdv_milliseconds_bucket[5m]))) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High RTP Packet Delay Variation"
+          description: "95th percentile raw PDV for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}ms. PDV exposes bursty delay spikes that the smoothed jitter metric averages out — values above 100ms indicate sustained delay variation that can overwhelm jitter buffers."
       ```
 
 ### System Health Alerts

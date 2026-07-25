@@ -206,6 +206,15 @@ groups:
           summary: "Обнаружен всплеск INVITE"
           description: "Один IP отправляет аномально высокий rate INVITE на {{ $labels.carrier }} из {{ $labels.source_country }}. Возможный toll fraud, DDoS или traffic pump."
 
+      - alert: SIPFalseAnswerSupervision
+        expr: rate(sip_exporter_fas_calls_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Подозрение на False Answer Supervision"
+          description: "Ответившие вызовы на {{ $labels.carrier }} (ua_type={{ $labels.ua_type }}, {{ $labels.source_country }}, {{ $labels.direction }}) не понесли RTP в течение FAS-threshold. Возможный биллинг-фрод — отвечающая сторона стартует биллинг без доставки медиа."
+
       - alert: SIPSessionCapacityExhaustion
         expr: sip_exporter_sessions_utilization > 90
         for: 5m
@@ -319,6 +328,16 @@ groups:
         annotations:
           summary: "Высокий RTP jitter"
           description: "95-й перцентиль RTP jitter для оператора {{ $labels.carrier }} — {{ $value | printf \"%.1f\" }}мс. Jitter выше 50мс вызывает артефакты аудио и переполнение jitter buffer."
+
+      - alert: RTPPDVHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtp_pdv_milliseconds_bucket[5m]))) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Высокая Packet Delay Variation RTP"
+          description: "95-й перцентиль сырого PDV для оператора {{ $labels.carrier }} — {{ $value | printf \"%.1f\" }}мс. PDV выявляет bursty-всплески задержки, которые сглаженный jitter усредняет — значения выше 100мс указывают на устойчивую вариацию задержки, переполняющую jitter buffer."
       ```
 
 ### Алерты здоровья системы
