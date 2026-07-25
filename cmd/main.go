@@ -81,6 +81,7 @@ func main() {
 		FraudRegScanWindow:        cfg.FraudRegScanWindow,
 		FraudInviteBurstThreshold: cfg.FraudInviteBurstThreshold,
 		FraudInviteBurstWindow:    cfg.FraudInviteBurstWindow,
+		FraudFASThreshold:         cfg.FraudFASThreshold,
 	})
 
 	go telemetry.Run(context.Background(), telemetry.Config{

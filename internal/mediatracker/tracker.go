@@ -50,15 +50,17 @@ type (
 
 	// ObserveResult is the per-packet outcome of an RTP observation.
 	ObserveResult struct {
-		Counted       bool   // packet counted as received (not duplicate/reorder)
-		Duplicate     bool   // packet is a duplicate (same sequence number)
-		Reorder       bool   // packet is out-of-order (seq < maxSeq, not duplicate)
-		Lost          uint64 // packets newly marked lost by this observation
-		Codec         string // resolved codec name
-		Carrier       string // dialog carrier (for metric labels)
-		UAType        string // dialog UA type (for metric labels)
-		SourceCountry string // dialog source country (for metric labels)
-		Direction     string // dialog direction (for metric labels)
+		Counted            bool   // packet counted as received (not duplicate/reorder)
+		Duplicate          bool   // packet is a duplicate (same sequence number)
+		Reorder            bool   // packet is out-of-order (seq < maxSeq, not duplicate)
+		Lost               uint64 // packets newly marked lost by this observation
+		StreamPacketsTotal uint64 // stream's total forward-counted packets after this Observe
+		Codec              string // resolved codec name
+		Carrier            string // dialog carrier (for metric labels)
+		UAType             string // dialog UA type (for metric labels)
+		SourceCountry      string // dialog source country (for metric labels)
+		Direction          string // dialog direction (for metric labels)
+		CallID             string // dialog Call-ID (used to clear FAS pending once media is established)
 	}
 
 	// RTPDialogResult is the per-dialog RTP summary returned at teardown.
@@ -250,15 +252,17 @@ func (t *Tracker) Observe(
 	}
 
 	return ObserveResult{
-		Counted:       entry.state.packetsTotal > prevTotal,
-		Duplicate:     entry.state.packetsDuplicate > prevDup,
-		Reorder:       entry.state.packetsReorder > prevReorder,
-		Lost:          lostDelta,
-		Codec:         codec,
-		Carrier:       labels.Carrier,
-		UAType:        labels.UAType,
-		SourceCountry: labels.SourceCountry,
-		Direction:     labels.Direction,
+		Counted:            entry.state.packetsTotal > prevTotal,
+		Duplicate:          entry.state.packetsDuplicate > prevDup,
+		Reorder:            entry.state.packetsReorder > prevReorder,
+		Lost:               lostDelta,
+		StreamPacketsTotal: entry.state.packetsTotal,
+		Codec:              codec,
+		Carrier:            labels.Carrier,
+		UAType:             labels.UAType,
+		SourceCountry:      labels.SourceCountry,
+		Direction:          labels.Direction,
+		CallID:             labels.CallID,
 	}, true
 }
 

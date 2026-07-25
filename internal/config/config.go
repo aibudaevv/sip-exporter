@@ -37,6 +37,7 @@ type (
 		FraudRegScanWindow        time.Duration `env:"SIP_EXPORTER_FRAUD_REGISTER_SCAN_WINDOW"    env-default:"60s"`
 		FraudInviteBurstThreshold int           `env:"SIP_EXPORTER_FRAUD_INVITE_BURST_THRESHOLD"  env-default:"100"`
 		FraudInviteBurstWindow    time.Duration `env:"SIP_EXPORTER_FRAUD_INVITE_BURST_WINDOW"     env-default:"60s"`
+		FraudFASThreshold         time.Duration `env:"SIP_EXPORTER_FRAUD_FAS_THRESHOLD"           env-default:"10s"`
 	}
 )
 

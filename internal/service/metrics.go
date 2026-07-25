@@ -87,6 +87,7 @@ type (
 		registerCountryChange *prometheus.CounterVec
 		registerScanTotal     *prometheus.CounterVec
 		inviteBurstTotal      *prometheus.CounterVec
+		fasCalls              *prometheus.CounterVec
 
 		shortCalls *prometheus.CounterVec
 
@@ -192,6 +193,7 @@ type (
 		RegisterCountryChange(carrier, sourceCountry, direction string)
 		RegisterScan(carrier, sourceCountry, direction string)
 		InviteBurst(carrier, sourceCountry, direction string)
+		FasCall(carrier, uaType, sourceCountry, direction string)
 		SIPRetransmission(carrier, uaType, sourceCountry, direction, method string)
 		UpdateShortCalls(carrier, uaType, sourceCountry, direction string, duration time.Duration)
 		UpdateBillableSeconds(carrier, destinationCountry, direction string, duration time.Duration)
@@ -440,6 +442,12 @@ func (m *metrics) initRegistrationMetrics(reg *prometheus.Registry) {
 		"sip_exporter_invite_burst_total",
 		"INVITEs from a single IP exceeding the burst threshold (per INVITE at or above threshold, excludes re-INVITEs)",
 		[]string{"carrier", "source_country", "direction"},
+		reg,
+	)
+	m.fasCalls = newCounterVecWithRegistry(
+		"sip_exporter_fas_calls_total",
+		"Suspected False Answer Supervision: 200 OK received on a call with registered media endpoints but no RTP observed within the threshold window",
+		[]string{"carrier", "ua_type", "source_country", "direction"},
 		reg,
 	)
 	m.sipRetransmission = newCounterVecWithRegistry(
@@ -956,6 +964,10 @@ func (m *metrics) RegisterScan(carrier, sourceCountry, direction string) {
 
 func (m *metrics) InviteBurst(carrier, sourceCountry, direction string) {
 	m.inviteBurstTotal.WithLabelValues(carrier, sourceCountry, direction).Inc()
+}
+
+func (m *metrics) FasCall(carrier, uaType, sourceCountry, direction string) {
+	m.fasCalls.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 }
 
 func (m *metrics) SIPRetransmission(carrier, uaType, sourceCountry, _, method string) {

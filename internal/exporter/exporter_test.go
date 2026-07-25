@@ -18,6 +18,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/aibudaevv/sip-exporter/internal/carriers"
+	"github.com/aibudaevv/sip-exporter/internal/dto"
 	"github.com/aibudaevv/sip-exporter/internal/geoip"
 	"github.com/aibudaevv/sip-exporter/internal/mediatracker"
 	"github.com/aibudaevv/sip-exporter/internal/service"
@@ -64,6 +65,8 @@ type mockMetricser struct {
 	registerCountryChange     []string
 	registerScanCalls         int
 	inviteBurstCalls          int
+	fasCalls                  int
+	fasCallsLabels            []carrierCall
 	vqReportCalled            bool
 	vqCarrier                 string
 	vqUAType                  string
@@ -152,6 +155,13 @@ func (m *mockMetricser) RegisterScan(_, _, _ string) {
 
 func (m *mockMetricser) InviteBurst(_, _, _ string) {
 	m.inviteBurstCalls++
+}
+
+func (m *mockMetricser) FasCall(carrier, uaType, sourceCountry, direction string) {
+	m.fasCalls++
+	m.fasCallsLabels = append(m.fasCallsLabels, carrierCall{
+		carrier: carrier, uaType: uaType, sourceCountry: sourceCountry, direction: direction,
+	})
 }
 
 func (m *mockMetricser) UpdateRRD(_, _, _, _ string, delayMs float64) {
@@ -2019,6 +2029,211 @@ func TestInviteBurstTracker_EmptySrcIPSkipped(t *testing.T) {
 	require.Zero(t, mm.inviteBurstCalls, "empty srcIP must be skipped")
 }
 
+// ==================== S11-2: FAS (False Answer Supervision) Detection ====================
+
+func TestFasTracker_SignalsAfterThreshold(t *testing.T) {
+	mm := &mockMetricser{}
+	tracker := newFasTracker(60 * time.Millisecond)
+
+	tracker.store("call-1", "carrier-a", "yealink", "US", "inbound")
+	require.Zero(t, mm.fasCalls, "immediately after 200 OK, FAS must not fire")
+
+	tracker.sweep(mm)
+	require.Zero(t, mm.fasCalls, "sweep before threshold must not fire")
+
+	time.Sleep(90 * time.Millisecond)
+	tracker.sweep(mm)
+	require.Equal(t, 1, mm.fasCalls, "after threshold with no RTP, FAS must fire once")
+	require.Empty(t, tracker.entries, "fired entry must be removed")
+}
+
+func TestFasTracker_NoSignalBeforeThreshold(t *testing.T) {
+	mm := &mockMetricser{}
+	tracker := newFasTracker(time.Second)
+
+	tracker.store("call-1", "carrier-a", "yealink", "US", "inbound")
+	tracker.sweep(mm)
+	require.Zero(t, mm.fasCalls, "entry younger than threshold must not fire")
+	require.Len(t, tracker.entries, 1, "entry must remain pending")
+}
+
+func TestFasTracker_ClearPreventsSignal(t *testing.T) {
+	mm := &mockMetricser{}
+	tracker := newFasTracker(60 * time.Millisecond)
+
+	tracker.store("call-1", "carrier-a", "yealink", "US", "inbound")
+	tracker.clear("call-1")
+	time.Sleep(90 * time.Millisecond)
+	tracker.sweep(mm)
+
+	require.Zero(t, mm.fasCalls, "RTP observed (clear) before threshold must prevent FAS")
+}
+
+func TestFasTracker_PreservesLabelsOnFire(t *testing.T) {
+	mm := &mockMetricser{}
+	tracker := newFasTracker(50 * time.Millisecond)
+
+	tracker.store("call-1", "carrier-b", "grandstream", "DE", "outbound")
+	time.Sleep(70 * time.Millisecond)
+	tracker.sweep(mm)
+
+	require.Equal(t, 1, mm.fasCalls, "FAS must fire with the stored labels")
+	require.Len(t, mm.fasCallsLabels, 1)
+	got := mm.fasCallsLabels[0]
+	require.Equal(t, "carrier-b", got.carrier)
+	require.Equal(t, "grandstream", got.uaType)
+	require.Equal(t, "DE", got.sourceCountry)
+	require.Equal(t, "outbound", got.direction)
+}
+
+func TestFasTracker_NilTrackerSafe(t *testing.T) {
+	mm := &mockMetricser{}
+	var tracker *fasTracker
+
+	tracker.store("call-1", "carrier", "ua", "US", "inbound")
+	tracker.clear("call-1")
+	tracker.sweep(mm)
+	require.Zero(t, mm.fasCalls, "nil tracker must be no-op")
+}
+
+// ==================== S11-2: FAS exporter wiring ====================
+
+const (
+	fasSdpNormal = "v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\n" +
+		"c=IN IP4 10.0.0.1\r\nt=0 0\r\nm=audio 5004 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n"
+	fasSdpHeld = "v=0\r\no=- 1 1 IN IP4 0.0.0.0\r\ns=-\r\n" +
+		"c=IN IP4 0.0.0.0\r\nt=0 0\r\nm=audio 5004 RTP/AVP 0\r\n"
+)
+
+func newFasTestExporter(mm *mockMetricser, fasThreshold time.Duration) *exporter {
+	return &exporter{
+		services: services{
+			metricser: mm,
+			dialoger:  service.NewDialoger(),
+		},
+		inviteTracker: make(map[string]inviteEntry),
+		inviteSDP:     make(map[string]inviteSDPEntity),
+		mediaTracker:  mediatracker.NewTracker(rtpStreamTTL),
+		fasTracker:    newFasTracker(fasThreshold),
+	}
+}
+
+func fasInvite200OK(callID, sdp string) dto.Packet {
+	return dto.Packet{
+		CallID:         []byte(callID),
+		From:           dto.From{Tag: []byte("from-tag")},
+		To:             dto.To{Tag: []byte("to-tag")},
+		ContentType:    []byte("application/sdp"),
+		SessionExpires: 3600,
+		Body:           []byte(sdp),
+	}
+}
+
+// rtpPacket builds an RTP header: V=2, PT=0 (PCMU), ts=160, SSRC=0x11223344.
+// Sequence number is parameterised so a test can send a forward-advancing burst.
+func fasRTPPacket(seq uint16) []byte {
+	return []byte{0x80, 0x00, byte(seq >> 8), byte(seq), 0x00, 0x00, 0x00, 0xA0, 0x11, 0x22, 0x33, 0x44}
+}
+
+func TestFAS_HeldSDPNotTracked(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Second)
+
+	require.NoError(
+		t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-held", fasSdpHeld), false),
+	)
+	require.Empty(t, e.fasTracker.entries, "held SDP (c=0.0.0.0) registers no media → not a FAS candidate")
+}
+
+func TestFAS_200OKThenNoRTPFiresAfterThreshold(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, 60*time.Millisecond)
+
+	require.NoError(
+		t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
+	)
+	require.Len(t, e.fasTracker.entries, 1, "200 OK with media endpoints must open a FAS pending entry")
+
+	e.fasTracker.sweep(mm)
+	require.Zero(t, mm.fasCalls, "before threshold, FAS must not fire")
+
+	time.Sleep(90 * time.Millisecond)
+	e.fasTracker.sweep(mm)
+	require.Equal(t, 1, mm.fasCalls, "no RTP within threshold → FAS fires")
+}
+
+func TestFAS_RTPBeforeThresholdPreventsFire(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, 60*time.Millisecond)
+
+	require.NoError(
+		t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
+	)
+
+	// Two forward RTP packets for the registered endpoint (10.0.0.1:5004) → media
+	// established (≥2) → FAS pending cleared. A single packet would NOT clear it.
+	_, err := e.handleRTP(net.ParseIP("10.0.0.2"), 5004, net.ParseIP("10.0.0.1"), 5004, fasRTPPacket(1))
+	require.NoError(t, err)
+	_, err = e.handleRTP(net.ParseIP("10.0.0.2"), 5004, net.ParseIP("10.0.0.1"), 5004, fasRTPPacket(2))
+	require.NoError(t, err)
+	require.Empty(t, e.fasTracker.entries, "≥2 RTP packets → FAS pending cleared")
+
+	time.Sleep(90 * time.Millisecond)
+	e.fasTracker.sweep(mm)
+	require.Zero(t, mm.fasCalls, "established media before threshold must prevent FAS")
+}
+
+func TestFAS_SingleRTPDoesNotClear(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, 60*time.Millisecond)
+
+	require.NoError(
+		t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
+	)
+
+	// A single RTP packet must NOT clear FAS (could be a stray/spoofed packet).
+	_, err := e.handleRTP(net.ParseIP("10.0.0.2"), 5004, net.ParseIP("10.0.0.1"), 5004, fasRTPPacket(1))
+	require.NoError(t, err)
+	require.Len(t, e.fasTracker.entries, 1, "single RTP packet must not clear FAS pending")
+
+	time.Sleep(90 * time.Millisecond)
+	e.fasTracker.sweep(mm)
+	require.Equal(t, 1, mm.fasCalls, "one stray packet does not establish media → FAS fires after threshold")
+}
+
+func TestFAS_ByeBeforeThresholdPreventsFire(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, 60*time.Millisecond)
+
+	require.NoError(
+		t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
+	)
+
+	// BYE tears down the dialog before the threshold → FAS pending cleared.
+	require.NoError(t, e.handleBye200OK(fasInvite200OK("call-1", ""), ""))
+	require.Empty(t, e.fasTracker.entries, "BYE teardown → FAS pending cleared")
+
+	time.Sleep(90 * time.Millisecond)
+	e.fasTracker.sweep(mm)
+	require.Zero(t, mm.fasCalls, "short call without RTP (BYE before threshold) must not be misreported as FAS")
+}
+
+func TestFAS_ReinviteDoesNotOpenPending(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Second)
+
+	require.NoError(
+		t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), true),
+	)
+	require.Empty(t, e.fasTracker.entries, "re-INVITE refreshes a dialog, not a new answer → no FAS pending")
+}
+
 func TestHandleMessage_ReINVITE_ExcludedFromBurst(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
@@ -3847,6 +4062,7 @@ type carrierCall struct {
 	value         float64
 	uaType        string
 	sourceCountry string
+	direction     string
 }
 
 type carrierFailure struct {
@@ -3939,6 +4155,8 @@ func (m *carrierTrackingMetricser) InviteBurst(carrier, sourceCountry, _ string)
 	m.inviteBurst = append(m.inviteBurst,
 		carrierCall{carrier: carrier, sourceCountry: sourceCountry})
 }
+
+func (m *carrierTrackingMetricser) FasCall(_, _, _, _ string) {}
 
 func (m *carrierTrackingMetricser) SIPRetransmission(carrier, _, _, _, method string) {
 	m.retransmissionCalls = append(m.retransmissionCalls,

@@ -185,6 +185,7 @@ type (
 		pktType               uint8
 		registerScanTracker   *registerScanTracker
 		inviteBurstTracker    *inviteBurstTracker
+		fasTracker            *fasTracker
 		registerTracker       map[string]registerEntry
 		registerMutex         sync.RWMutex
 		registerExpiryTracker map[string]registerExpiryEntry
@@ -216,6 +217,7 @@ type (
 		FraudRegScanWindow        time.Duration
 		FraudInviteBurstThreshold int
 		FraudInviteBurstWindow    time.Duration
+		FraudFASThreshold         time.Duration
 	}
 	// InitConfig configures the exporter during [Exporter.Initialize].
 	InitConfig struct {
@@ -259,6 +261,7 @@ func NewExporter(deps Deps) Exporter {
 		mediaTracker:          mediatracker.NewTracker(rtpStreamTTL),
 		registerScanTracker:   newRegisterScanTracker(deps.FraudRegScanThreshold, deps.FraudRegScanWindow),
 		inviteBurstTracker:    newInviteBurstTracker(deps.FraudInviteBurstThreshold, deps.FraudInviteBurstWindow),
+		fasTracker:            newFasTracker(deps.FraudFASThreshold),
 		messages:              make(chan *rawPacket, messagesChanSize),
 		done:                  make(chan struct{}),
 		registerTracker:       make(map[string]registerEntry),
@@ -563,9 +566,11 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		e.cleanupOptionsTracker()
 		e.cleanupByeTracker()
 		e.mediaTracker.Cleanup()
+		e.fasTracker.sweep(e.services.metricser)
 		s := e.services.dialoger.Size()
 
 		for _, r := range results {
+			e.fasTracker.clear(r.CallID)
 			e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry, r.Direction)
 			e.services.metricser.UpdateSPD(
 				r.Carrier, r.UAType, r.SourceCountry, r.Direction, r.Duration,
@@ -1101,6 +1106,11 @@ func (e *exporter) handleRTP(
 		// No correlated media endpoint for this flow → drop.
 		return "", nil
 	}
+	// Require ≥ fasMediaPacketsThreshold forward packets before cancelling FAS:
+	// a single stray/spoofed RTP packet must not mask a media-less call.
+	if res.StreamPacketsTotal >= fasMediaPacketsThreshold {
+		e.fasTracker.clear(res.CallID)
+	}
 	if res.Counted {
 		e.services.metricser.UpdateRTPPackets(res.Carrier, res.UAType, res.Codec, res.SourceCountry, res.Direction)
 	}
@@ -1458,11 +1468,15 @@ func (e *exporter) handleInvite200OK(
 	labels := mediatracker.MediaLabels{
 		Carrier: carrier, UAType: uaType, SourceCountry: sourceCountry, CallID: callID, Direction: direction,
 	}
+	mediaEndpoints := 0
 	if offerSDP, ok := e.takeInviteSDP(callID); ok {
-		e.registerMediaEndpoints(offerSDP, labels)
+		mediaEndpoints += e.registerMediaEndpoints(offerSDP, labels)
 	}
 	if isSDPContentType(packet.ContentType) {
-		e.registerMediaEndpoints(packet.Body, labels)
+		mediaEndpoints += e.registerMediaEndpoints(packet.Body, labels)
+	}
+	if !isReinvite && mediaEndpoints > 0 {
+		e.fasTracker.store(callID, carrier, uaType, sourceCountry, direction)
 	}
 	return nil
 }
@@ -1475,6 +1489,7 @@ func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {
 
 	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
 	result := e.services.dialoger.Delete(dialogID)
+	e.fasTracker.clear(string(packet.CallID))
 
 	if delayMs, byeCarrier, byeUAType, byeSC, ok := e.measureByeTime(string(packet.CallID)); ok {
 		e.services.metricser.UpdatePBD(byeCarrier, byeUAType, byeSC, result.Direction, delayMs)
@@ -1882,8 +1897,10 @@ func (e *exporter) cleanupInviteSDP() {
 }
 
 // registerMediaEndpoints parses an SDP body and registers each audio media
-// endpoint in the media tracker under the given dialog labels.
-func (e *exporter) registerMediaEndpoints(body []byte, labels mediatracker.MediaLabels) {
+// endpoint in the media tracker under the given dialog labels. Returns the
+// number of endpoints registered (0 for held/inactive/IPv6 SDP).
+func (e *exporter) registerMediaEndpoints(body []byte, labels mediatracker.MediaLabels) int {
+	count := 0
 	for _, m := range sdp.Parse(body) {
 		ml := labels
 		ml.SDPCodecs = m.Codecs
@@ -1893,7 +1910,9 @@ func (e *exporter) registerMediaEndpoints(body []byte, labels mediatracker.Media
 		zap.L().Debug("RTP media endpoint registered",
 			zap.String("ip", m.IP), zap.Uint16("port", m.Port),
 			zap.String("call_id", labels.CallID))
+		count++
 	}
+	return count
 }
 
 // ipPortToKey converts an IP address string and port to a BPF map key.

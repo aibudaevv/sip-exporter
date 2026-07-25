@@ -432,6 +432,19 @@ func TestMetrics_UpdateRTPPDV(t *testing.T) {
 	require.InDelta(t, 65.0, h.GetSampleSum(), 0.0001, "sample sum must equal observed PDV")
 }
 
+func TestMetrics_FasCall(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+
+	m.FasCall("carrier-a", "yealink", "US", "inbound")
+	m.FasCall("carrier-a", "yealink", "US", "inbound")
+
+	counter, err := m.fasCalls.GetMetricWithLabelValues("carrier-a", "yealink", "US", "inbound")
+	require.NoError(t, err)
+	var d dto.Metric
+	require.NoError(t, counter.Write(&d))
+	require.InDelta(t, 2.0, d.GetCounter().GetValue(), 0.0001, "two FAS calls must increment the counter twice")
+}
+
 func TestMetrics_Request_HostLabels(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := newMetricserWithRegistry(reg).(*metrics)
