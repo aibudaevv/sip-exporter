@@ -54,10 +54,11 @@ func sendRTPWithSSRC(t *testing.T, port int, ssrc uint32, count int) {
 
 // sendRTCPRR injects a single RTCP Receiver Report (RFC 3550 §6.4.2) for ssrc to
 // 127.0.0.1:port (rtcp-mux: the RTP port). One report block carries jitter / loss
-// / LSR / DLSR values the test asserts on. Must be called while a SIPp media
+// / LSR / DLSR values the test asserts on. cumLost sets the 24-bit cumulative-lost
+// field (the exporter diffs it between RRs). Must be called while a SIPp media
 // socket is bound to port (so the loopback packet completes the PACKET_HOST
 // receive cycle the exporter — with PACKET_IGNORE_OUTGOING — actually sees).
-func sendRTCPRR(t *testing.T, port int, ssrc uint32) {
+func sendRTCPRR(t *testing.T, port int, ssrc, cumLost uint32) {
 	t.Helper()
 	addr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port}
 	conn, err := net.DialUDP("udp4", nil, addr)
@@ -72,6 +73,9 @@ func sendRTCPRR(t *testing.T, port int, ssrc uint32) {
 	binary.BigEndian.PutUint32(pkt[4:8], 0x5A5A5A5A)                                  // reporter (sender) SSRC
 	binary.BigEndian.PutUint32(pkt[8:12], ssrc)                                       // reported source SSRC
 	pkt[12] = 10                                                                      // fraction lost (10/256 ≈ 3.9%)
+	pkt[13] = byte(cumLost >> 16)                                                     // 24-bit cumulative number of packets lost
+	pkt[14] = byte(cumLost >> 8)
+	pkt[15] = byte(cumLost)
 	binary.BigEndian.PutUint32(pkt[16:20], 500)                                       // extended highest sequence
 	binary.BigEndian.PutUint32(pkt[20:24], 1600)                                      // jitter ticks → 200 ms at 8000 Hz
 	binary.BigEndian.PutUint32(pkt[24:28], pastNTP32(time.Now().Add(-5*time.Second))) // LSR
@@ -114,20 +118,32 @@ func TestRTCP_MetricsFromInjectedRR(t *testing.T) {
 	// Two RRs guard against a single dropped packet at the socket.
 	sendRTPWithSSRC(t, uasMediaNum, testSSRC, 20)
 	time.Sleep(300 * time.Millisecond) // let RTP reach the tracker before the RR
-	sendRTCPRR(t, uasMediaNum, testSSRC)
+	sendRTCPRR(t, uasMediaNum, testSSRC, 0)   // first RR: establishes the loss baseline (delta=0)
 	time.Sleep(100 * time.Millisecond)
-	sendRTCPRR(t, uasMediaNum, testSSRC)
-	time.Sleep(300 * time.Millisecond) // let the RTCP be processed before BYE
+	sendRTCPRR(t, uasMediaNum, testSSRC, 500) // second RR: cumulative=500 → delta=500 emitted
+	time.Sleep(300 * time.Millisecond)        // let the RTCP be processed before BYE
 
 	// Let SIPp finish (BYE tears down the dialog; the injected RTCP already ran).
 	wait()
 
-	// The RTCP path is asynchronous (AF_PACKET → handleRTCP); poll until all three
-	// metrics are observed (mirrors the Eventually pattern used by the RTP suite).
+	// The RTCP path is asynchronous (AF_PACKET → handleRTCP); poll until all five
+	// RTCP metric families are observed — reports, jitter, RTT, loss-fraction, and
+	// cumulative-loss (the delta from the second RR proves D3 baseline semantics).
 	require.Eventually(t, func() bool {
 		return getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) > 0 &&
 			getRTPMetric(t, endpoint, "sip_exporter_rtcp_jitter_milliseconds_count") > 0 &&
-			getRTPMetric(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds_count") > 0
+			getRTPMetric(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds_count") > 0 &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtcp_loss_fraction_percent_count") > 0 &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtcp_cumulative_loss_total") > 0
 	}, 10*time.Second, 500*time.Millisecond,
-		"rtcp_reports_total{type=rr}, rtcp_jitter_count, rtcp_rtt_count must all be > 0")
+		"all five RTCP metrics must be observed")
+
+	// RTT value check (not just count): LSR was 5s ago, DLSR=0 → RTT ≈ 5000ms.
+	// Proves the formula end-to-end, not merely that an observation landed.
+	rttSum := getRTPMetric(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds_sum")
+	rttCount := getRTPMetric(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds_count")
+	require.Greater(t, rttCount, 0.0)
+	avgRTT := rttSum / rttCount
+	require.Greater(t, avgRTT, 4000.0, "RTT should be ~5000ms (LSR 5s ago, DLSR=0)")
+	require.Less(t, avgRTT, 6000.0, "RTT should be ~5000ms (LSR 5s ago, DLSR=0)")
 }
