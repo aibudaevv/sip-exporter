@@ -1536,7 +1536,7 @@ func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {
 
 	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
 	result := e.services.dialoger.Delete(dialogID)
-	e.fasTracker.clear(string(packet.CallID))
+	e.fasTracker.finalizeOnBye(string(packet.CallID), e.services.metricser)
 
 	if delayMs, byeCarrier, byeUAType, byeSC, ok := e.measureByeTime(string(packet.CallID)); ok {
 		e.services.metricser.UpdatePBD(byeCarrier, byeUAType, byeSC, result.Direction, delayMs)

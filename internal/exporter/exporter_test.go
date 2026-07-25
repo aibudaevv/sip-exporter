@@ -2294,6 +2294,67 @@ func TestFAS_ByeBeforeThresholdPreventsFire(t *testing.T) {
 	require.Zero(t, mm.fasCalls, "short call without RTP (BYE before threshold) must not be misreported as FAS")
 }
 
+// TestFAS_ByePath_FiresAfterFloor verifies that a call answered with no
+// answer-side RTP, terminated by BYE after the floor duration, is reported as
+// FAS at teardown — covering short dead-air calls that end before the sweep
+// threshold (S11-7 / F5).
+func TestFAS_ByePath_FiresAfterFloor(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Hour) // long threshold: only the BYE path can fire
+
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
+	)
+	require.Len(t, e.fasTracker.entries, 1)
+
+	// Simulate answer→BYE duration above the floor by backdating the entry.
+	e.fasTracker.mu.Lock()
+	ent := e.fasTracker.entries["call-1"]
+	ent.createdAt = time.Now().Add(-fasByeFloor - time.Second)
+	e.fasTracker.entries["call-1"] = ent
+	e.fasTracker.mu.Unlock()
+
+	require.NoError(t, e.handleBye200OK(fasInvite200OK("call-1", ""), ""))
+	require.Equal(t, 1, mm.fasCalls, "BYE after floor with no answer-side RTP must fire FAS")
+	require.Empty(t, e.fasTracker.entries, "entry cleared after BYE finalize")
+}
+
+// TestFAS_ByePath_BelowFloorNoFire verifies that a very short call (caller
+// abandoned immediately) is not reported as FAS — not fraud, just a quick hangup.
+func TestFAS_ByePath_BelowFloorNoFire(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Hour)
+
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
+	)
+	// No backdating: createdAt is "now", far below the floor.
+	require.NoError(t, e.handleBye200OK(fasInvite200OK("call-1", ""), ""))
+	require.Zero(t, mm.fasCalls, "BYE before floor must not fire FAS")
+}
+
+// TestFAS_ByePath_NoFire_WhenMediaCleared verifies the BYE path is a no-op when
+// answer-side media already cleared the pending entry (the normal good case).
+func TestFAS_ByePath_NoFire_WhenMediaCleared(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Hour)
+
+	e.storeInviteSDP("call-1", []byte(fasSdpOffer))
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
+	)
+	// Answer-side media (2 packets to the offer endpoint) clears the entry.
+	for _, seq := range []uint16{1, 2} {
+		_, err := e.handleRTP(net.ParseIP("10.0.0.1"), 5004, net.ParseIP("10.0.0.2"), 5004, fasRTPPacket(seq))
+		require.NoError(t, err)
+	}
+	require.Empty(t, e.fasTracker.entries, "answer-side media clears FAS pending")
+
+	// Backdate would be moot — the entry is already gone; BYE must not fire.
+	require.NoError(t, e.handleBye200OK(fasInvite200OK("call-1", ""), ""))
+	require.Zero(t, mm.fasCalls, "no FAS when media already cleared the entry")
+}
+
 // TestFAS_SRTP_ExtendsThreshold verifies the DTLS-SRTP grace: a call whose
 // answer SDP carries a=fingerprint does NOT fire FAS at the base threshold, but
 // does fire after base+grace (S11-6 / F2).

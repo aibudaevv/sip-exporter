@@ -18,6 +18,11 @@ const fasMediaPacketsThreshold = 2
 // up to ~15 s after the 200 OK, which would otherwise false-positive.
 const fasSRTPGrace = 15 * time.Second
 
+// fasByeFloor is the minimum answer→BYE duration for a BYE-path FAS report.
+// Below this the caller likely abandoned before the callee could send media
+// (not fraud); above it with zero answer-side RTP, the dead air is suspect.
+const fasByeFloor = 3 * time.Second
+
 type registerScanTracker struct {
 	mu        sync.Mutex
 	threshold int
@@ -269,6 +274,35 @@ func (t *fasTracker) clearIfAnswerMedia(callID string, ep fasEndpoint, packetsTo
 		delete(t.entries, callID)
 		delete(t.offer, callID)
 	}
+}
+
+// finalizeOnBye reports FAS at teardown when the entry is still pending (the
+// answer side never sent media) and the call lasted beyond fasByeFloor, then
+// clears. A no-op when media already cleared the entry earlier (normal case).
+// This catches short dead-air calls that end via BYE before the sweep threshold.
+func (t *fasTracker) finalizeOnBye(callID string, metricser service.Metricser) {
+	if t == nil || callID == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	e, ok := t.entries[callID]
+	if !ok {
+		return
+	}
+	if time.Since(e.createdAt) >= fasByeFloor {
+		metricser.FasCall(e.carrier, e.uaType, e.sourceCountry, e.direction)
+		zap.L().Warn("FAS suspected at BYE: answered call ended with no answer-side RTP",
+			zap.String("call_id", callID),
+			zap.String("carrier", e.carrier),
+			zap.String("ua_type", e.uaType),
+			zap.String("source_country", e.sourceCountry),
+			zap.String("direction", e.direction),
+			zap.Duration("duration", time.Since(e.createdAt)),
+		)
+	}
+	delete(t.entries, callID)
+	delete(t.offer, callID)
 }
 
 func (t *fasTracker) sweep(metricser service.Metricser) {
