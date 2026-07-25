@@ -88,12 +88,13 @@ type (
 	// Tracker keeps per-flow RTP statistics and correlates RTP flows to SIP
 	// dialogs via the media-endpoint map (IP:port → labels) populated from SDP.
 	Tracker struct {
-		mu      sync.Mutex
-		streams map[streamKey]*streamEntry
-		media   map[endpointKey]MediaLabels
-		callRTP map[string]map[endpointKey]struct{} // per-CallID endpoints that ever had RTP (TTL-independent)
-		ttl     time.Duration
-		now     func() time.Time
+		mu        sync.Mutex
+		streams   map[streamKey]*streamEntry
+		media     map[endpointKey]MediaLabels
+		callRTP   map[string]map[endpointKey]struct{} // per-CallID endpoints that ever had RTP (TTL-independent)
+		ssrcIndex map[uint32][]streamKey              // SSRC → stream keys (multi-valued: an SSRC may be reused across endpoints)
+		ttl       time.Duration
+		now       func() time.Time
 	}
 
 	// streamEntry bundles a stream state with its correlation labels.
@@ -107,11 +108,12 @@ type (
 // NewTracker creates a Tracker that expires idle streams after ttl.
 func NewTracker(ttl time.Duration) *Tracker {
 	return &Tracker{
-		streams: make(map[streamKey]*streamEntry),
-		media:   make(map[endpointKey]MediaLabels),
-		callRTP: make(map[string]map[endpointKey]struct{}),
-		ttl:     ttl,
-		now:     time.Now,
+		streams:   make(map[streamKey]*streamEntry),
+		media:     make(map[endpointKey]MediaLabels),
+		callRTP:   make(map[string]map[endpointKey]struct{}),
+		ssrcIndex: make(map[uint32][]streamKey),
+		ttl:       ttl,
+		now:       time.Now,
 	}
 }
 
@@ -161,6 +163,7 @@ func (t *Tracker) Unregister(callID string) (RTPDialogResult, []MediaEndpoint) {
 
 	for k, e := range t.streams {
 		if e.labels.CallID == callID {
+			t.removeSSRCIndex(k)
 			delete(t.streams, k)
 		}
 	}
@@ -230,6 +233,7 @@ func (t *Tracker) Observe(
 			codec:  codec,
 		}
 		t.streams[key] = entry
+		t.ssrcIndex[h.SSRC] = append(t.ssrcIndex[h.SSRC], key)
 		if t.callRTP[labels.CallID] == nil {
 			t.callRTP[labels.CallID] = make(map[endpointKey]struct{})
 		}
@@ -313,9 +317,61 @@ func (t *Tracker) Cleanup() {
 	now := t.now()
 	for key, e := range t.streams {
 		if now.Sub(e.state.lastArrival) > t.ttl {
+			t.removeSSRCIndex(key)
 			delete(t.streams, key)
 		}
 	}
+}
+
+// removeSSRCIndex drops a stream key from the SSRC index. Caller holds t.mu.
+func (t *Tracker) removeSSRCIndex(key streamKey) {
+	keys := t.ssrcIndex[key.ssrc]
+	for i, k := range keys {
+		if k == key {
+			if len(keys) == 1 {
+				delete(t.ssrcIndex, key.ssrc)
+				return
+			}
+			t.ssrcIndex[key.ssrc] = append(keys[:i], keys[i+1:]...)
+			return
+		}
+	}
+}
+
+// LookupBySSRC resolves an SSRC (carried in an RTCP report block) to the labels of
+// the tracked RTP stream sending with that SSRC, enabling RTCP↔RTP correlation.
+// When multiple streams share an SSRC (reuse across endpoints), the RTCP packet's
+// endpoints disambiguate — destination first (NAT-robust), then source — mirroring
+// lookupLabels; absent a match, the first tracked stream for that SSRC is returned
+// (rare collision fallback). Returns false if no stream tracks the SSRC.
+func (t *Tracker) LookupBySSRC(
+	ssrc uint32,
+	srcIP string, srcPort uint16,
+	dstIP string, dstPort uint16,
+) (MediaLabels, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	keys, ok := t.ssrcIndex[ssrc]
+	if !ok || len(keys) == 0 {
+		return MediaLabels{}, false
+	}
+	for _, ep := range []endpointKey{
+		{ip: dstIP, port: dstPort},
+		{ip: srcIP, port: srcPort},
+	} {
+		for _, k := range keys {
+			if k.endpoint != ep {
+				continue
+			}
+			if e, found := t.streams[k]; found {
+				return e.labels, true
+			}
+		}
+	}
+	if e, found := t.streams[keys[0]]; found {
+		return e.labels, true
+	}
+	return MediaLabels{}, false
 }
 
 // StreamCount returns the number of active RTP streams.

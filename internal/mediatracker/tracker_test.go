@@ -393,3 +393,97 @@ func TestTracker_UnregisterResult_SurvivesTTL(t *testing.T) {
 	require.True(t, r.RTPObserved, "RTP fact must survive stream TTL")
 	require.False(t, r.OneWay, "two-way RTP was observed")
 }
+
+// TestTracker_LookupBySSRC verifies RTCP correlation: an SSRC from an RTCP report
+// block resolves to the labels of the tracked RTP stream sending with that SSRC.
+func TestTracker_LookupBySSRC(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+	const ssrc uint32 = 0x11223344
+	_, ok := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), t0)
+	require.True(t, ok)
+
+	labels, ok := tr.LookupBySSRC(ssrc, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok, "tracked SSRC must resolve")
+	require.Equal(t, "call-1", labels.CallID)
+	require.Equal(t, "carrier-a", labels.Carrier)
+
+	_, ok = tr.LookupBySSRC(0x99999999, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.False(t, ok, "unknown SSRC must not resolve")
+}
+
+func TestTracker_LookupBySSRC_CollisionDisambiguates(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, MediaLabels{Carrier: "carrier-a", CallID: "call-1",
+		SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000}})
+	tr.Register("10.0.0.2", 5006, MediaLabels{Carrier: "carrier-b", CallID: "call-2",
+		SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000}})
+	t0 := time.Unix(1000, 0)
+	const ssrc uint32 = 0xABCDEFFF
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), t0)
+	_, _ = tr.Observe("10.0.0.2", 5006, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), t0)
+
+	// RTCP matching the second stream's endpoint must resolve to carrier-b.
+	labels, ok := tr.LookupBySSRC(ssrc, "9.9.9.9", 0, "10.0.0.2", 5006)
+	require.True(t, ok)
+	require.Equal(t, "carrier-b", labels.Carrier, "must disambiguate to the dst-matched stream")
+
+	// Matching the first stream's endpoint must resolve to carrier-a.
+	labels, ok = tr.LookupBySSRC(ssrc, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Equal(t, "carrier-a", labels.Carrier)
+}
+
+func TestTracker_LookupBySSRC_RemovedOnUnregister(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+	const ssrc uint32 = 0xDEADBEEF
+	_, ok := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), t0)
+	require.True(t, ok)
+
+	tr.Unregister("call-1")
+
+	_, ok = tr.LookupBySSRC(ssrc, "10.0.0.1", 5004, "0.0.0.0", 0)
+	require.False(t, ok, "SSRC must leave the index when its stream is unregistered")
+}
+
+func TestTracker_LookupBySSRC_RemovedOnCleanup(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+	const ssrc uint32 = 0xCAFEBABE
+	_, ok := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), t0)
+	require.True(t, ok)
+
+	tr.SetNow(func() time.Time { return t0.Add(31 * time.Second) })
+	tr.Cleanup()
+
+	_, ok = tr.LookupBySSRC(ssrc, "10.0.0.1", 5004, "0.0.0.0", 0)
+	require.False(t, ok, "SSRC must leave the index when its stream TTL-expires")
+}
+
+func TestTracker_LookupBySSRC_Concurrent(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+	const ssrc uint32 = 0x55667788
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), t0)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 200 {
+			_, _ = tr.LookupBySSRC(ssrc, "9.9.9.9", 0, "10.0.0.1", 5004)
+		}
+	}()
+	for i := range 200 {
+		_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(uint16(i+10), ssrc), t0)
+	}
+	<-done
+
+	// Post-concurrency state must remain consistent (no index corruption).
+	_, ok := tr.LookupBySSRC(ssrc, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok, "SSRC must still resolve after concurrent Observe/Lookup")
+}
