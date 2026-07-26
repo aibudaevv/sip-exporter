@@ -99,6 +99,9 @@ func Parse(payload []byte) ([]Report, error) {
 		if pt == PTSenderReport || pt == PTReceiverReport {
 			rep, err := parseReport(payload[off:off+pktLen], pt)
 			if err != nil {
+				if len(rep.Blocks) > 0 {
+					reports = append(reports, rep)
+				}
 				return reports, err
 			}
 			reports = append(reports, rep)

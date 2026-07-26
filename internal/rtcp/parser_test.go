@@ -175,6 +175,24 @@ func TestParse_BlockCountLiesAboutBlocks(t *testing.T) {
 	require.ErrorIs(t, err, ErrTruncated, "lying RC must not read out of bounds")
 }
 
+func TestParse_TruncatedSRKeepsValidBlocks(t *testing.T) {
+	// SR declares RC=2 but only 1 block fits — parseReport returns the partial
+	// rep (1 valid block) plus ErrTruncated. Parse must salvage that block
+	// instead of discarding it with the error.
+	blk := makeBlock(0x12345678, 10, 500, 0x100, 200, 0xAABB, 0xCCDD)
+	pkt := make([]byte, 0, srMinLen+24)
+	pkt = append(pkt, 0xA2, PTSenderReport, 0x00, 0x0C) // V=2, RC=2, length=12 (52 bytes)
+	pkt = append(pkt, 0, 0, 0, 0)                       // sender SSRC
+	pkt = append(pkt, make([]byte, senderInfoLen)...)    // 20-byte sender info
+	pkt = append(pkt, blk...)                           // 1 block; RC=2 lies
+	reports, err := Parse(pkt)
+	require.ErrorIs(t, err, ErrTruncated, "trailing truncation still reported")
+	require.Len(t, reports, 1, "partial SR salvaged with valid blocks")
+	require.Len(t, reports[0].Blocks, 1, "one valid block preserved")
+	require.Equal(t, uint32(0x12345678), reports[0].Blocks[0].SSRC)
+	require.Equal(t, uint32(200), reports[0].Blocks[0].Jitter)
+}
+
 func TestParse_CumulativeLostMaxPositive(t *testing.T) {
 	// Maximum POSITIVE 24-bit signed value (0x7FFFFF = 8388607) round-trips.
 	blk := makeBlock(0x1, 0, 0x7FFFFF, 0, 0, 0, 0)
