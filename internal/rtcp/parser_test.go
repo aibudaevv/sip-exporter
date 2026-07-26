@@ -224,6 +224,25 @@ func TestParse_NegativeCumulativeLostSigned(t *testing.T) {
 	}
 }
 
+func TestParse_MalformedMidCompoundContinuesIteration(t *testing.T) {
+	// [valid RR with 1 block][malformed SR][valid RR with 1 block]
+	// The malformed SR has a declared length shorter than srMinLen, so
+	// parseReport returns ErrInvalidRTCP. The parser must continue to the
+	// next sub-packet instead of aborting the whole compound.
+	rr1 := makeRR(0x1, makeBlock(0x2, 0, 0, 0, 0, 0, 0))
+	badSR := []byte{0x80, PTSenderReport, 0x00, 0x05, // V=2, RC=0, length=5 → pktLen=24 < srMinLen=28
+		0, 0, 0, 0, // sender SSRC
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+	rr2 := makeRR(0x3, makeBlock(0x4, 0, 0, 0, 0, 0, 0))
+	compound := append(append(rr1, badSR...), rr2...)
+
+	reports, err := Parse(compound)
+	require.Error(t, err, "malformed SR must still be reported as error")
+	require.Len(t, reports, 2, "valid RR before AND after bad SR must be salvaged")
+	require.Equal(t, uint32(0x2), reports[0].Blocks[0].SSRC)
+	require.Equal(t, uint32(0x4), reports[1].Blocks[0].SSRC)
+}
+
 // FuzzParse ensures Parse never panics on arbitrary input AND that successful
 // parses are deterministic and structurally valid. The caller's packet-consuming
 // goroutine has no recover(); a panic would stall the whole exporter. Beyond the

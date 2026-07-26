@@ -72,8 +72,11 @@ type ReportBlock struct {
 // Parse decodes an RTCP compound payload into its SR/RR reports. Non-SR/RR
 // sub-packets (SDES, BYE, APP, unknown) are skipped by length. The function
 // validates bounds at every step and returns ErrInvalidRTCP, ErrNotRTCP, or
-// ErrTruncated on malformed input without panicking. A compound with no SR/RR
-// (e.g. SDES-only) returns (nil, nil).
+// ErrTruncated on malformed input without panicking. When a sub-packet is
+// malformed, Parse salvages any valid reports already decoded and continues
+// iterating subsequent sub-packets — the first error is returned but never
+// suppresses later valid reports. A compound with no SR/RR (e.g. SDES-only)
+// returns (nil, nil).
 func Parse(payload []byte) ([]Report, error) {
 	if len(payload) < commonHeaderLen {
 		return nil, ErrInvalidRTCP
@@ -83,17 +86,23 @@ func Parse(payload []byte) ([]Report, error) {
 	}
 
 	var reports []Report
+	var firstErr error
 	off := 0
 	for off < len(payload) {
-		// Common header: need 4 bytes to read PT and length.
 		if off+commonHeaderLen > len(payload) {
-			return reports, ErrTruncated
+			if firstErr == nil {
+				firstErr = ErrTruncated
+			}
+			break
 		}
 		pt := payload[off+ptOffset]
 		lengthWords := int(binary.BigEndian.Uint16(payload[off+lengthOffset : off+commonHeaderLen]))
 		pktLen := (lengthWords + 1) * wordLen // RFC 3550: length is 32-bit words minus one
 		if off+pktLen > len(payload) {
-			return reports, ErrTruncated
+			if firstErr == nil {
+				firstErr = ErrTruncated
+			}
+			break
 		}
 
 		if pt == PTSenderReport || pt == PTReceiverReport {
@@ -102,14 +111,17 @@ func Parse(payload []byte) ([]Report, error) {
 				if len(rep.Blocks) > 0 {
 					reports = append(reports, rep)
 				}
-				return reports, err
+				if firstErr == nil {
+					firstErr = err
+				}
+			} else {
+				reports = append(reports, rep)
 			}
-			reports = append(reports, rep)
 		}
 		// SDES/BYE/APP and unknown PTs: skip — contents not needed.
 		off += pktLen
 	}
-	return reports, nil
+	return reports, firstErr
 }
 
 // parseReport decodes one SR or RR sub-packet already sliced to its declared
