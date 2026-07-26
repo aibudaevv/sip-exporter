@@ -140,6 +140,8 @@ func NewTracker(ttl time.Duration) *Tracker {
 
 // SetNow overrides the clock used for expiry (for testing).
 func (t *Tracker) SetNow(now func() time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.now = now
 }
 
