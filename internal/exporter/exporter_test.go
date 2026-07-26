@@ -2778,6 +2778,55 @@ func TestHandleRTP_KernelTimestampMissingCounter(t *testing.T) {
 		"non-zero pktTimestamp must not increment the counter")
 }
 
+// TestFAS_SweepLatency_10kEntries is a performance regression guard: sweeping
+// 10k expired entries must stay well under the threshold. A spike indicates
+// accidental O(n²) behavior or a regression of the S11-14 lock-release fix.
+func TestFAS_SweepLatency_10kEntries(t *testing.T) {
+	mm := &mockMetricser{}
+	ft := newFasTracker(time.Hour)
+	t0 := time.Unix(1_700_000_000, 0)
+	ft.SetNow(func() time.Time { return t0 })
+
+	for i := range 10_000 {
+		ft.store(fmt.Sprintf("call-%d", i), fasEntry{}, nil, false)
+	}
+	ft.SetNow(func() time.Time { return t0.Add(2 * time.Hour) })
+
+	start := time.Now()
+	ft.sweep(mm)
+	elapsed := time.Since(start)
+
+	require.Equal(t, 10_000, mm.fasCalls, "all 10k entries must fire")
+	require.Less(t, elapsed, 200*time.Millisecond,
+		"sweep of 10k entries must complete <200ms (got %v)", elapsed)
+}
+
+func BenchmarkHandleRTP_FASHotPath(b *testing.B) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Hour)
+	e.pktTimestamp = time.Unix(1_700_000_000, 0)
+
+	for i := range 1000 {
+		e.fasTracker.store(fmt.Sprintf("filler-%d", i), fasEntry{}, nil, false)
+	}
+	e.storeInviteSDP("bench", []byte(fasSdpOffer))
+	require.NoError(b,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("bench", fasSdpNormal), false),
+	)
+
+	dst := net.ParseIP("10.0.0.2")
+	src := net.ParseIP("10.0.0.1")
+	pkt := fasRTPPacket(0)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := range b.N {
+		pkt[2] = byte(uint16(i) >> 8)
+		pkt[3] = byte(uint16(i))
+		_, _ = e.handleRTP(src, 5004, dst, 5004, pkt)
+	}
+}
+
 func TestHandleMessage_ReINVITE_ExcludedFromBurst(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
