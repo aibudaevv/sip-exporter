@@ -1253,7 +1253,7 @@ func (e *exporter) handleRTP(
 	}
 	if res.Counted {
 		e.fasTracker.clearIfAnswerMedia(
-			res.CallID, fasEndpoint{ip: res.MatchedIP, port: res.MatchedPort}, res.StreamPacketsTotal,
+			res.CallID, fasEndpoint{ip: res.MatchedIP, port: res.MatchedPort}, res.StreamPacketsTotal, res.MatchedBy,
 		)
 		e.services.metricser.UpdateRTPPackets(res.Carrier, res.UAType, res.Codec, res.SourceCountry, res.Direction)
 		if res.StreamPacketsTotal > 1 {

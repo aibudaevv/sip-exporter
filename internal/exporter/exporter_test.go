@@ -2308,6 +2308,56 @@ func TestFAS_CallerRTPDoesNotClear(t *testing.T) {
 		"answer-side RTP (arriving at offer endpoint) must clear FAS")
 }
 
+// TestFAS_LateOffer_CallerRTPDoesNotClear closes the src-fallback hole: when
+// the INVITE offer was cached (offer map populated) but the 200 OK carried no
+// SDP (late offer — ISUP gateways), the answer endpoint is never registered.
+// Caller RTP then matches by src-fallback on the offer endpoint. Without the
+// fix this falsely clears FAS (caller's own media masks fraud). The match-by
+// must be "src" and, with a non-empty offer map, must not clear.
+func TestFAS_LateOffer_CallerRTPDoesNotClear(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, 60*time.Millisecond)
+
+	e.storeInviteSDP("call-late", []byte(fasSdpOffer))
+
+	pkt := fasInvite200OK("call-late", "")
+	pkt.ContentType = nil
+	require.NoError(t, e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", pkt, false))
+	require.Len(t, e.fasTracker.entries, 1, "offer endpoints from cached INVITE must open FAS pending")
+	require.Len(t, e.fasTracker.offer["call-late"], 1, "offer endpoint tracked for side gating")
+
+	for _, seq := range []uint16{1, 2, 3} {
+		_, err := e.handleRTP(net.ParseIP("10.0.0.2"), 5004, net.ParseIP("10.0.0.1"), 5004, fasRTPPacket(seq))
+		require.NoError(t, err)
+	}
+	require.Len(t, e.fasTracker.entries, 1,
+		"caller RTP matched by src-fallback on offer endpoint must not clear FAS")
+}
+
+// TestFAS_LateOffer_AnswerRTPClears is the MC/DC complement to the negative
+// test above: in the same late-offer scenario (answer endpoint not registered),
+// genuine answer-side media (callee→caller, dst-match on the offer endpoint)
+// must still clear FAS. This proves the guard is matchedBy-specific, not a
+// blanket block on late-offer calls.
+func TestFAS_LateOffer_AnswerRTPClears(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, 60*time.Millisecond)
+
+	e.storeInviteSDP("call-late", []byte(fasSdpOffer))
+
+	pkt := fasInvite200OK("call-late", "")
+	pkt.ContentType = nil
+	require.NoError(t, e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", pkt, false))
+	require.Len(t, e.fasTracker.entries, 1)
+
+	for _, seq := range []uint16{1, 2} {
+		_, err := e.handleRTP(net.ParseIP("10.0.0.1"), 5004, net.ParseIP("10.0.0.2"), 5004, fasRTPPacket(seq))
+		require.NoError(t, err)
+	}
+	require.Empty(t, e.fasTracker.entries,
+		"answer RTP (dst-match on offer endpoint) must clear FAS even in late-offer scenario")
+}
+
 func TestFAS_SingleRTPDoesNotClear(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, 60*time.Millisecond)
@@ -2562,7 +2612,7 @@ func TestFAS_ConcurrentSweepClearBye(t *testing.T) {
 			defer wg.Done()
 			for range 200 {
 				e.fasTracker.sweep(mm)
-				e.fasTracker.clearIfAnswerMedia("call-1", fasEndpoint{ip: "10.0.0.2", port: 5004}, 5)
+				e.fasTracker.clearIfAnswerMedia("call-1", fasEndpoint{ip: "10.0.0.2", port: 5004}, 5, "dst")
 				e.fasTracker.finalizeOnBye("call-1", mm)
 			}
 		}()

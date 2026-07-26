@@ -306,8 +306,11 @@ func (t *fasTracker) Size() int {
 // arrives at a registered offer-side endpoint (callee→caller), so a stream keyed
 // by an offer endpoint proves the answer side sent media. When no offer endpoints
 // are tracked (INVITE offer SDP not cached), the side is unknown and any media
-// clears the entry (legacy fallback, avoids new false FAS alerts).
-func (t *fasTracker) clearIfAnswerMedia(callID string, ep fasEndpoint, packetsTotal uint64) {
+// clears the entry (legacy fallback, avoids new false FAS alerts). A src-fallback
+// match (late offer, answer endpoint not registered) on an offer endpoint is the
+// caller's own media and does not clear — matchedBy distinguishes this from a
+// genuine dst match.
+func (t *fasTracker) clearIfAnswerMedia(callID string, ep fasEndpoint, packetsTotal uint64, matchedBy string) {
 	if t == nil || callID == "" || packetsTotal < fasMediaPacketsThreshold {
 		return
 	}
@@ -322,7 +325,7 @@ func (t *fasTracker) clearIfAnswerMedia(callID string, ep fasEndpoint, packetsTo
 		delete(t.offer, callID)
 		return
 	}
-	if _, isOffer := offer[ep]; isOffer {
+	if _, isOffer := offer[ep]; isOffer && matchedBy != "src" {
 		delete(t.entries, callID)
 		delete(t.offer, callID)
 	}

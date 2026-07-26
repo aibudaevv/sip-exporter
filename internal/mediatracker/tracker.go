@@ -11,6 +11,11 @@ import (
 
 const defaultClockRate = 8000
 
+const (
+	matchedByDst = "dst"
+	matchedBySrc = "src"
+)
+
 type (
 	// MediaLabels is the SIP-dialog context attached to a media endpoint via SDP.
 	MediaLabels struct {
@@ -56,6 +61,7 @@ type (
 		StreamPacketsTotal uint64  // stream's total forward-counted packets after this Observe
 		MatchedIP          string  // IP of the correlated media endpoint the stream is keyed by (dst-first, then src)
 		MatchedPort        uint16  // port of the correlated media endpoint (companion of MatchedIP)
+		MatchedBy          string  // which candidate matched: "dst" (local receive endpoint) or "src" (sender, NAT fallback)
 		Codec              string  // resolved codec name
 		Carrier            string  // dialog carrier (for metric labels)
 		UAType             string  // dialog UA type (for metric labels)
@@ -199,21 +205,22 @@ func (t *Tracker) Lookup(ip string, port uint16) (MediaLabels, bool) {
 }
 
 // lookupLabels resolves a packet's media endpoint trying destination first
-// (local receive endpoint, NAT-robust), then source. Returns the matched labels
-// and the endpoint key used for flow identity.
+// (local receive endpoint, NAT-robust), then source. Returns the matched labels,
+// the endpoint key used for flow identity, and which candidate matched ("dst" or
+// "src") so FAS side-gating can reject src-fallback matches on offer endpoints.
 func (t *Tracker) lookupLabels(
 	srcIP string, srcPort uint16,
 	dstIP string, dstPort uint16,
-) (MediaLabels, endpointKey, bool) {
-	for _, ep := range []endpointKey{
-		{ip: dstIP, port: dstPort},
-		{ip: srcIP, port: srcPort},
-	} {
-		if l, ok := t.media[ep]; ok {
-			return l, ep, true
-		}
+) (MediaLabels, endpointKey, string, bool) {
+	dst := endpointKey{ip: dstIP, port: dstPort}
+	if l, ok := t.media[dst]; ok {
+		return l, dst, matchedByDst, true
 	}
-	return MediaLabels{}, endpointKey{}, false
+	src := endpointKey{ip: srcIP, port: srcPort}
+	if l, ok := t.media[src]; ok {
+		return l, src, matchedBySrc, true
+	}
+	return MediaLabels{}, endpointKey{}, "", false
 }
 
 // Observe ingests an RTP packet. Correlation tries the destination endpoint
@@ -228,7 +235,7 @@ func (t *Tracker) Observe(
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	labels, ep, ok := t.lookupLabels(srcIP, srcPort, dstIP, dstPort)
+	labels, ep, matchedBy, ok := t.lookupLabels(srcIP, srcPort, dstIP, dstPort)
 	if !ok {
 		return ObserveResult{}, false
 	}
@@ -275,6 +282,7 @@ func (t *Tracker) Observe(
 		StreamPacketsTotal: entry.state.packetsTotal,
 		MatchedIP:          ep.ip,
 		MatchedPort:        ep.port,
+		MatchedBy:          matchedBy,
 		Codec:              codec,
 		Carrier:            labels.Carrier,
 		UAType:             labels.UAType,
