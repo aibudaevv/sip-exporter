@@ -1,6 +1,8 @@
 package mediatracker
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -611,4 +613,38 @@ func TestTracker_LookupBySSRC_Concurrent(t *testing.T) {
 	// Post-concurrency state must remain consistent (no index corruption).
 	_, ok := tr.LookupBySSRC(ssrc, "9.9.9.9", 0, "10.0.0.1", 5004)
 	require.True(t, ok, "SSRC must still resolve after concurrent Observe/Lookup")
+}
+
+// TestRecordRTCP_Concurrent proves atomic delta accounting under -race: 100
+// goroutines report the same cumulative loss. The first establishes the
+// baseline (delta=0); every subsequent call sees cumulative==prevLoss →
+// delta=0. Sum must be 0. A subsequent higher cumulative must yield the exact
+// diff, proving the baseline survived concurrent access without corruption.
+func TestRecordRTCP_Concurrent(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	const ssrc uint32 = 0xBEEF1234
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), time.Unix(1000, 0))
+
+	const N = 100
+	const cumul = uint32(50)
+	var sum atomic.Uint64
+	var wg sync.WaitGroup
+	for range N {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, delta, ok := tr.RecordRTCP(ssrc, cumul, "9.9.9.9", 0, "10.0.0.1", 5004)
+			if ok {
+				sum.Add(delta)
+			}
+		}()
+	}
+	wg.Wait()
+
+	require.Zero(t, sum.Load(), "identical cumulative must produce no delta")
+
+	_, delta, ok := tr.RecordRTCP(ssrc, cumul+10, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Equal(t, uint64(10), delta, "baseline survived concurrent access")
 }
