@@ -528,6 +528,28 @@ func TestTracker_RecordRTCP(t *testing.T) {
 	require.False(t, ok)
 }
 
+// TestRecordRTCP_NegativeCumulativePreservesBaseline proves that a negative
+// cumulative-lost value (duplicates exceeding losses, RFC 3550 §6.4.1) does not
+// corrupt the delta baseline: 10 → -3 → 13 yields delta=3 (13−10), not 9 (13−0).
+func TestRecordRTCP_NegativeCumulativePreservesBaseline(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	const ssrc uint32 = 0xCAFE0001
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), time.Unix(1000, 0))
+
+	_, delta, ok := tr.RecordRTCP(ssrc, 10, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Zero(t, delta, "first observation establishes baseline")
+
+	_, delta, ok = tr.RecordRTCP(ssrc, -3, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Zero(t, delta, "negative cumulative emits no delta")
+
+	_, delta, ok = tr.RecordRTCP(ssrc, 13, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Equal(t, uint64(3), delta, "delta=13-10=3, baseline preserved despite negative")
+}
+
 // TestTracker_RecordRTCP_UniqueSSRCResolvesWithoutEndpointMatch verifies the D1
 // middle-ground: when an SSRC is unique (one stream), RTCP resolves even if its
 // endpoints match no registered endpoint (NAT/remapped port) — there is no
@@ -627,7 +649,7 @@ func TestRecordRTCP_Concurrent(t *testing.T) {
 	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), time.Unix(1000, 0))
 
 	const N = 100
-	const cumul = uint32(50)
+	const cumul = int32(50)
 	var sum atomic.Uint64
 	var wg sync.WaitGroup
 	for range N {
