@@ -1172,7 +1172,11 @@ func (e *exporter) handleRTCP(
 	if len(reports) == 0 {
 		return "", nil
 	}
-	nowNTP := nowNTP32(time.Now())
+	ts := e.pktTimestamp
+	if ts.IsZero() {
+		ts = time.Now()
+	}
+	nowNTP := nowNTP32(ts)
 	sIP, dIP := srcIP.String(), dstIP.String()
 
 	for _, rep := range reports {

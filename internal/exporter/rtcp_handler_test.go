@@ -299,3 +299,28 @@ func TestHandleRTCP_PartialCompoundProcessesValidPrefix(t *testing.T) {
 	require.Equal(t, 1, mm.parseErrorCalls, "the trailing parse error must be counted")
 	require.Equal(t, "rtcp", mm.parseErrorType)
 }
+
+// TestHandleRTCP_RTTUsesCaptureTimestamp proves that RTT is computed from the
+// kernel capture timestamp (e.pktTimestamp, SO_TIMESTAMPNS), not wall-clock
+// time.Now(). The capture time is set 60 s in the past; LSR is 5 s before the
+// capture time and DLSR is 1 s, so the correct RTT ≈ 4 s. Without the fix the
+// handler uses time.Now(), yielding RTT ≈ 64 s (60 s of accumulated drift).
+func TestHandleRTCP_RTTUsesCaptureTimestamp(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newRTCPTestExporter(mm)
+	const ssrc uint32 = 0xAAAA0011
+	registerRTPStream(t, e, ssrc)
+
+	captureTime := time.Now().Add(-60 * time.Second)
+	e.pktTimestamp = captureTime
+	lsr := nowNTP32(captureTime.Add(-5 * time.Second))
+	dlsr := uint32(1 * 65536) // 1 s in NTP32 units
+	rr := buildRR(buildRTCPBlock(ssrc, 0, 0, 0, 0, lsr, dlsr))
+
+	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, mm.rtcpRTTCalls, "RTT must be computed (LSR/DLSR valid)")
+	require.Greater(t, mm.rtcpRTTVal, 3500.0, "RTT should be ~4 s (capture-based)")
+	require.Less(t, mm.rtcpRTTVal, 4500.0, "RTT should be ~4 s, not ~64 s (time.Now-based)")
+}
