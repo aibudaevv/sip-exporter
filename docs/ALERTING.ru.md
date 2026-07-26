@@ -375,15 +375,15 @@ groups:
 
       - alert: SIPRTCPSilence
         expr: |
-          (sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m])) > 10)
+          (sum by (carrier, ua_type) (rate(sip_exporter_rtp_packets_total[5m])) > 10)
           unless
-          (sum by (carrier) (rate(sip_exporter_rtcp_reports_total[5m])) > 0)
+          (sum by (carrier, ua_type) (rate(sip_exporter_rtcp_reports_total[5m])) > 0)
         for: 10m
         labels:
           severity: warning
         annotations:
-          summary: "RTCP не поступает при текучем RTP (оператор {{ $labels.carrier }})"
-          description: "RTP-пакеты идут для оператора {{ $labels.carrier }}, но RTCP-репорты не поступают примерно 15 минут (5-минутное окно rate плюс 10-минутная выдержка). RTCP обязателен (RFC 3550) — его отсутствие означает, что RTCP фильтруется, эндпоинты его не шлют, либо сломан захват/регистрация (проверьте sip_exporter_rtcp_orphan_reports_total)."
+          summary: "RTCP не поступает при текучем RTP (оператор {{ $labels.carrier }}, ua_type {{ $labels.ua_type }})"
+          description: "RTP-пакеты идут для оператора {{ $labels.carrier }} (ua_type {{ $labels.ua_type }}), но RTCP-репорты не поступают примерно 15 минут (5-минутное окно rate плюс 10-минутная выдержка). RTCP обязателен (RFC 3550) — его отсутствие означает, что RTCP фильтруется, эндпоинты его не шлют, либо сломан захват/регистрация (проверьте sip_exporter_rtcp_orphan_reports_total)."
       ```
 
 ### Алерты здоровья системы

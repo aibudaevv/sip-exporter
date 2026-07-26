@@ -375,15 +375,15 @@ These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) mea
 
       - alert: SIPRTCPSilence
         expr: |
-          (sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m])) > 10)
+          (sum by (carrier, ua_type) (rate(sip_exporter_rtp_packets_total[5m])) > 10)
           unless
-          (sum by (carrier) (rate(sip_exporter_rtcp_reports_total[5m])) > 0)
+          (sum by (carrier, ua_type) (rate(sip_exporter_rtcp_reports_total[5m])) > 0)
         for: 10m
         labels:
           severity: warning
         annotations:
-          summary: "No RTCP received while RTP flows (carrier {{ $labels.carrier }})"
-          description: "RTP packets are flowing for carrier {{ $labels.carrier }} but zero RTCP reports have been received for approximately 15 minutes (a 5-minute rate window plus the 10-minute hold). RTCP is mandatory (RFC 3550) — its absence suggests RTCP is filtered, endpoints do not send it, or capture/registration is broken (check sip_exporter_rtcp_orphan_reports_total)."
+          summary: "No RTCP received while RTP flows (carrier {{ $labels.carrier }}, ua_type {{ $labels.ua_type }})"
+          description: "RTP packets are flowing for carrier {{ $labels.carrier }} (ua_type {{ $labels.ua_type }}) but zero RTCP reports have been received for approximately 15 minutes (a 5-minute rate window plus the 10-minute hold). RTCP is mandatory (RFC 3550) — its absence suggests RTCP is filtered, endpoints do not send it, or capture/registration is broken (check sip_exporter_rtcp_orphan_reports_total)."
       ```
 
 ### System Health Alerts
