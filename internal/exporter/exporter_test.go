@@ -2458,36 +2458,49 @@ func TestFAS_ByePath_NoFire_WhenMediaCleared(t *testing.T) {
 	require.Zero(t, mm.fasCalls, "no FAS when media already cleared the entry")
 }
 
-// TestFAS_ByePath_SRTPRespectsGrace is the S11-6 × S11-7 interaction regression:
-// an SRTP call (a=fingerprint) ending via BYE WITHIN the DTLS/ICE grace window
-// must NOT fire FAS — the grace that protects the sweep path must also protect
-// the BYE path. Otherwise WebRTC calls that fail ICE and hang up false-positive.
-func TestFAS_ByePath_SRTPRespectsGrace(t *testing.T) {
+// TestFAS_ByePath_SRTP_BelowFloorNoFire verifies that an SRTP call ending via
+// BYE below fasByeFloor does not fire — the floor protects short calls from
+// false positives (caller abandoned before media could start). The floor is
+// the same for plain RTP and SRTP (S11-16: grace extends only the sweep path).
+func TestFAS_ByePath_SRTP_BelowFloorNoFire(t *testing.T) {
 	mm := &mockMetricser{}
-	e := newFasTestExporter(mm, 100*time.Millisecond)
+	e := newFasTestExporter(mm, 10*time.Second)
 
-	const srtpSDP = "v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\nc=IN IP4 10.0.0.1\r\n" +
-		"t=0 0\r\nm=audio 5004 RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\n" +
-		"a=fingerprint:sha-256 AB:CD:01:02\r\na=setup:actpass\r\n"
+	t0 := time.Unix(1_700_000_000, 0)
+	e.fasTracker.SetNow(func() time.Time { return t0 })
+
 	require.NoError(t,
-		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", srtpSDP), false),
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpSRTP), false),
 	)
 	require.Len(t, e.fasTracker.entries, 1)
 
-	// Elapsed (5s) is past fasByeFloor (3s) but well within the SRTP grace
-	// window (deadline = base 100ms + grace 15s ≈ 15.1s). A plain-RTP call here
-	// WOULD fire at BYE; an SRTP call must NOT — still in ICE/DTLS tolerance.
-	const elapsed = 5 * time.Second
-	e.fasTracker.mu.Lock()
-	ent := e.fasTracker.entries["call-1"]
-	ent.createdAt = time.Now().Add(-elapsed)
-	ent.deadline = ent.deadline.Add(-elapsed)
-	ent.byeFloor = ent.byeFloor.Add(-elapsed)
-	e.fasTracker.entries["call-1"] = ent
-	e.fasTracker.mu.Unlock()
-
+	e.fasTracker.SetNow(func() time.Time { return t0.Add(1 * time.Second) })
 	require.NoError(t, e.handleBye200OK(fasInvite200OK("call-1", ""), ""))
-	require.Zero(t, mm.fasCalls, "SRTP call ending within grace must not fire FAS at BYE")
+	require.Zero(t, mm.fasCalls, "SRTP call BYE below fasByeFloor must not fire")
+}
+
+// TestFAS_ByePath_SRTP_FakeFingerprint_StillFires closes the DTLS-grace evasion
+// on the BYE path (S11-16): a fraudster can add a fake a=fingerprint to the 200
+// OK and get byeFloor = full deadline (25s), hanging up before any media without
+// detection. byeFloor must always be fasByeFloor (3s) regardless of SRTP — the
+// grace protects only the sweep path, where the fraudster does not control timing.
+func TestFAS_ByePath_SRTP_FakeFingerprint_StillFires(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, 10*time.Second)
+
+	t0 := time.Unix(1_700_000_000, 0)
+	e.fasTracker.SetNow(func() time.Time { return t0 })
+
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpSRTP), false),
+	)
+	require.Len(t, e.fasTracker.entries, 1)
+
+	// 5s elapsed: past fasByeFloor (3s), well within the SRTP sweep deadline
+	// (10s + 15s grace = 25s). A fraudster hangs up here — FAS must fire.
+	e.fasTracker.SetNow(func() time.Time { return t0.Add(5 * time.Second) })
+	require.NoError(t, e.handleBye200OK(fasInvite200OK("call-1", ""), ""))
+	require.Equal(t, 1, mm.fasCalls, "SRTP BYE after fasByeFloor must fire despite fake fingerprint")
 }
 
 // TestFAS_SRTP_ExtendsThreshold verifies the DTLS-SRTP grace: a call whose
@@ -2588,8 +2601,8 @@ func TestFAS_Reinvite_SRTP_ExtendsDeadline(t *testing.T) {
 	newDeadline := e.fasTracker.entries["call-1"].deadline
 	require.True(t, newDeadline.After(origDeadline.Add(fasSRTPGrace-time.Second)),
 		"re-INVITE to SRTP must extend deadline by ~fasSRTPGrace")
-	require.True(t, newDeadline.Equal(e.fasTracker.entries["call-1"].byeFloor),
-		"byeFloor must track the extended deadline for SRTP")
+	require.True(t, e.fasTracker.entries["call-1"].byeFloor.Before(newDeadline),
+		"byeFloor must remain at fasByeFloor, not track the SRTP grace deadline")
 }
 
 // TestFAS_ConcurrentSweepClearBye verifies thread safety of fasTracker under

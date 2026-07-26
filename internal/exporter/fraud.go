@@ -172,7 +172,7 @@ func (t *inviteBurstTracker) cleanup() {
 type fasEntry struct {
 	createdAt     time.Time
 	deadline      time.Time // createdAt + threshold (+ fasSRTPGrace when SRTP); sweep fires after this
-	byeFloor      time.Time // earliest teardown time at which finalizeOnBye may report FAS (= deadline for SRTP, else createdAt + fasByeFloor)
+	byeFloor      time.Time // earliest teardown time at which finalizeOnBye may report FAS (createdAt + fasByeFloor, independent of SRTP)
 	carrier       string
 	uaType        string
 	sourceCountry string
@@ -229,13 +229,9 @@ func (t *fasTracker) store(callID string, e fasEntry, offerEndpoints []fasEndpoi
 	now := t.now()
 	e.createdAt = now
 	deadline := now.Add(t.threshold)
-	// The BYE path may report FAS once the call outlived its setup tolerance. For
-	// plain RTP that's fasByeFloor; for DTLS-SRTP it's the full grace window
-	// (deadline) — a WebRTC call that fails ICE and hangs up is not FAS.
 	byeFloor := now.Add(fasByeFloor)
 	if srtp {
 		deadline = deadline.Add(fasSRTPGrace)
-		byeFloor = deadline
 	}
 	e.deadline = deadline
 	e.byeFloor = byeFloor
@@ -276,7 +272,6 @@ func (t *fasTracker) updateOffer(callID string, offerEndpoints []fasEndpoint, sr
 		graceDeadline := e.createdAt.Add(t.threshold + fasSRTPGrace)
 		if e.deadline.Before(graceDeadline) {
 			e.deadline = graceDeadline
-			e.byeFloor = graceDeadline
 		}
 	}
 	t.entries[callID] = e
@@ -334,9 +329,9 @@ func (t *fasTracker) clearIfAnswerMedia(callID string, ep fasEndpoint, packetsTo
 // finalizeOnBye reports FAS at teardown when the entry is still pending (the
 // answer side never sent media) and the call lasted beyond its byeFloor, then
 // clears. A no-op when media already cleared the entry earlier (normal case).
-// byeFloor equals fasByeFloor for plain RTP but the full deadline (threshold +
-// fasSRTPGrace) for DTLS-SRTP, so a WebRTC call failing ICE and hanging up does
-// not false-positive during the setup window.
+// byeFloor is fasByeFloor for all calls; the SRTP grace extends only the sweep
+// deadline, not the BYE path — a fake a=fingerprint must not let a fraudster
+// evade detection by hanging up within the grace window.
 func (t *fasTracker) finalizeOnBye(callID string, metricser service.Metricser) {
 	if t == nil || callID == "" {
 		return
