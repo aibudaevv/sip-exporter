@@ -27,71 +27,72 @@ import (
 
 // Mock services for testing.
 type mockMetricser struct {
-	requestCalled             []byte
-	requestCount              int
-	reinviteCalled            bool
-	sipRetransmissionCalls    int
-	sipRetransmissionMethod   string
-	responseCalled            []byte
-	responseIsInvite          bool
-	sessionUpdated            int
-	systemErrorCalled         bool
-	packetsIncremented        int
-	invite200OKCalled         bool
-	sessionCompletedFlag      bool
-	rrdUpdated                bool
-	rrdDelay                  float64
-	responseWithMetricsCalled bool
-	spdUpdated                bool
-	spdDuration               time.Duration
-	ttrUpdated                bool
-	ttrDelay                  float64
-	pddUpdated                bool
-	pddDelay                  float64
-	ordUpdated                bool
-	ordDelay                  float64
-	lrdUpdated                bool
-	lrdDelay                  float64
-	pbdUpdated                bool
-	pbdDelay                  float64
-	shortCallsUpdated         bool
-	shortCallsDuration        time.Duration
-	billableCalled            bool
-	billableCarrier           string
-	billableDestCountry       string
-	billableDuration          time.Duration
-	registerSuccessCalls      int
-	registerFailureCodes      []string
-	registerCountryChange     []string
-	registerScanCalls         int
-	inviteBurstCalls          int
-	fasCalls                  int
-	fasCallsLabels            []carrierCall
-	vqReportCalled            bool
-	vqCarrier                 string
-	vqUAType                  string
-	vqReport                  *vq.SessionReport
-	rtpPacketsCalls           int
-	rtpLossCalls              int
-	rtpLossValue              uint64
-	rtpDuplicateCalls         int
-	rtpOutOfOrderCalls        int
-	rtpDroppedCount           int
-	parseErrorCalls           int
-	parseErrorType            string
-	rtcpJitterCalls           int
-	rtcpJitterVal             float64
-	rtcpLossFracCalls         int
-	rtcpLossFracVal           float64
-	rtcpCumLossCalls          int
-	rtcpCumLossVal            uint64
-	rtcpRTTCalls              int
-	rtcpRTTVal                float64
-	rtcpReportCalls           int
-	rtcpReportType            string
-	rtcpReportCarrier         string
-	rtcpReportDirection       string
-	rtcpOrphanCalls           int
+	requestCalled                  []byte
+	requestCount                   int
+	reinviteCalled                 bool
+	sipRetransmissionCalls         int
+	sipRetransmissionMethod        string
+	responseCalled                 []byte
+	responseIsInvite               bool
+	sessionUpdated                 int
+	systemErrorCalled              bool
+	packetsIncremented             int
+	invite200OKCalled              bool
+	sessionCompletedFlag           bool
+	rrdUpdated                     bool
+	rrdDelay                       float64
+	responseWithMetricsCalled      bool
+	spdUpdated                     bool
+	spdDuration                    time.Duration
+	ttrUpdated                     bool
+	ttrDelay                       float64
+	pddUpdated                     bool
+	pddDelay                       float64
+	ordUpdated                     bool
+	ordDelay                       float64
+	lrdUpdated                     bool
+	lrdDelay                       float64
+	pbdUpdated                     bool
+	pbdDelay                       float64
+	shortCallsUpdated              bool
+	shortCallsDuration             time.Duration
+	billableCalled                 bool
+	billableCarrier                string
+	billableDestCountry            string
+	billableDuration               time.Duration
+	registerSuccessCalls           int
+	registerFailureCodes           []string
+	registerCountryChange          []string
+	registerScanCalls              int
+	inviteBurstCalls               int
+	fasCalls                       int
+	fasCallsLabels                 []carrierCall
+	vqReportCalled                 bool
+	vqCarrier                      string
+	vqUAType                       string
+	vqReport                       *vq.SessionReport
+	rtpPacketsCalls                int
+	rtpLossCalls                   int
+	rtpLossValue                   uint64
+	rtpDuplicateCalls              int
+	rtpOutOfOrderCalls             int
+	rtpDroppedCount                int
+	parseErrorCalls                int
+	parseErrorType                 string
+	rtcpJitterCalls                int
+	rtcpJitterVal                  float64
+	rtcpLossFracCalls              int
+	rtcpLossFracVal                float64
+	rtcpCumLossCalls               int
+	rtcpCumLossVal                 uint64
+	rtcpRTTCalls                   int
+	rtcpRTTVal                     float64
+	rtcpReportCalls                int
+	rtcpReportType                 string
+	rtcpReportCarrier              string
+	rtcpReportDirection            string
+	rtcpOrphanCalls                int
+	rtpKernelTimestampMissingCalls int
 }
 
 func (m *mockMetricser) UpdateSessions(_ []service.LabeledCount) {}
@@ -289,6 +290,9 @@ func (m *mockMetricser) UpdateRTCPReport(carrier, _, _, direction, reportType st
 }
 func (m *mockMetricser) UpdateRTCPOrphan() {
 	m.rtcpOrphanCalls++
+}
+func (m *mockMetricser) RTPKernelTimestampMissing() {
+	m.rtpKernelTimestampMissingCalls++
 }
 
 type dialogCreateArgs struct {
@@ -2755,6 +2759,25 @@ func TestFAS_FinalizeOnBye_DoesNotHoldLockDuringReport(t *testing.T) {
 	<-byeDone
 }
 
+// TestHandleRTP_KernelTimestampMissingCounter verifies the wiring (MC/DC):
+// handleRTP calls RTPKernelTimestampMissing when pktTimestamp is zero and does
+// NOT call it when a kernel timestamp is present.
+func TestHandleRTP_KernelTimestampMissingCounter(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Hour)
+
+	_, err := e.handleRTP(net.ParseIP("10.0.0.1"), 5004, net.ParseIP("10.0.0.2"), 5004, fasRTPPacket(1))
+	require.NoError(t, err)
+	require.Equal(t, 1, mm.rtpKernelTimestampMissingCalls,
+		"zero pktTimestamp (no SO_TIMESTAMPNS) must increment the counter")
+
+	e.pktTimestamp = time.Unix(1_700_000_000, 0)
+	_, err = e.handleRTP(net.ParseIP("10.0.0.1"), 5004, net.ParseIP("10.0.0.2"), 5004, fasRTPPacket(2))
+	require.NoError(t, err)
+	require.Equal(t, 1, mm.rtpKernelTimestampMissingCalls,
+		"non-zero pktTimestamp must not increment the counter")
+}
+
 func TestHandleMessage_ReINVITE_ExcludedFromBurst(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
@@ -4776,6 +4799,7 @@ func (m *carrierTrackingMetricser) UpdateRTCPCumulativeLoss(string, string, stri
 func (m *carrierTrackingMetricser) UpdateRTCPRTT(string, string, string, string, string, float64) {}
 func (m *carrierTrackingMetricser) UpdateRTCPReport(string, string, string, string, string)       {}
 func (m *carrierTrackingMetricser) UpdateRTCPOrphan()                                             {}
+func (m *carrierTrackingMetricser) RTPKernelTimestampMissing()                                    {}
 
 // ==================== SIP message builders for MC/DC tests ====================
 

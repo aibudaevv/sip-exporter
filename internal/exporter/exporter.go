@@ -1244,7 +1244,8 @@ func (e *exporter) handleRTP(
 	}
 	arrival := e.pktTimestamp
 	if arrival.IsZero() {
-		arrival = time.Now() // direct test invocation without a captured socket timestamp
+		arrival = time.Now()
+		e.services.metricser.RTPKernelTimestampMissing()
 	}
 	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, dstIP.String(), dstPort, header, arrival)
 	if !ok {
