@@ -373,6 +373,16 @@ These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) mea
           summary: "High endpoint-reported loss (RTCP)"
           description: "95th percentile RTCP-reported loss fraction for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}%. The receiver reports losing >5% of packets — the most direct QoE signal; check the media path."
 
+      - alert: SIPRTCPReportedLossCritical
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtcp_loss_fraction_percent_bucket[5m]))) > 10
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical endpoint-reported loss (RTCP)"
+          description: "95th percentile RTCP-reported loss fraction for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}%. The receiver reports losing >10% of packets — call quality is severely degraded."
+
       - alert: SIPRTCPSilence
         expr: |
           (sum by (carrier, ua_type) (rate(sip_exporter_rtp_packets_total[5m])) > 10)

@@ -373,6 +373,16 @@ groups:
           summary: "Высокая endpoint-reported потеря (RTCP)"
           description: "95-й перцентиль отрепорченной через RTCP доли потерь для оператора {{ $labels.carrier }} — {{ $value | printf \"%.1f\" }}%. Приёмник теряет >5% пакетов — самый прямой QoE-сигнал; проверьте медиа-путь."
 
+      - alert: SIPRTCPReportedLossCritical
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtcp_loss_fraction_percent_bucket[5m]))) > 10
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Критическая endpoint-reported потеря (RTCP)"
+          description: "95-й перцентиль отрепорченной через RTCP доли потерь для оператора {{ $labels.carrier }} — {{ $value | printf \"%.1f\" }}%. Приёмник теряет >10% пакетов — качество звонка критически снижено."
+
       - alert: SIPRTCPSilence
         expr: |
           (sum by (carrier, ua_type) (rate(sip_exporter_rtp_packets_total[5m])) > 10)
