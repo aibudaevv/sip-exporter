@@ -94,6 +94,7 @@ func (s *StreamState) observe(h rtp.Header, arrival time.Time, isAudio bool) {
 		s.classifyLossRun()
 		if isAudio {
 			s.lastPacketDelayVariationMs = s.updateJitter(h, arrival)
+			s.saveBaseline(h, arrival)
 		}
 		s.packetsTotal++
 		if delta > 1 {
@@ -106,10 +107,6 @@ func (s *StreamState) observe(h rtp.Header, arrival time.Time, isAudio bool) {
 		if isAudio {
 			s.updateJitter(h, arrival)
 		}
-	}
-
-	if isAudio {
-		s.saveBaseline(h, arrival)
 	}
 }
 

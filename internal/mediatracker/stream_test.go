@@ -306,3 +306,28 @@ func TestStreamState_NonAudio_DoesNotContaminatePDV(t *testing.T) {
 
 	require.Equal(t, uint64(7), s.packetsTotal, "DTMF packets must be counted")
 }
+
+func TestStreamState_ReorderDoesNotContaminateNextForwardPDV(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
+	s.Observe(newHeader(1, 160), t0)
+	s.Observe(newHeader(3, 480), t0.Add(40*time.Millisecond))
+	require.InDelta(t, 0.0, s.lastPacketDelayVariationMs, 0.0001, "perfect forward spacing")
+
+	s.Observe(newHeader(2, 320), t0.Add(50*time.Millisecond))
+
+	s.Observe(newHeader(4, 640), t0.Add(60*time.Millisecond))
+	require.InDelta(t, 0.0, s.lastPacketDelayVariationMs, 0.001,
+		"reorder must not overwrite baseline: next forward PDV computed vs last forward packet")
+}
+
+func TestStreamState_DuplicateDoesNotContaminateNextForwardPDV(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
+	s.Observe(newHeader(1, 160), t0)
+	s.Observe(newHeader(1, 160), t0.Add(5*time.Millisecond))
+
+	s.Observe(newHeader(2, 320), t0.Add(20*time.Millisecond))
+	require.InDelta(t, 0.0, s.lastPacketDelayVariationMs, 0.001,
+		"duplicate must not overwrite baseline: next forward PDV computed vs original packet")
+}
