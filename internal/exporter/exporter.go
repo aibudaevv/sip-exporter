@@ -1155,7 +1155,7 @@ func nowNTP32(t time.Time) uint32 {
 // tracked RTP stream sending with that SSRC (destination-first, NAT-robust) and
 // emits jitter / loss-fraction / cumulative-loss / RTT metrics inheriting the
 // stream's labels. RTT is computed as (now_NTP32 − LSR − DLSR) and skipped when
-// LSR is zero (no prior SR) or the result is negative (clock skew). Blocks whose
+// LSR or DLSR is zero (no prior SR) or the result is negative (clock skew). Blocks whose
 // SSRC is not tracked are dropped — consistent with RTP correlation.
 func (e *exporter) handleRTCP(
 	srcIP net.IP, srcPort uint16,
