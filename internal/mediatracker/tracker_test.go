@@ -595,6 +595,41 @@ func TestRecordRTCP_NegativeCumulativePreservesBaseline(t *testing.T) {
 	require.Equal(t, uint64(3), delta, "delta=13-10=3, baseline preserved despite negative")
 }
 
+// TestRecordRTCP_RefreshesTTL proves that RTCP reports refresh the stream TTL:
+// when RTP pauses (hold/mute/one-way) but RTCP keeps arriving, the stream must
+// survive Cleanup beyond the RTP-idle window. Without the fix, RecordRTCP never
+// updates any timestamp — Cleanup evicts based solely on lastArrival (set only by
+// RTP), so the stream expires and subsequent RTCP reports become orphans,
+// dropping quality metrics precisely during degradation.
+func TestRecordRTCP_RefreshesTTL(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+	const ssrc uint32 = 0xCAFED00D
+
+	// Two RTP packets establish a stream with a non-zero jitter baseline.
+	_, ok := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), t0)
+	require.True(t, ok)
+	_, ok = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(2, ssrc), t0.Add(20*time.Millisecond))
+	require.True(t, ok)
+	jitterBefore := tr.Snapshot()[0].JitterMs
+
+	// Advance to 20s — approaching TTL expiry since last RTP.
+	tr.SetNow(func() time.Time { return t0.Add(20 * time.Second) })
+
+	// RTCP arrives with no new RTP. Must refresh TTL without altering jitter.
+	_, _, ok = tr.RecordRTCP(ssrc, 0, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Equal(t, jitterBefore, tr.Snapshot()[0].JitterMs,
+		"RTCP must not alter jitter (lastArrival invariant preserved)")
+
+	// 31s since last RTP (t0), but only 11s since last RTCP (t0+20s).
+	tr.SetNow(func() time.Time { return t0.Add(31 * time.Second) })
+	tr.Cleanup()
+
+	require.Len(t, tr.Snapshot(), 1, "stream survives: RTCP refreshed TTL beyond RTP-idle window")
+}
+
 // TestTracker_RecordRTCP_UniqueSSRCResolvesWithoutEndpointMatch verifies the D1
 // middle-ground: when an SSRC is unique (one stream), RTCP resolves even if its
 // endpoints match no registered endpoint (NAT/remapped port) — there is no

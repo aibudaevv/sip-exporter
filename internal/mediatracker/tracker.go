@@ -114,8 +114,9 @@ type (
 		state        *StreamState
 		labels       MediaLabels
 		codec        string
-		rtcpPrevLoss int32 // last RTCP cumulative-lost seen for this SSRC (delta tracking)
-		rtcpLossSeen bool   // whether an RTCP RR has established the loss baseline
+		lastRTCP     time.Time // last RTCP arrival (TTL refresh only; does NOT affect jitter)
+		rtcpPrevLoss int32     // last RTCP cumulative-lost seen for this SSRC (delta tracking)
+		rtcpLossSeen bool      // whether an RTCP RR has established the loss baseline
 	}
 
 	// RTCPContext is the resolved context of an RTP stream needed to emit RTCP
@@ -362,13 +363,21 @@ func (t *Tracker) Snapshot() []StreamStats {
 	return out
 }
 
-// Cleanup removes streams idle for longer than the configured TTL.
+// Cleanup removes streams idle for longer than the configured TTL. A stream is
+// considered active if either RTP or RTCP has been observed within the TTL
+// window — RTCP reports (sent every 5s per RFC 3550) keep the stream alive
+// during RTP pauses (hold, mute, one-way audio), preventing quality metrics
+// from degrading to orphans.
 func (t *Tracker) Cleanup() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	now := t.now()
 	for key, e := range t.streams {
-		if now.Sub(e.state.lastArrival) > t.ttl {
+		last := e.state.lastArrival
+		if e.lastRTCP.After(last) {
+			last = e.lastRTCP
+		}
+		if now.Sub(last) > t.ttl {
 			t.removeSSRCIndex(key)
 			delete(t.streams, key)
 		}
@@ -440,6 +449,7 @@ func (t *Tracker) RecordRTCP(
 	if e == nil {
 		return RTCPContext{}, 0, false
 	}
+	e.lastRTCP = t.now()
 	if cumulative < 0 {
 		if !e.rtcpLossSeen {
 			e.rtcpLossSeen = true
