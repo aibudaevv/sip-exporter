@@ -186,6 +186,14 @@ type fasEndpoint struct {
 	port uint16
 }
 
+func toOfferSet(eps []fasEndpoint) map[fasEndpoint]struct{} {
+	set := make(map[fasEndpoint]struct{}, len(eps))
+	for _, ep := range eps {
+		set[ep] = struct{}{}
+	}
+	return set
+}
+
 type fasTracker struct {
 	mu        sync.Mutex
 	threshold time.Duration
@@ -237,11 +245,7 @@ func (t *fasTracker) store(callID string, e fasEntry, offerEndpoints []fasEndpoi
 	e.byeFloor = byeFloor
 	t.entries[callID] = e
 	if len(offerEndpoints) > 0 {
-		set := make(map[fasEndpoint]struct{}, len(offerEndpoints))
-		for _, ep := range offerEndpoints {
-			set[ep] = struct{}{}
-		}
-		t.offer[callID] = set
+		t.offer[callID] = toOfferSet(offerEndpoints)
 	}
 }
 
@@ -260,11 +264,7 @@ func (t *fasTracker) updateOffer(callID string, offerEndpoints []fasEndpoint, sr
 		return
 	}
 	if len(offerEndpoints) > 0 {
-		set := make(map[fasEndpoint]struct{}, len(offerEndpoints))
-		for _, ep := range offerEndpoints {
-			set[ep] = struct{}{}
-		}
-		t.offer[callID] = set
+		t.offer[callID] = toOfferSet(offerEndpoints)
 	} else {
 		delete(t.offer, callID)
 	}
