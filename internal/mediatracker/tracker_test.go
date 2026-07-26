@@ -637,11 +637,14 @@ func TestTracker_LookupBySSRC_Concurrent(t *testing.T) {
 	require.True(t, ok, "SSRC must still resolve after concurrent Observe/Lookup")
 }
 
-// TestRecordRTCP_Concurrent proves atomic delta accounting under -race: 100
-// goroutines report the same cumulative loss. The first establishes the
-// baseline (delta=0); every subsequent call sees cumulative==prevLoss →
-// delta=0. Sum must be 0. A subsequent higher cumulative must yield the exact
-// diff, proving the baseline survived concurrent access without corruption.
+// TestRecordRTCP_Concurrent proves thread-safety under concurrent access.
+// All goroutines use an IDENTICAL cumulative value (50) deliberately:
+// distinct values would make the sum non-deterministic because the 24-bit
+// wrap/reset branch in RecordRTCP treats out-of-order arrivals as resets.
+// The test verifies: (1) -race detects no data race, (2) the baseline
+// survives concurrent access (follow-up +10 yields delta=10, proving
+// rtcpPrevLoss==50 was not corrupted). Delta-accounting correctness is
+// covered by the sequential TestTracker_RecordRTCP.
 func TestRecordRTCP_Concurrent(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
