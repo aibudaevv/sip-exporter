@@ -2597,6 +2597,101 @@ func TestFAS_SweepThenClear_NoDoubleFire(t *testing.T) {
 	require.Empty(t, e.fasTracker.entries)
 }
 
+// blockingFasMetricser wraps mockMetricser so FasCall signals called and then
+// blocks until block is closed. Used to prove that sweep/finalizeOnBye release
+// the fasTracker lock before invoking reportFAS (metricser + zap must run
+// outside the critical section so packet processing is not stalled).
+type blockingFasMetricser struct {
+	mockMetricser
+
+	called chan struct{}
+	block  chan struct{}
+}
+
+func (m *blockingFasMetricser) FasCall(_, _, _, _ string) {
+	m.called <- struct{}{}
+	<-m.block
+}
+
+func TestFAS_Sweep_DoesNotHoldLockDuringReport(t *testing.T) {
+	ft := newFasTracker(time.Hour)
+	t0 := time.Unix(1_700_000_000, 0)
+	ft.SetNow(func() time.Time { return t0 })
+
+	ft.store("expired-1", fasEntry{}, nil, false)
+	ft.store("expired-2", fasEntry{}, nil, false)
+
+	ft.SetNow(func() time.Time { return t0.Add(2 * time.Hour) })
+
+	blockMM := &blockingFasMetricser{
+		called: make(chan struct{}, 2),
+		block:  make(chan struct{}),
+	}
+
+	sweepDone := make(chan struct{})
+	go func() {
+		ft.sweep(blockMM)
+		close(sweepDone)
+	}()
+
+	<-blockMM.called // FasCall invoked — sweep is inside reportFAS.
+
+	// If sweep holds t.mu during reportFAS, Size blocks until FasCall returns.
+	sizeDone := make(chan struct{})
+	go func() {
+		_ = ft.Size()
+		close(sizeDone)
+	}()
+
+	select {
+	case <-sizeDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("sweep held fasTracker.mu during reportFAS; Size blocked >200ms")
+	}
+
+	close(blockMM.block)
+	<-sweepDone
+}
+
+func TestFAS_FinalizeOnBye_DoesNotHoldLockDuringReport(t *testing.T) {
+	ft := newFasTracker(time.Hour)
+	t0 := time.Unix(1_700_000_000, 0)
+	ft.SetNow(func() time.Time { return t0 })
+
+	ft.store("call-bye", fasEntry{}, nil, false)
+
+	// Advance past byeFloor so finalizeOnBye will report.
+	ft.SetNow(func() time.Time { return t0.Add(2 * time.Hour) })
+
+	blockMM := &blockingFasMetricser{
+		called: make(chan struct{}, 1),
+		block:  make(chan struct{}),
+	}
+
+	byeDone := make(chan struct{})
+	go func() {
+		ft.finalizeOnBye("call-bye", blockMM)
+		close(byeDone)
+	}()
+
+	<-blockMM.called // FasCall invoked — finalizeOnBye is inside reportFAS.
+
+	sizeDone := make(chan struct{})
+	go func() {
+		_ = ft.Size()
+		close(sizeDone)
+	}()
+
+	select {
+	case <-sizeDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("finalizeOnBye held fasTracker.mu during reportFAS; Size blocked >200ms")
+	}
+
+	close(blockMM.block)
+	<-byeDone
+}
+
 func TestHandleMessage_ReINVITE_ExcludedFromBurst(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}

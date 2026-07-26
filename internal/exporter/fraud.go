@@ -334,10 +334,29 @@ func (t *fasTracker) clearIfAnswerMedia(callID string, ep fasEndpoint, packetsTo
 // byeFloor equals fasByeFloor for plain RTP but the full deadline (threshold +
 // fasSRTPGrace) for DTLS-SRTP, so a WebRTC call failing ICE and hanging up does
 // not false-positive during the setup window.
+func (t *fasTracker) finalizeOnBye(callID string, metricser service.Metricser) {
+	if t == nil || callID == "" {
+		return
+	}
+	t.mu.Lock()
+	e, ok := t.entries[callID]
+	now := t.now()
+	if ok {
+		delete(t.entries, callID)
+		delete(t.offer, callID)
+	}
+	shouldReport := ok && now.After(e.byeFloor)
+	t.mu.Unlock()
+	if shouldReport {
+		t.reportFAS(callID, e, "bye", now, metricser)
+	}
+}
+
 // reportFAS increments the FAS counter and logs a structured warning. path is
-// "sweep" (periodic threshold timeout) or "bye" (teardown with no media). Must
-// be called under t.mu.
-func (t *fasTracker) reportFAS(callID string, e fasEntry, path string, metricser service.Metricser) {
+// "sweep" (periodic threshold timeout) or "bye" (teardown with no media). now
+// is captured under t.mu by the caller and passed here so this method runs
+// entirely WITHOUT the lock (metricser/zap must not stall packet processing).
+func (t *fasTracker) reportFAS(callID string, e fasEntry, path string, now time.Time, metricser service.Metricser) {
 	metricser.FasCall(e.carrier, e.uaType, e.sourceCountry, e.direction)
 	zap.L().Warn("FAS suspected: answered call with no answer-side RTP",
 		zap.String("path", path),
@@ -346,25 +365,8 @@ func (t *fasTracker) reportFAS(callID string, e fasEntry, path string, metricser
 		zap.String("ua_type", e.uaType),
 		zap.String("source_country", e.sourceCountry),
 		zap.String("direction", e.direction),
-		zap.Duration("duration", t.now().Sub(e.createdAt)),
+		zap.Duration("duration", now.Sub(e.createdAt)),
 	)
-}
-
-func (t *fasTracker) finalizeOnBye(callID string, metricser service.Metricser) {
-	if t == nil || callID == "" {
-		return
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	e, ok := t.entries[callID]
-	if !ok {
-		return
-	}
-	if t.now().After(e.byeFloor) {
-		t.reportFAS(callID, e, "bye", metricser)
-	}
-	delete(t.entries, callID)
-	delete(t.offer, callID)
 }
 
 func (t *fasTracker) sweep(metricser service.Metricser) {
@@ -372,13 +374,21 @@ func (t *fasTracker) sweep(metricser service.Metricser) {
 		return
 	}
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	now := t.now()
+	type firedEntry struct {
+		callID string
+		e      fasEntry
+	}
+	var fired []firedEntry
 	for callID, e := range t.entries {
 		if now.After(e.deadline) {
-			t.reportFAS(callID, e, "sweep", metricser)
+			fired = append(fired, firedEntry{callID: callID, e: e})
 			delete(t.entries, callID)
 			delete(t.offer, callID)
 		}
+	}
+	t.mu.Unlock()
+	for _, f := range fired {
+		t.reportFAS(f.callID, f.e, "sweep", now, metricser)
 	}
 }
