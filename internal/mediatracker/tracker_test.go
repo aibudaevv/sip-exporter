@@ -648,3 +648,36 @@ func TestRecordRTCP_Concurrent(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, uint64(10), delta, "baseline survived concurrent access")
 }
+
+// TestRecordRTCP_PerLegIsolation proves that two streams with distinct SSRCs
+// maintain independent loss baselines: rtcpLossSeen and rtcpPrevLoss are
+// per-stream-entry fields, not shared. Interleaved RR observations for SSRC-A
+// and SSRC-B must not cross-contaminate deltas.
+func TestRecordRTCP_PerLegIsolation(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, MediaLabels{Carrier: "carrier-a", CallID: "call-1",
+		SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000}})
+	tr.Register("10.0.0.2", 5006, MediaLabels{Carrier: "carrier-b", CallID: "call-2",
+		SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000}})
+	t0 := time.Unix(1000, 0)
+	const ssrcA uint32 = 0x11110001
+	const ssrcB uint32 = 0x22220002
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrcA), t0)
+	_, _ = tr.Observe("10.0.0.2", 5006, "0.0.0.0", 0, newHeaderSSRC(1, ssrcB), t0)
+
+	// Establish baselines — interleaved to stress per-stream isolation.
+	_, dA, ok := tr.RecordRTCP(ssrcA, 10, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Zero(t, dA, "A baseline")
+	_, dB, ok := tr.RecordRTCP(ssrcB, 20, "9.9.9.9", 0, "10.0.0.2", 5006)
+	require.True(t, ok)
+	require.Zero(t, dB, "B baseline")
+
+	// A jumps by 5 (10→15), B by 5 (20→25) — interleaved.
+	_, dA, ok = tr.RecordRTCP(ssrcA, 15, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Equal(t, uint64(5), dA, "A delta must be 15-10, not influenced by B")
+	_, dB, ok = tr.RecordRTCP(ssrcB, 25, "9.9.9.9", 0, "10.0.0.2", 5006)
+	require.True(t, ok)
+	require.Equal(t, uint64(5), dB, "B delta must be 25-20, not influenced by A")
+}
