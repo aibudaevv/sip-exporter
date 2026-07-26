@@ -595,6 +595,25 @@ func TestRecordRTCP_NegativeCumulativePreservesBaseline(t *testing.T) {
 	require.Equal(t, uint64(3), delta, "delta=13-10=3, baseline preserved despite negative")
 }
 
+// TestRecordRTCP_FirstNegativeBaseline proves that when the FIRST RTCP report for
+// an SSRC carries a negative cumulative-lost (duplicates exceeding losses,
+// RFC 3550 §6.4.1), the baseline is set to the actual value, not zero. Without
+// the fix [-5 → 3] yields delta=3 (3−0); with the fix delta=8 (3−(−5)).
+func TestRecordRTCP_FirstNegativeBaseline(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	const ssrc uint32 = 0xCAFE0002
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), time.Unix(1000, 0))
+
+	_, delta, ok := tr.RecordRTCP(ssrc, -5, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Zero(t, delta, "first observation establishes baseline, emits no delta")
+
+	_, delta, ok = tr.RecordRTCP(ssrc, 3, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Equal(t, uint64(8), delta, "delta=3-(-5)=8, negative baseline preserved")
+}
+
 // TestRecordRTCP_RefreshesTTL proves that RTCP reports refresh the stream TTL:
 // when RTP pauses (hold/mute/one-way) but RTCP keeps arriving, the stream must
 // survive Cleanup beyond the RTP-idle window. Without the fix, RecordRTCP never

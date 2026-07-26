@@ -453,7 +453,7 @@ func (t *Tracker) RecordRTCP(
 	if cumulative < 0 {
 		if !e.rtcpLossSeen {
 			e.rtcpLossSeen = true
-			e.rtcpPrevLoss = 0
+			e.rtcpPrevLoss = cumulative
 		}
 		return rtcpContext(e), 0, true
 	}
