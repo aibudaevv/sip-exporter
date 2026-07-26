@@ -2312,6 +2312,35 @@ func TestFAS_CallerRTPDoesNotClear(t *testing.T) {
 		"answer-side RTP (arriving at offer endpoint) must clear FAS")
 }
 
+// TestFAS_Retransmit200OK_PreservesOfferSet verifies that a retransmitted 200 OK
+// (Timer G, UDP) does not destroy the offer-side gating established by the first
+// 200 OK. On retransmission the cached INVITE SDP is already consumed, so
+// updateOffer receives empty endpoints — it must NOT delete the existing offer
+// set. Otherwise the caller's own RTP clears FAS via the legacy fallback.
+func TestFAS_Retransmit200OK_PreservesOfferSet(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Hour)
+
+	e.storeInviteSDP("call-1", []byte(fasSdpOffer))
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
+	)
+	require.Len(t, e.fasTracker.offer["call-1"], 1, "first 200 OK must populate offer endpoints")
+
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), true),
+	)
+	require.Contains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: "10.0.0.2", port: 5004},
+		"retransmitted 200 OK must not delete the offer set")
+
+	for _, seq := range []uint16{1, 2, 3} {
+		_, err := e.handleRTP(net.ParseIP("10.0.0.2"), 5004, net.ParseIP("10.0.0.1"), 5004, fasRTPPacket(seq))
+		require.NoError(t, err)
+	}
+	require.Len(t, e.fasTracker.entries, 1,
+		"caller RTP must not clear FAS after retransmitted 200 OK — side-gating preserved")
+}
+
 // TestFAS_LateOffer_CallerRTPDoesNotClear closes the src-fallback hole: when
 // the INVITE offer was cached (offer map populated) but the 200 OK carried no
 // SDP (late offer — ISUP gateways), the answer endpoint is never registered.
