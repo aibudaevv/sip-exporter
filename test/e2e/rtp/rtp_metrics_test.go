@@ -50,6 +50,23 @@ func getRTPMetric(t *testing.T, endpoint, name string) float64 {
 	return 0
 }
 
+// metricExists checks whether a metric family is present in the /metrics body.
+// Call this before getRTPMetric/getMetricByLabel value reads to avoid false-zero
+// when the metric is missing (AGENTS.md metricExists rule).
+func metricExists(t *testing.T, endpoint, name string) bool {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/metrics", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return strings.Contains(string(body), name)
+}
+
 // getMetricByLabel scrapes a metric value whose label set contains ALL the given
 // label substrings (e.g. `carrier="loopback"`, `codec="PCMA"`), in any order
 // (Prometheus emits labels alphabetically, not in registration order). Returns 0

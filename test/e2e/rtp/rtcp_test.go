@@ -299,6 +299,8 @@ func TestRTCP_MetricsFromInjectedRR(t *testing.T) {
 
 	// RTT value check (not just count): LSR was 5s ago, DLSR=0 → RTT ≈ 5000ms.
 	// Proves the formula end-to-end, not merely that an observation landed.
+	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds"),
+		"rtt histogram must exist before reading its value")
 	rttSum := getRTPMetric(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds_sum")
 	rttCount := getRTPMetric(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds_count")
 	require.Greater(t, rttCount, 0.0)
@@ -309,6 +311,8 @@ func TestRTCP_MetricsFromInjectedRR(t *testing.T) {
 	// Loss-fraction value check (not just count): the RR carries fracLost=10 →
 	// 10/256*100 ≈ 3.9%. Proves the fracLost byte extraction + scale end-to-end,
 	// not merely that an observation landed (guards against a byte-offset regression).
+	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_loss_fraction_percent"),
+		"loss-fraction histogram must exist before reading its value")
 	lossSum := getRTPMetric(t, endpoint, "sip_exporter_rtcp_loss_fraction_percent_sum")
 	lossCount := getRTPMetric(t, endpoint, "sip_exporter_rtcp_loss_fraction_percent_count")
 	require.Greater(t, lossCount, 0.0)
