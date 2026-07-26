@@ -78,6 +78,17 @@ func startExporter(
 	ttl string,
 ) string {
 	t.Helper()
+	return startExporterWithExtraEnv(ctx, t, httpPort, sipPort, iface, ttl, nil)
+}
+
+// startExporterWithExtraEnv is like startExporter but merges extraEnv into the
+// exporter container environment (used to tune fraud/threshold config per test).
+func startExporterWithExtraEnv(
+	ctx context.Context, t *testing.T,
+	httpPort, sipPort, iface, ttl string,
+	extraEnv map[string]string,
+) string {
+	t.Helper()
 
 	startCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
@@ -97,6 +108,9 @@ func startExporter(
 	}
 	if ttl != "" {
 		env["SIP_EXPORTER_RTP_STREAM_TTL"] = ttl
+	}
+	for k, v := range extraEnv {
+		env[k] = v
 	}
 
 	req := testcontainers.ContainerRequest{

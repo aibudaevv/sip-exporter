@@ -7,6 +7,23 @@
 #define IPPROTO_UDP  17
 #define SIP_MAX_PORTS 3  // must match maxPortsPerInterface in internal/config/config.go
 
+// RTCP packet types (RFC 3550 §6): SR=200, RR=201, SDES=202, BYE=203, APP=204.
+// RTP and RTCP share V=2 on the same port (rtcp-mux, RFC 5761). They are told
+// apart by the UDP payload's packet-type byte (byte[1]): RTCP uses 200-204. The
+// ranges are disjoint ONLY because RFC 5761 §4 forbids RTP payload types 64-95
+// under rtcp-mux — otherwise an RTP packet with the marker bit set and PT in
+// {72..76} would yield byte[1] in {200..204}. A non-matching byte[1] here is
+// treated as RTP and keeps the small header-only snapshot.
+#define RTCP_PT_MIN 200
+#define RTCP_PT_MAX 204
+
+// Snapshot size returned to userspace for a matched RTP endpoint. RTP needs only
+// its 12-byte header (64 bytes is ample incl. L2/L3/L4 headers); RTCP compounds
+// must arrive whole, so they bypass this cap (see the PT peek below) but are
+// themselves capped at the Ethernet MTU — every real RTCP compound fits.
+#define RTP_SNAPSHOT_CAP 64
+#define RTCP_SNAPSHOT_CAP 1500
+
 // Map for SIP ports (configured from userspace)
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
@@ -106,28 +123,43 @@ int bpf_socket_filter(struct __sk_buff *skb) {
     }
 
     // Not a SIP port — check SDP-driven RTP endpoint lookup.
-    // dst first (local receive endpoint, NAT-robust), then src as fallback.
     __u32 src_ip = (__u32)ip_header[12]<<24 | (__u32)ip_header[13]<<16
                  | (__u32)ip_header[14]<<8  | (__u32)ip_header[15];
     __u32 dst_ip = (__u32)ip_header[16]<<24 | (__u32)ip_header[17]<<16
                  | (__u32)ip_header[18]<<8  | (__u32)ip_header[19];
 
     struct rtp_endpoint_key dst_key = { .ip = dst_ip, .port = dest_port, ._pad = 0 };
-    if (bpf_map_lookup_elem(&rtp_endpoints, &dst_key)) {
-        __u32 snap = skb->len;
-        if (snap > 64) snap = 64;
-        return snap;
-    }
-
     struct rtp_endpoint_key src_key = { .ip = src_ip, .port = src_port, ._pad = 0 };
-    if (bpf_map_lookup_elem(&rtp_endpoints, &src_key)) {
+
+    // dst first (local receive endpoint, NAT-robust), then src as fallback.
+    int matched = 0;
+    if (bpf_map_lookup_elem(&rtp_endpoints, &dst_key)) {
+        matched = 1;
+    } else if (bpf_map_lookup_elem(&rtp_endpoints, &src_key)) {
+        matched = 1;
+    }
+    if (matched) {
+        // PT peek: RTCP compounds must reach userspace whole (a 64-byte snapshot
+        // leaves only ~22 bytes of UDP payload, truncating any report block). RTP
+        // needs only its 12-byte header, so it keeps the small cap. The UDP payload
+        // starts at ip_offset + ip_header_len + 8 (UDP header); PT is byte[1].
+        __u32 payload_off = ip_offset + ip_header_len + 8;
+        __u8 pt = 0;
+        if (bpf_skb_load_bytes(skb, payload_off + 1, &pt, 1) == 0 &&
+            pt >= RTCP_PT_MIN && pt <= RTCP_PT_MAX) {
+            // RTCP — full compound, capped at the MTU as defense-in-depth against
+            // oversized packets (legitimate RTCP always fits a single Ethernet frame).
+            __u32 rtcp_snap = skb->len;
+            if (rtcp_snap > RTCP_SNAPSHOT_CAP) rtcp_snap = RTCP_SNAPSHOT_CAP;
+            return rtcp_snap;
+        }
         __u32 snap = skb->len;
-        if (snap > 64) snap = 64;
-        return snap;
+        if (snap > RTP_SNAPSHOT_CAP) snap = RTP_SNAPSHOT_CAP;
+        return snap;  // RTP (or PT unreadable) — header-only snapshot
     }
 
     // No SDP-driven match and no pattern fallback — drop.
-    // Only RTP from endpoints learned via SDP signaling is passed.
+    // Only RTP/RTCP from endpoints learned via SDP signaling is passed.
     return 0;
 }
 

@@ -13,10 +13,11 @@
 - [Метрики SIP-запросов](#метрики-sip-запросов) — `invite_total`, `reinvite_total`, `register_total`, `bye_total` и др.
 - [Метрики SIP-ответов (по кодам статуса)](#метрики-sip-ответов-по-кодам-статуса) — `100_total`…`606_total`
 - [Здоровье регистраций](#здоровье-регистраций) — `register_success_total`, `register_failure_total`, `register_success_ratio`, `active_registrations`
-- [Детекция фрода](#детекция-фрода) — `register_scan_total`, `invite_burst_total`, `register_country_change_total`
+- [Детекция фрода](#детекция-фрода) — `register_scan_total`, `invite_burst_total`, `register_country_change_total`, `fas_calls_total`
 - [Мониторинг ёмкости](#мониторинг-ёмкости) — `sessions_limit`, `sessions_utilization`
 - [Минуты трафика по направлению](#минуты-трафика-по-направлению) — `billable_seconds_total`
-- [Метрики RTP-медиа](#метрики-rtp-медиа) — `rtp_packets_total`, `rtp_mos_score`, `rtp_jitter_milliseconds` и др.
+- [Метрики RTP-медиа](#метрики-rtp-медиа) — `rtp_packets_total`, `rtp_mos_score`, `rtp_jitter_milliseconds`, `rtp_pdv_milliseconds` и др.
+- [Метрики RTCP (endpoint-reported)](#метрики-rtcp-endpoint-reported) — `rtcp_jitter_milliseconds`, `rtcp_rtt_milliseconds`, `rtcp_loss_fraction_percent`, `rtcp_cumulative_loss_total`, `rtcp_reports_total`
 - [Метрики самомониторинга](#метрики-самомониторинга) — `socket_packets_*`, `rtp_dropped_total`, `channel_*`, `parse_errors_total`, `active_trackers`, `active_dialogs`, `build_info`
 - [Метрики производительности RFC 6076](#метрики-производительности-rfc-6076)
   - [SER](#session-establishment-ratio-ser) — Session Establishment Ratio
@@ -59,10 +60,11 @@ SIP-метрики используют многоуровневую модел�
 > | **Базовый** | Все SIP-запросы, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD/PBD, VQ-отчёты, sessions, `reinvite_total`, здоровье регистраций (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country, direction` |
 > | **Ошибки рег.** | `register_failure_total` | `carrier, ua_type, source_country, code` |
 > | **Ретрансляции** | `sip_retransmission_total` | `carrier, ua_type, source_country, method` |
-> | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_out_of_order_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country, direction` |
-> | **RTP-диалог** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country, direction` |
+> | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_out_of_order_total`, `rtp_jitter_milliseconds`, `rtp_pdv_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country, direction` |
+> | **RTP dialog** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country, direction` |
 > | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, direction, destination_country, caller_host, called_host, iface` |
 > | **Фрод** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country, direction` |
+> | **Фрод (call-level)** | `fas_calls_total` | `carrier, ua_type, source_country, direction` |
 > | **Короткие вызовы** | `short_calls_total` | `carrier, ua_type, source_country, threshold` |
 > | **Трафик** | `billable_seconds_total` | `carrier, destination_country, direction` |
 > | **Ёмкость** | `sessions_limit`, `sessions_utilization` | `carrier` |
@@ -640,13 +642,14 @@ topk(5, sum by (code) (rate(sip_exporter_register_failure_total[5m])))
 
 ## Детекция фрода
 
-Сигналы фрода детектируют подозрительные паттерны: сканирование регистраций (один IP регистрирует множество аккаунтов), географическую невозможность (тот же аккаунт из разных стран) и флуд INVITE (один IP отправляет всплеск вызовов). Все разбиты по `carrier,source_country,direction` — `ua_type` намеренно опущен, т.к. атакующие варьируют User-Agent.
+Сигналы фрода детектируют подозрительные паттерны: сканирование регистраций (один IP регистрирует множество аккаунтов), географическую невозможность (тот же аккаунт из разных стран), флуд INVITE (один IP отправляет всплеск вызовов) и False Answer Supervision (ответившие вызовы без медиа). Сигнальные эвристики разбиты по `carrier,source_country,direction` — `ua_type` намеренно опущен, т.к. атакующие варьируют User-Agent. **FAS — исключение**: это call-level сигнал, измеряемый на 200 OK, где `ua_type` отвечающего эндпоинта осмыслен, поэтому он несёт полный набор `carrier,ua_type,source_country,direction`.
 
 | Метрика | Тип | Лейблы | Описание |
 |---------|-----|--------|----------|
 | `sip_exporter_register_country_change_total` | counter | `carrier,source_country,direction` | Количество смен страны регистрации (сигнал перехвата аккаунта) |
 | `sip_exporter_register_scan_total` | counter | `carrier,source_country,direction` | Сигналы сканирования регистраций (один IP регистрирует N+ уникальных AOR за окно) |
 | `sip_exporter_invite_burst_total` | counter | `carrier,source_country,direction` | Сигналы всплеска INVITE (один IP отправляет N+ INVITE за окно) |
+| `sip_exporter_fas_calls_total` | counter | `carrier,ua_type,source_country,direction` | Подозрение на False Answer Supervision: 200 OK на диалоге с media-эндпоинтами, но без RTP в течение threshold |
 
 ### register_country_change_total
 
@@ -688,6 +691,36 @@ rate(sip_exporter_register_scan_total[5m])
 # Toll fraud или DDoS через флуд INVITE
 rate(sip_exporter_invite_burst_total[5m])
 ```
+
+### fas_calls_total
+
+Инкрементируется, когда вызов **ответил** (не-re-INVITE 200 OK на диалоге, зарегистрировавшем media-эндпоинты из SDP), но **нет RTP в течение threshold** — сигнал real-time False Answer Supervision. Отвечающая сторона стартует биллинг, не доставляя медиа.
+
+Отличается от `sessions_missing_rtp_total` (метрика **teardown**, вычисляется на BYE/expiry и может прийти сильно позже): FAS — **ранний real-time** сигнал через `threshold` секунд после ответа.
+
+- Pending-запись создаётся на 200 OK (только если SDP зарегистрировал ≥1 media-эндпоинт; held SDP `c=0.0.0.0` исключён — медиа не ожидается).
+- Сбрасывается, как только **≥2 forward RTP-пакетов** достигли media-эндпоинта диалога (один случайный/spoofed пакет не должен маскировать вызов без медиа).
+- Также сбрасывается на teardown диалога (BYE / истечение Session-Expires), поэтому короткий вызов без медиа не ложно детектируется.
+
+| Конфиг | Env var | По умолчанию |
+|--------|---------|--------------|
+| Threshold | `SIP_EXPORTER_FRAUD_FAS_THRESHOLD` | `10s` |
+
+```promql
+# False Answer Supervision — ответившие вызовы, не понёсшие медиа
+rate(sip_exporter_fas_calls_total[5m])
+```
+
+#### Ограничения FAS
+
+Это **сигнальная эвристика**. True FAS-детекция требует декодирования аудиопотока и распознавания ringing/two-tone паттернов в «ответившем» медиа (напр. европейские/UK ringing tones) — вне рамок Prometheus-экспортёра (won't fix). Известные ограничения:
+
+- **Adversarial-обход принципиален.** Сторона, контролирующая отвечающий эндпоинт, может послать короткий RTP-буст (≥2 пакета), чтобы отменить сигнал. Gate ≥2 пакетов только поднимает планку против случайных/совпадающих сбросов, но не против целенаправленного атакующего.
+- **Side-gated clearing (требуется медиа answer-side).** FAS снимается только когда наблюдается медиа *отвечающей* стороны (оно приходит на offer/caller-эндпоинт). Медиа *вызывающей* стороны **не** отменяет FAS — ложный 200 OK мошенника больше нельзя замаскировать upstream-RTP жертвы. Требуется, чтобы INVITE offer SDP был закэширован; если INVITE не был виден (экспортёр стартовал посреди вызова, late offer) — сторону определить нельзя и FAS деградирует к any-media-clears. При NAT, меняющем source-порт отвечающей стороны, side-детекция также деградирует к этому fallback.
+- **DTLS-SRTP-вызовы — авто-grace.** Если answer SDP несёт `a=fingerprint` (RFC 4572), вызов получает per-call grace (`fasSRTPGrace`, 15 с) поверх базового threshold, поэтому ICE/DTLS-сетап не даёт false positive на WebRTC-транках. Plain-RTP-вызовы используют базовый threshold.
+- **Короткие dead-air вызовы — репорт на BYE.** Вызов, ответивший без answer-side RTP и завершённый BYE раньше sweep-threshold, репортится на teardown при answer→BYE ≥ `fasByeFloor` (3 с) — покрывает частый FAS-паттерн, когда абонент бросает трубку на dead air. Более короткие вызовы (немедленный abandon) исключаются.
+- **Re-INVITE un-hold blind spot.** Если исходный 200 OK нёс held SDP (`c=0.0.0.0`, pending не создаётся), а последующий re-INVITE предлагает реальное медиа — вызов никогда не попадёт под FAS-трекинг. Редко (hold→unhold без предшествующего RTP).
+- **Без аудио-анализа.** Fraudster, стримящий тишину или comfort noise, проходит проверку media-established.
 
 ## Мониторинг ёмкости
 
@@ -774,6 +807,8 @@ RTP без коррелированного диалога отбрасывае�
 
 `sip_exporter_rtp_jitter_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 0.1..500 мс)*: сглаженный interarrival jitter (RFC 3550 A.8).
 
+`sip_exporter_rtp_pdv_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 1..500 мс)*: Packet Delay Variation — **сырое** per-packet отклонение `|arrivalDelta − tsDelta|` (без сглаживания), **наблюдается на каждый RTP-пакет** (parity с VoIPMonitor, который бакетирует отклонение каждого пакета от ожидаемого 20 мс интервала). В отличие от `rtp_jitter_milliseconds` (EWMA, сглаживающая всплески), PDV — мгновенное per-packet отклонение, поэтому histogram отражает истинное распределение delay-variation, включая транзиентные всплески. Учитываются только forward (counted) пакеты; reorder/duplicate — нет (их ts-дельта не forward). Первый пакет каждого потока (и после stream restart) пропускается — нет baseline для вычисления дельты. Arrival-тайместамп — это kernel `SO_TIMESTAMPNS` (время приёма на AF_PACKET-сокете), поэтому задержки Go scheduler/GC не влияют на измерение. Поскольку формула использует consecutive-дельты `(Rj−Ri)−(Sj−Si)` (та же дрейфо-компенсирующая форма, что у RFC 3550 jitter), она иммунна к дрейфу часов отправителя/получателя.
+
 `sip_exporter_rtp_mos_score{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 1.0..5.0)*: MOS-LQ, оценённый по ITU-T G.107 E-model с предположением jitter-буфера 60 мс.
 
 `sip_exporter_rtp_mos_f1{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 1.0..5.0)*: MOS-LQ со строгим jitter-буфером (50 мс) — моделирует низколатентные эндпоинты с меньшей толерантностью к jitter.
@@ -814,6 +849,32 @@ RTP без коррелированного диалога отбрасывае�
 > Обе метрики опираются на персистентную запись RTP по диалогу, переживающую
 > истечение TTL потока, обеспечивая точную детекцию даже когда RTP-потоки
 > были очищены до завершения диалога.
+
+## Метрики RTCP (endpoint-reported)
+
+Метрики RTCP строятся из RTCP Sender/Receiver Report (RFC 3550 §6), захватываемых eBPF-фильтром и коррелируемых с RTP-потоками по SSRC. Они отражают **собственное наблюдение эндпоинта** (что телефон переживает после jitter-буфера и консемента пакетов) — дополняя пассивные RTP-метрики, которые фиксируют то, что сниффер видит в проводе. RTCP универсален (RFC 3550 требует его от каждого RTP-отправителя/получателя), поэтому эти метрики покрывают трафик, который VQ (RFC 6035, конец звонка, opt-in) не покрывает.
+
+> **Захват:** RTCP разделяет V=2 и (при rtcp-mux, RFC 5761) порт с RTP; eBPF-фильтр различает их по 8-битному байту packet-type (200–204 для RTCP) и пропускает **полный** RTCP compound в userspace (RTP остаётся с 64-байтным header-only snapshot). rtcp-mux работает без доп. настройки. Non-mux RTCP на отдельном порту захватывается, если SDP объявила его через `a=rtcp` (RFC 3605) — учитываются и порт, и опциональный unicast-адрес (`a=rtcp:<port> IN IP4 <addr>`, RTCP на хосте, отличном от `c=`, только IPv4); при отсутствии и `a=rtcp-mux`, и `a=rtcp` legacy-RTCP на `port+1` (RFC 3550 §9) регистрируется автоматически.
+
+Все метрики качества наследуют лейблы correlated-потока: `carrier, ua_type, codec, source_country, direction` (как у RTP-tier — `direction` = `inbound`/`outbound`). Блок RTCP-репорта, чей SSRC не совпал с трекаемым RTP-потоком, дропается (как и RTP без диалога).
+
+`{carrier="...",ua_type="...",codec="...",source_country="...",direction="..."}`
+
+`sip_exporter_rtcp_jitter_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 0.1..500 мс)*: interarrival jitter, отрепорченный приёмником (блок RR), конвертированный из timestamp-единиц RTP в миллисекунды через clock rate потока.
+
+`sip_exporter_rtcp_loss_fraction_percent{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 0..100)*: доля потерянных RTP-пакетов с прошлого RR, в процентах (0–100). Поле RR — 8-битное отношение (N/256).
+
+`sip_exporter_rtcp_cumulative_loss_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: кумулятивная потеря пакетов, отрепорченная приёмником. Экспортёр дифференцирует последовательные репорты по SSRC: **первый** репорт для SSRC устанавливает baseline и не эмитит delta (поэтому счётчик отражает только потери с момента, когда экспортёр начал отслеживать поток, а не абсолютный кумулятивный итог эндпоинта), а сброс сессии или 24-битный wrap даёт текущее значение как delta. Счётчик монотонен и годится для `rate()`.
+
+`sip_exporter_rtcp_rtt_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 1..5000 мс)*: сетевой round-trip time, вычисленный из полей LSR/DLSR блока RR: `RTT = (now_NTP32 − LSR − DLSR) × 1000 / 65536` (RFC 3550 §6.4.1). Пропускается при `LSR == 0` (нет предшествующего SR) или отрицательном результате (clock skew). Требует примерно NTP-синхронизированных часов хоста.
+
+`sip_exporter_rtcp_reports_total{carrier,ua_type,source_country,direction,type}` *(counter)*: количество блоков RTCP reception-report, обработанных для трекаемых потоков. `type` = `sr` (Sender Report, PT 200) или `rr` (Receiver Report, PT 201). Без лейбла `codec` (репорт описывает приём, а не кодек); считается на блок.
+
+`sip_exporter_rtcp_orphan_reports_total` *(counter, без лейблов)*: блоки RTCP reception-report, чей SSRC не удалось сопоставить с трекаемым RTP-потоком (SSRC неизвестен, либо два потока коллизируют на SSRC и endpoint'ы репорта не совпадают ни с одним). Ненулевой `rate()` указывает на проблемы регистрации SDP/SSRC или на RTCP для звонков, которые экспортёр не отслеживает. Без лейблов — поток (и его carrier/codec-контекст) неизвестен.
+
+> **RTT vs всё прочее:** у RTT нет эквивалента в пассивном RTP — одна точка сниффинга не может измерить end-to-end RTT только из RTP. RTT из RTCP — единственный источник сетевой задержки round-trip в sip-exporter, полезен для диагностики эха и точности E-model.
+
+> **Корреляция по SSRC:** блок репорта сопоставляется с RTP-потоком по его SSRC (destination-first, NAT-robust). При редкой коллизии SSRC (два потока переиспользуют SSRC в окне TTL) дезамбигуация по endpoint'ам; delta потери и лейблы всегда относятся к одному потоку.
 
 ## Системные метрики
 
@@ -860,6 +921,7 @@ rate(sip_exporter_socket_packets_dropped_total[5m])
 | `l4` | UDP | Не UDP-пакет или UDP-заголовок слишком короткий |
 | `sip` | SIP | Нет SIP-payload, пакет слишком мал или нераспознанный метод |
 | `vq` | Voice Quality | Не удалось разобрать тело VQ-отчёта RFC 6035 |
+| `rtcp` | RTCP | Битый/усечённый RTCP-compound; валидный SR/RR-префикс до ошибки всё равно salvaged |
 
 **Примеры PromQL:**
 ```promql

@@ -18,21 +18,22 @@ const (
 // StreamState tracks per-SSRC RTP statistics: jitter (RFC 3550 A.8),
 // packet loss via sequence-number gaps, and total packet count.
 type StreamState struct {
-	SSRC             uint32
-	Codec            string
-	clockRate        uint32
-	maxSeq           uint16
-	lastTS           uint32
-	lastArrival      time.Time
-	jitterTicks      float64
-	packetsTotal     uint64
-	packetsLost      uint64
-	packetsDuplicate uint64
-	packetsReorder   uint64
-	burstLoss        uint64 // packets lost in burst runs (≥ burstThreshold consecutive)
-	gapLoss          uint64 // packets lost in isolated gaps (< burstThreshold)
-	lossRun          int    // current consecutive loss count (classified on next good packet)
-	hasPrev          bool
+	SSRC                       uint32
+	Codec                      string
+	clockRate                  uint32
+	maxSeq                     uint16
+	lastTS                     uint32
+	lastArrival                time.Time
+	jitterTicks                float64
+	lastPacketDelayVariationMs float64
+	packetsTotal               uint64
+	packetsLost                uint64
+	packetsDuplicate           uint64
+	packetsReorder             uint64
+	burstLoss                  uint64 // packets lost in burst runs (≥ burstThreshold consecutive)
+	gapLoss                    uint64 // packets lost in isolated gaps (< burstThreshold)
+	lossRun                    int    // current consecutive loss count (classified on next good packet)
+	hasPrev                    bool
 }
 
 func newStreamState(ssrc uint32, codec string, clockRate uint32, now time.Time) *StreamState {
@@ -66,6 +67,7 @@ func (s *StreamState) Observe(h rtp.Header, arrival time.Time) {
 		// forward but huge gap → stream restart (e.g. SSRC reuse): reset all
 		// counters — this is a new flow instance, the previous totals are stale.
 		s.jitterTicks = 0
+		s.lastPacketDelayVariationMs = 0
 		s.packetsLost = 0
 		s.packetsDuplicate = 0
 		s.packetsReorder = 0
@@ -77,7 +79,7 @@ func (s *StreamState) Observe(h rtp.Header, arrival time.Time) {
 	case delta > 0:
 		// normal forward — classify previous loss run (burst/gap heuristic)
 		s.classifyLossRun()
-		s.updateJitter(h, arrival)
+		s.lastPacketDelayVariationMs = s.updateJitter(h, arrival)
 		s.packetsTotal++
 		if delta > 1 {
 			s.packetsLost += uint64(delta - 1)
@@ -102,9 +104,9 @@ func (s *StreamState) saveBaseline(h rtp.Header, arrival time.Time) {
 	s.hasPrev = true
 }
 
-func (s *StreamState) updateJitter(h rtp.Header, arrival time.Time) {
+func (s *StreamState) updateJitter(h rtp.Header, arrival time.Time) float64 {
 	if s.clockRate == 0 {
-		return
+		return 0
 	}
 	// Inter-arrival delta in RTP timestamp units (avoid overflow of absolute time).
 	// The uint32 subtraction wraps correctly for forward deltas; int32 reinterprets
@@ -116,6 +118,7 @@ func (s *StreamState) updateJitter(h rtp.Header, arrival time.Time) {
 		d = -d
 	}
 	s.jitterTicks += (float64(d) - s.jitterTicks) / jitterGain
+	return float64(d) / float64(s.clockRate) * msPerSec
 }
 
 // JitterMs returns the smoothed interarrival jitter in milliseconds (RFC 3550).

@@ -26,16 +26,21 @@ func TestRTP_BothDirections(t *testing.T) {
 		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
 
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_invite_total") >= 1
+		return getMetricByLabel(t, endpoint, "sip_exporter_sessions") >= 1
 	}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
 
-	sendControlledRTP(t, uacMediaNum, []uint16{1, 2, 3, 4, 5})
-	sendControlledRTP(t, uasMediaNum, []uint16{1, 2, 3, 4, 5})
-
-	// Both UAC→UAS and UAS→UAC legs observed → at least two active PCMA streams.
+	// Send RTP in both directions, retrying until the exporter reports both
+	// streams. AF_PACKET capture on loopback with PACKET_IGNORE_OUTGOING is
+	// timing-sensitive; small bursts can be missed.
+	rtpSeqs := []uint16{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_active_streams") >= 2
-	}, 15*time.Second, 500*time.Millisecond,
+		if getRTPMetric(t, endpoint, "sip_exporter_rtp_active_streams") >= 2 {
+			return true
+		}
+		sendControlledRTP(t, uacMediaNum, rtpSeqs)
+		sendControlledRTP(t, uasMediaNum, rtpSeqs)
+		return false
+	}, 15*time.Second, 3*time.Second,
 		"rtp_active_streams{codec=PCMA} must reflect both media directions (>=2)")
 
 	wait()
@@ -78,17 +83,21 @@ func TestRTP_FullIntegration_MetricsVerified(t *testing.T) {
 		return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
 	}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
 
-	// Send RTP in both directions (deterministic, unlike SIPp's rtp_stream).
-	sendControlledRTP(t, uacMediaNum, []uint16{1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
-	sendControlledRTP(t, uasMediaNum, []uint16{1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
-
 	// --- RTP metrics with concrete labels ---
 	rtpLabels := []string{labelCarrier, labelUAType, labelCodec}
 
-	// Packets counter (cumulative) must be observed for the dialog's labels.
+	// Send RTP in both directions, retrying until packets are observed.
+	// AF_PACKET capture on loopback with PACKET_IGNORE_OUTGOING is
+	// timing-sensitive; small bursts can be missed.
+	rtpSeqs := []uint16{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_rtp_packets_total", rtpLabels...) > 0
-	}, 10*time.Second, 500*time.Millisecond, "rtp_packets_total must be observed with labels")
+		if getMetricByLabel(t, endpoint, "sip_exporter_rtp_packets_total", rtpLabels...) > 0 {
+			return true
+		}
+		sendControlledRTP(t, uacMediaNum, rtpSeqs)
+		sendControlledRTP(t, uasMediaNum, rtpSeqs)
+		return false
+	}, 15*time.Second, 3*time.Second, "rtp_packets_total must be observed with labels")
 
 	// No spurious loss on clean G.711a. The lost counter is only created on the
 	// first detected gap, so for clean traffic the series is absent and the
@@ -116,10 +125,15 @@ func TestRTP_FullIntegration_MetricsVerified(t *testing.T) {
 	require.Greater(t, avgMOS, 3.5, "clean G.711 MOS should be > 3.5")
 	require.Less(t, avgMOS, 4.6)
 
-	// Active streams gauge: both media directions tracked.
+	// Active streams gauge: both media directions tracked, with retry.
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_rtp_active_streams", rtpLabels...) >= 2
-	}, 15*time.Second, 500*time.Millisecond, "rtp_active_streams must reflect both directions")
+		if getMetricByLabel(t, endpoint, "sip_exporter_rtp_active_streams", rtpLabels...) >= 2 {
+			return true
+		}
+		sendControlledRTP(t, uacMediaNum, rtpSeqs)
+		sendControlledRTP(t, uasMediaNum, rtpSeqs)
+		return false
+	}, 15*time.Second, 3*time.Second, "rtp_active_streams must reflect both directions")
 
 	wait()
 

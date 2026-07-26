@@ -1,17 +1,209 @@
 {
   "version": 1,
-  "updated": "2026-07-06T08:30:02+03:00",
-  "commit": "702fe74",
+  "updated": "2026-07-25T14:41:51+03:00",
+  "commit": "ac07622",
   "results": {
+    "TestBenchmark_GCPauseDuration": {
+      "metrics": {
+        "avg_ms": {
+          "value": 0.3171086956521739,
+          "unit": "ms",
+          "direction": "lower_is_better"
+        },
+        "max_ms": {
+          "value": 2.832,
+          "unit": "ms",
+          "direction": "lower_is_better"
+        },
+        "min_ms": {
+          "value": 0.047,
+          "unit": "ms",
+          "direction": "lower_is_better"
+        },
+        "p95_ms": {
+          "value": 1.8515000000000001,
+          "unit": "ms",
+          "direction": "lower_is_better"
+        }
+      }
+    },
+    "TestBenchmark_MemoryPerDialog/dialogs_0": {
+      "metrics": {
+        "mem_mb": {
+          "value": 14.38671875,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        }
+      }
+    },
+    "TestBenchmark_MemoryPerDialog/dialogs_100": {
+      "metrics": {
+        "mem_mb": {
+          "value": 17.34765625,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        },
+        "sessions": {
+          "value": 100,
+          "unit": "count",
+          "direction": "higher_is_better"
+        }
+      }
+    },
+    "TestBenchmark_MemoryPerDialog/dialogs_1000": {
+      "metrics": {
+        "mem_mb": {
+          "value": 23.91015625,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        },
+        "sessions": {
+          "value": 802,
+          "unit": "count",
+          "direction": "higher_is_better"
+        }
+      }
+    },
+    "TestBenchmark_MemoryPerDialog/dialogs_2000": {
+      "metrics": {
+        "mem_mb": {
+          "value": 20.71484375,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        },
+        "sessions": {
+          "value": 1600,
+          "unit": "count",
+          "direction": "higher_is_better"
+        }
+      }
+    },
+    "TestBenchmark_MemoryPerDialog/dialogs_500": {
+      "metrics": {
+        "mem_mb": {
+          "value": 20.3984375,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        },
+        "sessions": {
+          "value": 408,
+          "unit": "count",
+          "direction": "higher_is_better"
+        }
+      }
+    },
+    "TestBenchmark_MemoryPerDialog/dialogs_5000": {
+      "metrics": {
+        "mem_mb": {
+          "value": 22.0703125,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        },
+        "sessions": {
+          "value": 4040,
+          "unit": "count",
+          "direction": "higher_is_better"
+        }
+      }
+    },
+    "TestBenchmark_MemoryPerRTPStream/streams_0": {
+      "metrics": {
+        "mem_mb": {
+          "value": 14.51953125,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        }
+      }
+    },
+    "TestBenchmark_MemoryPerRTPStream/streams_100": {
+      "metrics": {
+        "mem_mb": {
+          "value": 29.28125,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        },
+        "streams": {
+          "value": 198,
+          "unit": "count",
+          "direction": "higher_is_better"
+        }
+      }
+    },
+    "TestBenchmark_MemoryPerRTPStream/streams_200": {
+      "metrics": {
+        "mem_mb": {
+          "value": 39.73828125,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        },
+        "streams": {
+          "value": 400,
+          "unit": "count",
+          "direction": "higher_is_better"
+        }
+      }
+    },
+    "TestBenchmark_MemoryPerRTPStream/streams_50": {
+      "metrics": {
+        "mem_mb": {
+          "value": 21.25390625,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        },
+        "streams": {
+          "value": 94,
+          "unit": "count",
+          "direction": "higher_is_better"
+        }
+      }
+    },
+    "TestBenchmark_MemoryPerRTPStream/streams_500": {
+      "metrics": {
+        "mem_mb": {
+          "value": 65.59765625,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        },
+        "streams": {
+          "value": 948,
+          "unit": "count",
+          "direction": "higher_is_better"
+        }
+      }
+    },
+    "TestBenchmark_ScrapeLatencyUnderLoad": {
+      "metrics": {
+        "avg_ms": {
+          "value": 5.0997,
+          "unit": "ms",
+          "direction": "lower_is_better"
+        },
+        "max_ms": {
+          "value": 11.916,
+          "unit": "ms",
+          "direction": "lower_is_better"
+        },
+        "min_ms": {
+          "value": 2.091,
+          "unit": "ms",
+          "direction": "lower_is_better"
+        },
+        "p95_ms": {
+          "value": 8.766399999999999,
+          "unit": "ms",
+          "direction": "lower_is_better"
+        }
+      }
+    },
     "TestLoad_ConcurrentSessions/concurrent_1000": {
       "metrics": {
         "cpu_avg": {
-          "value": 0.2906164948815649,
+          "value": 0.4200349637938378,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 1.0307692307692307,
+          "value": 1.3055654383735704,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -21,7 +213,7 @@
           "direction": "higher_is_better"
         },
         "mem_mb": {
-          "value": 27.29296875,
+          "value": 24.4609375,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -35,12 +227,12 @@
     "TestLoad_ConcurrentSessions/concurrent_2000": {
       "metrics": {
         "cpu_avg": {
-          "value": 0.43611015809726916,
+          "value": 0.6415817940924323,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 0.9237989556135769,
+          "value": 1.667532637075718,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -50,7 +242,7 @@
           "direction": "higher_is_better"
         },
         "mem_mb": {
-          "value": 27.9453125,
+          "value": 27.4296875,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -64,12 +256,12 @@
     "TestLoad_ConcurrentSessions/concurrent_500": {
       "metrics": {
         "cpu_avg": {
-          "value": 0.2047699629825489,
+          "value": 0.3012392354547364,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 0.9510814249363867,
+          "value": 1.7128683181225555,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -79,7 +271,7 @@
           "direction": "higher_is_better"
         },
         "mem_mb": {
-          "value": 24.75390625,
+          "value": 22.5546875,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -93,17 +285,17 @@
     "TestLoad_DualUAType/rate_1000": {
       "metrics": {
         "actual_pps": {
-          "value": 6236.665277941282,
+          "value": 6167.352133436599,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 3.765676116407426,
+          "value": 3.1205650621691494,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 4.911357142857143,
+          "value": 4.1732072829131655,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -123,7 +315,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 17.890625,
+          "value": 26.203125,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -142,17 +334,17 @@
     "TestLoad_DualUAType/rate_1800": {
       "metrics": {
         "actual_pps": {
-          "value": 11226.58824528161,
+          "value": 11072.546695428426,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 5.646975229826354,
+          "value": 4.421484190948543,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 6.945428156748912,
+          "value": 6.204823695345557,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -172,7 +364,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 15.41015625,
+          "value": 41.41015625,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -191,17 +383,17 @@
     "TestLoad_DualUAType/rate_500": {
       "metrics": {
         "actual_pps": {
-          "value": 3126.75718868446,
+          "value": 3095.3393848710557,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 2.03952296819788,
+          "value": 2.0170216067804705,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 3.5342894393741853,
+          "value": 2.7540536912751676,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -221,7 +413,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 18.76171875,
+          "value": 20.4765625,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -240,17 +432,17 @@
     "TestLoad_FullCallFlow/rate_100": {
       "metrics": {
         "actual_pps": {
-          "value": 602.0331437089874,
+          "value": 593.5955924093137,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 0.5849619611158072,
+          "value": 0.8799830220713073,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 0.7317677419354839,
+          "value": 1.1650253807106599,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -260,7 +452,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 17.15234375,
+          "value": 17.9609375,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -274,17 +466,17 @@
     "TestLoad_FullCallFlow/rate_1000": {
       "metrics": {
         "actual_pps": {
-          "value": 5943.247282022139,
+          "value": 5918.438629338334,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 3.334366872005476,
+          "value": 3.699448228882834,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 4.878769448373409,
+          "value": 5.106614950634697,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -294,7 +486,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 19.3359375,
+          "value": 22.64453125,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -308,17 +500,17 @@
     "TestLoad_FullCallFlow/rate_1200": {
       "metrics": {
         "actual_pps": {
-          "value": 7159.265196114015,
+          "value": 7086.331507116809,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 3.400896473265074,
+          "value": 4.523733084461036,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 4.834397759103641,
+          "value": 6.148204022988506,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -328,7 +520,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 20.46875,
+          "value": 26.5390625,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -342,17 +534,17 @@
     "TestLoad_FullCallFlow/rate_1400": {
       "metrics": {
         "actual_pps": {
-          "value": 8348.808049253636,
+          "value": 8423.027128104151,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 4.062274727820245,
+          "value": 4.784106818181818,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 5.463252840909091,
+          "value": 7.118047752808988,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -362,7 +554,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 18.46875,
+          "value": 26.5078125,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -376,17 +568,17 @@
     "TestLoad_FullCallFlow/rate_1600": {
       "metrics": {
         "actual_pps": {
-          "value": 9515.676331219436,
+          "value": 9394.10548955287,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 4.45391637630662,
+          "value": 3.9021154723870377,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 5.476139332365747,
+          "value": 6.010776836158192,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -396,7 +588,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 18.34765625,
+          "value": 26.65625,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -410,17 +602,17 @@
     "TestLoad_FullCallFlow/rate_1800": {
       "metrics": {
         "actual_pps": {
-          "value": 10772.857983147638,
+          "value": 10555.49843225113,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 4.609377011494253,
+          "value": 5.37845939675174,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 7.04474820143885,
+          "value": 8.532569750367108,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -430,7 +622,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 18.5859375,
+          "value": 34.26171875,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -444,17 +636,17 @@
     "TestLoad_FullCallFlow/rate_500": {
       "metrics": {
         "actual_pps": {
-          "value": 2978.772325076861,
+          "value": 2965.002860834686,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 1.6482760103181429,
+          "value": 1.420017248814144,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 2.2578007761966368,
+          "value": 2.315838751625488,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -464,7 +656,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 17,
+          "value": 20.0625,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -478,17 +670,17 @@
     "TestLoad_FullCallWithRTP/rate_10": {
       "metrics": {
         "actual_pps": {
-          "value": 30.07431852514496,
+          "value": 21.4460783770565,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 0.5194231013059465,
+          "value": 0.7888740388136214,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 1.054448669201521,
+          "value": 1.2236666666666667,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -498,12 +690,12 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 17.5859375,
+          "value": 23.515625,
           "unit": "MB",
           "direction": "lower_is_better"
         },
         "rtp_packets": {
-          "value": 19907,
+          "value": 39947,
           "unit": "count",
           "direction": "higher_is_better"
         },
@@ -517,17 +709,17 @@
     "TestLoad_FullCallWithRTP/rate_100": {
       "metrics": {
         "actual_pps": {
-          "value": 289.2736178744393,
+          "value": 213.4205198157939,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 3.756063843480499,
+          "value": 2.6248253592868838,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 7.041793193717277,
+          "value": 3.6745075757575756,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -537,12 +729,12 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 17.9140625,
+          "value": 106.34375,
           "unit": "MB",
           "direction": "lower_is_better"
         },
         "rtp_packets": {
-          "value": 199299,
+          "value": 399248,
           "unit": "count",
           "direction": "higher_is_better"
         },
@@ -556,17 +748,17 @@
     "TestLoad_FullCallWithRTP/rate_25": {
       "metrics": {
         "actual_pps": {
-          "value": 75.7348647535328,
+          "value": 53.20554224347293,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 1.0349594628832024,
+          "value": 1.2488486842105264,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 1.621723700887199,
+          "value": 2.68888745148771,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -576,12 +768,12 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 17.79296875,
+          "value": 30.16796875,
           "unit": "MB",
           "direction": "lower_is_better"
         },
         "rtp_packets": {
-          "value": 49812,
+          "value": 99815,
           "unit": "count",
           "direction": "higher_is_better"
         },
@@ -595,17 +787,17 @@
     "TestLoad_FullCallWithRTP/rate_50": {
       "metrics": {
         "actual_pps": {
-          "value": 151.27074502264472,
+          "value": 105.32141828130784,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 1.6160797342192692,
+          "value": 2.6108117332349416,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 3.0909290322580647,
+          "value": 5.184177545691906,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -615,135 +807,18 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 14.94921875,
+          "value": 56.96875,
           "unit": "MB",
           "direction": "lower_is_better"
         },
         "rtp_packets": {
-          "value": 99589,
+          "value": 199541,
           "unit": "count",
           "direction": "higher_is_better"
         },
         "ser": {
           "value": 100,
           "unit": "%",
-          "direction": "higher_is_better"
-        }
-      }
-    },
-    "TestLoad_FullCallWithVQReport/rate_100": {
-      "metrics": {
-        "actual_pps": {
-          "value": 771.561928985984,
-          "unit": "pps",
-          "direction": "higher_is_better"
-        },
-        "cpu_avg": {
-          "value": 0.8902855924978686,
-          "unit": "%",
-          "direction": "lower_is_better"
-        },
-        "cpu_peak": {
-          "value": 1.0707179487179486,
-          "unit": "%",
-          "direction": "lower_is_better"
-        },
-        "loss_rate": {
-          "value": 0,
-          "unit": "%",
-          "direction": "lower_is_better"
-        },
-        "mem_mb": {
-          "value": 18.62890625,
-          "unit": "MB",
-          "direction": "lower_is_better"
-        },
-        "ser": {
-          "value": 100,
-          "unit": "%",
-          "direction": "higher_is_better"
-        },
-        "vq_reports": {
-          "value": 500,
-          "unit": "count",
-          "direction": "higher_is_better"
-        }
-      }
-    },
-    "TestLoad_FullCallWithVQReport/rate_1000": {
-      "metrics": {
-        "actual_pps": {
-          "value": 7654.937448356528,
-          "unit": "pps",
-          "direction": "higher_is_better"
-        },
-        "cpu_avg": {
-          "value": 4.868247349823322,
-          "unit": "%",
-          "direction": "lower_is_better"
-        },
-        "cpu_peak": {
-          "value": 7.293391812865497,
-          "unit": "%",
-          "direction": "lower_is_better"
-        },
-        "loss_rate": {
-          "value": 0,
-          "unit": "%",
-          "direction": "lower_is_better"
-        },
-        "mem_mb": {
-          "value": 16.88671875,
-          "unit": "MB",
-          "direction": "lower_is_better"
-        },
-        "ser": {
-          "value": 100,
-          "unit": "%",
-          "direction": "higher_is_better"
-        },
-        "vq_reports": {
-          "value": 5000,
-          "unit": "count",
-          "direction": "higher_is_better"
-        }
-      }
-    },
-    "TestLoad_FullCallWithVQReport/rate_500": {
-      "metrics": {
-        "actual_pps": {
-          "value": 3828.293459348068,
-          "unit": "pps",
-          "direction": "higher_is_better"
-        },
-        "cpu_avg": {
-          "value": 2.5401027473754745,
-          "unit": "%",
-          "direction": "lower_is_better"
-        },
-        "cpu_peak": {
-          "value": 3.6460935350756536,
-          "unit": "%",
-          "direction": "lower_is_better"
-        },
-        "loss_rate": {
-          "value": 0,
-          "unit": "%",
-          "direction": "lower_is_better"
-        },
-        "mem_mb": {
-          "value": 16.7578125,
-          "unit": "MB",
-          "direction": "lower_is_better"
-        },
-        "ser": {
-          "value": 100,
-          "unit": "%",
-          "direction": "higher_is_better"
-        },
-        "vq_reports": {
-          "value": 2500,
-          "unit": "count",
           "direction": "higher_is_better"
         }
       }
@@ -751,17 +826,17 @@
     "TestLoad_INVITEFlood/rate_100": {
       "metrics": {
         "actual_pps": {
-          "value": 96.12283744407121,
+          "value": 95.55560364847852,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 0.24568325334680474,
+          "value": 0.36827135162862273,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 0.29820253164556965,
+          "value": 0.5530918499353169,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -771,7 +846,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 15.1796875,
+          "value": 15.69140625,
           "unit": "MB",
           "direction": "lower_is_better"
         }
@@ -780,17 +855,17 @@
     "TestLoad_INVITEFlood/rate_1000": {
       "metrics": {
         "actual_pps": {
-          "value": 962.1147029327318,
+          "value": 957.4747708686803,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 0.6628963414634146,
+          "value": 1.1215248503773094,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 0.7544713375796178,
+          "value": 1.7053255208333333,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -800,7 +875,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 19.1171875,
+          "value": 15.62890625,
           "unit": "MB",
           "direction": "lower_is_better"
         }
@@ -809,17 +884,17 @@
     "TestLoad_INVITEFlood/rate_2000": {
       "metrics": {
         "actual_pps": {
-          "value": 1911.0389637675275,
+          "value": 1913.3723690686022,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 1.1661813471502591,
+          "value": 1.637625786163522,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 1.4162123197903014,
+          "value": 2.2471580345285522,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -829,7 +904,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 15.01171875,
+          "value": 21.79296875,
           "unit": "MB",
           "direction": "lower_is_better"
         }
@@ -838,17 +913,17 @@
     "TestLoad_INVITEFlood/rate_500": {
       "metrics": {
         "actual_pps": {
-          "value": 481.5109260315452,
+          "value": 478.13288072718933,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 0.5087788778877887,
+          "value": 0.8826785247188073,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 0.7190556274256145,
+          "value": 0.9512121212121212,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -858,7 +933,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 13.6953125,
+          "value": 18.69921875,
           "unit": "MB",
           "direction": "lower_is_better"
         }
@@ -867,17 +942,17 @@
     "TestLoad_INVITEFlood/rate_5000": {
       "metrics": {
         "actual_pps": {
-          "value": 4768.068684058384,
+          "value": 4764.524478968993,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 3.205507399577167,
+          "value": 2.9678149237764107,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 4.930746666666667,
+          "value": 4.105275167785235,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -887,26 +962,158 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 22.65625,
+          "value": 26.19140625,
           "unit": "MB",
           "direction": "lower_is_better"
         }
       }
     },
-    "TestLoad_VQHighRateWithResponse/rate_100": {
+    "TestLoad_MultiInterface/interfaces_1": {
       "metrics": {
         "actual_pps": {
-          "value": 171.32661680923573,
+          "value": 371.0812819805758,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 0.28320998096849226,
+          "value": 0.5163225806451612,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 0.3594117647058824,
+          "value": 0.7117012987012987,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "drain_time_ms": {
+          "value": 601,
+          "unit": "ms",
+          "direction": "lower_is_better"
+        },
+        "errors": {
+          "value": 0,
+          "unit": "count",
+          "direction": "lower_is_better"
+        },
+        "loss_rate": {
+          "value": 0,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "mem_mb": {
+          "value": 17.01953125,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        },
+        "socket_packets_received": {
+          "value": 1000,
+          "unit": "count",
+          "direction": "higher_is_better"
+        }
+      }
+    },
+    "TestLoad_MultiInterface/interfaces_2": {
+      "metrics": {
+        "actual_pps": {
+          "value": 802.6773263692535,
+          "unit": "pps",
+          "direction": "higher_is_better"
+        },
+        "cpu_avg": {
+          "value": 0.7589541363051865,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "cpu_peak": {
+          "value": 1.0244170984455958,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "drain_time_ms": {
+          "value": 602,
+          "unit": "ms",
+          "direction": "lower_is_better"
+        },
+        "errors": {
+          "value": 0,
+          "unit": "count",
+          "direction": "lower_is_better"
+        },
+        "loss_rate": {
+          "value": 0,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "mem_mb": {
+          "value": 23.97265625,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        },
+        "socket_packets_received": {
+          "value": 2000,
+          "unit": "count",
+          "direction": "higher_is_better"
+        }
+      }
+    },
+    "TestLoad_MultiInterface/interfaces_3": {
+      "metrics": {
+        "actual_pps": {
+          "value": 1139.8428538323951,
+          "unit": "pps",
+          "direction": "higher_is_better"
+        },
+        "cpu_avg": {
+          "value": 1.003752702118461,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "cpu_peak": {
+          "value": 1.2826675427069645,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "drain_time_ms": {
+          "value": 602,
+          "unit": "ms",
+          "direction": "lower_is_better"
+        },
+        "errors": {
+          "value": 0,
+          "unit": "count",
+          "direction": "lower_is_better"
+        },
+        "loss_rate": {
+          "value": 0,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "mem_mb": {
+          "value": 30.55859375,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        },
+        "socket_packets_received": {
+          "value": 3000,
+          "unit": "count",
+          "direction": "higher_is_better"
+        }
+      }
+    },
+    "TestLoad_VQScenarios/FullCallWithVQReport/rate_100": {
+      "metrics": {
+        "actual_pps": {
+          "value": 727.1616389507362,
+          "unit": "pps",
+          "direction": "higher_is_better"
+        },
+        "cpu_avg": {
+          "value": 0.9902085527701707,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "cpu_peak": {
+          "value": 1.2262064676616915,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -916,7 +1123,124 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 14.89453125,
+          "value": 17.546875,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        },
+        "ser": {
+          "value": 100,
+          "unit": "%",
+          "direction": "higher_is_better"
+        },
+        "vq_reports": {
+          "value": 500,
+          "unit": "count",
+          "direction": "higher_is_better"
+        }
+      }
+    },
+    "TestLoad_VQScenarios/FullCallWithVQReport/rate_1000": {
+      "metrics": {
+        "actual_pps": {
+          "value": 7317.1803073390465,
+          "unit": "pps",
+          "direction": "higher_is_better"
+        },
+        "cpu_avg": {
+          "value": 3.256454842219804,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "cpu_peak": {
+          "value": 3.919578947368421,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "loss_rate": {
+          "value": 0,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "mem_mb": {
+          "value": 25.21484375,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        },
+        "ser": {
+          "value": 100,
+          "unit": "%",
+          "direction": "higher_is_better"
+        },
+        "vq_reports": {
+          "value": 5000,
+          "unit": "count",
+          "direction": "higher_is_better"
+        }
+      }
+    },
+    "TestLoad_VQScenarios/FullCallWithVQReport/rate_500": {
+      "metrics": {
+        "actual_pps": {
+          "value": 3618.056866803015,
+          "unit": "pps",
+          "direction": "higher_is_better"
+        },
+        "cpu_avg": {
+          "value": 2.323227424749164,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "cpu_peak": {
+          "value": 2.9861375,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "loss_rate": {
+          "value": 0,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "mem_mb": {
+          "value": 22.21484375,
+          "unit": "MB",
+          "direction": "lower_is_better"
+        },
+        "ser": {
+          "value": 100,
+          "unit": "%",
+          "direction": "higher_is_better"
+        },
+        "vq_reports": {
+          "value": 2500,
+          "unit": "count",
+          "direction": "higher_is_better"
+        }
+      }
+    },
+    "TestLoad_VQScenarios/VQHighRateWithResponse/rate_100": {
+      "metrics": {
+        "actual_pps": {
+          "value": 164.6329938181516,
+          "unit": "pps",
+          "direction": "higher_is_better"
+        },
+        "cpu_avg": {
+          "value": 0.4568673166596015,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "cpu_peak": {
+          "value": 0.49773466833541924,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "loss_rate": {
+          "value": 0,
+          "unit": "%",
+          "direction": "lower_is_better"
+        },
+        "mem_mb": {
+          "value": 19.98046875,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -927,20 +1251,20 @@
         }
       }
     },
-    "TestLoad_VQHighRateWithResponse/rate_1000": {
+    "TestLoad_VQScenarios/VQHighRateWithResponse/rate_1000": {
       "metrics": {
         "actual_pps": {
-          "value": 1705.1412687860318,
+          "value": 1653.0388602942803,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 1.4319868708971553,
+          "value": 1.2829258861439312,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 1.8645866666666666,
+          "value": 1.5510103626943006,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -950,7 +1274,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 16.0859375,
+          "value": 20.09375,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -961,20 +1285,20 @@
         }
       }
     },
-    "TestLoad_VQHighRateWithResponse/rate_500": {
+    "TestLoad_VQScenarios/VQHighRateWithResponse/rate_500": {
       "metrics": {
         "actual_pps": {
-          "value": 848.3289804665633,
+          "value": 827.1901427340034,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 0.7475969158278004,
+          "value": 0.908084742135673,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 1.1051099611901682,
+          "value": 1.1113471502590673,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -984,7 +1308,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 17.76953125,
+          "value": 18.55078125,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -995,20 +1319,20 @@
         }
       }
     },
-    "TestLoad_VQReportFlood/rate_100": {
+    "TestLoad_VQScenarios/VQReportFlood/rate_100": {
       "metrics": {
         "actual_pps": {
-          "value": 96.28623049952476,
+          "value": 93.09694394166291,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 0.2749451390660883,
+          "value": 0.45900076667518525,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 0.29707653701380177,
+          "value": 0.7337483953786906,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -1018,7 +1342,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 12.3671875,
+          "value": 17.765625,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -1029,20 +1353,20 @@
         }
       }
     },
-    "TestLoad_VQReportFlood/rate_1000": {
+    "TestLoad_VQScenarios/VQReportFlood/rate_1000": {
       "metrics": {
         "actual_pps": {
-          "value": 962.9656095348458,
+          "value": 935.4009863777958,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 0.7025114155251142,
+          "value": 1.2823106156574613,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 0.8116582914572864,
+          "value": 1.4732030264817149,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -1052,7 +1376,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 16.71875,
+          "value": 15.51171875,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -1063,20 +1387,20 @@
         }
       }
     },
-    "TestLoad_VQReportFlood/rate_2000": {
+    "TestLoad_VQScenarios/VQReportFlood/rate_2000": {
       "metrics": {
         "actual_pps": {
-          "value": 1911.4696836920841,
+          "value": 1874.059904203024,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 1.2911967338606787,
+          "value": 1.5926958762886598,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 1.6857051282051283,
+          "value": 1.6900766283524902,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -1086,7 +1410,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 17.05078125,
+          "value": 17.1796875,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -1097,20 +1421,20 @@
         }
       }
     },
-    "TestLoad_VQReportFlood/rate_500": {
+    "TestLoad_VQScenarios/VQReportFlood/rate_500": {
       "metrics": {
         "actual_pps": {
-          "value": 479.4893351428747,
+          "value": 469.7090609732378,
           "unit": "pps",
           "direction": "higher_is_better"
         },
         "cpu_avg": {
-          "value": 0.5819641025641026,
+          "value": 0.8586907507045861,
           "unit": "%",
           "direction": "lower_is_better"
         },
         "cpu_peak": {
-          "value": 0.6397823303457106,
+          "value": 0.9833290816326531,
           "unit": "%",
           "direction": "lower_is_better"
         },
@@ -1120,7 +1444,7 @@
           "direction": "lower_is_better"
         },
         "mem_mb": {
-          "value": 17.0546875,
+          "value": 18.81640625,
           "unit": "MB",
           "direction": "lower_is_better"
         },
@@ -1130,51 +1454,6 @@
           "direction": "higher_is_better"
         }
       }
-    },
-    "TestLoad_MultiInterface/interfaces_1": {
-      "metrics": {
-        "actual_pps": { "value": 373.43, "unit": "pps", "direction": "higher_is_better" },
-        "cpu_avg": { "value": 0.51, "unit": "%", "direction": "lower_is_better" },
-        "cpu_peak": { "value": 0.77, "unit": "%", "direction": "lower_is_better" },
-        "drain_time_ms": { "value": 602, "unit": "ms", "direction": "lower_is_better" },
-        "errors": { "value": 0, "unit": "count", "direction": "lower_is_better" },
-        "loss_rate": { "value": 0, "unit": "%", "direction": "lower_is_better" },
-        "mem_mb": { "value": 15.82, "unit": "MB", "direction": "lower_is_better" },
-        "socket_packets_received": { "value": 1000, "unit": "count", "direction": "higher_is_better" }
-      }
-    },
-    "TestLoad_MultiInterface/interfaces_2": {
-      "metrics": {
-        "actual_pps": { "value": 870.21, "unit": "pps", "direction": "higher_is_better" },
-        "cpu_avg": { "value": 0.78, "unit": "%", "direction": "lower_is_better" },
-        "cpu_peak": { "value": 0.83, "unit": "%", "direction": "lower_is_better" },
-        "drain_time_ms": { "value": 603, "unit": "ms", "direction": "lower_is_better" },
-        "errors": { "value": 0, "unit": "count", "direction": "lower_is_better" },
-        "loss_rate": { "value": 0, "unit": "%", "direction": "lower_is_better" },
-        "mem_mb": { "value": 14.99, "unit": "MB", "direction": "lower_is_better" },
-        "socket_packets_received": { "value": 2000, "unit": "count", "direction": "higher_is_better" }
-      }
-    },
-    "TestLoad_MultiInterface/interfaces_3": {
-      "metrics": {
-        "actual_pps": { "value": 1043.07, "unit": "pps", "direction": "higher_is_better" },
-        "cpu_avg": { "value": 0.76, "unit": "%", "direction": "lower_is_better" },
-        "cpu_peak": { "value": 1.23, "unit": "%", "direction": "lower_is_better" },
-        "drain_time_ms": { "value": 602, "unit": "ms", "direction": "lower_is_better" },
-        "errors": { "value": 0, "unit": "count", "direction": "lower_is_better" },
-        "loss_rate": { "value": 0, "unit": "%", "direction": "lower_is_better" },
-        "mem_mb": { "value": 17.13, "unit": "MB", "direction": "lower_is_better" },
-        "socket_packets_received": { "value": 3000, "unit": "count", "direction": "higher_is_better" }
-      }
     }
-  },
-  "regression_limits": {
-    "actual_pps": { "tolerance_pct": 15, "direction": "higher_is_better" },
-    "loss_rate": { "tolerance_pct": 100, "direction": "lower_is_better" },
-    "cpu_avg": { "tolerance_pct": 25, "direction": "lower_is_better" },
-    "cpu_peak": { "tolerance_pct": 25, "direction": "lower_is_better" },
-    "mem_mb": { "tolerance_pct": 15, "direction": "lower_is_better" },
-    "drain_time_ms": { "tolerance_pct": 50, "direction": "lower_is_better" },
-    "errors": { "tolerance_pct": 100, "direction": "lower_is_better" }
   }
 }

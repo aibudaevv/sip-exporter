@@ -176,3 +176,30 @@ func TestParseRawPacket_RTPDetection(t *testing.T) {
 	require.Empty(t, errType)
 	require.Equal(t, 1, e.mediaTracker.StreamCount(), "RTP must be observed via parseRawPacket")
 }
+
+// TestIsRTCPPayload verifies the RTCP/RTP disambiguation by payload-type byte.
+// RTP and RTCP share V=2; the PT range is disjoint (RFC 5761). isRTCPPayload is
+// called inside the V=2 branch of parseRawPacket, so it checks only PT + length.
+func TestIsRTCPPayload(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload []byte
+		want    bool
+	}{
+		{"SR (PT 200)", []byte{0x80, 200}, true},
+		{"RR (PT 201)", []byte{0x80, 201}, true},
+		{"APP (PT 204, upper bound)", []byte{0x80, 204}, true},
+		{"below range (PT 199)", []byte{0x80, 199}, false},
+		{"above range (PT 205)", []byte{0x80, 205}, false},
+		{"RTP PCMU (PT 0)", []byte{0x80, 0}, false},
+		{"RTP dynamic (PT 127)", []byte{0x80, 127}, false},
+		{"single byte (no PT byte)", []byte{0x80}, false},
+		{"empty", []byte{}, false},
+		{"nil", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, isRTCPPayload(tt.payload))
+		})
+	}
+}

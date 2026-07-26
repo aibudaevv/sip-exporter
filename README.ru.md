@@ -21,6 +21,7 @@
 - [Архитектура](#архитектура)
 - [Производительность](#производительность)
 - [Установка](#установка)
+- [Топология развёртывания](#топология-развёртывания)
 - [Метрики](#метрики)
 - [Безопасность](docs/SECURITY.ru.md)
 - [Разработка](#разработка)
@@ -41,8 +42,9 @@
 - 🏷️ **Метрики по типам устройств** — классификация User-Agent для всех SIP-метрик
 - 🌍 **Гео-обогащение** — лейблы `source_country` (GeoIP) и `destination_country` (E.164 prefix) в SIP-метриках
 - 📞 **Качество голоса (RFC 6035)** — MOS, джиттер, потери пакетов из SIP PUBLISH/NOTIFY
-- 🎧 **Анализ RTP-медиа** — джиттер, потери и MOS (E-model G.107) из RTP-потоков, скоррелированных с SIP-диалогами, без захвата голосового payload (только заголовок)
-- 🛡️ **Детекция фрода** — сигналы сканирования регистраций, всплесков INVITE и перехвата аккаунтов (смена страны)
+- 🎧 **Анализ RTP-медиа** — джиттер, потери, MOS (E-model G.107) и Packet Delay Variation (PDV, per-packet, VoIPMonitor-parity) из RTP-потоков, скоррелированных с SIP-диалогами, без захвата голосового payload (только заголовок)
+- 📊 **RTCP-качество от эндпоинтов** — потери, джиттер и round-trip time (RTT) из RTCP SR/RR (RFC 3550), корреляция по SSRC; поддерживает rtcp-mux (RFC 5761), явный `a=rtcp` (RFC 3605) и legacy port+1
+- 🛡️ **Детекция фрода** — сигналы сканирования регистраций, всплесков INVITE, перехвата аккаунтов (смена страны) и False Answer Supervision (FAS)
 
 ## Быстрый старт
 
@@ -123,6 +125,16 @@ docker pull frzq/sip-exporter:latest
 
 > ⚠️ **Особенность мульти-интерфейса:** не указывайте интерфейсы, которые видят один и тот же трафик (bond parent + child, bridge + member, VLAN parent + subinterface, дублирующие SPAN-порты). Это приведёт к задвоению метрик. Если сомневаетесь — указывайте только физические NIC.
 
+## Топология развёртывания
+
+Устанавливайте sip-exporter на хост, через который проходят **и SIP-сигналинг, и RTP-медиа**. Он захватывает пакеты с того сетевого интерфейса, к которому подключён, а лейбл `direction` опирается на то, что ядро видит пакеты как адресованные этому хосту — поэтому хост должен владеть этими IP, а не получать их через зеркало.
+
+Покрытие зависит от того, что именно видит хост:
+
+- **Только SIP** (сигналинг проходит, медиа — нет) → только SIP-метрики; RTP-метрики остаются пустыми.
+- **Только RTP** (медиа проходит, сигналинг — нет) → экспортёр не сможет скоррелировать потоки с диалогами, так как RTP-эндпоинты он узнаёт из SDP внутри SIP-сообщений. Размещайте там, где виден и сигналинг.
+- **SIP + RTP** → полные метрики.
+
 ## Метрики
 
 Все метрики доступны на `/metrics` в формате Prometheus. Все SIP-метрики содержат лейблы `carrier`, `ua_type` и `source_country` для многомерного анализа. INVITE-метрики дополнительно содержат лейбл `iface`, идентифицирующий сетевой интерфейс, захвативший трафик. Экспортер предоставляет:
@@ -131,7 +143,9 @@ docker pull frzq/sip-exporter:latest
 - **Активные сессии** — количество активных SIP-диалогов в реальном времени
 - **Метрики RFC 6076** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, PDD, PBD
 - **Метрики качества голоса RFC 6035** — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
-- **Метрики RTP-медиа** — `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_jitter_milliseconds`, `rtp_mos_score`, `rtp_active_streams` (лейблы: `carrier,ua_type,codec,source_country`)
+- **Метрики RTP-медиа** — `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_jitter_milliseconds`, `rtp_pdv_milliseconds` (per-packet Packet Delay Variation), `rtp_mos_score`, `rtp_active_streams` (лейблы: `carrier,ua_type,codec,source_country,direction`)
+- **Метрики RTCP-качества** — `rtcp_reports_total`, `rtcp_loss_fraction_percent`, `rtcp_cumulative_loss_total`, `rtcp_jitter_milliseconds`, `rtcp_rtt_milliseconds`, `rtcp_orphan_reports_total` (лейблы: `carrier,ua_type,codec,source_country,direction`)
+- **Фрод-сигналы** — `fas_calls_total` (False Answer Supervision: 200 OK без RTP в течение threshold), `register_scan_total`, `invite_burst_total`, `register_country_change_total`
 - **Диагностика** — `sip_retransmission_total` (ретрансмиссии по SIP Timer A), `rtp_out_of_order_total` (нарушение порядка RTP-пакетов), `short_calls_total` (звонки короче 20/60/180 секунд)
 
 Полный справочник с формулами, примерами и привязкой к RFC: [docs/METRICS.ru.md](docs/METRICS.ru.md)

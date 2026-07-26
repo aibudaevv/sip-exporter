@@ -87,6 +87,7 @@ type (
 		registerCountryChange *prometheus.CounterVec
 		registerScanTotal     *prometheus.CounterVec
 		inviteBurstTotal      *prometheus.CounterVec
+		fasCalls              *prometheus.CounterVec
 
 		shortCalls *prometheus.CounterVec
 
@@ -139,6 +140,7 @@ type (
 		rtpDuplicate       *prometheus.CounterVec
 		rtpOutOfOrder      *prometheus.CounterVec
 		rtpJitter          *prometheus.HistogramVec
+		rtpPDV             *prometheus.HistogramVec
 		rtpMOS             *prometheus.HistogramVec
 		rtpMOSF1           *prometheus.HistogramVec
 		rtpMOSF2           *prometheus.HistogramVec
@@ -149,6 +151,13 @@ type (
 		rtpOneWayCalls     *prometheus.CounterVec
 		sessionsMissingRTP *prometheus.CounterVec
 		rtpActiveStreams   *prometheus.GaugeVec
+
+		rtcpJitter         *prometheus.HistogramVec
+		rtcpLossFraction   *prometheus.HistogramVec
+		rtcpCumulativeLoss *prometheus.CounterVec
+		rtcpRTT            *prometheus.HistogramVec
+		rtcpReports        *prometheus.CounterVec
+		rtcpOrphanReports  prometheus.Counter
 		// Single-writer: read+written only from sipDialogMetricsUpdate goroutine.
 		prevRTPKeys map[string][]string
 
@@ -191,6 +200,7 @@ type (
 		RegisterCountryChange(carrier, sourceCountry, direction string)
 		RegisterScan(carrier, sourceCountry, direction string)
 		InviteBurst(carrier, sourceCountry, direction string)
+		FasCall(carrier, uaType, sourceCountry, direction string)
 		SIPRetransmission(carrier, uaType, sourceCountry, direction, method string)
 		UpdateShortCalls(carrier, uaType, sourceCountry, direction string, duration time.Duration)
 		UpdateBillableSeconds(carrier, destinationCountry, direction string, duration time.Duration)
@@ -201,6 +211,7 @@ type (
 		UpdateRTPDuplicates(carrier, uaType, codec, sourceCountry, direction string)
 		UpdateRTPOutOfOrder(carrier, uaType, codec, sourceCountry, direction string)
 		UpdateRTPJitter(carrier, uaType, codec, sourceCountry, direction string, jitterMs float64)
+		UpdateRTPPDV(carrier, uaType, codec, sourceCountry, direction string, pdvMs float64)
 		UpdateRTPMOS(carrier, uaType, codec, sourceCountry, direction string, mos float64)
 		UpdateRTPMOSVariants(carrier, uaType, codec, sourceCountry, direction string, f1, f2, adapt float64)
 		UpdateRTPRFactor(carrier, uaType, codec, sourceCountry, direction string, rFactor float64)
@@ -209,6 +220,12 @@ type (
 		UpdateRTPActiveStreams(counts []LabeledCount)
 		OneWayCall(carrier, uaType, sourceCountry, direction string)
 		MissingRTP(carrier, uaType, sourceCountry, direction string)
+		UpdateRTCPJitter(carrier, uaType, codec, sourceCountry, direction string, jitterMs float64)
+		UpdateRTCPLossFraction(carrier, uaType, codec, sourceCountry, direction string, fractionPercent float64)
+		UpdateRTCPCumulativeLoss(carrier, uaType, codec, sourceCountry, direction string, lostDelta uint64)
+		UpdateRTCPRTT(carrier, uaType, codec, sourceCountry, direction string, rttMs float64)
+		UpdateRTCPReport(carrier, uaType, sourceCountry, direction, reportType string)
+		UpdateRTCPOrphan()
 		SystemError()
 		ParseError(errorType string)
 		SocketStats(stats []SocketStat)
@@ -284,6 +301,7 @@ func newMetricserWithRegistry(reg *prometheus.Registry) Metricser {
 	m.initVQHistograms(reg)
 	registerRatioCollectors(m, reg)
 	m.initRTPMetrics(reg)
+	m.initRTCPMetrics(reg)
 	m.initSelfMetrics(reg)
 	return m
 }
@@ -438,6 +456,12 @@ func (m *metrics) initRegistrationMetrics(reg *prometheus.Registry) {
 		"sip_exporter_invite_burst_total",
 		"INVITEs from a single IP exceeding the burst threshold (per INVITE at or above threshold, excludes re-INVITEs)",
 		[]string{"carrier", "source_country", "direction"},
+		reg,
+	)
+	m.fasCalls = newCounterVecWithRegistry(
+		"sip_exporter_fas_calls_total",
+		"Suspected False Answer Supervision: 200 OK received on a call with registered media endpoints but no RTP observed within the threshold window",
+		[]string{"carrier", "ua_type", "source_country", "direction"},
 		reg,
 	)
 	m.sipRetransmission = newCounterVecWithRegistry(
@@ -596,6 +620,7 @@ func (m *metrics) initVQHistograms(reg *prometheus.Registry) {
 
 func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 	jitterBuckets := []float64{0.1, 0.5, 1, 5, 10, 20, 50, 100, 200, 500}
+	pdvBuckets := []float64{1, 5, 10, 25, 50, 70, 90, 120, 150, 200, 300, 500}
 	mosBuckets := []float64{1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0}
 	rFactorBuckets := []float64{10, 20, 30, 40, 50, 60, 70, 80, 85, 90, 93, 100}
 	lossDensityBuckets := []float64{10, 25, 50, 75, 100}
@@ -616,6 +641,11 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 		Name:    "sip_exporter_rtp_jitter_milliseconds",
 		Help:    "RTP interarrival jitter in milliseconds (RFC 3550 A.8)",
 		Buckets: jitterBuckets,
+	}, rl, reg)
+	m.rtpPDV = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_rtp_pdv_milliseconds",
+		Help:    "RTP Packet Delay Variation in milliseconds: raw per-packet deviation (|arrivalDelta - tsDelta|), exposing jitter spikes smoothed by rtp_jitter_milliseconds",
+		Buckets: pdvBuckets,
 	}, rl, reg)
 	m.rtpMOS = newHistogramVecWithRegistry(prometheus.HistogramOpts{
 		Name:    "sip_exporter_rtp_mos_score",
@@ -662,6 +692,44 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 	m.rtpActiveStreams = newGaugeVecWithRegistry(
 		"sip_exporter_rtp_active_streams",
 		"Number of active RTP streams correlated with SIP dialogs", rl, reg)
+}
+
+func (m *metrics) initRTCPMetrics(reg *prometheus.Registry) {
+	jitterBuckets := []float64{0.1, 0.5, 1, 5, 10, 20, 50, 100, 200, 500}
+	msBuckets := []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000}
+	percentBuckets := []float64{0, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100}
+	rl := []string{"carrier", "ua_type", "codec", "source_country", "direction"}
+	m.rtcpJitter = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_rtcp_jitter_milliseconds",
+		Help:    "RTCP endpoint-reported interarrival jitter in milliseconds (RFC 3550 §6.4.1 RR block)",
+		Buckets: jitterBuckets,
+	}, rl, reg)
+	m.rtcpLossFraction = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_rtcp_loss_fraction_percent",
+		Help:    "RTCP endpoint-reported fraction-lost since last RR, percent (0-100, RFC 3550 §6.4.1)",
+		Buckets: percentBuckets,
+	}, rl, reg)
+	m.rtcpCumulativeLoss = newCounterVecWithRegistry(
+		"sip_exporter_rtcp_cumulative_loss_total",
+		"RTCP endpoint-reported cumulative packets lost (delta since previous RR; RFC 3550 §6.4.1)",
+		rl, reg)
+	m.rtcpRTT = newHistogramVecWithRegistry(prometheus.HistogramOpts{
+		Name:    "sip_exporter_rtcp_rtt_milliseconds",
+		Help:    "Round-trip time computed from RTCP RR LSR/DLSR (RFC 3550 §6.4.1)",
+		Buckets: msBuckets,
+	}, rl, reg)
+	rlReports := []string{"carrier", "ua_type", "source_country", "direction", "type"}
+	m.rtcpReports = newCounterVecWithRegistry(
+		"sip_exporter_rtcp_reports_total",
+		"RTCP SR/RR reception report blocks received for tracked streams (type=sr|rr; counted per block)",
+		rlReports,
+		reg,
+	)
+	m.rtcpOrphanReports = newCounterWithRegistry(
+		"sip_exporter_rtcp_orphan_reports_total",
+		"RTCP reception report blocks whose SSRC could not be correlated to a tracked RTP stream (no carrier labels: the stream is unknown)",
+		reg,
+	)
 }
 
 func registerRatioCollectors(m *metrics, reg *prometheus.Registry) {
@@ -950,6 +1018,10 @@ func (m *metrics) InviteBurst(carrier, sourceCountry, direction string) {
 	m.inviteBurstTotal.WithLabelValues(carrier, sourceCountry, direction).Inc()
 }
 
+func (m *metrics) FasCall(carrier, uaType, sourceCountry, direction string) {
+	m.fasCalls.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
+}
+
 func (m *metrics) SIPRetransmission(carrier, uaType, sourceCountry, _, method string) {
 	m.sipRetransmission.WithLabelValues(carrier, uaType, sourceCountry, method).Inc()
 }
@@ -1140,6 +1212,50 @@ func (m *metrics) UpdateRTPOutOfOrder(carrier, uaType, codec, sourceCountry, dir
 
 func (m *metrics) UpdateRTPJitter(carrier, uaType, codec, sourceCountry, direction string, jitterMs float64) {
 	m.rtpJitter.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(jitterMs)
+}
+
+func (m *metrics) UpdateRTPPDV(carrier, uaType, codec, sourceCountry, direction string, pdvMs float64) {
+	m.rtpPDV.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(pdvMs)
+}
+
+func (m *metrics) UpdateRTCPJitter(carrier, uaType, codec, sourceCountry, direction string, jitterMs float64) {
+	m.rtcpJitter.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(jitterMs)
+}
+
+func (m *metrics) UpdateRTCPLossFraction(
+	carrier, uaType, codec, sourceCountry, direction string,
+	fractionPercent float64,
+) {
+	m.rtcpLossFraction.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(fractionPercent)
+}
+
+// UpdateRTCPCumulativeLoss records the increase in endpoint-reported cumulative
+// packet loss since the previous RR for the SSRC. lostDelta is the difference
+// between the current RR's cumulative-lost field and the previous one; passing
+// the raw cumulative total double-counts. A zero delta is ignored (no empty series).
+func (m *metrics) UpdateRTCPCumulativeLoss(
+	carrier, uaType, codec, sourceCountry, direction string,
+	lostDelta uint64,
+) {
+	if lostDelta == 0 {
+		return
+	}
+	m.rtcpCumulativeLoss.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Add(float64(lostDelta))
+}
+
+func (m *metrics) UpdateRTCPRTT(carrier, uaType, codec, sourceCountry, direction string, rttMs float64) {
+	m.rtcpRTT.WithLabelValues(carrier, uaType, codec, sourceCountry, direction).Observe(rttMs)
+}
+
+func (m *metrics) UpdateRTCPReport(carrier, uaType, sourceCountry, direction, reportType string) {
+	m.rtcpReports.WithLabelValues(carrier, uaType, sourceCountry, direction, reportType).Inc()
+}
+
+// UpdateRTCPOrphan counts an RTCP report block whose SSRC could not be
+// correlated to a tracked RTP stream (uncorrelated/orphan). Label-less because
+// the stream — and thus its carrier/codec context — is unknown.
+func (m *metrics) UpdateRTCPOrphan() {
+	m.rtcpOrphanReports.Inc()
 }
 
 func (m *metrics) UpdateRTPMOS(carrier, uaType, codec, sourceCountry, direction string, mos float64) {

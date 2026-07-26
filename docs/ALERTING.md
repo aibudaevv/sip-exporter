@@ -206,6 +206,15 @@ These alerts detect suspicious SIP patterns: account takeover, registration enum
           summary: "INVITE burst detected"
           description: "Single IP is sending an unusually high rate of INVITEs on {{ $labels.carrier }} from {{ $labels.source_country }}. Possible toll fraud, DDoS, or traffic pump."
 
+      - alert: SIPFalseAnswerSupervision
+        expr: rate(sip_exporter_fas_calls_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "False Answer Supervision suspected"
+          description: "Answered calls on {{ $labels.carrier }} (ua_type={{ $labels.ua_type }}, {{ $labels.source_country }}, {{ $labels.direction }}) carried no RTP within the FAS threshold. Possible billing fraud — the answering side starts billing without delivering media."
+
       - alert: SIPSessionCapacityExhaustion
         expr: sip_exporter_sessions_utilization > 90
         for: 5m
@@ -319,6 +328,59 @@ These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) mea
         annotations:
           summary: "High RTP jitter"
           description: "95th percentile RTP jitter for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}ms. Jitter above 50ms causes audio artifacts and jitter buffer overflows."
+
+      - alert: RTPPDVHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtp_pdv_milliseconds_bucket[5m]))) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High RTP Packet Delay Variation"
+          description: "95th percentile raw PDV for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}ms. PDV exposes bursty delay spikes that the smoothed jitter metric averages out — values above 100ms indicate sustained delay variation that can overwhelm jitter buffers."
+
+      # RTCP Endpoint-Reported Alerts (RFC 3550) — what the endpoint experiences.
+      - alert: SIPRTCPRoundTripHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtcp_rtt_milliseconds_bucket[5m]))) > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High RTCP round-trip time"
+          description: "95th percentile RTT (from RTCP RR LSR/DLSR) for carrier {{ $labels.carrier }} is {{ $value | printf \"%.0f\" }}ms. High RTT causes echo and conversational difficulty; check routing and queuing."
+
+      - alert: SIPRTCPReportedJitterHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtcp_jitter_milliseconds_bucket[5m]))) > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High endpoint-reported jitter (RTCP)"
+          description: "95th percentile RTCP-reported jitter for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}ms. The receiver's own observation exceeds 50ms — its jitter buffer is under stress."
+
+      - alert: SIPRTCPReportedLossHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtcp_loss_fraction_percent_bucket[5m]))) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High endpoint-reported loss (RTCP)"
+          description: "95th percentile RTCP-reported loss fraction for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}%. The receiver reports losing >5% of packets — the most direct QoE signal; check the media path."
+
+      - alert: SIPRTCPSilence
+        expr: |
+          (sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m])) > 10)
+          unless
+          (sum by (carrier) (rate(sip_exporter_rtcp_reports_total[5m])) > 0)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No RTCP received while RTP flows (carrier {{ $labels.carrier }})"
+          description: "RTP packets are flowing for carrier {{ $labels.carrier }} but zero RTCP reports have been received for approximately 15 minutes (a 5-minute rate window plus the 10-minute hold). RTCP is mandatory (RFC 3550) — its absence suggests RTCP is filtered, endpoints do not send it, or capture/registration is broken (check sip_exporter_rtcp_orphan_reports_total)."
       ```
 
 ### System Health Alerts

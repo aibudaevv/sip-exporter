@@ -23,6 +23,7 @@ import (
 	"github.com/aibudaevv/sip-exporter/internal/dto"
 	"github.com/aibudaevv/sip-exporter/internal/geoip"
 	"github.com/aibudaevv/sip-exporter/internal/mediatracker"
+	"github.com/aibudaevv/sip-exporter/internal/rtcp"
 	"github.com/aibudaevv/sip-exporter/internal/rtp"
 	"github.com/aibudaevv/sip-exporter/internal/sdp"
 	"github.com/aibudaevv/sip-exporter/internal/service"
@@ -38,6 +39,7 @@ var (
 const (
 	ethPAll                   = 0x0003
 	readBufSize               = 65536
+	tsCmsgLen                 = 16 // sizeof struct timespec (SCM_TIMESTAMPNS payload) on 64-bit linux
 	defaultRegisterTTL        = 60 * time.Second
 	defaultInviteTTL          = 60 * time.Second
 	defaultOptionsTTL         = 60 * time.Second
@@ -63,6 +65,7 @@ const (
 	ipV4HdrLenShift  = 4
 	ipProtoUDP       = 17
 	udpHeaderLen     = 8
+	maxUDPPort       = 65535
 	minSIPDataLen    = 50
 	minRawPacketLen  = ethHeaderLen + ipV4MinHeaderLen + udpHeaderLen
 	minVLANPacketLen = vlanHeaderLen + ipV4MinHeaderLen + udpHeaderLen
@@ -77,6 +80,19 @@ const (
 
 	maxStaticRTPPayloadType  = 34
 	minDynamicRTPPayloadType = 96
+
+	// RTCP packet types (RFC 3550 §6): SR=200, RR=201, SDES=202, BYE=203, APP=204.
+	// RTP and RTCP share V=2; the PT byte range is disjoint (RFC 5761).
+	rtcpPTMin = 200
+	rtcpPTMax = 204
+
+	ntpEpochOffset  = 2208988800 // seconds between the NTP epoch (1900) and the Unix epoch (1970)
+	ntpFractionBits = 32         // width of the fractional half of a 64-bit NTP timestamp
+	ntpHalfBits     = 16         // shift to take the middle 32 bits of a 64-bit NTP timestamp
+	ntp32Scale      = 65536.0    // RTCP LSR/DLSR/RTT are in 16.16-second NTP32 units (2^16 per second)
+	fracLostScale   = 256.0      // RTCP fraction-lost is an 8-bit ratio (N/256)
+	msPerSec        = 1000.0     // milliseconds per second
+	percentScale    = 100.0      // scale factor for fraction-to-percent conversion
 
 	sipPartsCount                = 3
 	minSIPParts                  = 2
@@ -152,6 +168,7 @@ type (
 		data    []byte
 		iface   string
 		pkttype uint8
+		ts      time.Time // kernel SO_TIMESTAMPNS receive time (zero → fallback to time.Now())
 	}
 	rtpEndpointKey struct {
 		IP   uint32
@@ -183,8 +200,10 @@ type (
 		pktSrcIP              string
 		pktIface              string
 		pktType               uint8
+		pktTimestamp          time.Time // packet capture timestamp (SO_TIMESTAMPNS) for PDV
 		registerScanTracker   *registerScanTracker
 		inviteBurstTracker    *inviteBurstTracker
+		fasTracker            *fasTracker
 		registerTracker       map[string]registerEntry
 		registerMutex         sync.RWMutex
 		registerExpiryTracker map[string]registerExpiryEntry
@@ -216,6 +235,7 @@ type (
 		FraudRegScanWindow        time.Duration
 		FraudInviteBurstThreshold int
 		FraudInviteBurstWindow    time.Duration
+		FraudFASThreshold         time.Duration
 	}
 	// InitConfig configures the exporter during [Exporter.Initialize].
 	InitConfig struct {
@@ -259,6 +279,7 @@ func NewExporter(deps Deps) Exporter {
 		mediaTracker:          mediatracker.NewTracker(rtpStreamTTL),
 		registerScanTracker:   newRegisterScanTracker(deps.FraudRegScanThreshold, deps.FraudRegScanWindow),
 		inviteBurstTracker:    newInviteBurstTracker(deps.FraudInviteBurstThreshold, deps.FraudInviteBurstWindow),
+		fasTracker:            newFasTracker(deps.FraudFASThreshold),
 		messages:              make(chan *rawPacket, messagesChanSize),
 		done:                  make(chan struct{}),
 		registerTracker:       make(map[string]registerEntry),
@@ -435,6 +456,10 @@ func createSocketForInterface(ifaceName string, progFD int, ignoreOutgoing bool)
 		return 0, fmt.Errorf("failed to attach BPF program: %w", err)
 	}
 
+	if err = unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_TIMESTAMPNS, 1); err != nil {
+		return 0, fmt.Errorf("failed to set SO_TIMESTAMPNS: %w", err)
+	}
+
 	zap.L().Info("eBPF program attached to AF_PACKET socket",
 		zap.String("interface", ifaceName))
 
@@ -563,9 +588,11 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		e.cleanupOptionsTracker()
 		e.cleanupByeTracker()
 		e.mediaTracker.Cleanup()
+		e.fasTracker.sweep(e.services.metricser)
 		s := e.services.dialoger.Size()
 
 		for _, r := range results {
+			e.fasTracker.clear(r.CallID)
 			e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry, r.Direction)
 			e.services.metricser.UpdateSPD(
 				r.Carrier, r.UAType, r.SourceCountry, r.Direction, r.Duration,
@@ -617,6 +644,7 @@ func (e *exporter) updateTrackerSizes() {
 	e.services.metricser.UpdateTrackerSize("invite", inviteCount)
 	e.services.metricser.UpdateTrackerSize("options", optionsCount)
 	e.services.metricser.UpdateTrackerSize("bye", byeCount)
+	e.services.metricser.UpdateTrackerSize("fas", e.fasTracker.Size())
 	e.services.metricser.UpdateTrackerSize("rtp", e.mediaTracker.StreamCount())
 }
 
@@ -691,6 +719,7 @@ func (e *exporter) readPackets() {
 			}
 			e.pktIface = pkt.iface
 			e.pktType = pkt.pkttype
+			e.pktTimestamp = pkt.ts
 			if errType, err := e.parseRawPacket(pkt.data); err != nil {
 				e.services.metricser.SystemError()
 				e.services.metricser.ParseError(errType)
@@ -732,13 +761,36 @@ func (e *exporter) handleReadError(err error) bool {
 	return false
 }
 
+// parseTimestampNS extracts the kernel SO_TIMESTAMPNS receive timestamp from a
+// Recvmsg out-of-band buffer. Returns the zero time when the cmsg is absent or
+// malformed so the caller falls back to time.Now(). Uses encoding/binary (not
+// unsafe) to stay go-vet -unsafeptr clean.
+func parseTimestampNS(oob []byte) time.Time {
+	if len(oob) == 0 {
+		return time.Time{}
+	}
+	msgs, err := unix.ParseSocketControlMessage(oob)
+	if err != nil {
+		return time.Time{}
+	}
+	for _, m := range msgs {
+		if m.Header.Level == unix.SOL_SOCKET && m.Header.Type == unix.SCM_TIMESTAMPNS && len(m.Data) >= tsCmsgLen {
+			sec := int64(binary.NativeEndian.Uint64(m.Data[0:8]))
+			nsec := int64(binary.NativeEndian.Uint64(m.Data[8:16]))
+			return time.Unix(sec, nsec)
+		}
+	}
+	return time.Time{}
+}
+
 func (e *exporter) readSocket(idx int) {
 	defer e.wg.Done()
 	entry := e.socks[idx]
 	buf := make([]byte, readBufSize)
+	oob := make([]byte, unix.CmsgSpace(tsCmsgLen))
 
 	for {
-		n, from, err := unix.Recvfrom(entry.fd, buf, 0)
+		n, oobn, _, from, err := unix.Recvmsg(entry.fd, buf, oob, 0)
 		if err != nil {
 			if e.handleReadError(err) {
 				return
@@ -758,6 +810,7 @@ func (e *exporter) readSocket(idx int) {
 		pkt := e.acquireBuf()
 		pkt.data = append(pkt.data[:0], buf[:n]...)
 		pkt.iface = entry.iface
+		pkt.ts = parseTimestampNS(oob[:oobn])
 		if sa, ok := from.(*unix.SockaddrLinklayer); ok {
 			pkt.pkttype = sa.Pkttype
 		} else {
@@ -944,6 +997,9 @@ func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 		srcPort := binary.BigEndian.Uint16(packet[udpOffset : udpOffset+2])
 		dstPort := binary.BigEndian.Uint16(packet[udpOffset+2 : udpOffset+4])
 		srcIP, dstIP := extractIPs(ipHeader)
+		if isRTCPPayload(sipData) {
+			return e.handleRTCP(srcIP, srcPort, dstIP, dstPort, sipData)
+		}
 		return e.handleRTP(srcIP, srcPort, dstIP, dstPort, sipData)
 	}
 
@@ -1076,6 +1132,96 @@ func (e *exporter) handleMessage(carrier string, sourceCountry string, rawPacket
 	return nil
 }
 
+// isRTCPPayload reports whether a V=2 UDP payload is an RTCP packet rather than
+// RTP, by inspecting the 8-bit packet-type byte (payload[1]). RTCP PT range is
+// 200-204 (RFC 3550 §6); RTP PTs occupy 0-127 with a separate marker bit. The
+// ranges are disjoint, so a single byte distinguishes them. Must be called only
+// after the caller has confirmed V=2 (sipData[0]&0xC0 == 0x80).
+func isRTCPPayload(payload []byte) bool {
+	return len(payload) > 1 && payload[1] >= rtcpPTMin && payload[1] <= rtcpPTMax
+}
+
+// nowNTP32 returns the middle 32 bits of the NTP timestamp (RFC 3550 §4) for t —
+// the compact 16.16-second format used by RTCP LSR/DLSR fields. Used to compute
+// round-trip time from a Receiver Report: RTT = nowNTP32 − LSR − DLSR.
+func nowNTP32(t time.Time) uint32 {
+	secs := uint64(t.Unix()) + ntpEpochOffset
+	frac := (uint64(t.Nanosecond()) << ntpFractionBits) / uint64(time.Second)
+	ntp64 := secs<<ntpFractionBits | frac
+	return uint32(ntp64 >> ntpHalfBits)
+}
+
+// handleRTCP processes an RTCP compound packet (RFC 3550 §6). SR/RR report blocks
+// carry endpoint-observed quality for an SSRC; each block is correlated to the
+// tracked RTP stream sending with that SSRC (destination-first, NAT-robust) and
+// emits jitter / loss-fraction / cumulative-loss / RTT metrics inheriting the
+// stream's labels. RTT is computed as (now_NTP32 − LSR − DLSR) and skipped when
+// LSR is zero (no prior SR) or the result is negative (clock skew). Blocks whose
+// SSRC is not tracked are dropped — consistent with RTP correlation.
+func (e *exporter) handleRTCP(
+	srcIP net.IP, srcPort uint16,
+	dstIP net.IP, dstPort uint16,
+	payload []byte,
+) (string, error) {
+	reports, err := rtcp.Parse(payload)
+	if err != nil {
+		// A malformed trailing sub-packet still yields the valid SR/RR prefix;
+		// salvage it rather than letting one bad tail blind the whole compound.
+		e.services.metricser.ParseError("rtcp")
+		zap.L().Debug("RTCP parse error", zap.Error(err))
+	}
+	if len(reports) == 0 {
+		return "", nil
+	}
+	nowNTP := nowNTP32(time.Now())
+	sIP, dIP := srcIP.String(), dstIP.String()
+
+	for _, rep := range reports {
+		reportType := "rr"
+		if rep.Type == rtcp.PTSenderReport {
+			reportType = "sr"
+		}
+		for _, blk := range rep.Blocks {
+			ctx, lossDelta, ok := e.mediaTracker.RecordRTCP(blk.SSRC, blk.CumulativeLost, sIP, srcPort, dIP, dstPort)
+			if !ok {
+				e.services.metricser.UpdateRTCPOrphan()
+				zap.L().Debug("RTCP orphan: SSRC not tracked at this endpoint",
+					zap.Uint32("ssrc", blk.SSRC), zap.String("src", sIP), zap.String("dst", dIP))
+				continue
+			}
+			carrier, uaType, codec := ctx.Labels.Carrier, ctx.Labels.UAType, ctx.Codec
+			sourceCountry, direction := ctx.Labels.SourceCountry, ctx.Labels.Direction
+
+			e.services.metricser.UpdateRTCPJitter(carrier, uaType, codec, sourceCountry, direction,
+				rtcpJitterMs(blk.Jitter, ctx.ClockRate))
+			e.services.metricser.UpdateRTCPLossFraction(carrier, uaType, codec, sourceCountry, direction,
+				float64(blk.FractionLost)/fracLostScale*percentScale)
+			if lossDelta > 0 {
+				e.services.metricser.UpdateRTCPCumulativeLoss(carrier, uaType, codec, sourceCountry, direction,
+					lossDelta)
+			}
+			if blk.LSR != 0 {
+				rttUnits := nowNTP - blk.LSR - blk.DLSR
+				if int32(rttUnits) > 0 {
+					e.services.metricser.UpdateRTCPRTT(carrier, uaType, codec, sourceCountry, direction,
+						float64(rttUnits)/ntp32Scale*msPerSec)
+				}
+			}
+			e.services.metricser.UpdateRTCPReport(carrier, uaType, sourceCountry, direction, reportType)
+		}
+	}
+	return "", nil
+}
+
+// rtcpJitterMs converts an RTCP interarrival-jitter field (in RTP timestamp units)
+// to milliseconds using the stream's clock rate, mirroring StreamState.JitterMs.
+func rtcpJitterMs(jitterTicks uint32, clockRate uint32) float64 {
+	if clockRate == 0 {
+		return 0
+	}
+	return float64(jitterTicks) / float64(clockRate) * msPerSec
+}
+
 // handleRTP parses an RTP header and feeds it to the media tracker. Packets with
 // no correlated SIP dialog are dropped silently (per design: RTP without an
 // established dialog is not monitored). RTP stats are accumulated in the tracker
@@ -1096,13 +1242,30 @@ func (e *exporter) handleRTP(
 	if header.PayloadType > maxStaticRTPPayloadType && header.PayloadType < minDynamicRTPPayloadType {
 		return "", nil
 	}
-	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, dstIP.String(), dstPort, header, time.Now())
+	arrival := e.pktTimestamp
+	if arrival.IsZero() {
+		arrival = time.Now() // direct test invocation without a captured socket timestamp
+	}
+	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, dstIP.String(), dstPort, header, arrival)
 	if !ok {
 		// No correlated media endpoint for this flow → drop.
 		return "", nil
 	}
 	if res.Counted {
+		e.fasTracker.clearIfAnswerMedia(
+			res.CallID, fasEndpoint{ip: res.MatchedIP, port: res.MatchedPort}, res.StreamPacketsTotal,
+		)
 		e.services.metricser.UpdateRTPPackets(res.Carrier, res.UAType, res.Codec, res.SourceCountry, res.Direction)
+		if res.StreamPacketsTotal > 1 {
+			e.services.metricser.UpdateRTPPDV(
+				res.Carrier,
+				res.UAType,
+				res.Codec,
+				res.SourceCountry,
+				res.Direction,
+				res.DelayVariationMs,
+			)
+		}
 	}
 	if res.Duplicate {
 		e.services.metricser.UpdateRTPDuplicates(res.Carrier, res.UAType, res.Codec, res.SourceCountry, res.Direction)
@@ -1450,11 +1613,28 @@ func (e *exporter) handleInvite200OK(
 	labels := mediatracker.MediaLabels{
 		Carrier: carrier, UAType: uaType, SourceCountry: sourceCountry, CallID: callID, Direction: direction,
 	}
+	var offerEndpoints []fasEndpoint
+	mediaEndpoints := 0
 	if offerSDP, ok := e.takeInviteSDP(callID); ok {
-		e.registerMediaEndpoints(offerSDP, labels)
+		eps, _ := e.registerMediaEndpoints(offerSDP, labels)
+		mediaEndpoints += len(eps)
+		for _, ep := range eps {
+			offerEndpoints = append(offerEndpoints, fasEndpoint{ip: ep.IP, port: ep.Port})
+		}
 	}
+	answerSRTP := false
 	if isSDPContentType(packet.ContentType) {
-		e.registerMediaEndpoints(packet.Body, labels)
+		eps, srtp := e.registerMediaEndpoints(packet.Body, labels)
+		mediaEndpoints += len(eps)
+		answerSRTP = srtp
+	}
+	if !isReinvite && mediaEndpoints > 0 {
+		e.fasTracker.store(callID, fasEntry{
+			carrier: carrier, uaType: uaType, sourceCountry: sourceCountry, direction: direction,
+		}, offerEndpoints, answerSRTP)
+	}
+	if isReinvite {
+		e.fasTracker.updateOffer(callID, offerEndpoints, answerSRTP)
 	}
 	return nil
 }
@@ -1467,6 +1647,7 @@ func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {
 
 	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
 	result := e.services.dialoger.Delete(dialogID)
+	e.fasTracker.finalizeOnBye(string(packet.CallID), e.services.metricser)
 
 	if delayMs, byeCarrier, byeUAType, byeSC, ok := e.measureByeTime(string(packet.CallID)); ok {
 		e.services.metricser.UpdatePBD(byeCarrier, byeUAType, byeSC, result.Direction, delayMs)
@@ -1874,18 +2055,52 @@ func (e *exporter) cleanupInviteSDP() {
 }
 
 // registerMediaEndpoints parses an SDP body and registers each audio media
-// endpoint in the media tracker under the given dialog labels.
-func (e *exporter) registerMediaEndpoints(body []byte, labels mediatracker.MediaLabels) {
+// endpoint in the media tracker under the given dialog labels. Returns the
+// endpoints and whether any carry SRTP (0 endpoints for held/inactive/IPv6 SDP).
+// When an a=rtcp attribute (RFC 3605) declares a separate RTCP port, that
+// endpoint is also registered in the BPF rtp_endpoints map so non-mux RTCP is
+// captured.
+func (e *exporter) registerMediaEndpoints(
+	body []byte,
+	labels mediatracker.MediaLabels,
+) ([]mediatracker.MediaEndpoint, bool) {
+	var endpoints []mediatracker.MediaEndpoint
+	srtp := false
 	for _, m := range sdp.Parse(body) {
 		ml := labels
 		ml.SDPCodecs = m.Codecs
 		ml.ClockRates = m.ClockRates
 		e.mediaTracker.Register(m.IP, m.Port, ml)
 		e.rtpEndpointInsert(m.IP, m.Port)
+		// Register the RTCP endpoint so non-mux RTCP is captured. Explicit a=rtcp
+		// (RFC 3605) wins; otherwise rtcp-mux (RFC 5761) shares the RTP port
+		// (already registered); otherwise assume legacy RTCP on port+1 (RFC 3550 §9).
+		switch {
+		case m.RTCPPort != 0:
+			// Explicit a=rtcp (RFC 3605): register the RTCP endpoint. The
+			// address defaults to the c= connection IP but may be a different
+			// host when a=rtcp carries a unicast address.
+			rtcpIP := m.IP
+			if m.RTCPAddr != "" {
+				rtcpIP = m.RTCPAddr
+			}
+			e.rtpEndpointInsert(rtcpIP, m.RTCPPort)
+		case m.RTCPMux:
+			// RTCP on the RTP port — nothing extra to register.
+		default:
+			if m.Port < maxUDPPort {
+				e.rtpEndpointInsert(m.IP, m.Port+1)
+			}
+		}
 		zap.L().Debug("RTP media endpoint registered",
 			zap.String("ip", m.IP), zap.Uint16("port", m.Port),
 			zap.String("call_id", labels.CallID))
+		endpoints = append(endpoints, mediatracker.MediaEndpoint{IP: m.IP, Port: m.Port})
+		if m.SRTP {
+			srtp = true
+		}
 	}
+	return endpoints, srtp
 }
 
 // ipPortToKey converts an IP address string and port to a BPF map key.

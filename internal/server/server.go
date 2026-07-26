@@ -50,6 +50,7 @@ type (
 		FraudRegScanWindow        time.Duration
 		FraudInviteBurstThreshold int
 		FraudInviteBurstWindow    time.Duration
+		FraudFASThreshold         time.Duration
 	}
 )
 
@@ -72,6 +73,7 @@ func NewServer(cfg Config) Server {
 			FraudRegScanWindow:        cfg.FraudRegScanWindow,
 			FraudInviteBurstThreshold: cfg.FraudInviteBurstThreshold,
 			FraudInviteBurstWindow:    cfg.FraudInviteBurstWindow,
+			FraudFASThreshold:         cfg.FraudFASThreshold,
 		}),
 		geoipReader: cfg.GeoIPReader,
 	}

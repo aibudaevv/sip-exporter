@@ -126,3 +126,100 @@ func TestParse_MulticastConnAddress(t *testing.T) {
 	require.Len(t, media, 1)
 	require.Equal(t, "224.2.1.1", media[0].IP, "multicast TTL/count suffix must be stripped")
 }
+
+func TestParse_SRTP_Fingerprint(t *testing.T) {
+	body := []byte("v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\nc=IN IP4 10.0.0.1\r\n" +
+		"t=0 0\r\nm=audio 5004 RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\n" +
+		"a=fingerprint:sha-256 AB:CD:01:02\r\na=setup:actpass\r\n")
+	media := Parse(body)
+	require.Len(t, media, 1)
+	require.True(t, media[0].SRTP, "a=fingerprint must set SRTP flag")
+}
+
+func TestParse_SRTP_SDES_Crypto(t *testing.T) {
+	body := []byte("v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\nc=IN IP4 10.0.0.1\r\n" +
+		"t=0 0\r\nm=audio 5004 RTP/SAVP 0\r\na=rtpmap:0 PCMU/8000\r\n" +
+		"a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:d0RmdmcmVCspeEc3QGZiNWpVLF1hJXBSFRPaaHs=\r\n")
+	media := Parse(body)
+	require.Len(t, media, 1)
+	require.True(t, media[0].SRTP, "a=crypto (SDES-SRTP) must set SRTP flag")
+}
+
+func TestParse_NoSRTP_ForPlainRTP(t *testing.T) {
+	body := []byte("v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\nc=IN IP4 10.0.0.1\r\n" +
+		"t=0 0\r\nm=audio 5004 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n")
+	media := Parse(body)
+	require.Len(t, media, 1)
+	require.False(t, media[0].SRTP, "plain RTP must not set SRTP flag")
+}
+
+func TestParse_RTCPAttributePort(t *testing.T) {
+	body := []byte("c=IN IP4 10.0.0.1\r\n" +
+		"m=audio 5004 RTP/AVP 0\r\n" +
+		"a=rtpmap:0 PCMU/8000\r\n" +
+		"a=rtcp:5005\r\n")
+	media := Parse(body)
+	require.Len(t, media, 1)
+	require.Equal(t, uint16(5004), media[0].Port)
+	require.Equal(t, uint16(5005), media[0].RTCPPort, "a=rtcp port must be parsed")
+}
+
+func TestParse_RTCPAttribute(t *testing.T) {
+	tests := []struct {
+		name     string
+		rtcp     string // full a=rtcp line; empty means absent
+		want     uint16
+		wantAddr string // unicast RTCP address (RFC 3605); "" when absent/ignored
+	}{
+		{"port only", "a=rtcp:5005", 5005, ""},
+		{"port with IPv4 address (RFC 3605)", "a=rtcp:5006 IN IP4 10.0.0.99", 5006, "10.0.0.99"},
+		{"non-numeric port ignored", "a=rtcp:abc", 0, ""},
+		{"zero port ignored", "a=rtcp:0", 0, ""},
+		{"out-of-range port ignored", "a=rtcp:70000", 0, ""},
+		{"attribute absent (rtcp-mux)", "", 0, ""},
+		{"IPv6 address ignored (IPv4-only capture)", "a=rtcp:5007 IN IP6 ::1", 5007, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte("c=IN IP4 10.0.0.1\r\n" +
+				"m=audio 5004 RTP/AVP 0\r\n" +
+				"a=rtpmap:0 PCMU/8000\r\n")
+			if tt.rtcp != "" {
+				body = append(body, []byte(tt.rtcp+"\r\n")...)
+			}
+			media := Parse(body)
+			require.Len(t, media, 1)
+			require.Equal(t, tt.want, media[0].RTCPPort)
+			require.Equal(t, tt.wantAddr, media[0].RTCPAddr, "unicast RTCP address (RFC 3605)")
+		})
+	}
+}
+
+// TestParse_RTCPMux verifies a=rtcp-mux (RFC 5761) detection, which determines
+// whether the exporter registers the adjacent port+1 for legacy RTCP.
+func TestParse_RTCPMux(t *testing.T) {
+	tests := []struct {
+		name    string
+		attr    string // a=... appended after rtpmap; empty means absent
+		wantMux bool
+		wantPt  uint16
+	}{
+		{"rtcp-mux present", "a=rtcp-mux", true, 0},
+		{"a=rtcp overrides (no mux)", "a=rtcp:5005", false, 5005},
+		{"neither (legacy)", "", false, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte("c=IN IP4 10.0.0.1\r\n" +
+				"m=audio 5004 RTP/AVP 0\r\n" +
+				"a=rtpmap:0 PCMU/8000\r\n")
+			if tt.attr != "" {
+				body = append(body, []byte(tt.attr+"\r\n")...)
+			}
+			media := Parse(body)
+			require.Len(t, media, 1)
+			require.Equal(t, tt.wantMux, media[0].RTCPMux)
+			require.Equal(t, tt.wantPt, media[0].RTCPPort)
+		})
+	}
+}
