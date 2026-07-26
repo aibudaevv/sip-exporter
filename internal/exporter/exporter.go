@@ -1199,7 +1199,7 @@ func (e *exporter) handleRTCP(
 				e.services.metricser.UpdateRTCPCumulativeLoss(carrier, uaType, codec, sourceCountry, direction,
 					lossDelta)
 			}
-			if blk.LSR != 0 {
+			if blk.LSR != 0 && blk.DLSR != 0 {
 				rttUnits := nowNTP - blk.LSR - blk.DLSR
 				if int32(rttUnits) > 0 {
 					e.services.metricser.UpdateRTCPRTT(carrier, uaType, codec, sourceCountry, direction,

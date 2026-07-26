@@ -258,6 +258,26 @@ func TestHandleRTCP_RTTSkippedWhenDLSRExceedsElapsed(t *testing.T) {
 	require.Equal(t, 1, mm.rtcpReportCalls, "report is still counted")
 }
 
+// TestHandleRTCP_RTTSkippedWhenDLSRZero proves that RTT is not computed when
+// DLSR=0 despite a valid non-zero LSR. A zero DLSR with non-zero LSR is a
+// malformed report (the receiver remembered the timestamp but not its own
+// processing delay), and the formula now−LSR−0 would yield ~reporting interval
+// (5 s) instead of a real sub-second RTT.
+func TestHandleRTCP_RTTSkippedWhenDLSRZero(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newRTCPTestExporter(mm)
+	const ssrc uint32 = 0xAAAA0010
+	registerRTPStream(t, e, ssrc)
+
+	lsr := nowNTP32(time.Now().Add(-5 * time.Second))
+	rr := buildRR(buildRTCPBlock(ssrc, 0, 0, 0, 0, lsr, 0)) // DLSR=0
+	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr)
+	require.NoError(t, err)
+
+	require.Zero(t, mm.rtcpRTTCalls, "RTT must be skipped when DLSR=0 (malformed)")
+	require.Equal(t, 1, mm.rtcpReportCalls, "report is still counted")
+}
+
 // TestHandleRTCP_PartialCompoundProcessesValidPrefix proves that a single
 // malformed trailing sub-packet does not blind the whole compound: rtcp.Parse
 // returns the valid SR/RR prefix together with the error, and the handler
