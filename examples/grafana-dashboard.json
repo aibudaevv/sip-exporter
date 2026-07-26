@@ -4884,8 +4884,8 @@
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
-              "expr": "sum by (carrier, type) (rate(sip_exporter_rtcp_reports_total{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m]))",
-              "legendFormat": "{{carrier}} / {{type}}",
+              "expr": "sum by (carrier, ua_type, direction, type) (rate(sip_exporter_rtcp_reports_total{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m]))",
+              "legendFormat": "{{carrier}} / {{ua_type}} / {{direction}} / {{type}}",
               "refId": "A"
             }
           ],
