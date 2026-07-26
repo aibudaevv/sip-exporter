@@ -62,6 +62,51 @@ func TestTracker_UnregisterReturnsDeletedEndpoints(t *testing.T) {
 	require.True(t, ips["10.0.0.1"] && ips["10.0.0.2"], "must return call-1 endpoints only")
 }
 
+func TestTracker_UnregisterReturnsRTCPEndpoints(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.RegisterRTCP("10.0.0.1", 5005, "call-1")
+	tr.Register("10.0.0.3", 5008, sampleLabels("call-2"))
+	tr.RegisterRTCP("10.0.0.3", 5009, "call-2")
+
+	_, deleted := tr.Unregister("call-1")
+	require.Len(t, deleted, 2, "must return RTP and RTCP endpoints for call-1")
+	ports := map[uint16]bool{}
+	for _, ep := range deleted {
+		ports[ep.Port] = true
+	}
+	require.True(t, ports[5004], "RTP port must be in deleted")
+	require.True(t, ports[5005], "RTCP port must be in deleted")
+
+	_, deleted2 := tr.Unregister("call-2")
+	require.Len(t, deleted2, 2, "call-2 must also return both endpoints")
+}
+
+func TestTracker_UnregisterNoRTCP_OnlyRTPReturned(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+
+	_, deleted := tr.Unregister("call-1")
+	require.Len(t, deleted, 1, "rtcp-mux or no RTCP: only RTP returned")
+	require.Equal(t, uint16(5004), deleted[0].Port)
+}
+
+func TestTracker_UnregisterRTCPDoesNotAffectOneWay(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5006, sampleLabels("call-1"))
+	tr.RegisterRTCP("10.0.0.1", 5005, "call-1")
+	tr.RegisterRTCP("10.0.0.2", 5007, "call-1")
+	t0 := time.Unix(1000, 0)
+	_, ok := tr.Observe("10.0.0.99", 9999, "10.0.0.1", 5004, newHeader(1, 160), t0)
+	require.True(t, ok)
+
+	r, _ := tr.Unregister("call-1")
+	require.True(t, r.MediaExpected)
+	require.True(t, r.RTPObserved)
+	require.True(t, r.OneWay, "RTCP registration must not inflate mediaCount")
+}
+
 func TestTracker_ObserveNoCorrelation_Drop(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	t0 := time.Unix(1000, 0)

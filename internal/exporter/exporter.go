@@ -2074,6 +2074,7 @@ func (e *exporter) registerMediaEndpoints(
 		e.rtpEndpointInsert(m.IP, m.Port)
 		// Register a separate RTCP endpoint for non-mux capture.
 		if rtcpIP, rtcpPort, ok := resolveRTCEndpoint(m); ok {
+			e.mediaTracker.RegisterRTCP(rtcpIP, rtcpPort, labels.CallID)
 			e.rtpEndpointInsert(rtcpIP, rtcpPort)
 		}
 		zap.L().Debug("RTP media endpoint registered",

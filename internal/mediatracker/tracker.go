@@ -102,6 +102,7 @@ type (
 		mu        sync.Mutex
 		streams   map[streamKey]*streamEntry
 		media     map[endpointKey]MediaLabels
+		rtcpMedia map[endpointKey]string // RTCP endpoints (IP:port → CallID) for BPF cleanup only
 		callRTP   map[string]map[endpointKey]struct{} // per-CallID endpoints that ever had RTP (TTL-independent)
 		ssrcIndex map[uint32][]streamKey              // SSRC → stream keys (multi-valued: an SSRC may be reused across endpoints)
 		ttl       time.Duration
@@ -131,6 +132,7 @@ func NewTracker(ttl time.Duration) *Tracker {
 	return &Tracker{
 		streams:   make(map[streamKey]*streamEntry),
 		media:     make(map[endpointKey]MediaLabels),
+		rtcpMedia: make(map[endpointKey]string),
 		callRTP:   make(map[string]map[endpointKey]struct{}),
 		ssrcIndex: make(map[uint32][]streamKey),
 		ttl:       ttl,
@@ -160,6 +162,15 @@ func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) {
 	t.media[endpointKey{ip: ip, port: port}] = labels
 }
 
+// RegisterRTCP records a separate RTCP endpoint (IP:port) for BPF-map cleanup
+// at teardown. Unlike Register, this does NOT participate in label resolution —
+// RTCP packets are dispatched via RecordRTCP (SSRC-based), not lookupLabels.
+func (t *Tracker) RegisterRTCP(ip string, port uint16, callID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.rtcpMedia[endpointKey{ip: ip, port: port}] = callID
+}
+
 // Unregister removes all media endpoints and RTP streams belonging to a SIP
 // dialog (called on BYE 200 OK or Session-Expires cleanup) and returns a
 // summary of the RTP activity observed for that dialog, plus the list of
@@ -175,6 +186,13 @@ func (t *Tracker) Unregister(callID string) (RTPDialogResult, []MediaEndpoint) {
 			mediaCount++
 			deleted = append(deleted, MediaEndpoint{IP: k.ip, Port: k.port})
 			delete(t.media, k)
+		}
+	}
+
+	for k, cid := range t.rtcpMedia {
+		if cid == callID {
+			deleted = append(deleted, MediaEndpoint{IP: k.ip, Port: k.port})
+			delete(t.rtcpMedia, k)
 		}
 	}
 
