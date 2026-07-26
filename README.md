@@ -22,6 +22,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - [Architecture](#architecture)
 - [Performance](#performance)
 - [Install](#install)
+- [Deployment Topology](#deployment-topology)
 - [Metrics](#metrics)
 - [Fraud Detection](#fraud-detection)
 - [Security](docs/SECURITY.md)
@@ -133,6 +134,16 @@ Environment variables:
 The container must run with `--privileged` and `--network host` (eBPF requires `CAP_BPF` and access to the network interface). See [Security](docs/SECURITY.md) for details on why this is safe.
 
 > ⚠️ **Multi-interface caveat:** do not specify interfaces that see the same traffic (bond parent + child, bridge + member, VLAN parent + subinterface, duplicate SPAN ports). Doing so will double-count metrics. When in doubt, list only physical NICs.
+
+## Deployment Topology
+
+Install sip-exporter on the host where **both SIP signaling and RTP media pass through**. It captures packets from the network interface it is attached to, and the `direction` label relies on the kernel seeing packets as addressed to that host — so the host must own those IPs, not receive them via a mirror.
+
+Coverage depends on what the host actually sees:
+
+- **SIP only** (signaling passes through, media does not) → SIP metrics only; RTP metrics stay empty.
+- **RTP only** (media passes through, signaling does not) → the exporter cannot correlate streams to dialogs, because it learns RTP endpoints from the SDP carried inside SIP messages. Place it where signaling is also visible.
+- **SIP + RTP** → full metrics.
 
 ## Metrics
 
