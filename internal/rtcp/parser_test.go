@@ -266,6 +266,8 @@ func FuzzParse(f *testing.F) {
 		// is a signed 24-bit value with negatives floored to 0, so it must lie
 		// in [0, 0x7FFFFF] regardless of input bytes.
 		for _, rep := range r1 {
+			require.LessOrEqual(t, len(rep.Blocks), 31,
+				"block count must not exceed 5-bit RC max")
 			for _, blk := range rep.Blocks {
 				require.LessOrEqual(t, blk.CumulativeLost, uint32(0x7FFFFF),
 					"cumulative-lost must not exceed 0x7FFFFF (negative 24-bit floored to 0)")
