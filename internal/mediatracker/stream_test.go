@@ -282,3 +282,52 @@ func TestStreamState_PDV_ResetOnRestart(t *testing.T) {
 	require.InDelta(t, 0.0, s.lastPacketDelayVariationMs, 0.0001, "PDV reset on stream restart")
 	require.Equal(t, uint64(1), s.packetsTotal, "restart resets packetsTotal to 1 (new flow)")
 }
+
+func TestStreamState_NonAudio_DoesNotContaminatePDV(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
+	s.Observe(newHeader(1, 160), t0)
+	s.Observe(newHeader(2, 320), t0.Add(20*time.Millisecond))
+	s.Observe(newHeader(3, 480), t0.Add(45*time.Millisecond))
+	require.InDelta(t, 5.0, s.lastPacketDelayVariationMs, 0.0001, "audio PDV baseline")
+
+	s.ObserveNonAudio(newHeader(4, 640), t0.Add(65*time.Millisecond))
+	s.ObserveNonAudio(newHeader(5, 640), t0.Add(85*time.Millisecond))
+	s.ObserveNonAudio(newHeader(6, 640), t0.Add(105*time.Millisecond))
+
+	require.InDelta(t, 5.0, s.lastPacketDelayVariationMs, 0.0001,
+		"DTMF packets must not affect PDV")
+	require.InDelta(t, 0.3125, s.JitterMs(), 0.0001,
+		"DTMF packets must not affect jitter EWMA")
+
+	s.Observe(newHeader(7, 800), t0.Add(125*time.Millisecond))
+	require.InDelta(t, 40.0, s.lastPacketDelayVariationMs, 0.001,
+		"audio after DTMF must compute PDV from last audio baseline, not DTMF")
+
+	require.Equal(t, uint64(7), s.packetsTotal, "DTMF packets must be counted")
+}
+
+func TestStreamState_ReorderDoesNotContaminateNextForwardPDV(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
+	s.Observe(newHeader(1, 160), t0)
+	s.Observe(newHeader(3, 480), t0.Add(40*time.Millisecond))
+	require.InDelta(t, 0.0, s.lastPacketDelayVariationMs, 0.0001, "perfect forward spacing")
+
+	s.Observe(newHeader(2, 320), t0.Add(50*time.Millisecond))
+
+	s.Observe(newHeader(4, 640), t0.Add(60*time.Millisecond))
+	require.InDelta(t, 0.0, s.lastPacketDelayVariationMs, 0.001,
+		"reorder must not overwrite baseline: next forward PDV computed vs last forward packet")
+}
+
+func TestStreamState_DuplicateDoesNotContaminateNextForwardPDV(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
+	s.Observe(newHeader(1, 160), t0)
+	s.Observe(newHeader(1, 160), t0.Add(5*time.Millisecond))
+
+	s.Observe(newHeader(2, 320), t0.Add(20*time.Millisecond))
+	require.InDelta(t, 0.0, s.lastPacketDelayVariationMs, 0.001,
+		"duplicate must not overwrite baseline: next forward PDV computed vs original packet")
+}

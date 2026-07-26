@@ -2784,3 +2784,16 @@ func TestMetrics_BillableSeconds(t *testing.T) {
 		})
 	}
 }
+
+// TestRTP_KernelTimestampMissing verifies the counter increments when the
+// SO_TIMESTAMPNS cmsg is absent and PDV falls back to time.Now() — a sign the
+// kernel did not supply a receive timestamp and PDV readings may be unreliable.
+func TestRTP_KernelTimestampMissing(t *testing.T) {
+	m := NewTestMetricser().(*metrics)
+	m.RTPKernelTimestampMissing()
+	m.RTPKernelTimestampMissing()
+
+	var dm dto.Metric
+	require.NoError(t, m.rtpKernelTimestampMissing.Write(&dm))
+	require.InDelta(t, 2.0, dm.GetCounter().GetValue(), 0.01)
+}

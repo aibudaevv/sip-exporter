@@ -172,7 +172,7 @@ func (t *inviteBurstTracker) cleanup() {
 type fasEntry struct {
 	createdAt     time.Time
 	deadline      time.Time // createdAt + threshold (+ fasSRTPGrace when SRTP); sweep fires after this
-	byeFloor      time.Time // earliest teardown time at which finalizeOnBye may report FAS (= deadline for SRTP, else createdAt + fasByeFloor)
+	byeFloor      time.Time // earliest teardown time at which finalizeOnBye may report FAS (createdAt + fasByeFloor, independent of SRTP)
 	carrier       string
 	uaType        string
 	sourceCountry string
@@ -184,6 +184,14 @@ type fasEntry struct {
 type fasEndpoint struct {
 	ip   string
 	port uint16
+}
+
+func toOfferSet(eps []fasEndpoint) map[fasEndpoint]struct{} {
+	set := make(map[fasEndpoint]struct{}, len(eps))
+	for _, ep := range eps {
+		set[ep] = struct{}{}
+	}
+	return set
 }
 
 type fasTracker struct {
@@ -229,30 +237,25 @@ func (t *fasTracker) store(callID string, e fasEntry, offerEndpoints []fasEndpoi
 	now := t.now()
 	e.createdAt = now
 	deadline := now.Add(t.threshold)
-	// The BYE path may report FAS once the call outlived its setup tolerance. For
-	// plain RTP that's fasByeFloor; for DTLS-SRTP it's the full grace window
-	// (deadline) — a WebRTC call that fails ICE and hangs up is not FAS.
 	byeFloor := now.Add(fasByeFloor)
 	if srtp {
 		deadline = deadline.Add(fasSRTPGrace)
-		byeFloor = deadline
 	}
 	e.deadline = deadline
 	e.byeFloor = byeFloor
 	t.entries[callID] = e
 	if len(offerEndpoints) > 0 {
-		set := make(map[fasEndpoint]struct{}, len(offerEndpoints))
-		for _, ep := range offerEndpoints {
-			set[ep] = struct{}{}
-		}
-		t.offer[callID] = set
+		t.offer[callID] = toOfferSet(offerEndpoints)
 	}
 }
 
-// updateOffer replaces the offer endpoints for an existing FAS entry and extends
-// the deadline when the re-INVITE answer indicates SRTP. No-op when the entry was
-// already cleared (media established or sweep fired). The timer is NOT reset —
-// the callee had time to send media before the re-INVITE.
+// updateOffer replaces the offer endpoints for an existing FAS entry when new
+// endpoints are provided, and extends the deadline when the re-INVITE answer
+// indicates SRTP. When offerEndpoints is empty (retransmitted 200 OK whose
+// INVITE SDP was already consumed, or a held-SDP re-INVITE) the existing offer
+// set is preserved so side-gating is not silently lost. No-op when the entry
+// was already cleared. The timer is NOT reset — the callee had time to send
+// media before the re-INVITE.
 func (t *fasTracker) updateOffer(callID string, offerEndpoints []fasEndpoint, srtp bool) {
 	if t == nil || callID == "" {
 		return
@@ -264,19 +267,12 @@ func (t *fasTracker) updateOffer(callID string, offerEndpoints []fasEndpoint, sr
 		return
 	}
 	if len(offerEndpoints) > 0 {
-		set := make(map[fasEndpoint]struct{}, len(offerEndpoints))
-		for _, ep := range offerEndpoints {
-			set[ep] = struct{}{}
-		}
-		t.offer[callID] = set
-	} else {
-		delete(t.offer, callID)
+		t.offer[callID] = toOfferSet(offerEndpoints)
 	}
 	if srtp {
 		graceDeadline := e.createdAt.Add(t.threshold + fasSRTPGrace)
 		if e.deadline.Before(graceDeadline) {
 			e.deadline = graceDeadline
-			e.byeFloor = graceDeadline
 		}
 	}
 	t.entries[callID] = e
@@ -306,8 +302,11 @@ func (t *fasTracker) Size() int {
 // arrives at a registered offer-side endpoint (callee→caller), so a stream keyed
 // by an offer endpoint proves the answer side sent media. When no offer endpoints
 // are tracked (INVITE offer SDP not cached), the side is unknown and any media
-// clears the entry (legacy fallback, avoids new false FAS alerts).
-func (t *fasTracker) clearIfAnswerMedia(callID string, ep fasEndpoint, packetsTotal uint64) {
+// clears the entry (legacy fallback, avoids new false FAS alerts). A src-fallback
+// match (late offer, answer endpoint not registered) on an offer endpoint is the
+// caller's own media and does not clear — matchedBy distinguishes this from a
+// genuine dst match.
+func (t *fasTracker) clearIfAnswerMedia(callID string, ep fasEndpoint, packetsTotal uint64, matchedBy string) {
 	if t == nil || callID == "" || packetsTotal < fasMediaPacketsThreshold {
 		return
 	}
@@ -322,7 +321,7 @@ func (t *fasTracker) clearIfAnswerMedia(callID string, ep fasEndpoint, packetsTo
 		delete(t.offer, callID)
 		return
 	}
-	if _, isOffer := offer[ep]; isOffer {
+	if _, isOffer := offer[ep]; isOffer && matchedBy != "src" {
 		delete(t.entries, callID)
 		delete(t.offer, callID)
 	}
@@ -331,13 +330,32 @@ func (t *fasTracker) clearIfAnswerMedia(callID string, ep fasEndpoint, packetsTo
 // finalizeOnBye reports FAS at teardown when the entry is still pending (the
 // answer side never sent media) and the call lasted beyond its byeFloor, then
 // clears. A no-op when media already cleared the entry earlier (normal case).
-// byeFloor equals fasByeFloor for plain RTP but the full deadline (threshold +
-// fasSRTPGrace) for DTLS-SRTP, so a WebRTC call failing ICE and hanging up does
-// not false-positive during the setup window.
+// byeFloor is fasByeFloor for all calls; the SRTP grace extends only the sweep
+// deadline, not the BYE path — a fake a=fingerprint must not let a fraudster
+// evade detection by hanging up within the grace window.
+func (t *fasTracker) finalizeOnBye(callID string, metricser service.Metricser) {
+	if t == nil || callID == "" {
+		return
+	}
+	t.mu.Lock()
+	e, ok := t.entries[callID]
+	now := t.now()
+	if ok {
+		delete(t.entries, callID)
+		delete(t.offer, callID)
+	}
+	shouldReport := ok && now.After(e.byeFloor)
+	t.mu.Unlock()
+	if shouldReport {
+		t.reportFAS(callID, e, "bye", now, metricser)
+	}
+}
+
 // reportFAS increments the FAS counter and logs a structured warning. path is
-// "sweep" (periodic threshold timeout) or "bye" (teardown with no media). Must
-// be called under t.mu.
-func (t *fasTracker) reportFAS(callID string, e fasEntry, path string, metricser service.Metricser) {
+// "sweep" (periodic threshold timeout) or "bye" (teardown with no media). now
+// is captured under t.mu by the caller and passed here so this method runs
+// entirely WITHOUT the lock (metricser/zap must not stall packet processing).
+func (t *fasTracker) reportFAS(callID string, e fasEntry, path string, now time.Time, metricser service.Metricser) {
 	metricser.FasCall(e.carrier, e.uaType, e.sourceCountry, e.direction)
 	zap.L().Warn("FAS suspected: answered call with no answer-side RTP",
 		zap.String("path", path),
@@ -346,25 +364,8 @@ func (t *fasTracker) reportFAS(callID string, e fasEntry, path string, metricser
 		zap.String("ua_type", e.uaType),
 		zap.String("source_country", e.sourceCountry),
 		zap.String("direction", e.direction),
-		zap.Duration("duration", t.now().Sub(e.createdAt)),
+		zap.Duration("duration", now.Sub(e.createdAt)),
 	)
-}
-
-func (t *fasTracker) finalizeOnBye(callID string, metricser service.Metricser) {
-	if t == nil || callID == "" {
-		return
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	e, ok := t.entries[callID]
-	if !ok {
-		return
-	}
-	if t.now().After(e.byeFloor) {
-		t.reportFAS(callID, e, "bye", metricser)
-	}
-	delete(t.entries, callID)
-	delete(t.offer, callID)
 }
 
 func (t *fasTracker) sweep(metricser service.Metricser) {
@@ -372,13 +373,21 @@ func (t *fasTracker) sweep(metricser service.Metricser) {
 		return
 	}
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	now := t.now()
+	type firedEntry struct {
+		callID string
+		e      fasEntry
+	}
+	var fired []firedEntry
 	for callID, e := range t.entries {
 		if now.After(e.deadline) {
-			t.reportFAS(callID, e, "sweep", metricser)
+			fired = append(fired, firedEntry{callID: callID, e: e})
 			delete(t.entries, callID)
 			delete(t.offer, callID)
 		}
+	}
+	t.mu.Unlock()
+	for _, f := range fired {
+		t.reportFAS(f.callID, f.e, "sweep", now, metricser)
 	}
 }

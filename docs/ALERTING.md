@@ -207,13 +207,16 @@ These alerts detect suspicious SIP patterns: account takeover, registration enum
           description: "Single IP is sending an unusually high rate of INVITEs on {{ $labels.carrier }} from {{ $labels.source_country }}. Possible toll fraud, DDoS, or traffic pump."
 
       - alert: SIPFalseAnswerSupervision
-        expr: rate(sip_exporter_fas_calls_total[5m]) > 0
-        for: 1m
+        expr: |
+          (rate(sip_exporter_fas_calls_total[5m]) > 0)
+          unless on()
+          (rate(sip_exporter_rtp_dropped_total[5m]) > 100)
+        for: 2m
         labels:
-          severity: critical
+          severity: warning
         annotations:
           summary: "False Answer Supervision suspected"
-          description: "Answered calls on {{ $labels.carrier }} (ua_type={{ $labels.ua_type }}, {{ $labels.source_country }}, {{ $labels.direction }}) carried no RTP within the FAS threshold. Possible billing fraud — the answering side starts billing without delivering media."
+          description: "Answered calls on {{ $labels.carrier }} (ua_type={{ $labels.ua_type }}, {{ $labels.source_country }}, {{ $labels.direction }}) carried no answer-side RTP within the threshold (sweep path) or fasByeFloor 3 s (BYE path). Possible billing fraud. Suppressed when RTP drops exceed 100/s (capture degradation). Check sip_exporter_rtp_dropped_total and one-way-media endpoints (voicemail/IVR) before acting."
 
       - alert: SIPSessionCapacityExhaustion
         expr: sip_exporter_sessions_utilization > 90

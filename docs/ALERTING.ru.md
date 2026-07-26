@@ -207,13 +207,16 @@ groups:
           description: "Один IP отправляет аномально высокий rate INVITE на {{ $labels.carrier }} из {{ $labels.source_country }}. Возможный toll fraud, DDoS или traffic pump."
 
       - alert: SIPFalseAnswerSupervision
-        expr: rate(sip_exporter_fas_calls_total[5m]) > 0
-        for: 1m
+        expr: |
+          (rate(sip_exporter_fas_calls_total[5m]) > 0)
+          unless on()
+          (rate(sip_exporter_rtp_dropped_total[5m]) > 100)
+        for: 2m
         labels:
-          severity: critical
+          severity: warning
         annotations:
           summary: "Подозрение на False Answer Supervision"
-          description: "Ответившие вызовы на {{ $labels.carrier }} (ua_type={{ $labels.ua_type }}, {{ $labels.source_country }}, {{ $labels.direction }}) не понесли RTP в течение FAS-threshold. Возможный биллинг-фрод — отвечающая сторона стартует биллинг без доставки медиа."
+          description: "Ответившие вызовы на {{ $labels.carrier }} (ua_type={{ $labels.ua_type }}, {{ $labels.source_country }}, {{ $labels.direction }}) не понесли answer-side RTP в течение threshold (sweep-path) или fasByeFloor 3 с (BYE-path). Возможный биллинг-фрод. Подавляется при RTP-дропах >100/с (деградация захвата). Проверьте sip_exporter_rtp_dropped_total и one-way-media эндпоинты (voicemail/IVR) перед реакцией."
 
       - alert: SIPSessionCapacityExhaustion
         expr: sip_exporter_sessions_utilization > 90

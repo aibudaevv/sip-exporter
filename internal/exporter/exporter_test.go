@@ -27,71 +27,72 @@ import (
 
 // Mock services for testing.
 type mockMetricser struct {
-	requestCalled             []byte
-	requestCount              int
-	reinviteCalled            bool
-	sipRetransmissionCalls    int
-	sipRetransmissionMethod   string
-	responseCalled            []byte
-	responseIsInvite          bool
-	sessionUpdated            int
-	systemErrorCalled         bool
-	packetsIncremented        int
-	invite200OKCalled         bool
-	sessionCompletedFlag      bool
-	rrdUpdated                bool
-	rrdDelay                  float64
-	responseWithMetricsCalled bool
-	spdUpdated                bool
-	spdDuration               time.Duration
-	ttrUpdated                bool
-	ttrDelay                  float64
-	pddUpdated                bool
-	pddDelay                  float64
-	ordUpdated                bool
-	ordDelay                  float64
-	lrdUpdated                bool
-	lrdDelay                  float64
-	pbdUpdated                bool
-	pbdDelay                  float64
-	shortCallsUpdated         bool
-	shortCallsDuration        time.Duration
-	billableCalled            bool
-	billableCarrier           string
-	billableDestCountry       string
-	billableDuration          time.Duration
-	registerSuccessCalls      int
-	registerFailureCodes      []string
-	registerCountryChange     []string
-	registerScanCalls         int
-	inviteBurstCalls          int
-	fasCalls                  int
-	fasCallsLabels            []carrierCall
-	vqReportCalled            bool
-	vqCarrier                 string
-	vqUAType                  string
-	vqReport                  *vq.SessionReport
-	rtpPacketsCalls           int
-	rtpLossCalls              int
-	rtpLossValue              uint64
-	rtpDuplicateCalls         int
-	rtpOutOfOrderCalls        int
-	rtpDroppedCount           int
-	parseErrorCalls           int
-	parseErrorType            string
-	rtcpJitterCalls           int
-	rtcpJitterVal             float64
-	rtcpLossFracCalls         int
-	rtcpLossFracVal           float64
-	rtcpCumLossCalls          int
-	rtcpCumLossVal            uint64
-	rtcpRTTCalls              int
-	rtcpRTTVal                float64
-	rtcpReportCalls           int
-	rtcpReportType            string
-	rtcpReportCarrier         string
-	rtcpReportDirection       string
-	rtcpOrphanCalls           int
+	requestCalled                  []byte
+	requestCount                   int
+	reinviteCalled                 bool
+	sipRetransmissionCalls         int
+	sipRetransmissionMethod        string
+	responseCalled                 []byte
+	responseIsInvite               bool
+	sessionUpdated                 int
+	systemErrorCalled              bool
+	packetsIncremented             int
+	invite200OKCalled              bool
+	sessionCompletedFlag           bool
+	rrdUpdated                     bool
+	rrdDelay                       float64
+	responseWithMetricsCalled      bool
+	spdUpdated                     bool
+	spdDuration                    time.Duration
+	ttrUpdated                     bool
+	ttrDelay                       float64
+	pddUpdated                     bool
+	pddDelay                       float64
+	ordUpdated                     bool
+	ordDelay                       float64
+	lrdUpdated                     bool
+	lrdDelay                       float64
+	pbdUpdated                     bool
+	pbdDelay                       float64
+	shortCallsUpdated              bool
+	shortCallsDuration             time.Duration
+	billableCalled                 bool
+	billableCarrier                string
+	billableDestCountry            string
+	billableDuration               time.Duration
+	registerSuccessCalls           int
+	registerFailureCodes           []string
+	registerCountryChange          []string
+	registerScanCalls              int
+	inviteBurstCalls               int
+	fasCalls                       int
+	fasCallsLabels                 []carrierCall
+	vqReportCalled                 bool
+	vqCarrier                      string
+	vqUAType                       string
+	vqReport                       *vq.SessionReport
+	rtpPacketsCalls                int
+	rtpLossCalls                   int
+	rtpLossValue                   uint64
+	rtpDuplicateCalls              int
+	rtpOutOfOrderCalls             int
+	rtpDroppedCount                int
+	parseErrorCalls                int
+	parseErrorType                 string
+	rtcpJitterCalls                int
+	rtcpJitterVal                  float64
+	rtcpLossFracCalls              int
+	rtcpLossFracVal                float64
+	rtcpCumLossCalls               int
+	rtcpCumLossVal                 uint64
+	rtcpRTTCalls                   int
+	rtcpRTTVal                     float64
+	rtcpReportCalls                int
+	rtcpReportType                 string
+	rtcpReportCarrier              string
+	rtcpReportDirection            string
+	rtcpOrphanCalls                int
+	rtpKernelTimestampMissingCalls int
 }
 
 func (m *mockMetricser) UpdateSessions(_ []service.LabeledCount) {}
@@ -289,6 +290,9 @@ func (m *mockMetricser) UpdateRTCPReport(carrier, _, _, direction, reportType st
 }
 func (m *mockMetricser) UpdateRTCPOrphan() {
 	m.rtcpOrphanCalls++
+}
+func (m *mockMetricser) RTPKernelTimestampMissing() {
+	m.rtpKernelTimestampMissingCalls++
 }
 
 type dialogCreateArgs struct {
@@ -2308,6 +2312,85 @@ func TestFAS_CallerRTPDoesNotClear(t *testing.T) {
 		"answer-side RTP (arriving at offer endpoint) must clear FAS")
 }
 
+// TestFAS_Retransmit200OK_PreservesOfferSet verifies that a retransmitted 200 OK
+// (Timer G, UDP) does not destroy the offer-side gating established by the first
+// 200 OK. On retransmission the cached INVITE SDP is already consumed, so
+// updateOffer receives empty endpoints — it must NOT delete the existing offer
+// set. Otherwise the caller's own RTP clears FAS via the legacy fallback.
+func TestFAS_Retransmit200OK_PreservesOfferSet(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Hour)
+
+	e.storeInviteSDP("call-1", []byte(fasSdpOffer))
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
+	)
+	require.Len(t, e.fasTracker.offer["call-1"], 1, "first 200 OK must populate offer endpoints")
+
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), true),
+	)
+	require.Contains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: "10.0.0.2", port: 5004},
+		"retransmitted 200 OK must not delete the offer set")
+
+	for _, seq := range []uint16{1, 2, 3} {
+		_, err := e.handleRTP(net.ParseIP("10.0.0.2"), 5004, net.ParseIP("10.0.0.1"), 5004, fasRTPPacket(seq))
+		require.NoError(t, err)
+	}
+	require.Len(t, e.fasTracker.entries, 1,
+		"caller RTP must not clear FAS after retransmitted 200 OK — side-gating preserved")
+}
+
+// TestFAS_LateOffer_CallerRTPDoesNotClear closes the src-fallback hole: when
+// the INVITE offer was cached (offer map populated) but the 200 OK carried no
+// SDP (late offer — ISUP gateways), the answer endpoint is never registered.
+// Caller RTP then matches by src-fallback on the offer endpoint. Without the
+// fix this falsely clears FAS (caller's own media masks fraud). The match-by
+// must be "src" and, with a non-empty offer map, must not clear.
+func TestFAS_LateOffer_CallerRTPDoesNotClear(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, 60*time.Millisecond)
+
+	e.storeInviteSDP("call-late", []byte(fasSdpOffer))
+
+	pkt := fasInvite200OK("call-late", "")
+	pkt.ContentType = nil
+	require.NoError(t, e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", pkt, false))
+	require.Len(t, e.fasTracker.entries, 1, "offer endpoints from cached INVITE must open FAS pending")
+	require.Len(t, e.fasTracker.offer["call-late"], 1, "offer endpoint tracked for side gating")
+
+	for _, seq := range []uint16{1, 2, 3} {
+		_, err := e.handleRTP(net.ParseIP("10.0.0.2"), 5004, net.ParseIP("10.0.0.1"), 5004, fasRTPPacket(seq))
+		require.NoError(t, err)
+	}
+	require.Len(t, e.fasTracker.entries, 1,
+		"caller RTP matched by src-fallback on offer endpoint must not clear FAS")
+}
+
+// TestFAS_LateOffer_AnswerRTPClears is the MC/DC complement to the negative
+// test above: in the same late-offer scenario (answer endpoint not registered),
+// genuine answer-side media (callee→caller, dst-match on the offer endpoint)
+// must still clear FAS. This proves the guard is matchedBy-specific, not a
+// blanket block on late-offer calls.
+func TestFAS_LateOffer_AnswerRTPClears(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, 60*time.Millisecond)
+
+	e.storeInviteSDP("call-late", []byte(fasSdpOffer))
+
+	pkt := fasInvite200OK("call-late", "")
+	pkt.ContentType = nil
+	require.NoError(t, e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", pkt, false))
+	require.Len(t, e.fasTracker.entries, 1)
+
+	for _, seq := range []uint16{1, 2} {
+		_, err := e.handleRTP(net.ParseIP("10.0.0.1"), 5004, net.ParseIP("10.0.0.2"), 5004, fasRTPPacket(seq))
+		require.NoError(t, err)
+	}
+	require.Empty(t, e.fasTracker.entries,
+		"answer RTP (dst-match on offer endpoint) must clear FAS even in late-offer scenario")
+}
+
 func TestFAS_SingleRTPDoesNotClear(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, 60*time.Millisecond)
@@ -2408,36 +2491,49 @@ func TestFAS_ByePath_NoFire_WhenMediaCleared(t *testing.T) {
 	require.Zero(t, mm.fasCalls, "no FAS when media already cleared the entry")
 }
 
-// TestFAS_ByePath_SRTPRespectsGrace is the S11-6 × S11-7 interaction regression:
-// an SRTP call (a=fingerprint) ending via BYE WITHIN the DTLS/ICE grace window
-// must NOT fire FAS — the grace that protects the sweep path must also protect
-// the BYE path. Otherwise WebRTC calls that fail ICE and hang up false-positive.
-func TestFAS_ByePath_SRTPRespectsGrace(t *testing.T) {
+// TestFAS_ByePath_SRTP_BelowFloorNoFire verifies that an SRTP call ending via
+// BYE below fasByeFloor does not fire — the floor protects short calls from
+// false positives (caller abandoned before media could start). The floor is
+// the same for plain RTP and SRTP (S11-16: grace extends only the sweep path).
+func TestFAS_ByePath_SRTP_BelowFloorNoFire(t *testing.T) {
 	mm := &mockMetricser{}
-	e := newFasTestExporter(mm, 100*time.Millisecond)
+	e := newFasTestExporter(mm, 10*time.Second)
 
-	const srtpSDP = "v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\nc=IN IP4 10.0.0.1\r\n" +
-		"t=0 0\r\nm=audio 5004 RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\n" +
-		"a=fingerprint:sha-256 AB:CD:01:02\r\na=setup:actpass\r\n"
+	t0 := time.Unix(1_700_000_000, 0)
+	e.fasTracker.SetNow(func() time.Time { return t0 })
+
 	require.NoError(t,
-		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", srtpSDP), false),
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpSRTP), false),
 	)
 	require.Len(t, e.fasTracker.entries, 1)
 
-	// Elapsed (5s) is past fasByeFloor (3s) but well within the SRTP grace
-	// window (deadline = base 100ms + grace 15s ≈ 15.1s). A plain-RTP call here
-	// WOULD fire at BYE; an SRTP call must NOT — still in ICE/DTLS tolerance.
-	const elapsed = 5 * time.Second
-	e.fasTracker.mu.Lock()
-	ent := e.fasTracker.entries["call-1"]
-	ent.createdAt = time.Now().Add(-elapsed)
-	ent.deadline = ent.deadline.Add(-elapsed)
-	ent.byeFloor = ent.byeFloor.Add(-elapsed)
-	e.fasTracker.entries["call-1"] = ent
-	e.fasTracker.mu.Unlock()
-
+	e.fasTracker.SetNow(func() time.Time { return t0.Add(1 * time.Second) })
 	require.NoError(t, e.handleBye200OK(fasInvite200OK("call-1", ""), ""))
-	require.Zero(t, mm.fasCalls, "SRTP call ending within grace must not fire FAS at BYE")
+	require.Zero(t, mm.fasCalls, "SRTP call BYE below fasByeFloor must not fire")
+}
+
+// TestFAS_ByePath_SRTP_FakeFingerprint_StillFires closes the DTLS-grace evasion
+// on the BYE path (S11-16): a fraudster can add a fake a=fingerprint to the 200
+// OK and get byeFloor = full deadline (25s), hanging up before any media without
+// detection. byeFloor must always be fasByeFloor (3s) regardless of SRTP — the
+// grace protects only the sweep path, where the fraudster does not control timing.
+func TestFAS_ByePath_SRTP_FakeFingerprint_StillFires(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, 10*time.Second)
+
+	t0 := time.Unix(1_700_000_000, 0)
+	e.fasTracker.SetNow(func() time.Time { return t0 })
+
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpSRTP), false),
+	)
+	require.Len(t, e.fasTracker.entries, 1)
+
+	// 5s elapsed: past fasByeFloor (3s), well within the SRTP sweep deadline
+	// (10s + 15s grace = 25s). A fraudster hangs up here — FAS must fire.
+	e.fasTracker.SetNow(func() time.Time { return t0.Add(5 * time.Second) })
+	require.NoError(t, e.handleBye200OK(fasInvite200OK("call-1", ""), ""))
+	require.Equal(t, 1, mm.fasCalls, "SRTP BYE after fasByeFloor must fire despite fake fingerprint")
 }
 
 // TestFAS_SRTP_ExtendsThreshold verifies the DTLS-SRTP grace: a call whose
@@ -2538,8 +2634,8 @@ func TestFAS_Reinvite_SRTP_ExtendsDeadline(t *testing.T) {
 	newDeadline := e.fasTracker.entries["call-1"].deadline
 	require.True(t, newDeadline.After(origDeadline.Add(fasSRTPGrace-time.Second)),
 		"re-INVITE to SRTP must extend deadline by ~fasSRTPGrace")
-	require.True(t, newDeadline.Equal(e.fasTracker.entries["call-1"].byeFloor),
-		"byeFloor must track the extended deadline for SRTP")
+	require.True(t, e.fasTracker.entries["call-1"].byeFloor.Before(newDeadline),
+		"byeFloor must remain at fasByeFloor, not track the SRTP grace deadline")
 }
 
 // TestFAS_ConcurrentSweepClearBye verifies thread safety of fasTracker under
@@ -2562,7 +2658,7 @@ func TestFAS_ConcurrentSweepClearBye(t *testing.T) {
 			defer wg.Done()
 			for range 200 {
 				e.fasTracker.sweep(mm)
-				e.fasTracker.clearIfAnswerMedia("call-1", fasEndpoint{ip: "10.0.0.2", port: 5004}, 5)
+				e.fasTracker.clearIfAnswerMedia("call-1", fasEndpoint{ip: "10.0.0.2", port: 5004}, 5, "dst")
 				e.fasTracker.finalizeOnBye("call-1", mm)
 			}
 		}()
@@ -2595,6 +2691,169 @@ func TestFAS_SweepThenClear_NoDoubleFire(t *testing.T) {
 	e.fasTracker.clear("call-1")
 	require.Equal(t, 1, mm.fasCalls, "clear after sweep must not double-fire")
 	require.Empty(t, e.fasTracker.entries)
+}
+
+// blockingFasMetricser wraps mockMetricser so FasCall signals called and then
+// blocks until block is closed. Used to prove that sweep/finalizeOnBye release
+// the fasTracker lock before invoking reportFAS (metricser + zap must run
+// outside the critical section so packet processing is not stalled).
+type blockingFasMetricser struct {
+	mockMetricser
+
+	called chan struct{}
+	block  chan struct{}
+}
+
+func (m *blockingFasMetricser) FasCall(_, _, _, _ string) {
+	m.called <- struct{}{}
+	<-m.block
+}
+
+func TestFAS_Sweep_DoesNotHoldLockDuringReport(t *testing.T) {
+	ft := newFasTracker(time.Hour)
+	t0 := time.Unix(1_700_000_000, 0)
+	ft.SetNow(func() time.Time { return t0 })
+
+	ft.store("expired-1", fasEntry{}, nil, false)
+	ft.store("expired-2", fasEntry{}, nil, false)
+
+	ft.SetNow(func() time.Time { return t0.Add(2 * time.Hour) })
+
+	blockMM := &blockingFasMetricser{
+		called: make(chan struct{}, 2),
+		block:  make(chan struct{}),
+	}
+
+	sweepDone := make(chan struct{})
+	go func() {
+		ft.sweep(blockMM)
+		close(sweepDone)
+	}()
+
+	<-blockMM.called // FasCall invoked — sweep is inside reportFAS.
+
+	// If sweep holds t.mu during reportFAS, Size blocks until FasCall returns.
+	sizeDone := make(chan struct{})
+	go func() {
+		_ = ft.Size()
+		close(sizeDone)
+	}()
+
+	select {
+	case <-sizeDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("sweep held fasTracker.mu during reportFAS; Size blocked >200ms")
+	}
+
+	close(blockMM.block)
+	<-sweepDone
+}
+
+func TestFAS_FinalizeOnBye_DoesNotHoldLockDuringReport(t *testing.T) {
+	ft := newFasTracker(time.Hour)
+	t0 := time.Unix(1_700_000_000, 0)
+	ft.SetNow(func() time.Time { return t0 })
+
+	ft.store("call-bye", fasEntry{}, nil, false)
+
+	// Advance past byeFloor so finalizeOnBye will report.
+	ft.SetNow(func() time.Time { return t0.Add(2 * time.Hour) })
+
+	blockMM := &blockingFasMetricser{
+		called: make(chan struct{}, 1),
+		block:  make(chan struct{}),
+	}
+
+	byeDone := make(chan struct{})
+	go func() {
+		ft.finalizeOnBye("call-bye", blockMM)
+		close(byeDone)
+	}()
+
+	<-blockMM.called // FasCall invoked — finalizeOnBye is inside reportFAS.
+
+	sizeDone := make(chan struct{})
+	go func() {
+		_ = ft.Size()
+		close(sizeDone)
+	}()
+
+	select {
+	case <-sizeDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("finalizeOnBye held fasTracker.mu during reportFAS; Size blocked >200ms")
+	}
+
+	close(blockMM.block)
+	<-byeDone
+}
+
+// TestHandleRTP_KernelTimestampMissingCounter verifies the wiring (MC/DC):
+// handleRTP calls RTPKernelTimestampMissing when pktTimestamp is zero and does
+// NOT call it when a kernel timestamp is present.
+func TestHandleRTP_KernelTimestampMissingCounter(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Hour)
+
+	_, err := e.handleRTP(net.ParseIP("10.0.0.1"), 5004, net.ParseIP("10.0.0.2"), 5004, fasRTPPacket(1))
+	require.NoError(t, err)
+	require.Equal(t, 1, mm.rtpKernelTimestampMissingCalls,
+		"zero pktTimestamp (no SO_TIMESTAMPNS) must increment the counter")
+
+	e.pktTimestamp = time.Unix(1_700_000_000, 0)
+	_, err = e.handleRTP(net.ParseIP("10.0.0.1"), 5004, net.ParseIP("10.0.0.2"), 5004, fasRTPPacket(2))
+	require.NoError(t, err)
+	require.Equal(t, 1, mm.rtpKernelTimestampMissingCalls,
+		"non-zero pktTimestamp must not increment the counter")
+}
+
+// TestFAS_SweepLatency_10kEntries is a performance regression guard: sweeping
+// 10k expired entries must stay well under the threshold. A spike indicates
+// accidental O(n²) behavior or a regression of the S11-14 lock-release fix.
+func TestFAS_SweepLatency_10kEntries(t *testing.T) {
+	mm := &mockMetricser{}
+	ft := newFasTracker(time.Hour)
+	t0 := time.Unix(1_700_000_000, 0)
+	ft.SetNow(func() time.Time { return t0 })
+
+	for i := range 10_000 {
+		ft.store(fmt.Sprintf("call-%d", i), fasEntry{}, nil, false)
+	}
+	ft.SetNow(func() time.Time { return t0.Add(2 * time.Hour) })
+
+	start := time.Now()
+	ft.sweep(mm)
+	elapsed := time.Since(start)
+
+	require.Equal(t, 10_000, mm.fasCalls, "all 10k entries must fire")
+	require.Less(t, elapsed, 200*time.Millisecond,
+		"sweep of 10k entries must complete <200ms (got %v)", elapsed)
+}
+
+func BenchmarkHandleRTP_FASHotPath(b *testing.B) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Hour)
+	e.pktTimestamp = time.Unix(1_700_000_000, 0)
+
+	for i := range 1000 {
+		e.fasTracker.store(fmt.Sprintf("filler-%d", i), fasEntry{}, nil, false)
+	}
+	e.storeInviteSDP("bench", []byte(fasSdpOffer))
+	require.NoError(b,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("bench", fasSdpNormal), false),
+	)
+
+	dst := net.ParseIP("10.0.0.2")
+	src := net.ParseIP("10.0.0.1")
+	pkt := fasRTPPacket(0)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := range b.N {
+		pkt[2] = byte(uint16(i) >> 8)
+		pkt[3] = byte(uint16(i))
+		_, _ = e.handleRTP(src, 5004, dst, 5004, pkt)
+	}
 }
 
 func TestHandleMessage_ReINVITE_ExcludedFromBurst(t *testing.T) {
@@ -4618,6 +4877,7 @@ func (m *carrierTrackingMetricser) UpdateRTCPCumulativeLoss(string, string, stri
 func (m *carrierTrackingMetricser) UpdateRTCPRTT(string, string, string, string, string, float64) {}
 func (m *carrierTrackingMetricser) UpdateRTCPReport(string, string, string, string, string)       {}
 func (m *carrierTrackingMetricser) UpdateRTCPOrphan()                                             {}
+func (m *carrierTrackingMetricser) RTPKernelTimestampMissing()                                    {}
 
 // ==================== SIP message builders for MC/DC tests ====================
 

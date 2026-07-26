@@ -163,14 +163,15 @@ type (
 
 		carrierCounters sync.Map
 
-		socketPacketsReceived *prometheus.CounterVec
-		socketPacketsDropped  *prometheus.CounterVec
-		rtpDropped            prometheus.Counter
-		parseErrorsTotal      *prometheus.CounterVec
-		channelLength         prometheus.Gauge
-		channelCapacity       prometheus.Gauge
-		activeTrackers        *prometheus.GaugeVec
-		activeDialogs         prometheus.Gauge
+		socketPacketsReceived     *prometheus.CounterVec
+		socketPacketsDropped      *prometheus.CounterVec
+		rtpDropped                prometheus.Counter
+		rtpKernelTimestampMissing prometheus.Counter
+		parseErrorsTotal          *prometheus.CounterVec
+		channelLength             prometheus.Gauge
+		channelCapacity           prometheus.Gauge
+		activeTrackers            *prometheus.GaugeVec
+		activeDialogs             prometheus.Gauge
 	}
 
 	// Metricser records all SIP, RTP, and VQ-RTCPXR metrics exposed by the
@@ -226,6 +227,7 @@ type (
 		UpdateRTCPRTT(carrier, uaType, codec, sourceCountry, direction string, rttMs float64)
 		UpdateRTCPReport(carrier, uaType, sourceCountry, direction, reportType string)
 		UpdateRTCPOrphan()
+		RTPKernelTimestampMissing()
 		SystemError()
 		ParseError(errorType string)
 		SocketStats(stats []SocketStat)
@@ -692,6 +694,11 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 	m.rtpActiveStreams = newGaugeVecWithRegistry(
 		"sip_exporter_rtp_active_streams",
 		"Number of active RTP streams correlated with SIP dialogs", rl, reg)
+	m.rtpKernelTimestampMissing = newCounterWithRegistry(
+		"sip_exporter_rtp_kernel_timestamp_missing_total",
+		"RTP packets missing kernel SO_TIMESTAMPNS (PDV fell back to processing time; growing rate means unreliable PDV)",
+		reg,
+	)
 }
 
 func (m *metrics) initRTCPMetrics(reg *prometheus.Registry) {
@@ -1256,6 +1263,10 @@ func (m *metrics) UpdateRTCPReport(carrier, uaType, sourceCountry, direction, re
 // the stream — and thus its carrier/codec context — is unknown.
 func (m *metrics) UpdateRTCPOrphan() {
 	m.rtcpOrphanReports.Inc()
+}
+
+func (m *metrics) RTPKernelTimestampMissing() {
+	m.rtpKernelTimestampMissing.Inc()
 }
 
 func (m *metrics) UpdateRTPMOS(carrier, uaType, codec, sourceCountry, direction string, mos float64) {

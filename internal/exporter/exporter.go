@@ -40,6 +40,7 @@ const (
 	ethPAll                   = 0x0003
 	readBufSize               = 65536
 	tsCmsgLen                 = 16 // sizeof struct timespec (SCM_TIMESTAMPNS payload) on 64-bit linux
+	tsCmsgHdr                 = 16 // sizeof struct Cmsghdr on 64-bit linux (Len 8 + Level 4 + Type 4)
 	defaultRegisterTTL        = 60 * time.Second
 	defaultInviteTTL          = 60 * time.Second
 	defaultOptionsTTL         = 60 * time.Second
@@ -763,24 +764,22 @@ func (e *exporter) handleReadError(err error) bool {
 
 // parseTimestampNS extracts the kernel SO_TIMESTAMPNS receive timestamp from a
 // Recvmsg out-of-band buffer. Returns the zero time when the cmsg is absent or
-// malformed so the caller falls back to time.Now(). Uses encoding/binary (not
-// unsafe) to stay go-vet -unsafeptr clean.
+// malformed so the caller falls back to time.Now(). Parses the Cmsghdr + timespec
+// layout directly (no unix.ParseSocketControlMessage) to avoid per-packet heap
+// allocation on the hot path.
 func parseTimestampNS(oob []byte) time.Time {
-	if len(oob) == 0 {
+	if len(oob) < tsCmsgHdr+tsCmsgLen {
 		return time.Time{}
 	}
-	msgs, err := unix.ParseSocketControlMessage(oob)
-	if err != nil {
+	if int32(binary.NativeEndian.Uint32(oob[8:12])) != unix.SOL_SOCKET {
 		return time.Time{}
 	}
-	for _, m := range msgs {
-		if m.Header.Level == unix.SOL_SOCKET && m.Header.Type == unix.SCM_TIMESTAMPNS && len(m.Data) >= tsCmsgLen {
-			sec := int64(binary.NativeEndian.Uint64(m.Data[0:8]))
-			nsec := int64(binary.NativeEndian.Uint64(m.Data[8:16]))
-			return time.Unix(sec, nsec)
-		}
+	if int32(binary.NativeEndian.Uint32(oob[12:16])) != unix.SCM_TIMESTAMPNS {
+		return time.Time{}
 	}
-	return time.Time{}
+	sec := int64(binary.NativeEndian.Uint64(oob[tsCmsgHdr : tsCmsgHdr+8]))
+	nsec := int64(binary.NativeEndian.Uint64(oob[tsCmsgHdr+8 : tsCmsgHdr+tsCmsgLen]))
+	return time.Unix(sec, nsec)
 }
 
 func (e *exporter) readSocket(idx int) {
@@ -1244,7 +1243,8 @@ func (e *exporter) handleRTP(
 	}
 	arrival := e.pktTimestamp
 	if arrival.IsZero() {
-		arrival = time.Now() // direct test invocation without a captured socket timestamp
+		arrival = time.Now()
+		e.services.metricser.RTPKernelTimestampMissing()
 	}
 	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, dstIP.String(), dstPort, header, arrival)
 	if !ok {
@@ -1253,7 +1253,7 @@ func (e *exporter) handleRTP(
 	}
 	if res.Counted {
 		e.fasTracker.clearIfAnswerMedia(
-			res.CallID, fasEndpoint{ip: res.MatchedIP, port: res.MatchedPort}, res.StreamPacketsTotal,
+			res.CallID, fasEndpoint{ip: res.MatchedIP, port: res.MatchedPort}, res.StreamPacketsTotal, res.MatchedBy,
 		)
 		e.services.metricser.UpdateRTPPackets(res.Carrier, res.UAType, res.Codec, res.SourceCountry, res.Direction)
 		if res.StreamPacketsTotal > 1 {

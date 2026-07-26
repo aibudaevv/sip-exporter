@@ -61,3 +61,12 @@ func TestCodecName_EmptySDPValue_FallsBack(t *testing.T) {
 	sdp := map[uint8]string{0: ""}
 	require.Equal(t, "PCMU", CodecName(0, sdp))
 }
+
+func TestIsAudioCodec(t *testing.T) {
+	require.True(t, IsAudioCodec("PCMU"))
+	require.True(t, IsAudioCodec("PCMA"))
+	require.True(t, IsAudioCodec("opus"))
+	require.True(t, IsAudioCodec(CodecUnknown))
+	require.False(t, IsAudioCodec("telephone-event"))
+	require.False(t, IsAudioCodec("CN"))
+}
