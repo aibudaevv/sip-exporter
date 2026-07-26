@@ -868,7 +868,7 @@ RTP без коррелированного диалога отбрасывае�
 
 `sip_exporter_rtcp_cumulative_loss_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: кумулятивная потеря пакетов, отрепорченная приёмником. Экспортёр дифференцирует последовательные репорты по SSRC: **первый** репорт для SSRC устанавливает baseline и не эмитит delta (поэтому счётчик отражает только потери с момента, когда экспортёр начал отслеживать поток, а не абсолютный кумулятивный итог эндпоинта), а сброс сессии или 24-битный wrap даёт текущее значение как delta. Счётчик монотонен и годится для `rate()`.
 
-`sip_exporter_rtcp_rtt_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 1..5000 мс)*: сетевой round-trip time, вычисленный из полей LSR/DLSR блока RR: `RTT = (now_NTP32 − LSR − DLSR) × 1000 / 65536` (RFC 3550 §6.4.1). Пропускается при `LSR == 0` (нет предшествующего SR) или отрицательном результате (clock skew). Требует примерно NTP-синхронизированных часов хоста.
+`sip_exporter_rtcp_rtt_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 1..5000 мс)*: сетевой round-trip time, вычисленный из полей LSR/DLSR блока RR: `RTT = (now_NTP32 − LSR − DLSR) × 1000 / 65536` (RFC 3550 §6.4.1). Пропускается при `LSR=0` или `DLSR=0` (нет предшествующего SR), либо при отрицательном результате (clock skew). Требует примерно NTP-синхронизированных часов хоста.
 
 `sip_exporter_rtcp_reports_total{carrier,ua_type,source_country,direction,type}` *(counter)*: количество блоков RTCP reception-report, обработанных для трекаемых потоков. `type` = `sr` (Sender Report, PT 200) или `rr` (Receiver Report, PT 201). Без лейбла `codec` (репорт описывает приём, а не кодек); считается на блок.
 

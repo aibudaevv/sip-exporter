@@ -1155,7 +1155,7 @@ func nowNTP32(t time.Time) uint32 {
 // tracked RTP stream sending with that SSRC (destination-first, NAT-robust) and
 // emits jitter / loss-fraction / cumulative-loss / RTT metrics inheriting the
 // stream's labels. RTT is computed as (now_NTP32 − LSR − DLSR) and skipped when
-// LSR is zero (no prior SR) or the result is negative (clock skew). Blocks whose
+// LSR or DLSR is zero (no prior SR) or the result is negative (clock skew). Blocks whose
 // SSRC is not tracked are dropped — consistent with RTP correlation.
 func (e *exporter) handleRTCP(
 	srcIP net.IP, srcPort uint16,
@@ -1172,7 +1172,11 @@ func (e *exporter) handleRTCP(
 	if len(reports) == 0 {
 		return "", nil
 	}
-	nowNTP := nowNTP32(time.Now())
+	ts := e.pktTimestamp
+	if ts.IsZero() {
+		ts = time.Now()
+	}
+	nowNTP := nowNTP32(ts)
 	sIP, dIP := srcIP.String(), dstIP.String()
 
 	for _, rep := range reports {
@@ -1199,7 +1203,7 @@ func (e *exporter) handleRTCP(
 				e.services.metricser.UpdateRTCPCumulativeLoss(carrier, uaType, codec, sourceCountry, direction,
 					lossDelta)
 			}
-			if blk.LSR != 0 {
+			if blk.LSR != 0 && blk.DLSR != 0 {
 				rttUnits := nowNTP - blk.LSR - blk.DLSR
 				if int32(rttUnits) > 0 {
 					e.services.metricser.UpdateRTCPRTT(carrier, uaType, codec, sourceCountry, direction,
@@ -2072,25 +2076,10 @@ func (e *exporter) registerMediaEndpoints(
 		ml.ClockRates = m.ClockRates
 		e.mediaTracker.Register(m.IP, m.Port, ml)
 		e.rtpEndpointInsert(m.IP, m.Port)
-		// Register the RTCP endpoint so non-mux RTCP is captured. Explicit a=rtcp
-		// (RFC 3605) wins; otherwise rtcp-mux (RFC 5761) shares the RTP port
-		// (already registered); otherwise assume legacy RTCP on port+1 (RFC 3550 §9).
-		switch {
-		case m.RTCPPort != 0:
-			// Explicit a=rtcp (RFC 3605): register the RTCP endpoint. The
-			// address defaults to the c= connection IP but may be a different
-			// host when a=rtcp carries a unicast address.
-			rtcpIP := m.IP
-			if m.RTCPAddr != "" {
-				rtcpIP = m.RTCPAddr
-			}
-			e.rtpEndpointInsert(rtcpIP, m.RTCPPort)
-		case m.RTCPMux:
-			// RTCP on the RTP port — nothing extra to register.
-		default:
-			if m.Port < maxUDPPort {
-				e.rtpEndpointInsert(m.IP, m.Port+1)
-			}
+		// Register a separate RTCP endpoint for non-mux capture.
+		if rtcpIP, rtcpPort, ok := resolveRTCEndpoint(m); ok {
+			e.mediaTracker.RegisterRTCP(rtcpIP, rtcpPort, labels.CallID)
+			e.rtpEndpointInsert(rtcpIP, rtcpPort)
 		}
 		zap.L().Debug("RTP media endpoint registered",
 			zap.String("ip", m.IP), zap.Uint16("port", m.Port),
@@ -2101,6 +2090,28 @@ func (e *exporter) registerMediaEndpoints(
 		}
 	}
 	return endpoints, srtp
+}
+
+// resolveRTCEndpoint determines the RTCP endpoint (IP, port) for an SDP media
+// description. Explicit a=rtcp (RFC 3605) wins; rtcp-mux (RFC 5761) shares the
+// RTP port and needs no separate registration; otherwise legacy RTCP on port+1
+// (RFC 3550 §9) is assumed. ok is false when no separate endpoint is needed.
+func resolveRTCEndpoint(m sdp.Media) (ip string, port uint16, ok bool) {
+	switch {
+	case m.RTCPPort != 0:
+		ip = m.IP
+		if m.RTCPAddr != "" {
+			ip = m.RTCPAddr
+		}
+		return ip, m.RTCPPort, true
+	case m.RTCPMux:
+		return "", 0, false
+	default:
+		if m.Port < maxUDPPort {
+			return m.IP, m.Port + 1, true
+		}
+		return "", 0, false
+	}
 }
 
 // ipPortToKey converts an IP address string and port to a BPF map key.

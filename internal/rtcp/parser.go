@@ -63,7 +63,7 @@ type Report struct {
 type ReportBlock struct {
 	SSRC           uint32
 	FractionLost   uint8
-	CumulativeLost uint32 // signed 24-bit per RFC 3550 §6.4.1; negative (duplicates) floored to 0
+	CumulativeLost int32 // signed 24-bit per RFC 3550 §6.4.1; negative when duplicates exceed losses
 	Jitter         uint32
 	LSR            uint32
 	DLSR           uint32
@@ -72,8 +72,11 @@ type ReportBlock struct {
 // Parse decodes an RTCP compound payload into its SR/RR reports. Non-SR/RR
 // sub-packets (SDES, BYE, APP, unknown) are skipped by length. The function
 // validates bounds at every step and returns ErrInvalidRTCP, ErrNotRTCP, or
-// ErrTruncated on malformed input without panicking. A compound with no SR/RR
-// (e.g. SDES-only) returns (nil, nil).
+// ErrTruncated on malformed input without panicking. When a sub-packet is
+// malformed, Parse salvages any valid reports already decoded and continues
+// iterating subsequent sub-packets — the first error is returned but never
+// suppresses later valid reports. A compound with no SR/RR (e.g. SDES-only)
+// returns (nil, nil).
 func Parse(payload []byte) ([]Report, error) {
 	if len(payload) < commonHeaderLen {
 		return nil, ErrInvalidRTCP
@@ -83,30 +86,42 @@ func Parse(payload []byte) ([]Report, error) {
 	}
 
 	var reports []Report
+	var firstErr error
 	off := 0
 	for off < len(payload) {
-		// Common header: need 4 bytes to read PT and length.
 		if off+commonHeaderLen > len(payload) {
-			return reports, ErrTruncated
+			if firstErr == nil {
+				firstErr = ErrTruncated
+			}
+			break
 		}
 		pt := payload[off+ptOffset]
 		lengthWords := int(binary.BigEndian.Uint16(payload[off+lengthOffset : off+commonHeaderLen]))
 		pktLen := (lengthWords + 1) * wordLen // RFC 3550: length is 32-bit words minus one
 		if off+pktLen > len(payload) {
-			return reports, ErrTruncated
+			if firstErr == nil {
+				firstErr = ErrTruncated
+			}
+			break
 		}
 
 		if pt == PTSenderReport || pt == PTReceiverReport {
 			rep, err := parseReport(payload[off:off+pktLen], pt)
 			if err != nil {
-				return reports, err
+				if len(rep.Blocks) > 0 {
+					reports = append(reports, rep)
+				}
+				if firstErr == nil {
+					firstErr = err
+				}
+			} else {
+				reports = append(reports, rep)
 			}
-			reports = append(reports, rep)
 		}
 		// SDES/BYE/APP and unknown PTs: skip — contents not needed.
 		off += pktLen
 	}
-	return reports, nil
+	return reports, firstErr
 }
 
 // parseReport decodes one SR or RR sub-packet already sliced to its declared
@@ -147,13 +162,11 @@ func parseReport(pkt []byte, pt uint8) (Report, error) {
 // len(b) >= reportBlockLen.
 func parseReportBlock(b []byte) ReportBlock {
 	// RFC 3550 §6.4.1: cumulative number of packets lost is a SIGNED 24-bit
-	// field (negative when duplicates exceed losses, e.g. 0xFFFFFF = -1). A
-	// monitoring loss counter must never go backwards, so negative values floor
-	// to zero instead of being misread as huge positives.
+	// field (negative when duplicates exceed losses, e.g. 0xFFFFFF = -1).
 	raw := uint32(b[5])<<16 | uint32(b[6])<<8 | uint32(b[7])
-	cumLost := raw
+	cumLost := int32(raw)
 	if raw&0x800000 != 0 {
-		cumLost = 0
+		cumLost = int32(raw) - (1 << 24) // sign-extend 24-bit negative
 	}
 	return ReportBlock{
 		SSRC:           binary.BigEndian.Uint32(b[0:4]),

@@ -102,6 +102,7 @@ type (
 		mu        sync.Mutex
 		streams   map[streamKey]*streamEntry
 		media     map[endpointKey]MediaLabels
+		rtcpMedia map[endpointKey]string // RTCP endpoints (IP:port → CallID) for BPF cleanup only
 		callRTP   map[string]map[endpointKey]struct{} // per-CallID endpoints that ever had RTP (TTL-independent)
 		ssrcIndex map[uint32][]streamKey              // SSRC → stream keys (multi-valued: an SSRC may be reused across endpoints)
 		ttl       time.Duration
@@ -113,8 +114,9 @@ type (
 		state        *StreamState
 		labels       MediaLabels
 		codec        string
-		rtcpPrevLoss uint32 // last RTCP cumulative-lost seen for this SSRC (delta tracking)
-		rtcpLossSeen bool   // whether an RTCP RR has established the loss baseline
+		lastRTCP     time.Time // last RTCP arrival (TTL refresh only; does NOT affect jitter)
+		rtcpPrevLoss int32     // last RTCP cumulative-lost seen for this SSRC (delta tracking)
+		rtcpLossSeen bool      // whether an RTCP RR has established the loss baseline
 	}
 
 	// RTCPContext is the resolved context of an RTP stream needed to emit RTCP
@@ -131,6 +133,7 @@ func NewTracker(ttl time.Duration) *Tracker {
 	return &Tracker{
 		streams:   make(map[streamKey]*streamEntry),
 		media:     make(map[endpointKey]MediaLabels),
+		rtcpMedia: make(map[endpointKey]string),
 		callRTP:   make(map[string]map[endpointKey]struct{}),
 		ssrcIndex: make(map[uint32][]streamKey),
 		ttl:       ttl,
@@ -140,6 +143,8 @@ func NewTracker(ttl time.Duration) *Tracker {
 
 // SetNow overrides the clock used for expiry (for testing).
 func (t *Tracker) SetNow(now func() time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.now = now
 }
 
@@ -158,6 +163,15 @@ func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) {
 	t.media[endpointKey{ip: ip, port: port}] = labels
 }
 
+// RegisterRTCP records a separate RTCP endpoint (IP:port) for BPF-map cleanup
+// at teardown. Unlike Register, this does NOT participate in label resolution —
+// RTCP packets are dispatched via RecordRTCP (SSRC-based), not lookupLabels.
+func (t *Tracker) RegisterRTCP(ip string, port uint16, callID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.rtcpMedia[endpointKey{ip: ip, port: port}] = callID
+}
+
 // Unregister removes all media endpoints and RTP streams belonging to a SIP
 // dialog (called on BYE 200 OK or Session-Expires cleanup) and returns a
 // summary of the RTP activity observed for that dialog, plus the list of
@@ -173,6 +187,13 @@ func (t *Tracker) Unregister(callID string) (RTPDialogResult, []MediaEndpoint) {
 			mediaCount++
 			deleted = append(deleted, MediaEndpoint{IP: k.ip, Port: k.port})
 			delete(t.media, k)
+		}
+	}
+
+	for k, cid := range t.rtcpMedia {
+		if cid == callID {
+			deleted = append(deleted, MediaEndpoint{IP: k.ip, Port: k.port})
+			delete(t.rtcpMedia, k)
 		}
 	}
 
@@ -342,13 +363,21 @@ func (t *Tracker) Snapshot() []StreamStats {
 	return out
 }
 
-// Cleanup removes streams idle for longer than the configured TTL.
+// Cleanup removes streams idle for longer than the configured TTL. A stream is
+// considered active if either RTP or RTCP has been observed within the TTL
+// window — RTCP reports (sent every 5s per RFC 3550) keep the stream alive
+// during RTP pauses (hold, mute, one-way audio), preventing quality metrics
+// from degrading to orphans.
 func (t *Tracker) Cleanup() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	now := t.now()
 	for key, e := range t.streams {
-		if now.Sub(e.state.lastArrival) > t.ttl {
+		last := e.state.lastArrival
+		if e.lastRTCP.After(last) {
+			last = e.lastRTCP
+		}
+		if now.Sub(last) > t.ttl {
 			t.removeSSRCIndex(key)
 			delete(t.streams, key)
 		}
@@ -403,12 +432,14 @@ func (t *Tracker) LookupBySSRC(
 // delta attribute to the SAME stream (no TOCTOU window where Cleanup could
 // remove or replace the stream between a separate lookup and update). The first
 // observation establishes the baseline and returns a zero delta (avoiding a
-// rate() spike from cumulative-0 at hot start). A 24-bit wrap or session reset
-// (current less than previous) yields the current value as the delta. Returns
-// ok=false when the SSRC is untracked or cannot be attributed unambiguously
-// (caller counts it as an uncorrelated report).
+// rate() spike from cumulative-0 at hot start). A negative cumulative-lost
+// (duplicates exceeding losses, RFC 3550 §6.4.1) returns a zero delta and
+// preserves the baseline. A 24-bit wrap or session reset (current less than
+// previous) yields the current value as the delta. Returns ok=false when the
+// SSRC is untracked or cannot be attributed unambiguously (caller counts it as
+// an uncorrelated report).
 func (t *Tracker) RecordRTCP(
-	ssrc uint32, cumulative uint32,
+	ssrc uint32, cumulative int32,
 	srcIP string, srcPort uint16,
 	dstIP string, dstPort uint16,
 ) (RTCPContext, uint64, bool) {
@@ -417,6 +448,14 @@ func (t *Tracker) RecordRTCP(
 	e := t.selectStream(ssrc, srcIP, srcPort, dstIP, dstPort)
 	if e == nil {
 		return RTCPContext{}, 0, false
+	}
+	e.lastRTCP = t.now()
+	if cumulative < 0 {
+		if !e.rtcpLossSeen {
+			e.rtcpLossSeen = true
+			e.rtcpPrevLoss = cumulative
+		}
+		return rtcpContext(e), 0, true
 	}
 	var delta uint64
 	switch {

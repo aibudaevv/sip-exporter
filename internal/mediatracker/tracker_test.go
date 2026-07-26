@@ -1,6 +1,8 @@
 package mediatracker
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -58,6 +60,51 @@ func TestTracker_UnregisterReturnsDeletedEndpoints(t *testing.T) {
 	require.Len(t, deleted, 2)
 	ips := map[string]bool{deleted[0].IP: true, deleted[1].IP: true}
 	require.True(t, ips["10.0.0.1"] && ips["10.0.0.2"], "must return call-1 endpoints only")
+}
+
+func TestTracker_UnregisterReturnsRTCPEndpoints(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.RegisterRTCP("10.0.0.1", 5005, "call-1")
+	tr.Register("10.0.0.3", 5008, sampleLabels("call-2"))
+	tr.RegisterRTCP("10.0.0.3", 5009, "call-2")
+
+	_, deleted := tr.Unregister("call-1")
+	require.Len(t, deleted, 2, "must return RTP and RTCP endpoints for call-1")
+	ports := map[uint16]bool{}
+	for _, ep := range deleted {
+		ports[ep.Port] = true
+	}
+	require.True(t, ports[5004], "RTP port must be in deleted")
+	require.True(t, ports[5005], "RTCP port must be in deleted")
+
+	_, deleted2 := tr.Unregister("call-2")
+	require.Len(t, deleted2, 2, "call-2 must also return both endpoints")
+}
+
+func TestTracker_UnregisterNoRTCP_OnlyRTPReturned(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+
+	_, deleted := tr.Unregister("call-1")
+	require.Len(t, deleted, 1, "rtcp-mux or no RTCP: only RTP returned")
+	require.Equal(t, uint16(5004), deleted[0].Port)
+}
+
+func TestTracker_UnregisterRTCPDoesNotAffectOneWay(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5006, sampleLabels("call-1"))
+	tr.RegisterRTCP("10.0.0.1", 5005, "call-1")
+	tr.RegisterRTCP("10.0.0.2", 5007, "call-1")
+	t0 := time.Unix(1000, 0)
+	_, ok := tr.Observe("10.0.0.99", 9999, "10.0.0.1", 5004, newHeader(1, 160), t0)
+	require.True(t, ok)
+
+	r, _ := tr.Unregister("call-1")
+	require.True(t, r.MediaExpected)
+	require.True(t, r.RTPObserved)
+	require.True(t, r.OneWay, "RTCP registration must not inflate mediaCount")
 }
 
 func TestTracker_ObserveNoCorrelation_Drop(t *testing.T) {
@@ -526,6 +573,82 @@ func TestTracker_RecordRTCP(t *testing.T) {
 	require.False(t, ok)
 }
 
+// TestRecordRTCP_NegativeCumulativePreservesBaseline proves that a negative
+// cumulative-lost value (duplicates exceeding losses, RFC 3550 §6.4.1) does not
+// corrupt the delta baseline: 10 → -3 → 13 yields delta=3 (13−10), not 9 (13−0).
+func TestRecordRTCP_NegativeCumulativePreservesBaseline(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	const ssrc uint32 = 0xCAFE0001
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), time.Unix(1000, 0))
+
+	_, delta, ok := tr.RecordRTCP(ssrc, 10, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Zero(t, delta, "first observation establishes baseline")
+
+	_, delta, ok = tr.RecordRTCP(ssrc, -3, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Zero(t, delta, "negative cumulative emits no delta")
+
+	_, delta, ok = tr.RecordRTCP(ssrc, 13, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Equal(t, uint64(3), delta, "delta=13-10=3, baseline preserved despite negative")
+}
+
+// TestRecordRTCP_FirstNegativeBaseline proves that when the FIRST RTCP report for
+// an SSRC carries a negative cumulative-lost (duplicates exceeding losses,
+// RFC 3550 §6.4.1), the baseline is set to the actual value, not zero. Without
+// the fix [-5 → 3] yields delta=3 (3−0); with the fix delta=8 (3−(−5)).
+func TestRecordRTCP_FirstNegativeBaseline(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	const ssrc uint32 = 0xCAFE0002
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), time.Unix(1000, 0))
+
+	_, delta, ok := tr.RecordRTCP(ssrc, -5, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Zero(t, delta, "first observation establishes baseline, emits no delta")
+
+	_, delta, ok = tr.RecordRTCP(ssrc, 3, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Equal(t, uint64(8), delta, "delta=3-(-5)=8, negative baseline preserved")
+}
+
+// TestRecordRTCP_RefreshesTTL proves that RTCP reports refresh the stream TTL:
+// when RTP pauses (hold/mute/one-way) but RTCP keeps arriving, the stream must
+// survive Cleanup beyond the RTP-idle window. Without the fix, RecordRTCP never
+// updates any timestamp — Cleanup evicts based solely on lastArrival (set only by
+// RTP), so the stream expires and subsequent RTCP reports become orphans,
+// dropping quality metrics precisely during degradation.
+func TestRecordRTCP_RefreshesTTL(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	t0 := time.Unix(1000, 0)
+	const ssrc uint32 = 0xCAFED00D
+
+	// Two RTP packets establish a stream with a non-zero jitter baseline.
+	_, ok := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), t0)
+	require.True(t, ok)
+	_, ok = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(2, ssrc), t0.Add(20*time.Millisecond))
+	require.True(t, ok)
+	jitterBefore := tr.Snapshot()[0].JitterMs
+
+	// Advance to 20s — approaching TTL expiry since last RTP.
+	tr.SetNow(func() time.Time { return t0.Add(20 * time.Second) })
+
+	// RTCP arrives with no new RTP. Must refresh TTL without altering jitter.
+	_, _, ok = tr.RecordRTCP(ssrc, 0, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Equal(t, jitterBefore, tr.Snapshot()[0].JitterMs,
+		"RTCP must not alter jitter (lastArrival invariant preserved)")
+
+	// 31s since last RTP (t0), but only 11s since last RTCP (t0+20s).
+	tr.SetNow(func() time.Time { return t0.Add(31 * time.Second) })
+	tr.Cleanup()
+
+	require.Len(t, tr.Snapshot(), 1, "stream survives: RTCP refreshed TTL beyond RTP-idle window")
+}
+
 // TestTracker_RecordRTCP_UniqueSSRCResolvesWithoutEndpointMatch verifies the D1
 // middle-ground: when an SSRC is unique (one stream), RTCP resolves even if its
 // endpoints match no registered endpoint (NAT/remapped port) — there is no
@@ -611,4 +734,74 @@ func TestTracker_LookupBySSRC_Concurrent(t *testing.T) {
 	// Post-concurrency state must remain consistent (no index corruption).
 	_, ok := tr.LookupBySSRC(ssrc, "9.9.9.9", 0, "10.0.0.1", 5004)
 	require.True(t, ok, "SSRC must still resolve after concurrent Observe/Lookup")
+}
+
+// TestRecordRTCP_Concurrent proves thread-safety under concurrent access.
+// All goroutines use an IDENTICAL cumulative value (50) deliberately:
+// distinct values would make the sum non-deterministic because the 24-bit
+// wrap/reset branch in RecordRTCP treats out-of-order arrivals as resets.
+// The test verifies: (1) -race detects no data race, (2) the baseline
+// survives concurrent access (follow-up +10 yields delta=10, proving
+// rtcpPrevLoss==50 was not corrupted). Delta-accounting correctness is
+// covered by the sequential TestTracker_RecordRTCP.
+func TestRecordRTCP_Concurrent(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	const ssrc uint32 = 0xBEEF1234
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), time.Unix(1000, 0))
+
+	const N = 100
+	const cumul = int32(50)
+	var sum atomic.Uint64
+	var wg sync.WaitGroup
+	for range N {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, delta, ok := tr.RecordRTCP(ssrc, cumul, "9.9.9.9", 0, "10.0.0.1", 5004)
+			if ok {
+				sum.Add(delta)
+			}
+		}()
+	}
+	wg.Wait()
+
+	require.Zero(t, sum.Load(), "identical cumulative must produce no delta")
+
+	_, delta, ok := tr.RecordRTCP(ssrc, cumul+10, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Equal(t, uint64(10), delta, "baseline survived concurrent access")
+}
+
+// TestRecordRTCP_PerLegIsolation proves that two streams with distinct SSRCs
+// maintain independent loss baselines: rtcpLossSeen and rtcpPrevLoss are
+// per-stream-entry fields, not shared. Interleaved RR observations for SSRC-A
+// and SSRC-B must not cross-contaminate deltas.
+func TestRecordRTCP_PerLegIsolation(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, MediaLabels{Carrier: "carrier-a", CallID: "call-1",
+		SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000}})
+	tr.Register("10.0.0.2", 5006, MediaLabels{Carrier: "carrier-b", CallID: "call-2",
+		SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000}})
+	t0 := time.Unix(1000, 0)
+	const ssrcA uint32 = 0x11110001
+	const ssrcB uint32 = 0x22220002
+	_, _ = tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrcA), t0)
+	_, _ = tr.Observe("10.0.0.2", 5006, "0.0.0.0", 0, newHeaderSSRC(1, ssrcB), t0)
+
+	// Establish baselines — interleaved to stress per-stream isolation.
+	_, dA, ok := tr.RecordRTCP(ssrcA, 10, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Zero(t, dA, "A baseline")
+	_, dB, ok := tr.RecordRTCP(ssrcB, 20, "9.9.9.9", 0, "10.0.0.2", 5006)
+	require.True(t, ok)
+	require.Zero(t, dB, "B baseline")
+
+	// A jumps by 5 (10→15), B by 5 (20→25) — interleaved.
+	_, dA, ok = tr.RecordRTCP(ssrcA, 15, "9.9.9.9", 0, "10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Equal(t, uint64(5), dA, "A delta must be 15-10, not influenced by B")
+	_, dB, ok = tr.RecordRTCP(ssrcB, 25, "9.9.9.9", 0, "10.0.0.2", 5006)
+	require.True(t, ok)
+	require.Equal(t, uint64(5), dB, "B delta must be 25-20, not influenced by A")
 }

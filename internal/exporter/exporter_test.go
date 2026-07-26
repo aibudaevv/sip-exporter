@@ -21,6 +21,7 @@ import (
 	"github.com/aibudaevv/sip-exporter/internal/dto"
 	"github.com/aibudaevv/sip-exporter/internal/geoip"
 	"github.com/aibudaevv/sip-exporter/internal/mediatracker"
+	"github.com/aibudaevv/sip-exporter/internal/sdp"
 	"github.com/aibudaevv/sip-exporter/internal/service"
 	"github.com/aibudaevv/sip-exporter/internal/vq"
 )
@@ -6608,4 +6609,49 @@ func TestCleanupByeTracker_TTLExpiry(t *testing.T) {
 	_, freshKept := e.byeTracker["fresh"]
 	require.False(t, expiredGone, "expired entry must be cleaned up")
 	require.True(t, freshKept, "fresh entry must survive cleanup")
+}
+
+func TestResolveRTCEndpoint(t *testing.T) {
+	tests := []struct {
+		name   string
+		m      sdp.Media
+		wantIP string
+		wantPort uint16
+		wantOK  bool
+	}{
+		{
+			name: "a=rtcp with unicast address",
+			m:    sdp.Media{IP: "10.0.0.1", Port: 5004, RTCPPort: 5005, RTCPAddr: "10.0.0.99"},
+			wantIP: "10.0.0.99", wantPort: 5005, wantOK: true,
+		},
+		{
+			name: "a=rtcp port only (no address)",
+			m:    sdp.Media{IP: "10.0.0.1", Port: 5004, RTCPPort: 5005},
+			wantIP: "10.0.0.1", wantPort: 5005, wantOK: true,
+		},
+		{
+			name: "rtcp-mux shares RTP port",
+			m:    sdp.Media{IP: "10.0.0.1", Port: 5004, RTCPMux: true},
+			wantIP: "", wantPort: 0, wantOK: false,
+		},
+		{
+			name: "legacy port+1",
+			m:    sdp.Media{IP: "10.0.0.1", Port: 5004},
+			wantIP: "10.0.0.1", wantPort: 5005, wantOK: true,
+		},
+		{
+			name: "port at max skips legacy",
+			m:    sdp.Media{IP: "10.0.0.1", Port: maxUDPPort},
+			wantIP: "", wantPort: 0, wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ip, port, ok := resolveRTCEndpoint(tt.m)
+			require.Equal(t, tt.wantIP, ip)
+			require.Equal(t, tt.wantPort, port)
+			require.Equal(t, tt.wantOK, ok)
+		})
+	}
 }

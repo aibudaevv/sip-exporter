@@ -4814,8 +4814,8 @@
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
-              "expr": "histogram_quantile(0.95, sum by (le, carrier, ua_type, codec) (rate(sip_exporter_rtcp_loss_fraction_percent_bucket{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])))",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{codec}} p95",
+              "expr": "histogram_quantile(0.95, sum by (le, carrier, ua_type, source_country, codec) (rate(sip_exporter_rtcp_loss_fraction_percent_bucket{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])))",
+              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} / {{codec}} p95",
               "refId": "A"
             }
           ],
@@ -4849,8 +4849,8 @@
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
-              "expr": "sum by (carrier, ua_type, codec) (rate(sip_exporter_rtcp_cumulative_loss_total{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m]))",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{codec}}",
+              "expr": "sum by (carrier, ua_type, source_country, codec) (rate(sip_exporter_rtcp_cumulative_loss_total{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m]))",
+              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} / {{codec}}",
               "refId": "A"
             }
           ],
@@ -4884,8 +4884,8 @@
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
-              "expr": "sum by (carrier, type) (rate(sip_exporter_rtcp_reports_total{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m]))",
-              "legendFormat": "{{carrier}} / {{type}}",
+              "expr": "sum by (carrier, ua_type, direction, type) (rate(sip_exporter_rtcp_reports_total{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m]))",
+              "legendFormat": "{{carrier}} / {{ua_type}} / {{direction}} / {{type}}",
               "refId": "A"
             }
           ],
@@ -4925,6 +4925,47 @@
             }
           ],
           "title": "RTCP Orphan Reports (uncorrelated SSRC — capture/registration health)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisLabel": "", "axisPlacement": "auto", "drawStyle": "line",
+                "fillOpacity": 10, "lineInterpolation": "linear", "lineWidth": 1,
+                "pointSize": 5, "showPoints": "never", "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" }
+              },
+              "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] },
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": { "x": 0, "y": 186, "w": 24, "h": 8 },
+          "id": 326,
+          "options": {
+            "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtp_jitter_milliseconds_bucket{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])))",
+              "legendFormat": "RTP (wire) — {{carrier}}",
+              "refId": "A"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtcp_jitter_milliseconds_bucket{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])))",
+              "legendFormat": "RTCP (endpoint) — {{carrier}}",
+              "refId": "B"
+            }
+          ],
+          "title": "Jitter: RTP (wire) vs RTCP (endpoint)",
           "type": "timeseries"
         },
         {

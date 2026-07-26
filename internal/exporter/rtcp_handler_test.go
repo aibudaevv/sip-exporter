@@ -193,6 +193,34 @@ func TestHandleRTCP_SenderReportType(t *testing.T) {
 	require.Equal(t, "sr", mm.rtcpReportType, "SR packet must be labelled type=sr")
 }
 
+// TestHandleRTCP_SenderReportValues proves that SR report-block values
+// (jitter/loss/RTT) are extracted correctly despite the 20-byte sender-info
+// preceding the blocks — the same values an equivalent RR would produce.
+func TestHandleRTCP_SenderReportValues(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newRTCPTestExporter(mm)
+	const ssrc uint32 = 0xAAAA0009
+	registerRTPStream(t, e, ssrc)
+
+	lsr := nowNTP32(time.Now().Add(-5 * time.Second))
+	sr := buildSR(0, buildRTCPBlock(ssrc, 26, 5, 100, 1600, lsr, 0x00010000))
+
+	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, sr)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, mm.rtcpJitterCalls)
+	require.InDelta(t, 200.0, mm.rtcpJitterVal, 0.01)
+
+	require.Equal(t, 1, mm.rtcpLossFracCalls)
+	require.InDelta(t, 26.0/256*100, mm.rtcpLossFracVal, 0.01)
+
+	require.Zero(t, mm.rtcpCumLossCalls, "first SR establishes baseline")
+
+	require.Equal(t, 1, mm.rtcpRTTCalls)
+	require.Greater(t, mm.rtcpRTTVal, 3500.0)
+	require.Less(t, mm.rtcpRTTVal, 4500.0)
+}
+
 func TestHandleRTCP_RTTSkippedOnClockSkew(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newRTCPTestExporter(mm)
@@ -230,6 +258,26 @@ func TestHandleRTCP_RTTSkippedWhenDLSRExceedsElapsed(t *testing.T) {
 	require.Equal(t, 1, mm.rtcpReportCalls, "report is still counted")
 }
 
+// TestHandleRTCP_RTTSkippedWhenDLSRZero proves that RTT is not computed when
+// DLSR=0 despite a valid non-zero LSR. A zero DLSR with non-zero LSR is a
+// malformed report (the receiver remembered the timestamp but not its own
+// processing delay), and the formula now−LSR−0 would yield ~reporting interval
+// (5 s) instead of a real sub-second RTT.
+func TestHandleRTCP_RTTSkippedWhenDLSRZero(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newRTCPTestExporter(mm)
+	const ssrc uint32 = 0xAAAA0010
+	registerRTPStream(t, e, ssrc)
+
+	lsr := nowNTP32(time.Now().Add(-5 * time.Second))
+	rr := buildRR(buildRTCPBlock(ssrc, 0, 0, 0, 0, lsr, 0)) // DLSR=0
+	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr)
+	require.NoError(t, err)
+
+	require.Zero(t, mm.rtcpRTTCalls, "RTT must be skipped when DLSR=0 (malformed)")
+	require.Equal(t, 1, mm.rtcpReportCalls, "report is still counted")
+}
+
 // TestHandleRTCP_PartialCompoundProcessesValidPrefix proves that a single
 // malformed trailing sub-packet does not blind the whole compound: rtcp.Parse
 // returns the valid SR/RR prefix together with the error, and the handler
@@ -250,4 +298,79 @@ func TestHandleRTCP_PartialCompoundProcessesValidPrefix(t *testing.T) {
 	require.Equal(t, 1, mm.rtcpReportCalls, "valid RR prefix must be salvaged and counted")
 	require.Equal(t, 1, mm.parseErrorCalls, "the trailing parse error must be counted")
 	require.Equal(t, "rtcp", mm.parseErrorType)
+}
+
+// TestHandleRTCP_MultiBlockRR proves the inner loop (for _, blk := range rep.Blocks)
+// iterates all report blocks. With 2 blocks — one correlated (SSRC tracked) and one
+// orphan (untracked) — the correlated block emits jitter/loss/report while the orphan
+// increments the orphan counter and is skipped via continue.
+func TestHandleRTCP_MultiBlockRR(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newRTCPTestExporter(mm)
+	const (
+		knownSSRC  uint32 = 0xAAAA0012
+		orphanSSRC uint32 = 0xAAAA0013
+	)
+	registerRTPStream(t, e, knownSSRC)
+
+	rr := buildRR(
+		buildRTCPBlock(knownSSRC, 0, 0, 0, 1600, 0, 0),
+		buildRTCPBlock(orphanSSRC, 0, 0, 0, 3200, 0, 0),
+	)
+	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, mm.rtcpJitterCalls, "only correlated block emits jitter")
+	require.InDelta(t, 200.0, mm.rtcpJitterVal, 0.01)
+	require.Equal(t, 1, mm.rtcpReportCalls, "only correlated block emits report")
+	require.Equal(t, 1, mm.rtcpLossFracCalls)
+	require.Equal(t, 1, mm.rtcpOrphanCalls, "orphan block must increment orphan counter")
+	require.Zero(t, mm.rtcpCumLossCalls, "first RR establishes baseline")
+}
+
+// TestHandleRTCP_MixedCompound proves the outer loop (for _, rep := range reports)
+// iterates multiple sub-packets in a compound RTCP packet. An SR followed by an RR
+// (typical RFC 3550 ordering) — both carrying a block for the same correlated SSRC —
+// must produce 2 report calls and 2 jitter calls.
+func TestHandleRTCP_MixedCompound(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newRTCPTestExporter(mm)
+	const ssrc uint32 = 0xAAAA0014
+	registerRTPStream(t, e, ssrc)
+
+	sr := buildSR(0, buildRTCPBlock(ssrc, 0, 0, 0, 1600, 0, 0))
+	rr := buildRR(buildRTCPBlock(ssrc, 0, 0, 0, 1600, 0, 0))
+	compound := append(sr, rr...)
+
+	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, compound)
+	require.NoError(t, err)
+
+	require.Equal(t, 2, mm.rtcpReportCalls, "both SR and RR must be processed")
+	require.Equal(t, 2, mm.rtcpJitterCalls, "both blocks must emit jitter")
+	require.Equal(t, "rr", mm.rtcpReportType, "last report (RR) wins in mock")
+}
+
+// TestHandleRTCP_RTTUsesCaptureTimestamp proves that RTT is computed from the
+// kernel capture timestamp (e.pktTimestamp, SO_TIMESTAMPNS), not wall-clock
+// time.Now(). The capture time is set 60 s in the past; LSR is 5 s before the
+// capture time and DLSR is 1 s, so the correct RTT ≈ 4 s. Without the fix the
+// handler uses time.Now(), yielding RTT ≈ 64 s (60 s of accumulated drift).
+func TestHandleRTCP_RTTUsesCaptureTimestamp(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newRTCPTestExporter(mm)
+	const ssrc uint32 = 0xAAAA0011
+	registerRTPStream(t, e, ssrc)
+
+	captureTime := time.Now().Add(-60 * time.Second)
+	e.pktTimestamp = captureTime
+	lsr := nowNTP32(captureTime.Add(-5 * time.Second))
+	dlsr := uint32(1 * 65536) // 1 s in NTP32 units
+	rr := buildRR(buildRTCPBlock(ssrc, 0, 0, 0, 0, lsr, dlsr))
+
+	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, mm.rtcpRTTCalls, "RTT must be computed (LSR/DLSR valid)")
+	require.Greater(t, mm.rtcpRTTVal, 3500.0, "RTT should be ~4 s (capture-based)")
+	require.Less(t, mm.rtcpRTTVal, 4500.0, "RTT should be ~4 s, not ~64 s (time.Now-based)")
 }

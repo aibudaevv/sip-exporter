@@ -5,8 +5,12 @@ package rtp
 import (
 	"context"
 	"encoding/binary"
+	"io"
 	"net"
+	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -206,7 +210,7 @@ func sendRTCPRR(t *testing.T, port int, ssrc, cumLost uint32) {
 	binary.BigEndian.PutUint32(pkt[16:20], 500)                                       // extended highest sequence
 	binary.BigEndian.PutUint32(pkt[20:24], 1600)                                      // jitter ticks → 200 ms at 8000 Hz
 	binary.BigEndian.PutUint32(pkt[24:28], pastNTP32(time.Now().Add(-5*time.Second))) // LSR
-	binary.BigEndian.PutUint32(pkt[28:32], 0)                                         // DLSR
+	binary.BigEndian.PutUint32(pkt[28:32], 0x10000)                                   // DLSR = 1 s (NTP32)
 
 	_, err = conn.Write(pkt)
 	require.NoError(t, err)
@@ -297,23 +301,44 @@ func TestRTCP_MetricsFromInjectedRR(t *testing.T) {
 	}, 10*time.Second, 500*time.Millisecond,
 		"all five RTCP metrics must be observed")
 
-	// RTT value check (not just count): LSR was 5s ago, DLSR=0 → RTT ≈ 5000ms.
+	// RTT value check (not just count): LSR was 5s ago, DLSR=1s → RTT ≈ 4000ms.
 	// Proves the formula end-to-end, not merely that an observation landed.
+	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds"),
+		"rtt histogram must exist before reading its value")
 	rttSum := getRTPMetric(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds_sum")
 	rttCount := getRTPMetric(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds_count")
 	require.Greater(t, rttCount, 0.0)
 	avgRTT := rttSum / rttCount
-	require.Greater(t, avgRTT, 4000.0, "RTT should be ~5000ms (LSR 5s ago, DLSR=0)")
-	require.Less(t, avgRTT, 6000.0, "RTT should be ~5000ms (LSR 5s ago, DLSR=0)")
+	require.Greater(t, avgRTT, 3000.0, "RTT should be ~4000ms (LSR 5s ago, DLSR=1s)")
+	require.Less(t, avgRTT, 5500.0, "RTT should be ~4000ms (LSR 5s ago, DLSR=1s)")
 
 	// Loss-fraction value check (not just count): the RR carries fracLost=10 →
 	// 10/256*100 ≈ 3.9%. Proves the fracLost byte extraction + scale end-to-end,
 	// not merely that an observation landed (guards against a byte-offset regression).
+	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_loss_fraction_percent"),
+		"loss-fraction histogram must exist before reading its value")
 	lossSum := getRTPMetric(t, endpoint, "sip_exporter_rtcp_loss_fraction_percent_sum")
 	lossCount := getRTPMetric(t, endpoint, "sip_exporter_rtcp_loss_fraction_percent_count")
 	require.Greater(t, lossCount, 0.0)
 	avgLoss := lossSum / lossCount
 	require.InDelta(t, 10.0/256*100, avgLoss, 0.5, "loss fraction should be ~3.9%% (fracLost=10)")
+
+	// Jitter value check (not just count): every RR carries jitter=1600 ticks →
+	// 200ms at clockRate 8000. Proves the tick→ms conversion end-to-end, not
+	// merely that an observation landed.
+	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_jitter_milliseconds"),
+		"jitter histogram must exist before reading its value")
+	jitSum := getRTPMetric(t, endpoint, "sip_exporter_rtcp_jitter_milliseconds_sum")
+	jitCount := getRTPMetric(t, endpoint, "sip_exporter_rtcp_jitter_milliseconds_count")
+	require.Greater(t, jitCount, 0.0)
+	avgJitter := jitSum / jitCount
+	require.InDelta(t, 200.0, avgJitter, 50.0, "jitter should be ~200ms (1600 ticks at 8000Hz)")
+
+	// Cumulative-loss delta check: first RR (cumLost=0) establishes the baseline
+	// (delta=0, not emitted); second RR (cumLost=500) emits delta=500. Proves the
+	// baseline-diff semantics end-to-end, not merely that a non-zero value landed.
+	lossTotal := getRTPMetric(t, endpoint, "sip_exporter_rtcp_cumulative_loss_total")
+	require.Equal(t, 500.0, lossTotal, "cumulative-loss delta must be exactly 500")
 }
 
 // TestRTCP_SenderReportCaptured proves the SR (PT 200) path end to end. SR is
@@ -392,4 +417,98 @@ func TestRTCP_BothDirections(t *testing.T) {
 		return getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) >= 2
 	}, 10*time.Second, 500*time.Millisecond,
 		"RTCP from both legs must be captured (per-stream SSRC isolation)")
+}
+
+// getRTCPOrphanCount scrapes the label-less rtcp_orphan_reports_total counter.
+func getRTCPOrphanCount(t *testing.T, endpoint string) float64 {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/metrics", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	re := regexp.MustCompile(`^sip_exporter_rtcp_orphan_reports_total\s+([0-9.]+)`)
+	for _, line := range strings.Split(string(body), "\n") {
+		m := re.FindStringSubmatch(strings.TrimSpace(line))
+		if len(m) == 2 {
+			v, parseErr := strconv.ParseFloat(m[1], 64)
+			require.NoError(t, parseErr)
+			return v
+		}
+	}
+	return 0
+}
+
+// TestRTCP_RefreshesStreamTTL proves end-to-end that RTCP reports refresh the
+// stream TTL (S12-52): when RTP pauses but RTCP keeps arriving, the stream
+// survives the 1s cleanup cycle past the RTP-idle TTL window. Without the fix,
+// Cleanup evicts based solely on lastArrival (set only by RTP), so RRs sent
+// after the TTL become orphans — quality metrics are lost during hold/mute.
+//
+// The counterpart negative case (no RTCP → stream expires at TTL) is covered
+// by TestRTP_StreamExpiry. Together they form the MC/DC pair for the
+// max(lastArrival, lastRTCP) condition in Cleanup.
+func TestRTCP_RefreshesStreamTTL(t *testing.T) {
+	ports := allocatePortsN(6)
+	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
+	uasMediaNum, err := strconv.Atoi(uasMedia)
+	require.NoError(t, err)
+
+	// TTL=3s: short enough for a fast test, long enough to separate from the
+	// RTCP injection cadence. The 1s cleanup ticker evicts streams whose
+	// max(lastArrival, lastRTCP) is older than 3s.
+	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "3s")
+
+	wait := startSippContainers(
+		context.Background(), t,
+		"uas_rtp.xml", "uac_rtp.xml",
+		uasSIP, uacSIP, uasMedia, uacMedia,
+		"127.0.0.1", "127.0.0.1",
+	)
+
+	// Wait until RTP flows: media endpoint registered, UAS socket bound.
+	require.Eventually(t, func() bool {
+		return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
+	}, 15*time.Second, 500*time.Millisecond, "RTP must flow before injecting RTCP")
+
+	// Establish a stream under testSSRC, then STOP injecting RTP. SIPp's own
+	// RTP continues under a different SSRC — it does not refresh testSSRC.
+	sendRTPWithSSRC(t, uasMediaNum, testSSRC, 20)
+	time.Sleep(300 * time.Millisecond)
+
+	// Baseline RRs while the stream is well within TTL.
+	sendRTCPRR(t, uasMediaNum, testSSRC, 0)
+	time.Sleep(100 * time.Millisecond)
+	sendRTCPRR(t, uasMediaNum, testSSRC, 0)
+
+	// Mid-window RR: refreshes lastRTCP at ~2.4s (still within 3s TTL from RTP).
+	time.Sleep(2 * time.Second)
+	sendRTCPRR(t, uasMediaNum, testSSRC, 0)
+
+	// Wait past the 3s RTP-idle TTL, then send RRs that — without the fix —
+	// would find no tracked stream (evicted at the cleanup tick ≈3-4s) and
+	// increment the orphan counter instead of correlating.
+	time.Sleep(2 * time.Second) // now ~4.4s since last RTP — past TTL
+	sendRTCPRR(t, uasMediaNum, testSSRC, 0)
+	time.Sleep(100 * time.Millisecond)
+	sendRTCPRR(t, uasMediaNum, testSSRC, 0) // guard against AF_PACKET drop
+	time.Sleep(500 * time.Millisecond)
+
+	// With the fix: all RRs correlate (RTCP refreshed lastRTCP), so
+	// rtcp_reports_total grew to 5 and rtcp_orphan_reports_total stayed at 0.
+	// Without the fix: the last two RRs are orphans → reports stalls at 3.
+	require.Eventually(t, func() bool {
+		return getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) >= 4
+	}, 5*time.Second, 500*time.Millisecond,
+		"RRs sent past the RTP-idle TTL must correlate (RTCP refreshed stream TTL)")
+
+	require.Zero(t, getRTCPOrphanCount(t, endpoint),
+		"no orphan reports: RTCP kept the stream alive through the RTP-idle window")
+
+	wait()
 }
