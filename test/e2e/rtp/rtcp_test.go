@@ -206,7 +206,7 @@ func sendRTCPRR(t *testing.T, port int, ssrc, cumLost uint32) {
 	binary.BigEndian.PutUint32(pkt[16:20], 500)                                       // extended highest sequence
 	binary.BigEndian.PutUint32(pkt[20:24], 1600)                                      // jitter ticks → 200 ms at 8000 Hz
 	binary.BigEndian.PutUint32(pkt[24:28], pastNTP32(time.Now().Add(-5*time.Second))) // LSR
-	binary.BigEndian.PutUint32(pkt[28:32], 0)                                         // DLSR
+	binary.BigEndian.PutUint32(pkt[28:32], 0x10000)                                   // DLSR = 1 s (NTP32)
 
 	_, err = conn.Write(pkt)
 	require.NoError(t, err)
@@ -297,7 +297,7 @@ func TestRTCP_MetricsFromInjectedRR(t *testing.T) {
 	}, 10*time.Second, 500*time.Millisecond,
 		"all five RTCP metrics must be observed")
 
-	// RTT value check (not just count): LSR was 5s ago, DLSR=0 → RTT ≈ 5000ms.
+	// RTT value check (not just count): LSR was 5s ago, DLSR=1s → RTT ≈ 4000ms.
 	// Proves the formula end-to-end, not merely that an observation landed.
 	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds"),
 		"rtt histogram must exist before reading its value")
@@ -305,8 +305,8 @@ func TestRTCP_MetricsFromInjectedRR(t *testing.T) {
 	rttCount := getRTPMetric(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds_count")
 	require.Greater(t, rttCount, 0.0)
 	avgRTT := rttSum / rttCount
-	require.Greater(t, avgRTT, 4000.0, "RTT should be ~5000ms (LSR 5s ago, DLSR=0)")
-	require.Less(t, avgRTT, 6000.0, "RTT should be ~5000ms (LSR 5s ago, DLSR=0)")
+	require.Greater(t, avgRTT, 3000.0, "RTT should be ~4000ms (LSR 5s ago, DLSR=1s)")
+	require.Less(t, avgRTT, 5500.0, "RTT should be ~4000ms (LSR 5s ago, DLSR=1s)")
 
 	// Loss-fraction value check (not just count): the RR carries fracLost=10 →
 	// 10/256*100 ≈ 3.9%. Proves the fracLost byte extraction + scale end-to-end,
