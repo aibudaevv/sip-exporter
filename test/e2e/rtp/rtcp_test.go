@@ -322,6 +322,23 @@ func TestRTCP_MetricsFromInjectedRR(t *testing.T) {
 	require.Greater(t, lossCount, 0.0)
 	avgLoss := lossSum / lossCount
 	require.InDelta(t, 10.0/256*100, avgLoss, 0.5, "loss fraction should be ~3.9%% (fracLost=10)")
+
+	// Jitter value check (not just count): every RR carries jitter=1600 ticks →
+	// 200ms at clockRate 8000. Proves the tick→ms conversion end-to-end, not
+	// merely that an observation landed.
+	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_jitter_milliseconds"),
+		"jitter histogram must exist before reading its value")
+	jitSum := getRTPMetric(t, endpoint, "sip_exporter_rtcp_jitter_milliseconds_sum")
+	jitCount := getRTPMetric(t, endpoint, "sip_exporter_rtcp_jitter_milliseconds_count")
+	require.Greater(t, jitCount, 0.0)
+	avgJitter := jitSum / jitCount
+	require.InDelta(t, 200.0, avgJitter, 50.0, "jitter should be ~200ms (1600 ticks at 8000Hz)")
+
+	// Cumulative-loss delta check: first RR (cumLost=0) establishes the baseline
+	// (delta=0, not emitted); second RR (cumLost=500) emits delta=500. Proves the
+	// baseline-diff semantics end-to-end, not merely that a non-zero value landed.
+	lossTotal := getRTPMetric(t, endpoint, "sip_exporter_rtcp_cumulative_loss_total")
+	require.Equal(t, 500.0, lossTotal, "cumulative-loss delta must be exactly 500")
 }
 
 // TestRTCP_SenderReportCaptured proves the SR (PT 200) path end to end. SR is
