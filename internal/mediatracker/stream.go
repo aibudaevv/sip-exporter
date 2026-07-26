@@ -45,10 +45,23 @@ func newStreamState(ssrc uint32, codec string, clockRate uint32, now time.Time) 
 	}
 }
 
-// Observe ingests an RTP packet and updates jitter/loss counters.
+// Observe ingests an audio RTP packet and updates jitter/loss counters.
 // Sequence arithmetic is performed in uint16 space (natural wraparound), then
 // classified by the magnitude of the wrapped delta to avoid signed casts.
 func (s *StreamState) Observe(h rtp.Header, arrival time.Time) {
+	s.observe(h, arrival, true)
+}
+
+// ObserveNonAudio processes a non-audio packet (telephone-event/DTMF, CN) for
+// sequence and loss accounting without updating jitter or PDV timing. Non-audio
+// packets share the SSRC and sequence space with audio but have timing patterns
+// (RFC 4733 event bursts, RFC 3389 sparse CN) that would contaminate delay
+// variation metrics if processed through updateJitter.
+func (s *StreamState) ObserveNonAudio(h rtp.Header, arrival time.Time) {
+	s.observe(h, arrival, false)
+}
+
+func (s *StreamState) observe(h rtp.Header, arrival time.Time, isAudio bool) {
 	if !s.hasPrev {
 		s.packetsTotal++
 		s.maxSeq = h.SequenceNumber
@@ -60,12 +73,11 @@ func (s *StreamState) Observe(h rtp.Header, arrival time.Time) {
 
 	switch {
 	case delta >= seqHalf:
-		// out-of-order (reorder): update timing, ignore for loss
 		s.packetsReorder++
-		s.updateJitter(h, arrival)
+		if isAudio {
+			s.updateJitter(h, arrival)
+		}
 	case delta > maxGap:
-		// forward but huge gap → stream restart (e.g. SSRC reuse): reset all
-		// counters — this is a new flow instance, the previous totals are stale.
 		s.jitterTicks = 0
 		s.lastPacketDelayVariationMs = 0
 		s.packetsLost = 0
@@ -76,10 +88,13 @@ func (s *StreamState) Observe(h rtp.Header, arrival time.Time) {
 		s.lossRun = 0
 		s.packetsTotal = 1
 		s.maxSeq = h.SequenceNumber
+		s.saveBaseline(h, arrival)
+		return
 	case delta > 0:
-		// normal forward — classify previous loss run (burst/gap heuristic)
 		s.classifyLossRun()
-		s.lastPacketDelayVariationMs = s.updateJitter(h, arrival)
+		if isAudio {
+			s.lastPacketDelayVariationMs = s.updateJitter(h, arrival)
+		}
 		s.packetsTotal++
 		if delta > 1 {
 			s.packetsLost += uint64(delta - 1)
@@ -87,12 +102,15 @@ func (s *StreamState) Observe(h rtp.Header, arrival time.Time) {
 		}
 		s.maxSeq = h.SequenceNumber
 	default:
-		// delta == 0: duplicate/retransmit — update timing, ignore for loss
 		s.packetsDuplicate++
-		s.updateJitter(h, arrival)
+		if isAudio {
+			s.updateJitter(h, arrival)
+		}
 	}
 
-	s.saveBaseline(h, arrival)
+	if isAudio {
+		s.saveBaseline(h, arrival)
+	}
 }
 
 // saveBaseline records timing reference for jitter (arrival, timestamp) and

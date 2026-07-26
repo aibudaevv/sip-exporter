@@ -49,3 +49,10 @@ func CodecName(pt uint8, sdpMap map[uint8]string) string {
 	}
 	return staticCodecName(pt)
 }
+
+// IsAudioCodec returns false for non-audio payload types (telephone-event/DTMF
+// per RFC 4733, Comfort-Noise per RFC 3389) that share an SSRC with the audio
+// stream but have timing patterns that contaminate jitter/PDV measurements.
+func IsAudioCodec(codec string) bool {
+	return codec != "telephone-event" && codec != "CN"
+}

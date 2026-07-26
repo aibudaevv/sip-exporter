@@ -266,7 +266,11 @@ func (t *Tracker) Observe(
 	prevTotal := entry.state.packetsTotal
 	prevDup := entry.state.packetsDuplicate
 	prevReorder := entry.state.packetsReorder
-	entry.state.Observe(h, arrival)
+	if rtp.IsAudioCodec(codec) {
+		entry.state.Observe(h, arrival)
+	} else {
+		entry.state.ObserveNonAudio(h, arrival)
+	}
 
 	var lostDelta uint64
 	if entry.state.packetsLost >= prevLost {
