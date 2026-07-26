@@ -4814,8 +4814,8 @@
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
-              "expr": "histogram_quantile(0.95, sum by (le, carrier, ua_type, codec) (rate(sip_exporter_rtcp_loss_fraction_percent_bucket{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])))",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{codec}} p95",
+              "expr": "histogram_quantile(0.95, sum by (le, carrier, ua_type, source_country, codec) (rate(sip_exporter_rtcp_loss_fraction_percent_bucket{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])))",
+              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} / {{codec}} p95",
               "refId": "A"
             }
           ],
@@ -4849,8 +4849,8 @@
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
-              "expr": "sum by (carrier, ua_type, codec) (rate(sip_exporter_rtcp_cumulative_loss_total{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m]))",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{codec}}",
+              "expr": "sum by (carrier, ua_type, source_country, codec) (rate(sip_exporter_rtcp_cumulative_loss_total{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m]))",
+              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} / {{codec}}",
               "refId": "A"
             }
           ],
