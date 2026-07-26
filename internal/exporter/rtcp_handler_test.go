@@ -300,6 +300,56 @@ func TestHandleRTCP_PartialCompoundProcessesValidPrefix(t *testing.T) {
 	require.Equal(t, "rtcp", mm.parseErrorType)
 }
 
+// TestHandleRTCP_MultiBlockRR proves the inner loop (for _, blk := range rep.Blocks)
+// iterates all report blocks. With 2 blocks — one correlated (SSRC tracked) and one
+// orphan (untracked) — the correlated block emits jitter/loss/report while the orphan
+// increments the orphan counter and is skipped via continue.
+func TestHandleRTCP_MultiBlockRR(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newRTCPTestExporter(mm)
+	const (
+		knownSSRC  uint32 = 0xAAAA0012
+		orphanSSRC uint32 = 0xAAAA0013
+	)
+	registerRTPStream(t, e, knownSSRC)
+
+	rr := buildRR(
+		buildRTCPBlock(knownSSRC, 0, 0, 0, 1600, 0, 0),
+		buildRTCPBlock(orphanSSRC, 0, 0, 0, 3200, 0, 0),
+	)
+	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, mm.rtcpJitterCalls, "only correlated block emits jitter")
+	require.InDelta(t, 200.0, mm.rtcpJitterVal, 0.01)
+	require.Equal(t, 1, mm.rtcpReportCalls, "only correlated block emits report")
+	require.Equal(t, 1, mm.rtcpLossFracCalls)
+	require.Equal(t, 1, mm.rtcpOrphanCalls, "orphan block must increment orphan counter")
+	require.Zero(t, mm.rtcpCumLossCalls, "first RR establishes baseline")
+}
+
+// TestHandleRTCP_MixedCompound proves the outer loop (for _, rep := range reports)
+// iterates multiple sub-packets in a compound RTCP packet. An SR followed by an RR
+// (typical RFC 3550 ordering) — both carrying a block for the same correlated SSRC —
+// must produce 2 report calls and 2 jitter calls.
+func TestHandleRTCP_MixedCompound(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newRTCPTestExporter(mm)
+	const ssrc uint32 = 0xAAAA0014
+	registerRTPStream(t, e, ssrc)
+
+	sr := buildSR(0, buildRTCPBlock(ssrc, 0, 0, 0, 1600, 0, 0))
+	rr := buildRR(buildRTCPBlock(ssrc, 0, 0, 0, 1600, 0, 0))
+	compound := append(sr, rr...)
+
+	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, compound)
+	require.NoError(t, err)
+
+	require.Equal(t, 2, mm.rtcpReportCalls, "both SR and RR must be processed")
+	require.Equal(t, 2, mm.rtcpJitterCalls, "both blocks must emit jitter")
+	require.Equal(t, "rr", mm.rtcpReportType, "last report (RR) wins in mock")
+}
+
 // TestHandleRTCP_RTTUsesCaptureTimestamp proves that RTT is computed from the
 // kernel capture timestamp (e.pktTimestamp, SO_TIMESTAMPNS), not wall-clock
 // time.Now(). The capture time is set 60 s in the past; LSR is 5 s before the
