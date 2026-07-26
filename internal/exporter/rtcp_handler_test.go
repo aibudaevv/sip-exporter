@@ -193,6 +193,34 @@ func TestHandleRTCP_SenderReportType(t *testing.T) {
 	require.Equal(t, "sr", mm.rtcpReportType, "SR packet must be labelled type=sr")
 }
 
+// TestHandleRTCP_SenderReportValues proves that SR report-block values
+// (jitter/loss/RTT) are extracted correctly despite the 20-byte sender-info
+// preceding the blocks — the same values an equivalent RR would produce.
+func TestHandleRTCP_SenderReportValues(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newRTCPTestExporter(mm)
+	const ssrc uint32 = 0xAAAA0009
+	registerRTPStream(t, e, ssrc)
+
+	lsr := nowNTP32(time.Now().Add(-5 * time.Second))
+	sr := buildSR(0, buildRTCPBlock(ssrc, 26, 5, 100, 1600, lsr, 0x00010000))
+
+	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, sr)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, mm.rtcpJitterCalls)
+	require.InDelta(t, 200.0, mm.rtcpJitterVal, 0.01)
+
+	require.Equal(t, 1, mm.rtcpLossFracCalls)
+	require.InDelta(t, 26.0/256*100, mm.rtcpLossFracVal, 0.01)
+
+	require.Zero(t, mm.rtcpCumLossCalls, "first SR establishes baseline")
+
+	require.Equal(t, 1, mm.rtcpRTTCalls)
+	require.Greater(t, mm.rtcpRTTVal, 3500.0)
+	require.Less(t, mm.rtcpRTTVal, 4500.0)
+}
+
 func TestHandleRTCP_RTTSkippedOnClockSkew(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newRTCPTestExporter(mm)
