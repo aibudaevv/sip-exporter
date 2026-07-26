@@ -1,6 +1,7 @@
 package rtcp
 
 import (
+	"bytes"
 	"encoding/binary"
 	"testing"
 
@@ -247,9 +248,10 @@ func TestParse_MalformedMidCompoundContinuesIteration(t *testing.T) {
 // parses are deterministic and structurally valid. The caller's packet-consuming
 // goroutine has no recover(); a panic would stall the whole exporter. Beyond the
 // "no panic" contract, the fuzzer verifies: (1) parsing the same input twice
-// yields identical results (rules out uninitialized-memory reads), and (2) on a
-// successful parse every block's 24-bit cumulative-lost field fits in 24 bits
-// (catches extraction off-by-ones that don't crash).
+// yields identical results (rules out uninitialized-memory reads), (2) on a
+// successful parse every block's cumulative-lost fits in the signed 24-bit
+// range, and (3) a seed with all non-zero fields round-trips exactly (catches
+// extraction off-by-ones on SSRC, FractionLost, Jitter, LSR, DLSR).
 func FuzzParse(f *testing.F) {
 	// Seeds: valid compounds, edge cases, and structural traps.
 	f.Add(makeRR(0x1, makeBlock(0x2, 0, 0, 0, 0, 0, 0))) // 1-block RR
@@ -271,6 +273,9 @@ func FuzzParse(f *testing.F) {
 		[]byte{0x00, 202, 0x00, 0x01, 0xAB, 0xAB, 0xAB, 0xAB}...))
 	f.Add([]byte{0x00, 0x00, 0x00}) // short zeros
 	f.Add([]byte{})                 // empty
+	// All non-zero fields: exercises every byte offset in the report block.
+	allFieldsSeed := makeRR(0xA1B2C3D4, makeBlock(0xE5F6A7B8, 128, 1000, 0x11223344, 5000, 0x12345678, 0xABCDEF01))
+	f.Add(allFieldsSeed)
 	f.Fuzz(func(t *testing.T, data []byte) {
 		r1, err1 := Parse(data)
 		r2, err2 := Parse(data)
@@ -291,6 +296,18 @@ func FuzzParse(f *testing.F) {
 				require.LessOrEqual(t, blk.CumulativeLost, int32(0x7FFFFF),
 					"cumulative-lost must not exceed signed 24-bit maximum")
 			}
+		}
+		// Round-trip oracle for the all-nonzero-fields seed.
+		if bytes.Equal(data, allFieldsSeed) {
+			require.Len(t, r1, 1)
+			require.Len(t, r1[0].Blocks, 1)
+			blk := r1[0].Blocks[0]
+			require.Equal(t, uint32(0xE5F6A7B8), blk.SSRC)
+			require.Equal(t, uint8(128), blk.FractionLost)
+			require.Equal(t, int32(1000), blk.CumulativeLost)
+			require.Equal(t, uint32(5000), blk.Jitter)
+			require.Equal(t, uint32(0x12345678), blk.LSR)
+			require.Equal(t, uint32(0xABCDEF01), blk.DLSR)
 		}
 	})
 }
