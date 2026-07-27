@@ -6,9 +6,9 @@ SIP-exporter uses **eBPF** (extended Berkeley Packet Filter) attached to `AF_PAC
 
 | Capability | Why it's needed | Code reference |
 |---|---|---|
-| `CAP_BPF` (or `CAP_SYS_ADMIN`) | Load eBPF program into kernel via `bpf()` syscall | `exporter.go:326` — `ebpf.LoadCollection()` |
-| `CAP_NET_RAW` | Create `AF_PACKET` raw socket (`SOCK_RAW`) | `exporter.go:378` — `unix.Socket(AF_PACKET, SOCK_RAW, ...)` |
-| `CAP_NET_ADMIN` | Attach eBPF filter to socket, set socket buffer size | `exporter.go:434` — `SO_ATTACH_BPF`, `exporter.go:390-391` — `SO_RCVBUFFORCE`→`SO_RCVBUF` |
+| `CAP_BPF` (or `CAP_SYS_ADMIN`) | Load eBPF program into kernel via `bpf()` syscall | `internal/exporter/exporter.go` — `ebpf.LoadCollection()` |
+| `CAP_NET_RAW` | Create `AF_PACKET` raw socket (`SOCK_RAW`) | `internal/exporter/exporter.go` — `unix.Socket(AF_PACKET, SOCK_RAW, ...)` |
+| `CAP_NET_ADMIN` | Request a forced socket receive buffer | `internal/exporter/exporter.go` — `SO_RCVBUFFORCE` with `SO_RCVBUF` fallback |
 
 These capabilities are only available to root (`UID 0`), hence `--privileged`.
 
@@ -23,7 +23,7 @@ The container performs **read-only packet inspection**:
 1. **Loads** an eBPF socket filter program into the kernel (once, at startup)
 2. **Creates** an `AF_PACKET` raw socket bound to the specified network interface
 3. **Reads** packets from the socket into a Go channel (10,000 buffer)
-4. **Parses** SIP headers (method, status, Call-ID, From/To tags, CSeq, Session-Expires) and RTP headers (12 bytes: version, payload type, sequence, timestamp, SSRC)
+4. **Parses** SIP headers (method, status, Call-ID, From/To tags, CSeq, Session-Expires), fixed RTP headers (12 bytes: version, payload type, sequence, timestamp, SSRC), and RTCP report blocks
 5. **Exports** metrics to Prometheus via `/metrics` HTTP endpoint
 
 That's it. No packet modification, no packet injection, no network redirection, no iptables/nftables rules. (The exporter does make one outbound HTTPS telemetry beacon and write one telemetry ID file — see [Telemetry](#telemetry) below.)
@@ -80,14 +80,14 @@ SIP-exporter derives metric labels from packet content, but no **phone numbers**
 | Runtime dependencies | `libelf` (for eBPF), `bash` (for healthcheck), `libssl3` + `libcrypto3` (TLS libraries) |
 | Application | Single dynamically-linked Go binary |
 | Volumes | `/etc/localtime:ro`, `/etc/timezone:ro` — read-only timezone files |
-| Network | Only `/metrics` HTTP endpoint (default port 2112) |
+| Network | Inbound `/metrics` and `/health` HTTP endpoints (default port 2112); optional outbound telemetry |
 | Processes | Single process, no shell, no daemon |
 
-> **Security note — unauthenticated endpoints:** `/metrics` and `/health` are registered without any authentication or authorization middleware (`internal/server/server.go:100-101`). Anyone who can reach port `2112` can read all exported metrics. On untrusted networks, bind the HTTP listener to `localhost` (or a private interface), firewall port `2112`, or place a reverse proxy with authentication in front of it.
+> **Security note — unauthenticated endpoints:** `/metrics` and `/health` are registered without any authentication or authorization middleware (`internal/server/server.go:102-103`). Anyone who can reach port `2112` can read all exported metrics. The current service listens on all interfaces and does not provide a bind-address setting; on untrusted networks, firewall port `2112` or place a reverse proxy with authentication in front of it.
 
 ## eBPF Code Audit
 
-The entire eBPF program is [~130 lines of C](../internal/bpf/sip.c). It does two things: (1) passes through UDP traffic on the configured SIP port (default 5060), and (2) passes through RTP packets from media endpoints learned via SDP signaling (INVITE 200 OK).
+The eBPF program is [~166 lines of C](../internal/bpf/sip.c). It does two things: (1) passes through IPv4 UDP traffic on the configured SIP port (default 5060), and (2) passes through RTP/RTCP packets from media endpoints learned via SDP signaling (INVITE 200 OK).
 
 **What the eBPF program does:**
 1. Checks Ethernet header — skips non-Ethernet frames
@@ -97,10 +97,10 @@ The entire eBPF program is [~130 lines of C](../internal/bpf/sip.c). It does two
 5. Filters for UDP only (`protocol 17`)
 6. Reads source and destination ports
 7. Passes through packets where src or dst port matches a configured SIP port
-8. If RTP capture is enabled: also checks the first payload byte for the RTP version-2 prefix (`0x80`–`0xBF`) and a valid payload type — these are non-SIP-port packets on any UDP port
-9. Returns `skb->len` (pass) or `0` (drop from buffer — the packet still reaches its destination, it's just not copied to userspace)
+8. For matching media endpoints, returns up to 64 bytes for RTP and up to 1518 bytes for RTCP compounds; non-matching UDP is not copied to userspace
+9. Returns `skb->len` (SIP pass), a capped media snapshot, or `0` (drop from buffer — the packet still reaches its destination, it's just not copied to userspace)
 
-**RTP privacy:** Only the 12-byte RTP header is read (version, PT, sequence, timestamp, SSRC). The voice payload is never accessed by the application. RTP metrics expose only `carrier`, `ua_type`, `codec`, and `source_country` labels — no phone numbers, raw IPs, or call identifiers appear in RTP metrics. The full label inventory across all metric families is documented in [Data Exposed in Prometheus Labels](#data-exposed-in-prometheus-labels).
+**RTP privacy:** The application parses only the 12-byte fixed RTP header (version, PT, sequence, timestamp, SSRC), but the 64-byte capture snapshot can include a small payload prefix. It does not inspect or persist audio. RTCP compounds are copied up to 1518 bytes to parse report blocks. RTP metrics expose only `carrier`, `ua_type`, `codec`, `source_country`, and `direction` labels — no phone numbers, raw IPs, or call identifiers appear in RTP metrics. The full label inventory across all metric families is documented in [Data Exposed in Prometheus Labels](#data-exposed-in-prometheus-labels).
 
 **Critical point:** The eBPF filter is a *socket filter*, not a *tc/XDP filter*. It only controls which packets are copied to the application's socket buffer. Dropped packets are **not** lost — they continue through the normal network stack to their destination. The filter cannot modify or block traffic.
 

@@ -6,7 +6,7 @@ This guide provides pre-configured alerting examples for monitoring SIP infrastr
 
 ### Manual Setup
 
-1. Copy Prometheus alert rules to your Prometheus configuration
+1. Create a Prometheus rule file from the examples below: the first block defines the group, and the following blocks are entries to append to its `rules:` list
 2. Import Grafana dashboard JSON
 3. Configure Alertmanager receiver (Slack/PagerDuty/Email)
 4. Adjust thresholds based on your traffic patterns
@@ -17,7 +17,7 @@ This guide provides pre-configured alerting examples for monitoring SIP infrastr
 
 ```yaml
 groups:
-  - name: sip_exporter_critical
+  - name: sip_exporter
     interval: 30s
     rules:
       - alert: SIPExporterDown
@@ -50,7 +50,7 @@ groups:
           runbook_url: "https://wiki.example.com/runbooks/sip-ser-low"
 ```
 
-> **Note:** The `runbook_url` values above (and throughout this guide) are illustrative placeholders using the example host `wiki.example.com`. The shipped `alerts.yml` carries no `runbook_url`. Replace them with your operator's real runbook location before deploying.
+> **Note:** The `runbook_url` values above (and throughout this guide) are illustrative placeholders using the example host `wiki.example.com`. Replace them with your operator's real runbook location before deploying.
 
 ### Warning Alerts
 
@@ -139,7 +139,7 @@ groups:
         annotations:
           summary: "Spike in short calls (< 20s)"
           description: "More than 30% of completed sessions on carrier {{ $labels.carrier }} are shorter than 20 seconds. Possible call quality issues, abandoned calls, or toll fraud."
-      ```
+```
 
 ### Registration Health Alerts
 
@@ -282,7 +282,7 @@ These alerts monitor voice quality metrics extracted from SIP PUBLISH/NOTIFY wit
         annotations:
           summary: "High interarrival jitter"
           description: "95th percentile interarrival jitter is {{ $value | printf \"%.1f\" }}ms. High jitter causes audio artifacts. Check network queueing and jitter buffer configuration."
-      ```
+```
 
 ### RTP Media Alerts
 
@@ -394,7 +394,7 @@ These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) mea
         annotations:
           summary: "No RTCP received while RTP flows (carrier {{ $labels.carrier }}, ua_type {{ $labels.ua_type }})"
           description: "RTP packets are flowing for carrier {{ $labels.carrier }} (ua_type {{ $labels.ua_type }}) but zero RTCP reports have been received for approximately 15 minutes (a 5-minute rate window plus the 10-minute hold). RTCP is mandatory (RFC 3550) — its absence suggests RTCP is filtered, endpoints do not send it, or capture/registration is broken (check sip_exporter_rtcp_orphan_reports_total)."
-      ```
+```
 
 ### System Health Alerts
 

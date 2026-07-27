@@ -4,9 +4,9 @@ Load testing results for sip-exporter, measuring packet capture reliability unde
 
 ## TL;DR
 
-- **Zero packet loss** up to 2,000 CPS (~28,000 PPS) with full SIP dialog lifecycle
-- **< 15% CPU** and **~15 MB RAM** at maximum load
-- **GC stop-the-world pauses < 1 ms** — 400× smaller than the 4 MB socket buffer, packets never lost to GC
+- **Zero packet loss** up to 1,800 CPS (~21,200 PPS) with the measured full SIP dialog lifecycle
+- **< 15% CPU** and **9–16 MB RAM** at the measured full-call maximum
+- **GC stop-the-world pauses < 1 ms** in the measured workload, leaving substantial headroom relative to the 4 MB socket buffer
 - **Multi-NIC:** ~0.25% CPU and ~1 MiB RAM per additional interface
 - **Minimum:** 1 core / 128 MB for ≤ 1,000 CPS; 2 cores / 256 MB for ≤ 2,000 CPS
 
@@ -26,7 +26,7 @@ Key parameters for sizing:
 - **Network:** eBPF socket filter adds zero latency to SIP/RTP traffic (filters in kernel)
 - **Scrape interval:** 5-10 seconds recommended (scrape takes < 10 ms even at max load)
 
-## Reliability: Zero Packet Loss
+## Reliability: Measured Zero Packet Loss
 
 All scenarios tested with 3 consecutive runs per configuration; **0% loss required on every run**. On loopback each packet is captured twice (send + receive).
 
@@ -88,7 +88,7 @@ Scrape does not interfere with packet processing. Safe to scrape every 5-10 seco
 
 ### Memory Stability & GC
 
-**Memory:** 2-minute continuous run at 500 CPS (7,000 PPS), 840,000 packets processed. Memory starts at 12.8 MB, peaks at 14.4 MB, ends at 12.6 MB — growth rate **-0.09 MB/min (stable)**, CPU avg 4.6% / peak 5.9%. No memory leaks detected; memory stabilizes after initial warmup and remains flat.
+**Memory:** 2-minute continuous run at 500 CPS (7,000 PPS), 840,000 packets processed. Memory starts at 12.8 MB, peaks at 14.4 MB, ends at 12.6 MB — growth rate **-0.09 MB/min (stable)**, CPU avg 4.6% / peak 5.9%. This run shows stable memory after warmup; it is not a proof of leak absence under every workload.
 
 **GC:** Stop-the-world pauses at 2,000 CPS (14,000 PPS), 85 GC cycles over ~5 s of traffic.
 
@@ -99,7 +99,7 @@ Scrape does not interfere with packet processing. Safe to scrape every 5-10 seco
 | P95 STW | 0.264 ms |
 | Max STW | 0.970 ms |
 
-Maximum STW pause is **< 1 ms**. With `SO_RCVBUFFORCE = 4 MB` (~420 ms buffer at 28K PPS), GC pauses are 400× smaller than the socket buffer capacity — packets are never lost due to GC.
+Maximum STW pause is **< 1 ms** in this benchmark. With `SO_RCVBUFFORCE = 4 MB`, this leaves substantial measured headroom relative to the socket buffer; it does not prove that GC can never contribute to packet loss in another deployment.
 
 ## Multi-Interface Scaling
 
