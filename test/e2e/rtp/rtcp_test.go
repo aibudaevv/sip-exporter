@@ -65,6 +65,70 @@ func TestRTCP_NonMux_LegacyPort(t *testing.T) {
 		"RTCP injected to the legacy port+1 must be captured (S12-14 synthesis)")
 }
 
+// TestRTCP_NonMuxSSRCReuse verifies that two non-mux streams reusing an SSRC
+// are correlated through their distinct legacy RTCP endpoints. The RTCP port is
+// RTP port+1, so SSRC-only lookup is ambiguous unless the tracker maps each
+// registered RTCP endpoint back to its RTP endpoint before stream selection.
+func TestRTCP_NonMuxSSRCReuse(t *testing.T) {
+	ports := allocatePortsN(7)
+	httpPort, uasSIPA, uacSIPA := ports[0], ports[1], ports[2]
+	uasSIPB, uacSIPB, uacMediaA, uacMediaB := ports[3], ports[4], ports[5], ports[6]
+	uasMediaANum := allocateMediaPortWithAdjacent(t)
+	uasMediaBNum := allocateMediaPortWithAdjacent(t)
+	legacyRTCPA, legacyRTCPB := uasMediaANum+1, uasMediaBNum+1
+
+	dummyA, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: legacyRTCPA})
+	require.NoError(t, err)
+	defer dummyA.Close()
+	dummyB, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: legacyRTCPB})
+	require.NoError(t, err)
+	defer dummyB.Close()
+
+	endpoint := startExporter(
+		context.Background(), t, httpPort, uasSIPA+","+uasSIPB, testInterface, "",
+	)
+	waitA := startSippContainers(
+		context.Background(), t,
+		"uas_rtp.xml", "uac_rtp.xml",
+		uasSIPA, uacSIPA, strconv.Itoa(uasMediaANum), uacMediaA,
+		"127.0.0.1", "127.0.0.1",
+	)
+	waitB := startSippContainers(
+		context.Background(), t,
+		"uas_rtp.xml", "uac_rtp.xml",
+		uasSIPB, uacSIPB, strconv.Itoa(uasMediaBNum), uacMediaB,
+		"127.0.0.1", "127.0.0.1",
+	)
+
+	// SIPp starts UAC asynchronously; allow both INVITE/200 OK exchanges to
+	// register their SDP endpoints before injecting the colliding SSRC.
+	time.Sleep(500 * time.Millisecond)
+
+	sendRTPWithSSRC(t, uasMediaANum, testSSRC, 20)
+	sendRTPWithSSRC(t, uasMediaBNum, testSSRC, 20)
+	time.Sleep(300 * time.Millisecond)
+	sendRTCPRR(t, legacyRTCPA, testSSRC, 0)
+	sendRTCPRR(t, legacyRTCPB, testSSRC, 0)
+	time.Sleep(100 * time.Millisecond)
+	sendRTCPRR(t, legacyRTCPA, testSSRC, 5)
+	sendRTCPRR(t, legacyRTCPB, testSSRC, 7)
+	time.Sleep(300 * time.Millisecond)
+
+	waitA()
+	waitB()
+
+	require.Eventually(t, func() bool {
+		return metricExists(t, endpoint, "sip_exporter_rtcp_reports_total") &&
+			getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) == 4
+	}, 10*time.Second, 500*time.Millisecond, "all four RRs must correlate to their non-mux streams")
+	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_cumulative_loss_total"))
+	require.Equal(t, 12.0,
+		getMetricByLabel(t, endpoint, "sip_exporter_rtcp_cumulative_loss_total"),
+		"each RTCP endpoint must keep an independent cumulative-loss baseline")
+	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_orphan_reports_total"))
+	require.Zero(t, getRTCPOrphanCount(t, endpoint), "colliding SSRCs on registered RTCP endpoints must not become orphans")
+}
+
 // rtcpAttrPort is the explicit RTCP port declared via a=rtcp in
 // uas_rtcp_attr.xml (RFC 3605). SIPp has no [rtcp_port] template keyword, so the
 // scenario carries a fixed port; the test reserves it with a dummy listener so a

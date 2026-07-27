@@ -65,9 +65,9 @@ func TestTracker_UnregisterReturnsDeletedEndpoints(t *testing.T) {
 func TestTracker_UnregisterReturnsRTCPEndpoints(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
-	tr.RegisterRTCP("10.0.0.1", 5005, "call-1")
+	tr.RegisterRTCP("10.0.0.1", 5005, "10.0.0.1", 5004, "call-1")
 	tr.Register("10.0.0.3", 5008, sampleLabels("call-2"))
-	tr.RegisterRTCP("10.0.0.3", 5009, "call-2")
+	tr.RegisterRTCP("10.0.0.3", 5009, "10.0.0.3", 5008, "call-2")
 
 	_, deleted := tr.Unregister("call-1")
 	require.Len(t, deleted, 2, "must return RTP and RTCP endpoints for call-1")
@@ -95,8 +95,8 @@ func TestTracker_UnregisterRTCPDoesNotAffectOneWay(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
 	tr.Register("10.0.0.2", 5006, sampleLabels("call-1"))
-	tr.RegisterRTCP("10.0.0.1", 5005, "call-1")
-	tr.RegisterRTCP("10.0.0.2", 5007, "call-1")
+	tr.RegisterRTCP("10.0.0.1", 5005, "10.0.0.1", 5004, "call-1")
+	tr.RegisterRTCP("10.0.0.2", 5007, "10.0.0.2", 5006, "call-1")
 	t0 := time.Unix(1000, 0)
 	_, ok := tr.Observe("10.0.0.99", 9999, "10.0.0.1", 5004, newHeader(1, 160), t0)
 	require.True(t, ok)
@@ -571,6 +571,42 @@ func TestTracker_RecordRTCP(t *testing.T) {
 	// Unknown SSRC → ok=false (uncorrelated report).
 	_, _, ok = tr.RecordRTCP(0xDEADBEEF, 99, epSrcIP, epSrcPort, epDstIP, epDstPort)
 	require.False(t, ok)
+}
+
+func TestTracker_RecordRTCP_CollisionResolvesSeparateRTCPEndpoints(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	labelsA := sampleLabels("call-a")
+	labelsA.Carrier = "carrier-a"
+	labelsB := sampleLabels("call-b")
+	labelsB.Carrier = "carrier-b"
+	tr.Register("10.0.0.1", 5004, labelsA)
+	tr.Register("10.0.0.2", 5006, labelsB)
+	tr.RegisterRTCP("10.0.0.1", 5005, "10.0.0.1", 5004, "call-a")
+	tr.RegisterRTCP("10.0.0.2", 5007, "10.0.0.2", 5006, "call-b")
+
+	const ssrc uint32 = 0xCAFED00D
+	t0 := time.Unix(1000, 0)
+	_, ok := tr.Observe("10.0.0.1", 5004, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), t0)
+	require.True(t, ok)
+	_, ok = tr.Observe("10.0.0.2", 5006, "0.0.0.0", 0, newHeaderSSRC(1, ssrc), t0)
+	require.True(t, ok)
+
+	ctx, delta, ok := tr.RecordRTCP(ssrc, 0, "9.9.9.9", 0, "10.0.0.1", 5005)
+	require.True(t, ok)
+	require.Equal(t, "carrier-a", ctx.Labels.Carrier)
+	require.Zero(t, delta)
+
+	ctx, delta, ok = tr.RecordRTCP(ssrc, 0, "9.9.9.9", 0, "10.0.0.2", 5007)
+	require.True(t, ok)
+	require.Equal(t, "carrier-b", ctx.Labels.Carrier)
+	require.Zero(t, delta)
+
+	_, delta, ok = tr.RecordRTCP(ssrc, 5, "9.9.9.9", 0, "10.0.0.1", 5005)
+	require.True(t, ok)
+	require.Equal(t, uint64(5), delta)
+	_, delta, ok = tr.RecordRTCP(ssrc, 7, "9.9.9.9", 0, "10.0.0.2", 5007)
+	require.True(t, ok)
+	require.Equal(t, uint64(7), delta)
 }
 
 // TestRecordRTCP_NegativeCumulativePreservesBaseline proves that a negative

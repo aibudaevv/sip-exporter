@@ -88,6 +88,11 @@ type (
 		port uint16
 	}
 
+	rtcpMediaEntry struct {
+		callID      string
+		rtpEndpoint endpointKey
+	}
+
 	// streamKey identifies one RTP flow: a media endpoint plus an SSRC. SSRCs are
 	// only unique within a flow, so keying by SSRC alone would collide when two
 	// dialogs reuse an SSRC within the TTL window.
@@ -102,7 +107,7 @@ type (
 		mu        sync.Mutex
 		streams   map[streamKey]*streamEntry
 		media     map[endpointKey]MediaLabels
-		rtcpMedia map[endpointKey]string // RTCP endpoints (IP:port → CallID) for BPF cleanup only
+		rtcpMedia map[endpointKey]rtcpMediaEntry      // RTCP endpoints for BPF cleanup and RTCP→RTP correlation
 		callRTP   map[string]map[endpointKey]struct{} // per-CallID endpoints that ever had RTP (TTL-independent)
 		ssrcIndex map[uint32][]streamKey              // SSRC → stream keys (multi-valued: an SSRC may be reused across endpoints)
 		ttl       time.Duration
@@ -133,7 +138,7 @@ func NewTracker(ttl time.Duration) *Tracker {
 	return &Tracker{
 		streams:   make(map[streamKey]*streamEntry),
 		media:     make(map[endpointKey]MediaLabels),
-		rtcpMedia: make(map[endpointKey]string),
+		rtcpMedia: make(map[endpointKey]rtcpMediaEntry),
 		callRTP:   make(map[string]map[endpointKey]struct{}),
 		ssrcIndex: make(map[uint32][]streamKey),
 		ttl:       ttl,
@@ -164,12 +169,18 @@ func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) {
 }
 
 // RegisterRTCP records a separate RTCP endpoint (IP:port) for BPF-map cleanup
-// at teardown. Unlike Register, this does NOT participate in label resolution —
-// RTCP packets are dispatched via RecordRTCP (SSRC-based), not lookupLabels.
-func (t *Tracker) RegisterRTCP(ip string, port uint16, callID string) {
+// and maps it to its RTP endpoint for SSRC-collision disambiguation.
+func (t *Tracker) RegisterRTCP(
+	ip string, port uint16,
+	rtpIP string, rtpPort uint16,
+	callID string,
+) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.rtcpMedia[endpointKey{ip: ip, port: port}] = callID
+	t.rtcpMedia[endpointKey{ip: ip, port: port}] = rtcpMediaEntry{
+		callID:      callID,
+		rtpEndpoint: endpointKey{ip: rtpIP, port: rtpPort},
+	}
 }
 
 // Unregister removes all media endpoints and RTP streams belonging to a SIP
@@ -190,8 +201,8 @@ func (t *Tracker) Unregister(callID string) (RTPDialogResult, []MediaEndpoint) {
 		}
 	}
 
-	for k, cid := range t.rtcpMedia {
-		if cid == callID {
+	for k, entry := range t.rtcpMedia {
+		if entry.callID == callID {
 			deleted = append(deleted, MediaEndpoint{IP: k.ip, Port: k.port})
 			delete(t.rtcpMedia, k)
 		}
@@ -489,6 +500,9 @@ func (t *Tracker) selectStream(
 		{ip: dstIP, port: dstPort},
 		{ip: srcIP, port: srcPort},
 	} {
+		if rtcp, found := t.rtcpMedia[ep]; found {
+			ep = rtcp.rtpEndpoint
+		}
 		for _, k := range keys {
 			if k.endpoint != ep {
 				continue
