@@ -3,7 +3,6 @@
 package rtp
 
 import (
-	"context"
 	"encoding/binary"
 	"net"
 	"strconv"
@@ -55,14 +54,14 @@ func sendControlledRTP(t *testing.T, port int, seqNums []uint16) {
 	}
 }
 
-// TestRTP_QualityMetrics_Baseline verifies that clean G.711a RTP produces
+// TestRTPQualityMetricsBaseline verifies that clean G.711a RTP produces
 // r_factor, mos_f1, mos_f2, and mos_adaptive histograms with sane values.
-func TestRTP_QualityMetrics_Baseline(t *testing.T) {
+func TestRTPQualityMetricsBaseline(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
+	endpoint := startExporter(t.Context(), t, httpPort, uasSIP, testInterface, "")
 
-	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
+	runSippRTP(t.Context(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 
 	require.Eventually(t, func() bool {
 		return getRTPMetric(t, endpoint, "sip_exporter_rtp_r_factor_count") > 0
@@ -85,19 +84,19 @@ func TestRTP_QualityMetrics_Baseline(t *testing.T) {
 	}
 }
 
-// TestRTP_QualityMetrics_Degraded verifies that degraded RTP produces a lower
+// TestRTPQualityMetricsDegraded verifies that degraded RTP produces a lower
 // R-factor and all MOS variant histograms are populated. The ordering assertion
 // (f1 ≤ f2 ≤ adaptive) is mathematically guaranteed by the E-model formula;
 // strict separation requires jitter > 50ms (F1's JB threshold), which netem at
 // this scale does not reach. Strict f1 < f2 differentiation is covered by unit
 // tests with controlled jitter inputs.
-func TestRTP_QualityMetrics_Degraded(t *testing.T) {
+func TestRTPQualityMetricsDegraded(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
+	endpoint := startExporter(t.Context(), t, httpPort, uasSIP, testInterface, "")
 
 	applyNetem(t, []string{"delay", "30ms", "10ms", "loss", "30%"}, uasMedia, uacMedia)
-	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
+	runSippRTP(t.Context(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 
 	require.Eventually(t, func() bool {
 		return getRTPMetric(t, endpoint, "sip_exporter_rtp_r_factor_count") > 0
@@ -120,10 +119,10 @@ func TestRTP_QualityMetrics_Degraded(t *testing.T) {
 	require.LessOrEqual(t, f2Avg, adaptAvg, "F2 (JB=200) should be <= Adaptive (JB=500)")
 }
 
-// TestRTP_TeardownMetrics consolidates four dialog-teardown RTP quality tests
+// TestRTPTeardownMetrics consolidates four dialog-teardown RTP quality tests
 // into a single table-driven test. Each case establishes a SIP dialog, optionally
 // sends RTP with controlled sequence numbers, then verifies a teardown metric.
-func TestRTP_TeardownMetrics(t *testing.T) {
+func TestRTPTeardownMetrics(t *testing.T) {
 	tests := []struct {
 		name      string
 		rtpSeqs   []uint16
@@ -183,10 +182,10 @@ func TestRTP_TeardownMetrics(t *testing.T) {
 			httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 			uasMediaNum, _ := strconv.Atoi(uasMedia)
 
-			endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP,
+			endpoint := startExporterWithCarrierUA(t.Context(), t, httpPort, uasSIP,
 				integrationCarriersYAML, integrationUserAgentsYAML, "")
 
-			wait := startSippContainers(context.Background(), t,
+			wait := startSippContainers(t.Context(), t,
 				"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
 
 			require.Eventually(t, func() bool {

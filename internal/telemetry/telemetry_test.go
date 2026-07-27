@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetOrCreateID_LoadExisting(t *testing.T) {
+func TestGetOrCreateIDLoadExisting(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "anon_id")
 	expectedID := uuid.New().String()
@@ -26,7 +26,7 @@ func TestGetOrCreateID_LoadExisting(t *testing.T) {
 	require.Equal(t, expectedID, id)
 }
 
-func TestGetOrCreateID_GenerateNew(t *testing.T) {
+func TestGetOrCreateIDGenerateNew(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "anon_id")
 
@@ -44,7 +44,7 @@ func TestGetOrCreateID_GenerateNew(t *testing.T) {
 	require.Contains(t, string(data), "anonymous ID used for telemetry")
 }
 
-func TestGetOrCreateID_GenerateNewCreatesDirectory(t *testing.T) {
+func TestGetOrCreateIDGenerateNewCreatesDirectory(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "subdir", "nested", "anon_id")
 
@@ -57,14 +57,14 @@ func TestGetOrCreateID_GenerateNewCreatesDirectory(t *testing.T) {
 	require.FileExists(t, path, "ID file must exist after generation")
 }
 
-func TestGetOrCreateID_EmptyPathEphemeral(t *testing.T) {
+func TestGetOrCreateIDEmptyPathEphemeral(t *testing.T) {
 	id := getOrCreateID("")
 
 	_, err := uuid.Parse(id)
 	require.NoError(t, err, "empty path must still return a valid UUID")
 }
 
-func TestGetOrCreateID_InvalidContentOverwrites(t *testing.T) {
+func TestGetOrCreateIDInvalidContentOverwrites(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "anon_id")
 	require.NoError(t, os.WriteFile(path, []byte("not-a-uuid\n"), 0644))
@@ -76,7 +76,7 @@ func TestGetOrCreateID_InvalidContentOverwrites(t *testing.T) {
 	require.NotEqual(t, "not-a-uuid", id)
 }
 
-func TestGetOrCreateID_WriteFailEphemeral(t *testing.T) {
+func TestGetOrCreateIDWriteFailEphemeral(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "subdir", "anon_id")
 
@@ -89,7 +89,7 @@ func TestGetOrCreateID_WriteFailEphemeral(t *testing.T) {
 	require.NoError(t, err, "write failure must fall back to ephemeral UUID")
 }
 
-func TestSendBeacon_CorrectParams(t *testing.T) {
+func TestSendBeaconCorrectParams(t *testing.T) {
 	var capturedQuery url.Values
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedQuery = r.URL.Query()
@@ -97,7 +97,7 @@ func TestSendBeacon_CorrectParams(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := sendBeacon(context.Background(), server.URL, beaconData{
+	err := sendBeacon(t.Context(), server.URL, beaconData{
 		anonID: "550e8400-e29b-41d4-a716-446655440000",
 		uptime: 2 * time.Hour,
 	})
@@ -110,13 +110,13 @@ func TestSendBeacon_CorrectParams(t *testing.T) {
 	require.Equal(t, "7200", capturedQuery.Get("uptime"))
 }
 
-func TestSendBeacon_HTTPErrorNoCrash(t *testing.T) {
+func TestSendBeaconHTTPErrorNoCrash(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer server.Close()
 
-	err := sendBeacon(context.Background(), server.URL, beaconData{
+	err := sendBeacon(t.Context(), server.URL, beaconData{
 		anonID: uuid.New().String(),
 		uptime: time.Minute,
 	})
@@ -124,11 +124,11 @@ func TestSendBeacon_HTTPErrorNoCrash(t *testing.T) {
 	require.NoError(t, err, "HTTP error status must not cause sendBeacon to fail")
 }
 
-func TestSendBeacon_UnreachableURLNoCrash(t *testing.T) {
-	_, cancel := context.WithCancel(context.Background())
+func TestSendBeaconUnreachableURLNoCrash(t *testing.T) {
+	_, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	err := sendBeacon(context.Background(), "http://127.0.0.1:0/beacon", beaconData{
+	err := sendBeacon(t.Context(), "http://127.0.0.1:0/beacon", beaconData{
 		anonID: uuid.New().String(),
 		uptime: time.Minute,
 	})
@@ -136,7 +136,7 @@ func TestSendBeacon_UnreachableURLNoCrash(t *testing.T) {
 	require.Error(t, err, "unreachable URL must return error, not panic")
 }
 
-func TestRun_Disabled(t *testing.T) {
+func TestRunDisabled(t *testing.T) {
 	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requestCount.Add(1)
@@ -146,7 +146,7 @@ func TestRun_Disabled(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		Run(context.Background(), Config{
+		Run(t.Context(), Config{
 			Enabled: false,
 			URL:     server.URL,
 		}, time.Now())
@@ -162,7 +162,7 @@ func TestRun_Disabled(t *testing.T) {
 	require.Equal(t, int32(0), requestCount.Load(), "no beacon must be sent when disabled")
 }
 
-func TestRun_ImmediateBeacon(t *testing.T) {
+func TestRunImmediateBeacon(t *testing.T) {
 	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requestCount.Add(1)
@@ -170,7 +170,7 @@ func TestRun_ImmediateBeacon(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 
 	go Run(ctx, Config{
 		Enabled:  true,
@@ -186,13 +186,13 @@ func TestRun_ImmediateBeacon(t *testing.T) {
 	cancel()
 }
 
-func TestRun_ContextCancel(t *testing.T) {
+func TestRunContextCancel(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 
 	done := make(chan struct{})
 	go func() {

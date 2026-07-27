@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestResolver_Lookup_SourceIP(t *testing.T) {
+func TestResolverLookupSourceIP(t *testing.T) {
 	r, err := NewResolver([]Carrier{
 		{Name: "provider-a", CIDRs: []string{"10.0.1.0/24"}},
 		{Name: "provider-b", CIDRs: []string{"10.0.2.0/24"}},
@@ -27,7 +27,7 @@ func TestResolver_Lookup_SourceIP(t *testing.T) {
 	require.Empty(t, country)
 }
 
-func TestResolver_Lookup_MultipleCIDRs(t *testing.T) {
+func TestResolverLookupMultipleCIDRs(t *testing.T) {
 	r, err := NewResolver([]Carrier{
 		{Name: "provider-a", CIDRs: []string{"10.0.1.0/24", "192.168.100.0/24"}},
 	})
@@ -42,7 +42,7 @@ func TestResolver_Lookup_MultipleCIDRs(t *testing.T) {
 	require.Equal(t, "other", carrier)
 }
 
-func TestResolver_Lookup_EmptyResolver(t *testing.T) {
+func TestResolverLookupEmptyResolver(t *testing.T) {
 	r, err := NewResolver(nil)
 	require.NoError(t, err)
 	carrier, country := r.Lookup(net.ParseIP("10.0.1.1"))
@@ -50,7 +50,7 @@ func TestResolver_Lookup_EmptyResolver(t *testing.T) {
 	require.Empty(t, country)
 }
 
-func TestResolver_Lookup_CountryField(t *testing.T) {
+func TestResolverLookupCountryField(t *testing.T) {
 	r, err := NewResolver([]Carrier{
 		{Name: "provider-a", CIDRs: []string{"10.0.1.0/24"}, Country: "RU"},
 		{Name: "provider-b", CIDRs: []string{"10.0.2.0/24"}},
@@ -70,21 +70,21 @@ func TestResolver_Lookup_CountryField(t *testing.T) {
 	require.Empty(t, country)
 }
 
-func TestNewResolver_InvalidCIDR(t *testing.T) {
+func TestNewResolverInvalidCIDR(t *testing.T) {
 	_, err := NewResolver([]Carrier{
 		{Name: "bad", CIDRs: []string{"not-a-cidr"}},
 	})
 	require.Error(t, err)
 }
 
-func TestNewResolver_EmptyName(t *testing.T) {
+func TestNewResolverEmptyName(t *testing.T) {
 	_, err := NewResolver([]Carrier{
 		{Name: "", CIDRs: []string{"10.0.0.0/24"}},
 	})
 	require.Error(t, err)
 }
 
-func TestLoadConfig_ValidYAML(t *testing.T) {
+func TestLoadConfigValidYAML(t *testing.T) {
 	tmpFile, err := os.CreateTemp(t.TempDir(), "carriers-*.yaml")
 	require.NoError(t, err)
 
@@ -100,7 +100,7 @@ func TestLoadConfig_ValidYAML(t *testing.T) {
 	require.Empty(t, country)
 }
 
-func TestLoadConfig_WithCountry(t *testing.T) {
+func TestLoadConfigWithCountry(t *testing.T) {
 	tmpFile, err := os.CreateTemp(t.TempDir(), "carriers-*.yaml")
 	require.NoError(t, err)
 
@@ -116,7 +116,7 @@ func TestLoadConfig_WithCountry(t *testing.T) {
 	require.Equal(t, "DE", country)
 }
 
-func TestLoadConfig_FileNotFound(t *testing.T) {
+func TestLoadConfigFileNotFound(t *testing.T) {
 	_, err := LoadConfig("/nonexistent/carriers.yaml")
 	require.Error(t, err)
 }

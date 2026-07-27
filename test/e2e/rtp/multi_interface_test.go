@@ -3,7 +3,6 @@
 package rtp
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"strings"
@@ -78,7 +77,7 @@ func setupVethPair(t *testing.T) {
 	require.NoError(t, err, "failed to create veth pair: %s", string(out))
 }
 
-// TestRTP_MultiInterface verifies that RTP capture and correlation work when
+// TestRTPMultiInterface verifies that RTP capture and correlation work when
 // the SIP dialog uses non-loopback IPs. A single SIP+RTP flow is established
 // between UAS (10.10.0.1) and UAC (10.10.0.2), both bound to veth endpoints.
 // The exporter listens on lo+veth0a+veth0b.
@@ -90,9 +89,9 @@ func setupVethPair(t *testing.T) {
 // proves SDP correlation and RTP tracking with non-loopback media endpoints
 // (more realistic than 127.0.0.1), but does NOT prove cross-NIC capture per se.
 // True cross-NIC testing would require separate network namespaces.
-func TestRTP_MultiInterface(t *testing.T) {
+func TestRTPMultiInterface(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	setupVethPair(t)
 
 	ports := allocatePortsN(6)

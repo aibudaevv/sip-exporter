@@ -37,19 +37,19 @@ const (
 
 var (
 	portMu sync.Mutex
-
-	projectRoot   string
-	exporterImage string
 )
 
-func init() {
+func projectRoot() string {
 	_, file, _, _ := runtime.Caller(0)
-	projectRoot = filepath.Join(filepath.Dir(file), "..", "..", "..")
+	return filepath.Join(filepath.Dir(file), "..", "..", "..")
+}
 
-	exporterImage = os.Getenv("SIP_EXPORTER_E2E_IMAGE")
-	if exporterImage == "" {
-		exporterImage = "sip-exporter:latest"
+func exporterImage() string {
+	image := os.Getenv("SIP_EXPORTER_E2E_IMAGE")
+	if image == "" {
+		return "sip-exporter:latest"
 	}
+	return image
 }
 
 // allocatePortsN returns n unique port numbers (as strings) using the kernel's
@@ -114,7 +114,7 @@ func startExporterWithExtraEnv(
 	}
 
 	req := testcontainers.ContainerRequest{
-		Image:       exporterImage,
+		Image:       exporterImage(),
 		Privileged:  true,
 		NetworkMode: "host",
 		Env:         env,
@@ -139,18 +139,18 @@ func startExporterWithExtraEnv(
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
 		if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
-			logs, logErr := c.Logs(context.Background())
+			logs, logErr := c.Logs(cleanupCtx)
 			if logErr == nil {
 				defer logs.Close()
 				logBytes, _ := io.ReadAll(logs)
 				t.Logf("Exporter logs:\n%s", strings.TrimSpace(string(logBytes)))
 			}
 		}
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer stopCancel()
-		_ = c.Stop(stopCtx, nil)
-		_ = c.Terminate(context.Background())
+		_ = c.Stop(cleanupCtx, nil)
+		_ = c.Terminate(cleanupCtx)
 	})
 
 	return fmt.Sprintf("http://localhost:%s", httpPort)
@@ -211,7 +211,7 @@ func startExporterWithCarrierUA(
 	}
 
 	req := testcontainers.ContainerRequest{
-		Image:       exporterImage,
+		Image:       exporterImage(),
 		Privileged:  true,
 		NetworkMode: "host",
 		Env:         envVars,
@@ -237,18 +237,18 @@ func startExporterWithCarrierUA(
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
 		if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
-			logs, logErr := c.Logs(context.Background())
+			logs, logErr := c.Logs(cleanupCtx)
 			if logErr == nil {
 				defer logs.Close()
 				logBytes, _ := io.ReadAll(logs)
 				t.Logf("Exporter logs:\n%s", strings.TrimSpace(string(logBytes)))
 			}
 		}
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer stopCancel()
-		_ = c.Stop(stopCtx, nil)
-		_ = c.Terminate(context.Background())
+		_ = c.Stop(cleanupCtx, nil)
+		_ = c.Terminate(cleanupCtx)
 	})
 
 	return fmt.Sprintf("http://localhost:%s", httpPort)
@@ -262,7 +262,7 @@ const socketPacketsMetric = "sip_exporter_socket_packets_received_total"
 // delivered to the exporter's AF_PACKET socket.
 func getSocketPacketsReceived(t *testing.T, endpoint string) float64 {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/metrics", nil)
 	require.NoError(t, err)
@@ -362,18 +362,18 @@ func sendRTPOutOfOrder(t *testing.T, portStr string) {
 	}
 }
 
-// TestRTP_ReachesApp_WithCapture verifies that when RTP capture is enabled and
+// TestRTPReachesAppWithCapture verifies that when RTP capture is enabled and
 // a media endpoint is registered via SDP, RTP packets pass the eBPF filter and
 // reach the exporter's socket.
-func TestRTP_ReachesApp_WithCapture(t *testing.T) {
+func TestRTPReachesAppWithCapture(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 	uasMediaNum, _ := strconv.Atoi(uasMedia)
 
-	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP,
+	endpoint := startExporterWithCarrierUA(t.Context(), t, httpPort, uasSIP,
 		integrationCarriersYAML, integrationUserAgentsYAML, "")
 
-	wait := startSippContainers(context.Background(), t,
+	wait := startSippContainers(t.Context(), t,
 		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
 
 	require.Eventually(t, func() bool {
@@ -398,17 +398,17 @@ func TestRTP_ReachesApp_WithCapture(t *testing.T) {
 	wait()
 }
 
-// TestRTP_UncorrelatedDropped verifies RTP isolation: with the strict SDP-driven
+// TestRTPUncorrelatedDropped verifies RTP isolation: with the strict SDP-driven
 // BPF filter, RTP sent to a port with no established SIP dialog (no SDP-registered
 // media endpoint) is dropped by BPF — it never reaches the exporter socket and is
 // not counted as RTP metrics.
-func TestRTP_UncorrelatedDropped(t *testing.T) {
+func TestRTPUncorrelatedDropped(t *testing.T) {
 	ports := allocatePortsN(4)
 	httpPort, sipPort, rtpPort := ports[0], ports[1], ports[2]
 	rtpPortNum, err := strconv.Atoi(rtpPort)
 	require.NoError(t, err)
 
-	endpoint := startExporter(context.Background(), t, httpPort, sipPort, testInterface, "")
+	endpoint := startExporter(t.Context(), t, httpPort, sipPort, testInterface, "")
 
 	time.Sleep(1500 * time.Millisecond)
 	beforeSocket := getSocketPacketsReceived(t, endpoint)

@@ -3,7 +3,6 @@
 package rtp
 
 import (
-	"context"
 	"encoding/binary"
 	"net"
 	"strconv"
@@ -113,7 +112,7 @@ func TestSDPFilter(t *testing.T) {
 			uasMedia := ports[4]
 			uacMedia := ports[5]
 
-			endpoint := startExporterWithCarrierUA(context.Background(), t,
+			endpoint := startExporterWithCarrierUA(t.Context(), t,
 				httpPort, uasSIP,
 				integrationCarriersYAML, integrationUserAgentsYAML, "")
 
@@ -122,7 +121,7 @@ func TestSDPFilter(t *testing.T) {
 
 			if tt.setupDialog {
 				targetPort, _ = strconv.Atoi(uasMedia)
-				wait = startSippContainers(context.Background(), t,
+				wait = startSippContainers(t.Context(), t,
 					"uas_nortp.xml", "uac_nortp.xml",
 					uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
 
@@ -172,12 +171,12 @@ func TestSDPFilter(t *testing.T) {
 	}
 }
 
-// TestSDPFilter_EntryLifecycle verifies the BPF map entry lifecycle (S15-2, S15-3):
+// TestSDPFilterEntryLifecycle verifies the BPF map entry lifecycle (S15-2, S15-3):
 // the entry is inserted on INVITE 200 OK (dialog active) and deleted on BYE 200 OK.
 //
 // MC/DC: condition C (endpoint in BPF map) is the only variable.
 // The dialog state (active vs torn down) controls whether the entry exists.
-func TestSDPFilter_EntryLifecycle(t *testing.T) {
+func TestSDPFilterEntryLifecycle(t *testing.T) {
 	const pktCount = 20
 
 	tests := []struct {
@@ -195,11 +194,11 @@ func TestSDPFilter_EntryLifecycle(t *testing.T) {
 			httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 			uasMediaNum, _ := strconv.Atoi(uasMedia)
 
-			endpoint := startExporterWithCarrierUA(context.Background(), t,
+			endpoint := startExporterWithCarrierUA(t.Context(), t,
 				httpPort, uasSIP,
 				integrationCarriersYAML, integrationUserAgentsYAML, "")
 
-			wait := startSippContainers(context.Background(), t,
+			wait := startSippContainers(t.Context(), t,
 				"uas_nortp.xml", "uac_nortp.xml",
 				uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
 

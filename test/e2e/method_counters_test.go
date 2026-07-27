@@ -3,17 +3,16 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-// TestMethodCounters_FullCallFlow verifies that request method counters are
+// TestMethodCountersFullCallFlow verifies that request method counters are
 // incremented correctly for a full INVITE → 200 OK → ACK → BYE → 200 OK flow.
-func TestMethodCounters_FullCallFlow(t *testing.T) {
+func TestMethodCountersFullCallFlow(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const callCount = 100
 	env := newTestEnv(ctx, t)
 
@@ -40,10 +39,10 @@ func TestMethodCounters_FullCallFlow(t *testing.T) {
 	waitForSessionsZero(t, env.endpoint)
 }
 
-// TestMethodCounters_Options verifies the OPTIONS request counter.
-func TestMethodCounters_Options(t *testing.T) {
+// TestMethodCountersOptions verifies the OPTIONS request counter.
+func TestMethodCountersOptions(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const callCount = 50
 	env := newTestEnv(ctx, t)
 
@@ -54,11 +53,11 @@ func TestMethodCounters_Options(t *testing.T) {
 	require.Equal(t, float64(callCount), optionsTotal)
 }
 
-// TestMethodCounters_OtherMethods verifies counters for SUBSCRIBE, UPDATE, INFO,
+// TestMethodCountersOtherMethods verifies counters for SUBSCRIBE, UPDATE, INFO,
 // REFER, PRACK, and MESSAGE requests.
-func TestMethodCounters_OtherMethods(t *testing.T) {
+func TestMethodCountersOtherMethods(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const callCount = 50
 
 	tests := []struct {

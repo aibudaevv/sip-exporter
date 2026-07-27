@@ -3,15 +3,14 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestMultiCodec_EarlyMedia_Success(t *testing.T) {
+func TestMultiCodecEarlyMediaSuccess(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
 	const callCount = 10

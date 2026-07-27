@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestParse_SessionLevelConnection(t *testing.T) {
+func TestParseSessionLevelConnection(t *testing.T) {
 	body := []byte("v=0\r\n" +
 		"o=- 1 1 IN IP4 10.0.0.1\r\n" +
 		"s=-\r\n" +
@@ -22,7 +22,7 @@ func TestParse_SessionLevelConnection(t *testing.T) {
 	require.EqualValues(t, 8000, media[0].ClockRates[0])
 }
 
-func TestParse_PerMediaConnectionOverridesSession(t *testing.T) {
+func TestParsePerMediaConnectionOverridesSession(t *testing.T) {
 	body := []byte("c=IN IP4 10.0.0.1\r\n" +
 		"m=audio 5004 RTP/AVP 0\r\n" +
 		"c=IN IP4 10.0.0.99\r\n" +
@@ -32,14 +32,14 @@ func TestParse_PerMediaConnectionOverridesSession(t *testing.T) {
 	require.Equal(t, "10.0.0.99", media[0].IP, "per-media c= must override session-level")
 }
 
-func TestParse_HoldConnectionSkipped(t *testing.T) {
+func TestParseHoldConnectionSkipped(t *testing.T) {
 	body := []byte("c=IN IP4 0.0.0.0\r\n" +
 		"m=audio 5004 RTP/AVP 0\r\n")
 	media := Parse(body)
 	require.Empty(t, media, "0.0.0.0 (hold) must not be registered")
 }
 
-func TestParse_OriginFallbackWhenNoConnection(t *testing.T) {
+func TestParseOriginFallbackWhenNoConnection(t *testing.T) {
 	body := []byte("o=- 1 1 IN IP4 10.0.0.7\r\n" +
 		"m=audio 5004 RTP/AVP 0\r\n")
 	media := Parse(body)
@@ -47,7 +47,7 @@ func TestParse_OriginFallbackWhenNoConnection(t *testing.T) {
 	require.Equal(t, "10.0.0.7", media[0].IP, "must fall back to o= when c= is absent")
 }
 
-func TestParse_InactiveSkipped(t *testing.T) {
+func TestParseInactiveSkipped(t *testing.T) {
 	body := []byte("c=IN IP4 10.0.0.1\r\n" +
 		"m=audio 5004 RTP/AVP 0\r\n" +
 		"a=inactive\r\n")
@@ -55,7 +55,7 @@ func TestParse_InactiveSkipped(t *testing.T) {
 	require.Empty(t, media, "a=inactive must not be registered")
 }
 
-func TestParse_SendOnlyRegistered(t *testing.T) {
+func TestParseSendOnlyRegistered(t *testing.T) {
 	body := []byte("c=IN IP4 10.0.0.1\r\n" +
 		"m=audio 5004 RTP/AVP 0\r\n" +
 		"a=sendonly\r\n")
@@ -63,7 +63,7 @@ func TestParse_SendOnlyRegistered(t *testing.T) {
 	require.Len(t, media, 1, "sendonly (one-way audio) must still be registered")
 }
 
-func TestParse_VideoIgnored(t *testing.T) {
+func TestParseVideoIgnored(t *testing.T) {
 	body := []byte("c=IN IP4 10.0.0.1\r\n" +
 		"m=audio 5004 RTP/AVP 0\r\n" +
 		"a=rtpmap:0 PCMU/8000\r\n" +
@@ -73,7 +73,7 @@ func TestParse_VideoIgnored(t *testing.T) {
 	require.Equal(t, uint16(5004), media[0].Port)
 }
 
-func TestParse_VideoThenAudio(t *testing.T) {
+func TestParseVideoThenAudio(t *testing.T) {
 	// video-first SDP (common for video-capable UAs): the audio section after
 	// the video section must still be parsed (regression: off-by-one used to skip it).
 	body := []byte("c=IN IP4 10.0.0.1\r\n" +
@@ -85,7 +85,7 @@ func TestParse_VideoThenAudio(t *testing.T) {
 	require.Equal(t, uint16(5004), media[0].Port)
 }
 
-func TestParse_MultipleAudioMedia(t *testing.T) {
+func TestParseMultipleAudioMedia(t *testing.T) {
 	body := []byte("c=IN IP4 10.0.0.1\r\n" +
 		"m=audio 5004 RTP/AVP 0\r\n" +
 		"m=audio 5006 RTP/AVP 8\r\n" +
@@ -96,7 +96,7 @@ func TestParse_MultipleAudioMedia(t *testing.T) {
 	require.Equal(t, uint16(5006), media[1].Port)
 }
 
-func TestParse_DynamicPayloadFromRtpmap(t *testing.T) {
+func TestParseDynamicPayloadFromRtpmap(t *testing.T) {
 	body := []byte("c=IN IP4 10.0.0.1\r\n" +
 		"m=audio 5004 RTP/AVP 111\r\n" +
 		"a=rtpmap:111 opus/48000/2\r\n")
@@ -106,19 +106,19 @@ func TestParse_DynamicPayloadFromRtpmap(t *testing.T) {
 	require.EqualValues(t, 48000, media[0].ClockRates[111])
 }
 
-func TestParse_IPv6Skipped(t *testing.T) {
+func TestParseIPv6Skipped(t *testing.T) {
 	body := []byte("c=IN IP6 ::1\r\n" +
 		"m=audio 5004 RTP/AVP 0\r\n")
 	media := Parse(body)
 	require.Empty(t, media, "IPv6 media is not captured by IPv4-only eBPF")
 }
 
-func TestParse_EmptyBody(t *testing.T) {
+func TestParseEmptyBody(t *testing.T) {
 	require.Empty(t, Parse(nil))
 	require.Empty(t, Parse([]byte("")))
 }
 
-func TestParse_MulticastConnAddress(t *testing.T) {
+func TestParseMulticastConnAddress(t *testing.T) {
 	body := []byte("c=IN IP4 224.2.1.1/127/3\r\n" +
 		"m=audio 5004 RTP/AVP 0\r\n" +
 		"a=rtpmap:0 PCMU/8000\r\n")
@@ -127,7 +127,7 @@ func TestParse_MulticastConnAddress(t *testing.T) {
 	require.Equal(t, "224.2.1.1", media[0].IP, "multicast TTL/count suffix must be stripped")
 }
 
-func TestParse_SRTP_Fingerprint(t *testing.T) {
+func TestParseSRTPFingerprint(t *testing.T) {
 	body := []byte("v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\nc=IN IP4 10.0.0.1\r\n" +
 		"t=0 0\r\nm=audio 5004 RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\n" +
 		"a=fingerprint:sha-256 AB:CD:01:02\r\na=setup:actpass\r\n")
@@ -136,7 +136,7 @@ func TestParse_SRTP_Fingerprint(t *testing.T) {
 	require.True(t, media[0].SRTP, "a=fingerprint must set SRTP flag")
 }
 
-func TestParse_SRTP_SDES_Crypto(t *testing.T) {
+func TestParseSRTPSDESCrypto(t *testing.T) {
 	body := []byte("v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\nc=IN IP4 10.0.0.1\r\n" +
 		"t=0 0\r\nm=audio 5004 RTP/SAVP 0\r\na=rtpmap:0 PCMU/8000\r\n" +
 		"a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:d0RmdmcmVCspeEc3QGZiNWpVLF1hJXBSFRPaaHs=\r\n")
@@ -145,7 +145,7 @@ func TestParse_SRTP_SDES_Crypto(t *testing.T) {
 	require.True(t, media[0].SRTP, "a=crypto (SDES-SRTP) must set SRTP flag")
 }
 
-func TestParse_NoSRTP_ForPlainRTP(t *testing.T) {
+func TestParseNoSRTPForPlainRTP(t *testing.T) {
 	body := []byte("v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\nc=IN IP4 10.0.0.1\r\n" +
 		"t=0 0\r\nm=audio 5004 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n")
 	media := Parse(body)
@@ -153,7 +153,7 @@ func TestParse_NoSRTP_ForPlainRTP(t *testing.T) {
 	require.False(t, media[0].SRTP, "plain RTP must not set SRTP flag")
 }
 
-func TestParse_RTCPAttributePort(t *testing.T) {
+func TestParseRTCPAttributePort(t *testing.T) {
 	body := []byte("c=IN IP4 10.0.0.1\r\n" +
 		"m=audio 5004 RTP/AVP 0\r\n" +
 		"a=rtpmap:0 PCMU/8000\r\n" +
@@ -164,7 +164,7 @@ func TestParse_RTCPAttributePort(t *testing.T) {
 	require.Equal(t, uint16(5005), media[0].RTCPPort, "a=rtcp port must be parsed")
 }
 
-func TestParse_RTCPAttribute(t *testing.T) {
+func TestParseRTCPAttribute(t *testing.T) {
 	tests := []struct {
 		name     string
 		rtcp     string // full a=rtcp line; empty means absent
@@ -195,9 +195,9 @@ func TestParse_RTCPAttribute(t *testing.T) {
 	}
 }
 
-// TestParse_RTCPMux verifies a=rtcp-mux (RFC 5761) detection, which determines
+// TestParseRTCPMux verifies a=rtcp-mux (RFC 5761) detection, which determines
 // whether the exporter registers the adjacent port+1 for legacy RTCP.
-func TestParse_RTCPMux(t *testing.T) {
+func TestParseRTCPMux(t *testing.T) {
 	tests := []struct {
 		name    string
 		attr    string // a=... appended after rtpmap; empty means absent

@@ -145,6 +145,17 @@ Coverage depends on what the host actually sees:
 - **RTP only** (media passes through, signaling does not) → the exporter cannot correlate streams to dialogs, because it learns RTP endpoints from the SDP carried inside SIP messages. Place it where signaling is also visible.
 - **SIP + RTP** → full metrics.
 
+### Capture Support Matrix
+
+| Scenario | Status | Operational requirement or limitation |
+|----------|--------|--------------------------------------|
+| SIP and RTP/RTCP over IPv4/UDP | Supported | The sensor must see signaling and both media directions on the same call path. |
+| `rtcp-mux`, SDP `a=rtcp`, or legacy RTP/RTCP port+1 | Supported | The final IPv4 endpoint and port must be present in SDP visible to the exporter. |
+| NAT/SBC with stable SDP-advertised media endpoints | Conditional | RTP correlation uses the advertised source IP:port; source-port remapping (symmetric RTP) is not correlated. |
+| SIP over TCP/TLS, IPv6 SIP/SDP/media, or fragmented UDP | Unsupported | The capture and SDP path are IPv4/UDP-only and do not reassemble IP fragments. |
+| RTP without visible SDP, or ICE/TURN endpoint changes after SDP | Unsupported | The kernel filter has no endpoint to register, so the media is dropped. |
+| SPAN/TAP or other mirrored traffic | Not supported for QoE/direction | Packet collection may occur, but `direction` is not trustworthy because the sensor does not own the traffic IPs. Deploy on the forwarding host. |
+
 ## Metrics
 
 All metrics are exposed at `/metrics` in Prometheus exposition format. Most SIP metrics include `carrier`, `ua_type`, and `source_country` labels for multi-dimensional analysis (exceptions: `sip_exporter_sessions_limit` carries only `carrier`; `sip_exporter_billable_seconds_total` carries `carrier`, `destination_country`, `direction`). INVITE metrics additionally carry an `iface` label identifying the network interface that captured the traffic. The exporter provides:
@@ -353,7 +364,7 @@ sum by (destination_country) (rate(sip_exporter_invite_total[5m]))
 
 ### RTP Media Analysis
 
-In addition to SIP signaling, the exporter can capture and analyze RTP media streams to measure real call quality (jitter, packet loss, MOS). RTP streams are **correlated with SIP dialogs**: when a `200 OK` to INVITE carries SDP, the exporter registers the negotiated media endpoints and tracks the matching RTP flows until BYE (or Session-Expires expiry). This means RTP metrics inherit the dialog's `carrier`, `ua_type`, and the negotiated `codec` labels.
+In addition to SIP signaling, the exporter captures RTP media streams to estimate transport quality at the **capture point** (jitter, sequence gaps, and E-model MOS). RTP streams are **correlated with SIP dialogs**: when a `200 OK` to INVITE carries SDP, the exporter registers the negotiated media endpoints and tracks the matching RTP flows until BYE (or Session-Expires expiry). This means RTP metrics inherit the dialog's `carrier`, `ua_type`, and the negotiated `codec` labels.
 
 Metrics produced:
 
@@ -370,6 +381,8 @@ Metrics produced:
 RTP capture is always enabled. RTP without a correlated SIP dialog (no SDP exchange seen) is dropped, so only media for monitored calls is counted.
 
 The eBPF filter uses **SDP-driven RTP detection**: media endpoints (IP:port) learned from INVITE 200 OK SDP are inserted into a BPF LRU hash map. Only UDP packets matching a registered endpoint pass the kernel filter — all other UDP is dropped. This eliminates false positives from random UDP traffic on public IPs.
+
+**How to interpret QoE:** RTP loss, jitter, PDV, and MOS are observations of packets that reached this sensor; they are not a subscriber's subjective score or proof of end-to-end impairment. RTCP SR/RR adds the receiver's own RTP statistics for a correlated SSRC, but still covers only reports and media visible to the sensor. Before acting on QoE alerts, verify `sip_exporter_socket_packets_dropped_total`, `sip_exporter_rtp_dropped_total`, and the deployment topology above.
 
 ```PromQL
 # Average MOS over the last 5m (per codec)

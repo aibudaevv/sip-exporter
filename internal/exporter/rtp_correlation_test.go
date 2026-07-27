@@ -20,10 +20,10 @@ func makeRTPPayload(ssrc uint32) []byte {
 	return p
 }
 
-// TestRTP_CorrelationViaSDP verifies the full Group-4 pipeline: an INVITE with an
+// TestRTPCorrelationViaSDP verifies the full Group-4 pipeline: an INVITE with an
 // SDP offer and a 200 OK with an SDP answer register two media endpoints, RTP
 // from either endpoint is observed, and RTP without a correlated dialog is dropped.
-func TestRTP_CorrelationViaSDP(t *testing.T) {
+func TestRTPCorrelationViaSDP(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 	e := &exporter{
@@ -94,10 +94,10 @@ func makeRTPPayloadSeq(ssrc uint32, seq uint16) []byte {
 	return p
 }
 
-// TestRTP_HandleRTP_Branches exercises the four decision branches in handleRTP:
+// TestRTPHandleRTPBranches exercises the four decision branches in handleRTP:
 // ParseHeader error (drop), Counted=true (UpdateRTPPackets), Counted=false (skip),
 // and Lost>0 (UpdateRTPLoss).
-func TestRTP_HandleRTP_Branches(t *testing.T) {
+func TestRTPHandleRTPBranches(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 	e := &exporter{
@@ -137,9 +137,9 @@ func TestRTP_HandleRTP_Branches(t *testing.T) {
 	require.Equal(t, 2, mm.rtpPacketsCalls, "duplicate must not be counted")
 }
 
-// TestParseRawPacket_RTPDetection verifies that parseRawPacket routes
+// TestParseRawPacketRTPDetection verifies that parseRawPacket routes
 // packets with RTP version-2 prefix byte to handleRTP (not SIP parsing).
-func TestParseRawPacket_RTPDetection(t *testing.T) {
+func TestParseRawPacketRTPDetection(t *testing.T) {
 	mm := &mockMetricser{}
 	e := &exporter{
 		services:       services{metricser: mm, dialoger: &mockDialoger{}},

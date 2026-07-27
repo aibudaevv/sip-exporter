@@ -49,7 +49,7 @@ func GetConfig() (*App, error) {
 	if err := cleanenv.ReadEnv(cfg); err != nil {
 		helpText := "error read env"
 		help, _ := cleanenv.GetDescription(cfg, &helpText)
-		return nil, fmt.Errorf("read env: %w, info: %s", err, help)
+		return nil, fmt.Errorf("read env (info: %s): %w", help, err)
 	}
 
 	return cfg, nil

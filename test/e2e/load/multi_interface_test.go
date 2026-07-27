@@ -138,7 +138,7 @@ func newMultiNICEnv(ctx context.Context, t *testing.T, ifaces []string, pairs []
 	defer cancel()
 
 	req := testcontainers.ContainerRequest{
-		Image:       exporterImage,
+		Image:       exporterImage(),
 		Privileged:  true,
 		NetworkMode: "host",
 		Env:         envVars,
@@ -163,18 +163,18 @@ func newMultiNICEnv(ctx context.Context, t *testing.T, ifaces []string, pairs []
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
 		if testing.Verbose() {
-			logs, logErr := c.Logs(context.Background())
+			logs, logErr := c.Logs(cleanupCtx)
 			if logErr == nil {
 				defer logs.Close()
 				logBytes, _ := io.ReadAll(logs)
 				t.Logf("Exporter logs:\n%s", strings.TrimSpace(string(logBytes)))
 			}
 		}
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer stopCancel()
-		_ = c.Stop(stopCtx, nil)
-		_ = c.Terminate(context.Background())
+		_ = c.Stop(cleanupCtx, nil)
+		_ = c.Terminate(cleanupCtx)
 		for range 10 {
 			conn, dialErr := net.DialTimeout("tcp", "localhost:"+httpPort, 500*time.Millisecond)
 			if dialErr != nil {
@@ -309,16 +309,16 @@ func runMultiNICLoad(
 	return result
 }
 
-// TestLoad_MultiInterface verifies linear scaling from N=1 to N=3 interfaces.
+// TestLoadMultiInterface verifies linear scaling from N=1 to N=3 interfaces.
 // Each subtest records results into load_result.json via recordResult, keyed
 // by subtest name, for later baseline comparison.
-func TestLoad_MultiInterface(t *testing.T) {
+func TestLoadMultiInterface(t *testing.T) {
 	const callCount = 1000
 	const rate = 500
 
 	for _, n := range []int{1, 2, 3} {
 		t.Run(fmt.Sprintf("interfaces_%d", n), func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 
 			pairs := setupVethPairs(t, n)
 

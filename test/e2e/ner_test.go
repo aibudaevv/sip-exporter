@@ -3,15 +3,14 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestNER_AllScenarios(t *testing.T) {
+func TestNERAllScenarios(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name        string
@@ -49,9 +48,9 @@ func TestNER_AllScenarios(t *testing.T) {
 	}
 }
 
-func TestNER_Mixed(t *testing.T) {
+func TestNERMixed(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const effectiveCount = 140
 	const ineffectiveCount = 60
 	env := newTestEnv(ctx, t)
@@ -68,9 +67,9 @@ func TestNER_Mixed(t *testing.T) {
 	waitForSessionsZero(t, env.endpoint)
 }
 
-func TestNER_Equals100MinusISA(t *testing.T) {
+func TestNEREquals100MinusISA(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
 	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 80, env)
@@ -85,9 +84,9 @@ func TestNER_Equals100MinusISA(t *testing.T) {
 	waitForSessionsZero(t, env.endpoint)
 }
 
-func TestNER_WithCarrierConfig(t *testing.T) {
+func TestNERWithCarrierConfig(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const effectiveCount = 140
 	const ineffectiveCount = 60
 	env := newTestEnvWithCarriers(ctx, t)

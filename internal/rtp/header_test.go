@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestParseHeader_Valid(t *testing.T) {
+func TestParseHeaderValid(t *testing.T) {
 	// V=2, P=0, X=0, CC=0 | M=1, PT=8 (PCMA) | seq=0x1234 | ts=0x0A0B0C0D | ssrc=0x11223344
 	data := []byte{
 		0x80,       // V=2, P=0, X=0, CC=0
@@ -29,7 +29,7 @@ func TestParseHeader_Valid(t *testing.T) {
 	require.Equal(t, uint32(0x11223344), h.SSRC)
 }
 
-func TestParseHeader_VersionNotTwo(t *testing.T) {
+func TestParseHeaderVersionNotTwo(t *testing.T) {
 	// V=0
 	data := []byte{0x00, 0x08, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	_, err := ParseHeader(data)
@@ -46,13 +46,13 @@ func TestParseHeader_VersionNotTwo(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotRTP)
 }
 
-func TestParseHeader_TooShort(t *testing.T) {
+func TestParseHeaderTooShort(t *testing.T) {
 	data := []byte{0x80, 0x08, 0, 0}
 	_, err := ParseHeader(data)
 	require.ErrorIs(t, err, ErrInvalidRTP)
 }
 
-func TestParseHeader_PaddingExtensionCSRC(t *testing.T) {
+func TestParseHeaderPaddingExtensionCSRC(t *testing.T) {
 	// V=2, P=1, X=1, CC=3 | PT=0
 	data := []byte{
 		0xB3, // V=2(0x80), P=1(0x20), X=1(0x10), CC=3(0x03) → 0xB3

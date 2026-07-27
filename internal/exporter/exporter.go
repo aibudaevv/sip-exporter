@@ -1180,40 +1180,52 @@ func (e *exporter) handleRTCP(
 	sIP, dIP := srcIP.String(), dstIP.String()
 
 	for _, rep := range reports {
-		reportType := "rr"
-		if rep.Type == rtcp.PTSenderReport {
-			reportType = "sr"
-		}
-		for _, blk := range rep.Blocks {
-			ctx, lossDelta, ok := e.mediaTracker.RecordRTCP(blk.SSRC, blk.CumulativeLost, sIP, srcPort, dIP, dstPort)
-			if !ok {
-				e.services.metricser.UpdateRTCPOrphan()
-				zap.L().Debug("RTCP orphan: SSRC not tracked at this endpoint",
-					zap.Uint32("ssrc", blk.SSRC), zap.String("src", sIP), zap.String("dst", dIP))
-				continue
-			}
-			carrier, uaType, codec := ctx.Labels.Carrier, ctx.Labels.UAType, ctx.Codec
-			sourceCountry, direction := ctx.Labels.SourceCountry, ctx.Labels.Direction
-
-			e.services.metricser.UpdateRTCPJitter(carrier, uaType, codec, sourceCountry, direction,
-				rtcpJitterMs(blk.Jitter, ctx.ClockRate))
-			e.services.metricser.UpdateRTCPLossFraction(carrier, uaType, codec, sourceCountry, direction,
-				float64(blk.FractionLost)/fracLostScale*percentScale)
-			if lossDelta > 0 {
-				e.services.metricser.UpdateRTCPCumulativeLoss(carrier, uaType, codec, sourceCountry, direction,
-					lossDelta)
-			}
-			if blk.LSR != 0 && blk.DLSR != 0 {
-				rttUnits := nowNTP - blk.LSR - blk.DLSR
-				if int32(rttUnits) > 0 {
-					e.services.metricser.UpdateRTCPRTT(carrier, uaType, codec, sourceCountry, direction,
-						float64(rttUnits)/ntp32Scale*msPerSec)
-				}
-			}
-			e.services.metricser.UpdateRTCPReport(carrier, uaType, sourceCountry, direction, reportType)
-		}
+		e.handleRTCPReport(rep, nowNTP, sIP, srcPort, dIP, dstPort)
 	}
 	return "", nil
+}
+
+func (e *exporter) handleRTCPReport(
+	report rtcp.Report,
+	nowNTP uint32,
+	srcIP string,
+	srcPort uint16,
+	dstIP string,
+	dstPort uint16,
+) {
+	reportType := "rr"
+	if report.Type == rtcp.PTSenderReport {
+		reportType = "sr"
+	}
+	for _, block := range report.Blocks {
+		ctx, lossDelta, ok := e.mediaTracker.RecordRTCP(
+			block.SSRC, block.CumulativeLost, srcIP, srcPort, dstIP, dstPort)
+		if !ok {
+			e.services.metricser.UpdateRTCPOrphan()
+			zap.L().Debug("RTCP orphan: SSRC not tracked at this endpoint",
+				zap.Uint32("ssrc", block.SSRC), zap.String("src", srcIP), zap.String("dst", dstIP))
+			continue
+		}
+		carrier, uaType, codec := ctx.Labels.Carrier, ctx.Labels.UAType, ctx.Codec
+		sourceCountry, direction := ctx.Labels.SourceCountry, ctx.Labels.Direction
+
+		e.services.metricser.UpdateRTCPJitter(carrier, uaType, codec, sourceCountry, direction,
+			rtcpJitterMs(block.Jitter, ctx.ClockRate))
+		e.services.metricser.UpdateRTCPLossFraction(carrier, uaType, codec, sourceCountry, direction,
+			float64(block.FractionLost)/fracLostScale*percentScale)
+		if lossDelta > 0 {
+			e.services.metricser.UpdateRTCPCumulativeLoss(carrier, uaType, codec, sourceCountry, direction,
+				lossDelta)
+		}
+		if block.LSR != 0 && block.DLSR != 0 {
+			rttUnits := nowNTP - block.LSR - block.DLSR
+			if int32(rttUnits) > 0 {
+				e.services.metricser.UpdateRTCPRTT(carrier, uaType, codec, sourceCountry, direction,
+					float64(rttUnits)/ntp32Scale*msPerSec)
+			}
+		}
+		e.services.metricser.UpdateRTCPReport(carrier, uaType, sourceCountry, direction, reportType)
+	}
 }
 
 // rtcpJitterMs converts an RTCP interarrival-jitter field (in RTP timestamp units)
@@ -2096,10 +2108,10 @@ func (e *exporter) registerMediaEndpoints(
 // description. Explicit a=rtcp (RFC 3605) wins; rtcp-mux (RFC 5761) shares the
 // RTP port and needs no separate registration; otherwise legacy RTCP on port+1
 // (RFC 3550 §9) is assumed. ok is false when no separate endpoint is needed.
-func resolveRTCEndpoint(m sdp.Media) (ip string, port uint16, ok bool) {
+func resolveRTCEndpoint(m sdp.Media) (string, uint16, bool) {
 	switch {
 	case m.RTCPPort != 0:
-		ip = m.IP
+		ip := m.IP
 		if m.RTCPAddr != "" {
 			ip = m.RTCPAddr
 		}

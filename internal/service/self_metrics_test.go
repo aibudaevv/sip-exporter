@@ -77,7 +77,7 @@ func selfMatchLabels(m *dto.Metric, labels map[string]string) bool {
 	return matched == len(labels)
 }
 
-func TestSelfMetrics_ParseError_AllTypes(t *testing.T) {
+func TestSelfMetricsParseErrorAllTypes(t *testing.T) {
 	m, reg := newTestMetricserWithRegistry()
 
 	types := []string{"l2", "l3", "l4", "sip", "vq"}
@@ -91,7 +91,7 @@ func TestSelfMetrics_ParseError_AllTypes(t *testing.T) {
 	}
 }
 
-func TestSelfMetrics_ParseError_MultipleSameType(t *testing.T) {
+func TestSelfMetricsParseErrorMultipleSameType(t *testing.T) {
 	m, reg := newTestMetricserWithRegistry()
 
 	m.ParseError("l3")
@@ -102,7 +102,7 @@ func TestSelfMetrics_ParseError_MultipleSameType(t *testing.T) {
 	require.InDelta(t, 3.0, val, 0.01)
 }
 
-func TestSelfMetrics_ParseError_Independence(t *testing.T) {
+func TestSelfMetricsParseErrorIndependence(t *testing.T) {
 	m, reg := newTestMetricserWithRegistry()
 
 	m.ParseError("l2")
@@ -116,7 +116,7 @@ func TestSelfMetrics_ParseError_Independence(t *testing.T) {
 	require.InDelta(t, 0.0, getParseErrorsValue(reg, map[string]string{"type": "vq"}), 0.01)
 }
 
-func TestSelfMetrics_ParseError_UninitializedIsZero(t *testing.T) {
+func TestSelfMetricsParseErrorUninitializedIsZero(t *testing.T) {
 	_, reg := newTestMetricserWithRegistry()
 
 	for _, errType := range []string{"l2", "l3", "l4", "sip", "vq"} {
@@ -131,7 +131,7 @@ type socketStatCheck struct {
 	want   float64
 }
 
-func TestSelfMetrics_SocketStats(t *testing.T) {
+func TestSelfMetricsSocketStats(t *testing.T) {
 	tests := []struct {
 		name   string
 		stats  []SocketStat
@@ -200,7 +200,7 @@ func TestSelfMetrics_SocketStats(t *testing.T) {
 	}
 }
 
-func TestSelfMetrics_ChannelLength_Updates(t *testing.T) {
+func TestSelfMetricsChannelLengthUpdates(t *testing.T) {
 	m, reg := newTestMetricserWithRegistry()
 
 	m.UpdateChannelLength(0)
@@ -216,14 +216,14 @@ func TestSelfMetrics_ChannelLength_Updates(t *testing.T) {
 	require.InDelta(t, 0.0, getSelfGaugeValue(reg, "sip_exporter_channel_length", nil), 0.01)
 }
 
-func TestSelfMetrics_ChannelCapacity(t *testing.T) {
+func TestSelfMetricsChannelCapacity(t *testing.T) {
 	m, reg := newTestMetricserWithRegistry()
 
 	m.UpdateChannelCapacity(10000)
 	require.InDelta(t, 10000.0, getSelfGaugeValue(reg, "sip_exporter_channel_capacity", nil), 0.01)
 }
 
-func TestSelfMetrics_TrackerSize_AllTypes(t *testing.T) {
+func TestSelfMetricsTrackerSizeAllTypes(t *testing.T) {
 	m, reg := newTestMetricserWithRegistry()
 
 	m.UpdateTrackerSize("register", 10)
@@ -238,7 +238,7 @@ func TestSelfMetrics_TrackerSize_AllTypes(t *testing.T) {
 	require.InDelta(t, 5.0, trackerVal("options"), 0.01)
 }
 
-func TestSelfMetrics_TrackerSize_Updates(t *testing.T) {
+func TestSelfMetricsTrackerSizeUpdates(t *testing.T) {
 	m, reg := newTestMetricserWithRegistry()
 
 	m.UpdateTrackerSize("invite", 100)
@@ -250,7 +250,7 @@ func TestSelfMetrics_TrackerSize_Updates(t *testing.T) {
 		map[string]string{"type": "invite"}), 0.01)
 }
 
-func TestSelfMetrics_TrackerSize_Independence(t *testing.T) {
+func TestSelfMetricsTrackerSizeIndependence(t *testing.T) {
 	m, reg := newTestMetricserWithRegistry()
 
 	m.UpdateTrackerSize("register", 10)
@@ -268,7 +268,7 @@ func TestSelfMetrics_TrackerSize_Independence(t *testing.T) {
 		map[string]string{"type": "options"}), 0.01)
 }
 
-func TestSelfMetrics_ActiveDialogs_Updates(t *testing.T) {
+func TestSelfMetricsActiveDialogsUpdates(t *testing.T) {
 	m, reg := newTestMetricserWithRegistry()
 
 	m.UpdateActiveDialogs(0)

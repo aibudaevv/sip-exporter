@@ -3,16 +3,15 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestSCR_AllScenarios(t *testing.T) {
+func TestSCRAllScenarios(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name        string
@@ -50,9 +49,9 @@ func TestSCR_AllScenarios(t *testing.T) {
 	}
 }
 
-func TestSCR_Mixed(t *testing.T) {
+func TestSCRMixed(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	type sippRun struct {
 		uas, uac string
@@ -90,9 +89,9 @@ func TestSCR_Mixed(t *testing.T) {
 	}
 }
 
-func TestSCR_SessionExpires(t *testing.T) {
+func TestSCRSessionExpires(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
 	scrBefore := getSCR(t, env.endpoint)
@@ -115,9 +114,9 @@ func TestSCR_SessionExpires(t *testing.T) {
 	require.Greater(t, scrAfter, scrBefore, "SCR should increase after Session-Expires timeout")
 }
 
-func TestSCR_WithCarrierConfig(t *testing.T) {
+func TestSCRWithCarrierConfig(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const callCount = 200
 	env := newTestEnvWithCarriers(ctx, t)
 
@@ -131,9 +130,9 @@ func TestSCR_WithCarrierConfig(t *testing.T) {
 	env.waitForSessionsZeroByCarrier(t)
 }
 
-func TestSCR_MixedWithCarrierConfig(t *testing.T) {
+func TestSCRMixedWithCarrierConfig(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const completedCount = 140
 	const failCount = 60
 	env := newTestEnvWithCarriers(ctx, t)

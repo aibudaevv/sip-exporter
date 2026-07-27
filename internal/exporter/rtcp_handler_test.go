@@ -64,7 +64,7 @@ func buildSR(ntpTS uint64, blocks ...[]byte) []byte {
 	return b
 }
 
-func TestNowNTP32_UnixEpoch(t *testing.T) {
+func TestNowNTP32UnixEpoch(t *testing.T) {
 	// Unix epoch (1970) = NTP seconds 2208988800 = 0x83AA7E80; low 16 bits 0x7E80,
 	// fraction 0 → middle-32 NTP = 0x7E800000. Pins the formula independently of
 	// the handler (which would self-cancel by computing LSR with the same function).
@@ -91,7 +91,7 @@ func registerRTPStream(t *testing.T, e *exporter, ssrc uint32) {
 	require.True(t, ok)
 }
 
-func TestHandleRTCP_ReceiverReport(t *testing.T) {
+func TestHandleRTCPReceiverReport(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newRTCPTestExporter(mm)
 	const ssrc uint32 = 0xAAAA0001
@@ -127,10 +127,10 @@ func TestHandleRTCP_ReceiverReport(t *testing.T) {
 	require.Less(t, mm.rtcpRTTVal, 4500.0)
 }
 
-// TestHandleRTCP_CumulativeLossDeltaOnSecondReport proves the D3 baseline + delta
+// TestHandleRTCPCumulativeLossDeltaOnSecondReport proves the D3 baseline + delta
 // semantics through the full handler: the first RR establishes the baseline (no
 // cumulative-loss emit), the second emits the delta between cumulative values.
-func TestHandleRTCP_CumulativeLossDeltaOnSecondReport(t *testing.T) {
+func TestHandleRTCPCumulativeLossDeltaOnSecondReport(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newRTCPTestExporter(mm)
 	const ssrc uint32 = 0xAAAA0006
@@ -150,7 +150,7 @@ func TestHandleRTCP_CumulativeLossDeltaOnSecondReport(t *testing.T) {
 	require.Equal(t, uint64(3), mm.rtcpCumLossVal)
 }
 
-func TestHandleRTCP_RTTSkippedWhenLSRZero(t *testing.T) {
+func TestHandleRTCPRTTSkippedWhenLSRZero(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newRTCPTestExporter(mm)
 	const ssrc uint32 = 0xAAAA0002
@@ -164,7 +164,7 @@ func TestHandleRTCP_RTTSkippedWhenLSRZero(t *testing.T) {
 	require.Zero(t, mm.rtcpRTTCalls, "RTT must be skipped when LSR==0")
 }
 
-func TestHandleRTCP_UncorrelatedSSRCDropped(t *testing.T) {
+func TestHandleRTCPUncorrelatedSSRCDropped(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newRTCPTestExporter(mm)
 	const knownSSRC uint32 = 0xAAAA0003
@@ -179,7 +179,7 @@ func TestHandleRTCP_UncorrelatedSSRCDropped(t *testing.T) {
 	require.Equal(t, 1, mm.rtcpOrphanCalls, "uncorrelated SSRC must increment the orphan counter")
 }
 
-func TestHandleRTCP_SenderReportType(t *testing.T) {
+func TestHandleRTCPSenderReportType(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newRTCPTestExporter(mm)
 	const ssrc uint32 = 0xAAAA0004
@@ -193,10 +193,10 @@ func TestHandleRTCP_SenderReportType(t *testing.T) {
 	require.Equal(t, "sr", mm.rtcpReportType, "SR packet must be labelled type=sr")
 }
 
-// TestHandleRTCP_SenderReportValues proves that SR report-block values
+// TestHandleRTCPSenderReportValues proves that SR report-block values
 // (jitter/loss/RTT) are extracted correctly despite the 20-byte sender-info
 // preceding the blocks — the same values an equivalent RR would produce.
-func TestHandleRTCP_SenderReportValues(t *testing.T) {
+func TestHandleRTCPSenderReportValues(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newRTCPTestExporter(mm)
 	const ssrc uint32 = 0xAAAA0009
@@ -221,7 +221,7 @@ func TestHandleRTCP_SenderReportValues(t *testing.T) {
 	require.Less(t, mm.rtcpRTTVal, 4500.0)
 }
 
-func TestHandleRTCP_RTTSkippedOnClockSkew(t *testing.T) {
+func TestHandleRTCPRTTSkippedOnClockSkew(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newRTCPTestExporter(mm)
 	const ssrc uint32 = 0xAAAA0005
@@ -237,12 +237,12 @@ func TestHandleRTCP_RTTSkippedOnClockSkew(t *testing.T) {
 	require.Equal(t, 1, mm.rtcpReportCalls, "report is still counted")
 }
 
-// TestHandleRTCP_RTTSkippedWhenDLSRExceedsElapsed exercises the negative-RTT
+// TestHandleRTCPRTTSkippedWhenDLSRExceedsElapsed exercises the negative-RTT
 // clamp via a path distinct from clock skew: LSR is valid (in the past) but DLSR
 // exceeds the elapsed time since LSR, so now-LSR-DLSR < 0. This is the same
 // int32(rttUnits) <= 0 guard, reached from an implausibly-large DLSR rather than
 // a future LSR.
-func TestHandleRTCP_RTTSkippedWhenDLSRExceedsElapsed(t *testing.T) {
+func TestHandleRTCPRTTSkippedWhenDLSRExceedsElapsed(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newRTCPTestExporter(mm)
 	const ssrc uint32 = 0xAAAA0008
@@ -258,12 +258,12 @@ func TestHandleRTCP_RTTSkippedWhenDLSRExceedsElapsed(t *testing.T) {
 	require.Equal(t, 1, mm.rtcpReportCalls, "report is still counted")
 }
 
-// TestHandleRTCP_RTTSkippedWhenDLSRZero proves that RTT is not computed when
+// TestHandleRTCPRTTSkippedWhenDLSRZero proves that RTT is not computed when
 // DLSR=0 despite a valid non-zero LSR. A zero DLSR with non-zero LSR is a
 // malformed report (the receiver remembered the timestamp but not its own
 // processing delay), and the formula now−LSR−0 would yield ~reporting interval
 // (5 s) instead of a real sub-second RTT.
-func TestHandleRTCP_RTTSkippedWhenDLSRZero(t *testing.T) {
+func TestHandleRTCPRTTSkippedWhenDLSRZero(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newRTCPTestExporter(mm)
 	const ssrc uint32 = 0xAAAA0010
@@ -278,11 +278,11 @@ func TestHandleRTCP_RTTSkippedWhenDLSRZero(t *testing.T) {
 	require.Equal(t, 1, mm.rtcpReportCalls, "report is still counted")
 }
 
-// TestHandleRTCP_PartialCompoundProcessesValidPrefix proves that a single
+// TestHandleRTCPPartialCompoundProcessesValidPrefix proves that a single
 // malformed trailing sub-packet does not blind the whole compound: rtcp.Parse
 // returns the valid SR/RR prefix together with the error, and the handler
 // salvages that prefix (emits its metrics) while counting the parse error.
-func TestHandleRTCP_PartialCompoundProcessesValidPrefix(t *testing.T) {
+func TestHandleRTCPPartialCompoundProcessesValidPrefix(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newRTCPTestExporter(mm)
 	const ssrc uint32 = 0xAAAA0007
@@ -300,11 +300,11 @@ func TestHandleRTCP_PartialCompoundProcessesValidPrefix(t *testing.T) {
 	require.Equal(t, "rtcp", mm.parseErrorType)
 }
 
-// TestHandleRTCP_MultiBlockRR proves the inner loop (for _, blk := range rep.Blocks)
+// TestHandleRTCPMultiBlockRR proves the inner loop (for _, blk := range rep.Blocks)
 // iterates all report blocks. With 2 blocks — one correlated (SSRC tracked) and one
 // orphan (untracked) — the correlated block emits jitter/loss/report while the orphan
 // increments the orphan counter and is skipped via continue.
-func TestHandleRTCP_MultiBlockRR(t *testing.T) {
+func TestHandleRTCPMultiBlockRR(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newRTCPTestExporter(mm)
 	const (
@@ -328,11 +328,11 @@ func TestHandleRTCP_MultiBlockRR(t *testing.T) {
 	require.Zero(t, mm.rtcpCumLossCalls, "first RR establishes baseline")
 }
 
-// TestHandleRTCP_MixedCompound proves the outer loop (for _, rep := range reports)
+// TestHandleRTCPMixedCompound proves the outer loop (for _, rep := range reports)
 // iterates multiple sub-packets in a compound RTCP packet. An SR followed by an RR
 // (typical RFC 3550 ordering) — both carrying a block for the same correlated SSRC —
 // must produce 2 report calls and 2 jitter calls.
-func TestHandleRTCP_MixedCompound(t *testing.T) {
+func TestHandleRTCPMixedCompound(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newRTCPTestExporter(mm)
 	const ssrc uint32 = 0xAAAA0014
@@ -340,7 +340,9 @@ func TestHandleRTCP_MixedCompound(t *testing.T) {
 
 	sr := buildSR(0, buildRTCPBlock(ssrc, 0, 0, 0, 1600, 0, 0))
 	rr := buildRR(buildRTCPBlock(ssrc, 0, 0, 0, 1600, 0, 0))
-	compound := append(sr, rr...)
+	compound := make([]byte, 0, len(sr)+len(rr))
+	compound = append(compound, sr...)
+	compound = append(compound, rr...)
 
 	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, compound)
 	require.NoError(t, err)
@@ -350,12 +352,12 @@ func TestHandleRTCP_MixedCompound(t *testing.T) {
 	require.Equal(t, "rr", mm.rtcpReportType, "last report (RR) wins in mock")
 }
 
-// TestHandleRTCP_RTTUsesCaptureTimestamp proves that RTT is computed from the
+// TestHandleRTCPRTTUsesCaptureTimestamp proves that RTT is computed from the
 // kernel capture timestamp (e.pktTimestamp, SO_TIMESTAMPNS), not wall-clock
 // time.Now(). The capture time is set 60 s in the past; LSR is 5 s before the
 // capture time and DLSR is 1 s, so the correct RTT ≈ 4 s. Without the fix the
 // handler uses time.Now(), yielding RTT ≈ 64 s (60 s of accumulated drift).
-func TestHandleRTCP_RTTUsesCaptureTimestamp(t *testing.T) {
+func TestHandleRTCPRTTUsesCaptureTimestamp(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newRTCPTestExporter(mm)
 	const ssrc uint32 = 0xAAAA0011

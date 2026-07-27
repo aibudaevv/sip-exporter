@@ -107,7 +107,7 @@ func newTestEnvWithCarriersYAML(ctx context.Context, t *testing.T, carriersYAML 
 
 func loadUserAgentsYAML(t *testing.T, filename string) string {
 	t.Helper()
-	path := filepath.Join(projectRoot, "test", "e2e", filename)
+	path := filepath.Join(projectRoot(), "test", "e2e", filename)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	return string(data)
@@ -116,7 +116,7 @@ func loadUserAgentsYAML(t *testing.T, filename string) string {
 // loadCarriersYAML reads a carriers YAML file from test/e2e/ directory.
 func loadCarriersYAML(t *testing.T, filename string) string {
 	t.Helper()
-	path := filepath.Join(projectRoot, "test", "e2e", filename)
+	path := filepath.Join(projectRoot(), "test", "e2e", filename)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	return string(data)
@@ -295,19 +295,17 @@ func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML,
 	return env
 }
 
-var projectRoot string
-var interfaceIP string
-var exporterImage string
-
-func init() {
+func projectRoot() string {
 	_, file, _, _ := runtime.Caller(0)
-	projectRoot = filepath.Join(filepath.Dir(file), "..", "..")
-	interfaceIP = getInterfaceIP(testInterface)
+	return filepath.Join(filepath.Dir(file), "..", "..")
+}
 
-	exporterImage = os.Getenv("SIP_EXPORTER_E2E_IMAGE")
-	if exporterImage == "" {
-		exporterImage = "sip-exporter:latest"
+func exporterImage() string {
+	image := os.Getenv("SIP_EXPORTER_E2E_IMAGE")
+	if image == "" {
+		return "sip-exporter:latest"
 	}
+	return image
 }
 
 // getInterfaceIP returns IPv4 address of network interface.
@@ -406,7 +404,7 @@ func startExporterWithConfigAndUA(ctx context.Context, t *testing.T, exporterPor
 	}
 
 	req := testcontainers.ContainerRequest{
-		Image:       exporterImage,
+		Image:       exporterImage(),
 		Privileged:  true,
 		NetworkMode: "host",
 		Env:         envVars,
@@ -437,18 +435,18 @@ func startExporterWithConfigAndUA(ctx context.Context, t *testing.T, exporterPor
 func registerExporterCleanup(t *testing.T, container testcontainers.Container, exporterPort string) {
 	t.Helper()
 	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
 		if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
-			logs, logErr := container.Logs(context.Background())
+			logs, logErr := container.Logs(cleanupCtx)
 			if logErr == nil {
 				defer logs.Close()
 				logBytes, _ := io.ReadAll(logs)
 				t.Logf("Exporter logs:\n%s", strings.TrimSpace(string(logBytes)))
 			}
 		}
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer stopCancel()
-		_ = container.Stop(stopCtx, nil)
-		_ = container.Terminate(context.Background())
+		_ = container.Stop(cleanupCtx, nil)
+		_ = container.Terminate(cleanupCtx)
 		for i := 0; i < 10; i++ {
 			conn, err := net.DialTimeout("tcp", "localhost:"+exporterPort, 500*time.Millisecond)
 			if err != nil {
@@ -541,7 +539,7 @@ func getMetric(t *testing.T, endpoint string, metricName string) float64 {
 // a single HTTP call site (and no http.Get-without-context).
 func fetchMetricsBody(t *testing.T, endpoint string) []byte {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/metrics", nil)
 	require.NoError(t, err)
@@ -758,7 +756,11 @@ func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacS
 		Logger:           log.New(io.Discard, "", 0),
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = uasC.Terminate(context.Background()) })
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		_ = uasC.Terminate(cleanupCtx)
+	})
 
 	if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
 		logs, logErr := uasC.Logs(ctx)
@@ -796,7 +798,11 @@ func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacS
 		Logger:           log.New(io.Discard, "", 0),
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = uacC.Terminate(context.Background()) })
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		_ = uacC.Terminate(cleanupCtx)
+	})
 
 	if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
 		logs, logErr := uacC.Logs(ctx)
@@ -809,7 +815,7 @@ func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacS
 
 	waitForContainerExitLogless(t, uasC)
 
-	terminateCtx, terminateCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	terminateCtx, terminateCancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer terminateCancel()
 	_ = uacC.Terminate(terminateCtx)
 	_ = uasC.Terminate(terminateCtx)
@@ -827,7 +833,7 @@ func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacS
 func waitForContainerExitLogless(t *testing.T, c testcontainers.Container) {
 	t.Helper()
 	require.Eventually(t, func() bool {
-		state, err := c.State(context.Background())
+		state, err := c.State(t.Context())
 		if err != nil {
 			return false
 		}
@@ -1155,7 +1161,7 @@ func dumpUDPPort(t *testing.T, port string) {
 // absScenarioPath returns absolute path to SIPp scenario.
 func absScenarioPath(t *testing.T, filename string) string {
 	t.Helper()
-	return filepath.Join(projectRoot, "test", "e2e", "sipp", filename)
+	return filepath.Join(projectRoot(), "test", "e2e", "sipp", filename)
 }
 
 // testWriter writes test logs via t.Log.

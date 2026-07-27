@@ -3,15 +3,14 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestStatusCodes_AllCodes(t *testing.T) {
+func TestStatusCodesAllCodes(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name        string
@@ -136,9 +135,9 @@ func TestStatusCodes_AllCodes(t *testing.T) {
 	}
 }
 
-func TestStatusCodes_WithCarrierConfig(t *testing.T) {
+func TestStatusCodesWithCarrierConfig(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name        string

@@ -75,7 +75,7 @@ func makeRawPT(pt uint8, bodyWords int) []byte {
 	return b
 }
 
-func TestParse_ReceiverReport(t *testing.T) {
+func TestParseReceiverReport(t *testing.T) {
 	blk := makeBlock(0x11111111, 10, 1500, 0x2222, 250, 0x83B4A5C9, 0x00001000)
 	reports, err := Parse(makeRR(0xDEADBEEF, blk))
 	require.NoError(t, err)
@@ -94,7 +94,7 @@ func TestParse_ReceiverReport(t *testing.T) {
 	require.Equal(t, uint32(0x00001000), b.DLSR)
 }
 
-func TestParse_SenderReport(t *testing.T) {
+func TestParseSenderReport(t *testing.T) {
 	blk := makeBlock(0x22222222, 5, 42, 0x3333, 90, 0, 0)
 	reports, err := Parse(makeSR(0xCAFEBABE, 0x83B4A5C9E1D2C3F4, 123456, 99, 7000, blk))
 	require.NoError(t, err)
@@ -106,7 +106,7 @@ func TestParse_SenderReport(t *testing.T) {
 	require.Equal(t, uint32(0x22222222), r.Blocks[0].SSRC)
 }
 
-func TestParse_CompoundSRThenSDESSkipsNonReport(t *testing.T) {
+func TestParseCompoundSRThenSDESSkipsNonReport(t *testing.T) {
 	sr := makeSR(0xAAAA, 1, 1, 1, 1)
 	sdes := makeRawPT(202, 3) // SDES, 3 words body — contents must be skipped, not parsed
 	reports, err := Parse(append(sr, sdes...))
@@ -115,7 +115,7 @@ func TestParse_CompoundSRThenSDESSkipsNonReport(t *testing.T) {
 	require.Equal(t, PTSenderReport, reports[0].Type)
 }
 
-func TestParse_MultipleBlocks(t *testing.T) {
+func TestParseMultipleBlocks(t *testing.T) {
 	b1 := makeBlock(0x100, 1, 10, 1000, 5, 0, 0)
 	b2 := makeBlock(0x200, 2, 20, 2000, 6, 0x1111, 0x2222)
 	reports, err := Parse(makeRR(0xBEEF, b1, b2))
@@ -126,45 +126,45 @@ func TestParse_MultipleBlocks(t *testing.T) {
 	require.Equal(t, uint32(0x200), reports[0].Blocks[1].SSRC)
 }
 
-func TestParse_ZeroBlockCount(t *testing.T) {
+func TestParseZeroBlockCount(t *testing.T) {
 	reports, err := Parse(makeRR(0x1)) // RR with RC=0
 	require.NoError(t, err)
 	require.Len(t, reports, 1)
 	require.Empty(t, reports[0].Blocks)
 }
 
-func TestParse_SDESOnlyReturnsNoReports(t *testing.T) {
+func TestParseSDESOnlyReturnsNoReports(t *testing.T) {
 	reports, err := Parse(makeRawPT(202, 2))
 	require.NoError(t, err, "a valid compound with no SR/RR is not an error")
 	require.Empty(t, reports)
 }
 
-func TestParse_TruncatedDeclaredLength(t *testing.T) {
+func TestParseTruncatedDeclaredLength(t *testing.T) {
 	// Declare a length (4 words = 16 bytes) but provide only 8 bytes.
 	short := []byte{0x80, PTReceiverReport, 0x00, 0x04, 0x00, 0x00, 0x00, 0x01}
 	_, err := Parse(short)
 	require.ErrorIs(t, err, ErrTruncated)
 }
 
-func TestParse_TooShortForHeader(t *testing.T) {
+func TestParseTooShortForHeader(t *testing.T) {
 	_, err := Parse([]byte{0x80, 0xC8, 0x00})
 	require.ErrorIs(t, err, ErrInvalidRTCP)
 }
 
-func TestParse_EmptyPayload(t *testing.T) {
+func TestParseEmptyPayload(t *testing.T) {
 	_, err := Parse(nil)
 	require.ErrorIs(t, err, ErrInvalidRTCP)
 	_, err = Parse([]byte{})
 	require.ErrorIs(t, err, ErrInvalidRTCP)
 }
 
-func TestParse_NotRTCPVersion(t *testing.T) {
+func TestParseNotRTCPVersion(t *testing.T) {
 	// V=0 in the first byte, but structurally a 4-byte header.
 	_, err := Parse([]byte{0x00, PTReceiverReport, 0x00, 0x00})
 	require.ErrorIs(t, err, ErrNotRTCP)
 }
 
-func TestParse_BlockCountLiesAboutBlocks(t *testing.T) {
+func TestParseBlockCountLiesAboutBlocks(t *testing.T) {
 	// RC=2 but only one block fits in the declared length. The parser must not
 	// read past the sub-packet boundary; the second "block" must trigger ErrTruncated.
 	oneBlock := makeBlock(0x1, 0, 0, 0, 0, 0, 0) // 24 bytes; second block missing → 8+24=32 declared
@@ -176,7 +176,7 @@ func TestParse_BlockCountLiesAboutBlocks(t *testing.T) {
 	require.ErrorIs(t, err, ErrTruncated, "lying RC must not read out of bounds")
 }
 
-func TestParse_TruncatedSRKeepsValidBlocks(t *testing.T) {
+func TestParseTruncatedSRKeepsValidBlocks(t *testing.T) {
 	// SR declares RC=2 but only 1 block fits — parseReport returns the partial
 	// rep (1 valid block) plus ErrTruncated. Parse must salvage that block
 	// instead of discarding it with the error.
@@ -184,7 +184,7 @@ func TestParse_TruncatedSRKeepsValidBlocks(t *testing.T) {
 	pkt := make([]byte, 0, srMinLen+24)
 	pkt = append(pkt, 0xA2, PTSenderReport, 0x00, 0x0C) // V=2, RC=2, length=12 (52 bytes)
 	pkt = append(pkt, 0, 0, 0, 0)                       // sender SSRC
-	pkt = append(pkt, make([]byte, senderInfoLen)...)    // 20-byte sender info
+	pkt = append(pkt, make([]byte, senderInfoLen)...)   // 20-byte sender info
 	pkt = append(pkt, blk...)                           // 1 block; RC=2 lies
 	reports, err := Parse(pkt)
 	require.ErrorIs(t, err, ErrTruncated, "trailing truncation still reported")
@@ -194,7 +194,7 @@ func TestParse_TruncatedSRKeepsValidBlocks(t *testing.T) {
 	require.Equal(t, uint32(200), reports[0].Blocks[0].Jitter)
 }
 
-func TestParse_CumulativeLostMaxPositive(t *testing.T) {
+func TestParseCumulativeLostMaxPositive(t *testing.T) {
 	// Maximum POSITIVE 24-bit signed value (0x7FFFFF = 8388607) round-trips.
 	blk := makeBlock(0x1, 0, 0x7FFFFF, 0, 0, 0, 0)
 	reports, err := Parse(makeRR(0x2, blk))
@@ -202,7 +202,7 @@ func TestParse_CumulativeLostMaxPositive(t *testing.T) {
 	require.Equal(t, int32(0x7FFFFF), reports[0].Blocks[0].CumulativeLost)
 }
 
-func TestParse_NegativeCumulativeLostSigned(t *testing.T) {
+func TestParseNegativeCumulativeLostSigned(t *testing.T) {
 	// RFC 3550 §6.4.1: cumulative number of packets lost is a SIGNED 24-bit
 	// field (negative when duplicates exceed losses). The parser sign-extends
 	// the 24-bit value so 0xFFFFFF = -1 and 0x800000 = -8388608.
@@ -225,7 +225,7 @@ func TestParse_NegativeCumulativeLostSigned(t *testing.T) {
 	}
 }
 
-func TestParse_MalformedMidCompoundContinuesIteration(t *testing.T) {
+func TestParseMalformedMidCompoundContinuesIteration(t *testing.T) {
 	// [valid RR with 1 block][malformed SR][valid RR with 1 block]
 	// The malformed SR has a declared length shorter than srMinLen, so
 	// parseReport returns ErrInvalidRTCP. The parser must continue to the

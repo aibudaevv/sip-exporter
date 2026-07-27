@@ -79,7 +79,7 @@ func setupVethNetns(t *testing.T) string {
 	}
 
 	// 1. Create pause container with isolated network namespace.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	pauseOut, err := exec.CommandContext(ctx, "docker", "run", "-d", "--rm",
 		"--network", "none", "--cap-add", "NET_ADMIN",
@@ -111,7 +111,7 @@ func setupVethNetns(t *testing.T) string {
 		"nsenter -t " + pid + " -n ip link set lo up",
 	}, "\n")
 
-	setupCtx, setupCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	setupCtx, setupCancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer setupCancel()
 	out, err := exec.CommandContext(setupCtx, "docker", "run", "--rm",
 		"--privileged", "--network", "host", "--pid", "host",
@@ -154,7 +154,7 @@ func runSippUACInNetns(ctx context.Context, t *testing.T, pauseID, uacScenario s
 	require.NoError(t, cmd.Run(), "SIPp UAC in netns failed")
 }
 
-// TestIfaceLabel_MultiInterface verifies that the iface label correctly
+// TestIfaceLabelMultiInterface verifies that the iface label correctly
 // identifies which NIC captured each packet, using a real second interface
 // (separate network namespace via pause container + veth pair).
 //
@@ -168,9 +168,9 @@ func runSippUACInNetns(ctx context.Context, t *testing.T, pauseID, uacScenario s
 // On sipns0, IGNORE_OUTGOING=true captures only RX (UAC→UAS direction). The
 // 200 OK (UAS→UAC, TX on sipns0) is not captured, so invite_200_total is only
 // asserted on lo.
-func TestIfaceLabel_MultiInterface(t *testing.T) {
+func TestIfaceLabelMultiInterface(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	pauseID := setupVethNetns(t)
 

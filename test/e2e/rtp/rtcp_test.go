@@ -17,23 +17,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestRTCP_NonMux_LegacyPort probes the S12-14 legacy RTCP capture path: when the
+// TestRTCPNonMuxLegacyPort probes the S12-14 legacy RTCP capture path: when the
 // SDP declares neither a=rtcp nor a=rtcp-mux, the exporter registers port+1
 // (RFC 3550 §9). RTCP injected to that adjacent port (NOT the RTP port) must be
 // captured by eBPF and correlated by SSRC. A dummy UDP listener represents the
 // endpoint's RTCP socket (SIPp does not bind the RTCP port) so the loopback
 // packet completes the PACKET_HOST receive cycle the exporter — with
 // PACKET_IGNORE_OUTGOING — sees, and avoids ICMP port-unreachable.
-func TestRTCP_NonMux_LegacyPort(t *testing.T) {
+func TestRTCPNonMuxLegacyPort(t *testing.T) {
 	ports := allocatePortsN(5)
 	httpPort, uasSIP, uacSIP, uacMedia := ports[0], ports[1], ports[2], ports[3]
 	uasMediaNum := allocateMediaPortWithAdjacent(t)
 	uasMedia := strconv.Itoa(uasMediaNum)
 	legacyRTCPPort := uasMediaNum + 1 // RFC 3550 §9: RTCP on the adjacent port
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
+	endpoint := startExporter(t.Context(), t, httpPort, uasSIP, testInterface, "")
 
 	wait := startSippContainers(
-		context.Background(), t,
+		t.Context(), t,
 		"uas_rtp.xml", "uac_rtp.xml",
 		uasSIP, uacSIP, uasMedia, uacMedia,
 		"127.0.0.1", "127.0.0.1",
@@ -65,11 +65,11 @@ func TestRTCP_NonMux_LegacyPort(t *testing.T) {
 		"RTCP injected to the legacy port+1 must be captured (S12-14 synthesis)")
 }
 
-// TestRTCP_NonMuxSSRCReuse verifies that two non-mux streams reusing an SSRC
+// TestRTCPNonMuxSSRCReuse verifies that two non-mux streams reusing an SSRC
 // are correlated through their distinct legacy RTCP endpoints. The RTCP port is
 // RTP port+1, so SSRC-only lookup is ambiguous unless the tracker maps each
 // registered RTCP endpoint back to its RTP endpoint before stream selection.
-func TestRTCP_NonMuxSSRCReuse(t *testing.T) {
+func TestRTCPNonMuxSSRCReuse(t *testing.T) {
 	ports := allocatePortsN(7)
 	httpPort, uasSIPA, uacSIPA := ports[0], ports[1], ports[2]
 	uasSIPB, uacSIPB, uacMediaA, uacMediaB := ports[3], ports[4], ports[5], ports[6]
@@ -85,16 +85,16 @@ func TestRTCP_NonMuxSSRCReuse(t *testing.T) {
 	defer dummyB.Close()
 
 	endpoint := startExporter(
-		context.Background(), t, httpPort, uasSIPA+","+uasSIPB, testInterface, "",
+		t.Context(), t, httpPort, uasSIPA+","+uasSIPB, testInterface, "",
 	)
 	waitA := startSippContainers(
-		context.Background(), t,
+		t.Context(), t,
 		"uas_rtp.xml", "uac_rtp.xml",
 		uasSIPA, uacSIPA, strconv.Itoa(uasMediaANum), uacMediaA,
 		"127.0.0.1", "127.0.0.1",
 	)
 	waitB := startSippContainers(
-		context.Background(), t,
+		t.Context(), t,
 		"uas_rtp.xml", "uac_rtp.xml",
 		uasSIPB, uacSIPB, strconv.Itoa(uasMediaBNum), uacMediaB,
 		"127.0.0.1", "127.0.0.1",
@@ -135,13 +135,13 @@ func TestRTCP_NonMuxSSRCReuse(t *testing.T) {
 // collision fails loudly rather than producing a silent capture miss.
 const rtcpAttrPort = 16008
 
-// TestRTCP_ExplicitAttrPort probes the S12-1c explicit a=rtcp capture path
+// TestRTCPExplicitAttrPort probes the S12-1c explicit a=rtcp capture path
 // (RFC 3605): when the SDP declares a=rtcp:<port>, the exporter registers that
 // port in the BPF map. RTCP injected to that explicit port (which is NEITHER the
 // RTP port NOR port+1) must be captured and correlated by SSRC. This closes the
-// S12-12 acceptance gap — TestRTCP_NonMux_LegacyPort covers only the legacy
+// S12-12 acceptance gap — TestRTCPNonMuxLegacyPort covers only the legacy
 // port+1 (default) branch, not the m.RTCPPort != 0 branch.
-func TestRTCP_ExplicitAttrPort(t *testing.T) {
+func TestRTCPExplicitAttrPort(t *testing.T) {
 	ports := allocatePortsN(5)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 	uasMediaNum, err := strconv.Atoi(uasMedia)
@@ -154,10 +154,10 @@ func TestRTCP_ExplicitAttrPort(t *testing.T) {
 	require.NoError(t, err, "rtcpAttrPort %d must be free", rtcpAttrPort)
 	defer dummy.Close()
 
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
+	endpoint := startExporter(t.Context(), t, httpPort, uasSIP, testInterface, "")
 
 	wait := startSippContainers(
-		context.Background(), t,
+		t.Context(), t,
 		"uas_rtcp_attr.xml", "uac_rtp.xml",
 		uasSIP, uacSIP, uasMedia, uacMedia,
 		"127.0.0.1", "127.0.0.1",
@@ -312,23 +312,23 @@ func sendRTCPSR(t *testing.T, port int, ssrc, cumLost uint32) {
 	require.NoError(t, err)
 }
 
-// TestRTCP_MetricsFromInjectedRR proves the full RTCP path end to end: SIPp
+// TestRTCPMetricsFromInjectedRR proves the full RTCP path end to end: SIPp
 // establishes a real SIP dialog (SDP → media endpoint registered, UAS media socket
 // bound); the test then injects its own RTP (deterministic SSRC) so the exporter
 // tracks a stream, and an RTCP Receiver Report for that SSRC, both captured by
 // eBPF (rtcp-mux, on the RTP port), routed to handleRTCP, correlated by SSRC, and
 // exported as the rtcp_* metrics. SIPp itself does not emit RTCP and may rewrite
 // the pcap SSRC, so both packets are injected by the test with a fixed SSRC.
-func TestRTCP_MetricsFromInjectedRR(t *testing.T) {
+func TestRTCPMetricsFromInjectedRR(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 	uasMediaNum, err := strconv.Atoi(uasMedia)
 	require.NoError(t, err)
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
+	endpoint := startExporter(t.Context(), t, httpPort, uasSIP, testInterface, "")
 
 	// Start the SIPp UAS+UAC pair but do not block: inject RTCP during the call.
 	wait := startSippContainers(
-		context.Background(), t,
+		t.Context(), t,
 		"uas_rtp.xml", "uac_rtp.xml",
 		uasSIP, uacSIP, uasMedia, uacMedia,
 		"127.0.0.1", "127.0.0.1",
@@ -405,20 +405,20 @@ func TestRTCP_MetricsFromInjectedRR(t *testing.T) {
 	require.Equal(t, 500.0, lossTotal, "cumulative-loss delta must be exactly 500")
 }
 
-// TestRTCP_SenderReportCaptured proves the SR (PT 200) path end to end. SR is
+// TestRTCPSenderReportCaptured proves the SR (PT 200) path end to end. SR is
 // the dominant RTCP type from active senders, but the prior e2e suite injected
 // only RR. The SR carries its report blocks after a 20-byte sender-info block;
 // this test confirms the exporter parses past the sender info, correlates the
 // block by SSRC, and labels the report type=sr.
-func TestRTCP_SenderReportCaptured(t *testing.T) {
+func TestRTCPSenderReportCaptured(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 	uasMediaNum, err := strconv.Atoi(uasMedia)
 	require.NoError(t, err)
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
+	endpoint := startExporter(t.Context(), t, httpPort, uasSIP, testInterface, "")
 
 	wait := startSippContainers(
-		context.Background(), t,
+		t.Context(), t,
 		"uas_rtp.xml", "uac_rtp.xml",
 		uasSIP, uacSIP, uasMedia, uacMedia,
 		"127.0.0.1", "127.0.0.1",
@@ -441,22 +441,22 @@ func TestRTCP_SenderReportCaptured(t *testing.T) {
 		"RTCP Sender Report (PT 200) must be captured and labelled type=sr")
 }
 
-// TestRTCP_BothDirections proves per-stream SSRC isolation: a single dialog has
+// TestRTCPBothDirections proves per-stream SSRC isolation: a single dialog has
 // two media legs, each emitting RTCP for a distinct SSRC. Both RRs must
 // correlate independently — a bug in the rtcpLossSeen baseline (shared state
 // across streams) would cross-contaminate the two legs. RTCP is injected to each
 // leg's RTP port (rtcp-mux capture path) for two different SSRCs.
-func TestRTCP_BothDirections(t *testing.T) {
+func TestRTCPBothDirections(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 	uasMediaNum, err := strconv.Atoi(uasMedia)
 	require.NoError(t, err)
 	uacMediaNum, err := strconv.Atoi(uacMedia)
 	require.NoError(t, err)
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
+	endpoint := startExporter(t.Context(), t, httpPort, uasSIP, testInterface, "")
 
 	wait := startSippContainers(
-		context.Background(), t,
+		t.Context(), t,
 		"uas_rtp.xml", "uac_rtp.xml",
 		uasSIP, uacSIP, uasMedia, uacMedia,
 		"127.0.0.1", "127.0.0.1",
@@ -486,7 +486,7 @@ func TestRTCP_BothDirections(t *testing.T) {
 // getRTCPOrphanCount scrapes the label-less rtcp_orphan_reports_total counter.
 func getRTCPOrphanCount(t *testing.T, endpoint string) float64 {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/metrics", nil)
 	require.NoError(t, err)
@@ -508,16 +508,16 @@ func getRTCPOrphanCount(t *testing.T, endpoint string) float64 {
 	return 0
 }
 
-// TestRTCP_RefreshesStreamTTL proves end-to-end that RTCP reports refresh the
+// TestRTCPRefreshesStreamTTL proves end-to-end that RTCP reports refresh the
 // stream TTL (S12-52): when RTP pauses but RTCP keeps arriving, the stream
 // survives the 1s cleanup cycle past the RTP-idle TTL window. Without the fix,
 // Cleanup evicts based solely on lastArrival (set only by RTP), so RRs sent
 // after the TTL become orphans — quality metrics are lost during hold/mute.
 //
 // The counterpart negative case (no RTCP → stream expires at TTL) is covered
-// by TestRTP_StreamExpiry. Together they form the MC/DC pair for the
+// by TestRTPStreamExpiry. Together they form the MC/DC pair for the
 // max(lastArrival, lastRTCP) condition in Cleanup.
-func TestRTCP_RefreshesStreamTTL(t *testing.T) {
+func TestRTCPRefreshesStreamTTL(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 	uasMediaNum, err := strconv.Atoi(uasMedia)
@@ -526,10 +526,10 @@ func TestRTCP_RefreshesStreamTTL(t *testing.T) {
 	// TTL=3s: short enough for a fast test, long enough to separate from the
 	// RTCP injection cadence. The 1s cleanup ticker evicts streams whose
 	// max(lastArrival, lastRTCP) is older than 3s.
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "3s")
+	endpoint := startExporter(t.Context(), t, httpPort, uasSIP, testInterface, "3s")
 
 	wait := startSippContainers(
-		context.Background(), t,
+		t.Context(), t,
 		"uas_rtp.xml", "uac_rtp.xml",
 		uasSIP, uacSIP, uasMedia, uacMedia,
 		"127.0.0.1", "127.0.0.1",

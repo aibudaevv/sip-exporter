@@ -3,15 +3,14 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestAuthCompletion_401ChallengeThenSuccess(t *testing.T) {
+func TestAuthCompletion401ChallengeThenSuccess(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
 	const callCount = 10

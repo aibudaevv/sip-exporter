@@ -3,15 +3,14 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestReinvite_CountedSeparately(t *testing.T) {
+func TestReinviteCountedSeparately(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
 	const callCount = 10
@@ -36,9 +35,9 @@ func TestReinvite_CountedSeparately(t *testing.T) {
 	waitForSessionsZero(t, env.endpoint)
 }
 
-func TestReinvite_DoesNotContaminateSER(t *testing.T) {
+func TestReinviteDoesNotContaminateSER(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
 	const callCount = 10

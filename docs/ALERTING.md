@@ -393,7 +393,7 @@ These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) mea
           severity: warning
         annotations:
           summary: "No RTCP received while RTP flows (carrier {{ $labels.carrier }}, ua_type {{ $labels.ua_type }})"
-          description: "RTP packets are flowing for carrier {{ $labels.carrier }} (ua_type {{ $labels.ua_type }}) but zero RTCP reports have been received for approximately 15 minutes (a 5-minute rate window plus the 10-minute hold). RTCP is mandatory (RFC 3550) — its absence suggests RTCP is filtered, endpoints do not send it, or capture/registration is broken (check sip_exporter_rtcp_orphan_reports_total)."
+          description: "Optional diagnostic alert: enable it only after confirming that this carrier and endpoint group normally sends SR/RR and both media directions are visible. Zero reports for approximately 15 minutes (a 5-minute rate window plus the 10-minute hold) does not prove an outage: endpoint policy, an SBC/mixer, or capture placement can suppress or rewrite RTCP. Check sip_exporter_rtcp_orphan_reports_total and the capture topology before escalating."
 ```
 
 ### System Health Alerts

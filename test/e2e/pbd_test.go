@@ -3,21 +3,20 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-// TestPBD_MetricObserved verifies that sip_exporter_pbd histogram records
+// TestPBDMetricObserved verifies that sip_exporter_pbd histogram records
 // the delay between BYE and 200 OK BYE responses.
 //
 // Flow: standard uac_100/uas_100 — INVITE → 200 OK → ACK → BYE → 200 OK BYE.
 // The BYE → 200 OK BYE delay is near-instantaneous but measurable (> 0 ms).
-func TestPBD_MetricObserved(t *testing.T) {
+func TestPBDMetricObserved(t *testing.T) {
 	t.Parallel()
 	const callCount = 50
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
 	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", callCount, env)

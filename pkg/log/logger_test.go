@@ -7,74 +7,74 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestVerbosity_Error(t *testing.T) {
+func TestVerbosityError(t *testing.T) {
 	err := Verbosity("error")
 	require.NoError(t, err)
 	require.NotNil(t, zap.L())
 }
 
-func TestVerbosity_Info(t *testing.T) {
+func TestVerbosityInfo(t *testing.T) {
 	err := Verbosity("info")
 	require.NoError(t, err)
 	require.NotNil(t, zap.L())
 }
 
-func TestVerbosity_Debug(t *testing.T) {
+func TestVerbosityDebug(t *testing.T) {
 	err := Verbosity("debug")
 	require.NoError(t, err)
 	require.NotNil(t, zap.L())
 }
 
-func TestVerbosity_Info_Uppercase(t *testing.T) {
+func TestVerbosityInfoUppercase(t *testing.T) {
 	err := Verbosity("INFO")
 	require.NoError(t, err)
 	require.NotNil(t, zap.L())
 }
 
-func TestVerbosity_Debug_MixedCase(t *testing.T) {
+func TestVerbosityDebugMixedCase(t *testing.T) {
 	err := Verbosity("DeBuG")
 	require.NoError(t, err)
 	require.NotNil(t, zap.L())
 }
 
-func TestVerbosity_Unknown(t *testing.T) {
+func TestVerbosityUnknown(t *testing.T) {
 	err := Verbosity("unknown_level")
 	require.NoError(t, err)
 	require.NotNil(t, zap.L())
 }
 
-func TestVerbosity_Empty(t *testing.T) {
+func TestVerbosityEmpty(t *testing.T) {
 	err := Verbosity("")
 	require.NoError(t, err)
 	require.NotNil(t, zap.L())
 }
 
-func TestVerbosity_Invalid(t *testing.T) {
+func TestVerbosityInvalid(t *testing.T) {
 	err := Verbosity("invalid")
 	require.NoError(t, err)
 	require.NotNil(t, zap.L())
 }
 
-func TestInfoLevel_Constant(t *testing.T) {
+func TestInfoLevelConstant(t *testing.T) {
 	require.Equal(t, "info", InfoLevel)
 }
 
-func TestSetHandler_InfoLevel(t *testing.T) {
+func TestSetHandlerInfoLevel(t *testing.T) {
 	err := setHandler(zap.InfoLevel)
 	require.NoError(t, err)
 }
 
-func TestSetHandler_DebugLevel(t *testing.T) {
+func TestSetHandlerDebugLevel(t *testing.T) {
 	err := setHandler(zap.DebugLevel)
 	require.NoError(t, err)
 }
 
-func TestSetHandler_ErrorLevel(t *testing.T) {
+func TestSetHandlerErrorLevel(t *testing.T) {
 	err := setHandler(zap.ErrorLevel)
 	require.NoError(t, err)
 }
 
-func TestLogger_AfterVerbositySet(t *testing.T) {
+func TestLoggerAfterVerbositySet(t *testing.T) {
 	levels := []string{"error", "info", "debug"}
 
 	for _, level := range levels {

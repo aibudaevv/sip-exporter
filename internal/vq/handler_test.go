@@ -27,7 +27,7 @@ func (m *mockMetricser) SystemError() {
 
 func (m *mockMetricser) ParseError(string) {}
 
-func TestHandler_FullReport(t *testing.T) {
+func TestHandlerFullReport(t *testing.T) {
 	mock := &mockMetricser{}
 	h := NewHandler(mock)
 
@@ -45,7 +45,7 @@ func TestHandler_FullReport(t *testing.T) {
 	require.True(t, mock.lastReport.Present["NLR"])
 }
 
-func TestHandler_PartialReport(t *testing.T) {
+func TestHandlerPartialReport(t *testing.T) {
 	mock := &mockMetricser{}
 	h := NewHandler(mock)
 
@@ -60,7 +60,7 @@ func TestHandler_PartialReport(t *testing.T) {
 	require.False(t, mock.lastReport.Present["NLR"])
 }
 
-func TestHandler_InvalidBody(t *testing.T) {
+func TestHandlerInvalidBody(t *testing.T) {
 	mock := &mockMetricser{}
 	h := NewHandler(mock)
 
@@ -70,7 +70,7 @@ func TestHandler_InvalidBody(t *testing.T) {
 	require.False(t, mock.vqReportCalled)
 }
 
-func TestHandler_EmptyBody(t *testing.T) {
+func TestHandlerEmptyBody(t *testing.T) {
 	mock := &mockMetricser{}
 	h := NewHandler(mock)
 
@@ -80,7 +80,7 @@ func TestHandler_EmptyBody(t *testing.T) {
 	require.False(t, mock.vqReportCalled)
 }
 
-func TestHandler_NilBody(t *testing.T) {
+func TestHandlerNilBody(t *testing.T) {
 	mock := &mockMetricser{}
 	h := NewHandler(mock)
 
@@ -90,7 +90,7 @@ func TestHandler_NilBody(t *testing.T) {
 	require.False(t, mock.vqReportCalled)
 }
 
-func TestHandler_CarrierLabel(t *testing.T) {
+func TestHandlerCarrierLabel(t *testing.T) {
 	mock := &mockMetricser{}
 	h := NewHandler(mock)
 
@@ -101,7 +101,7 @@ func TestHandler_CarrierLabel(t *testing.T) {
 	require.Equal(t, "mobile-operator", mock.lastCarrier)
 }
 
-func TestHandler_UATypeLabel(t *testing.T) {
+func TestHandlerUATypeLabel(t *testing.T) {
 	mock := &mockMetricser{}
 	h := NewHandler(mock)
 

@@ -31,6 +31,7 @@ const (
 	senderSSRCLen   = 4  // sender SSRC follows the common header
 	senderInfoLen   = 20 // SR sender info: NTP(8) + RTP ts(4) + pkt count(4) + oct count(4)
 	reportBlockLen  = 24 // one report block (RFC 3550 §6.4.1)
+	signed24Bit     = 24
 
 	rrMinLen = commonHeaderLen + senderSSRCLen                 // 8 (RR with 0 blocks)
 	srMinLen = commonHeaderLen + senderSSRCLen + senderInfoLen // 28 (SR with 0 blocks)
@@ -89,39 +90,44 @@ func Parse(payload []byte) ([]Report, error) {
 	var firstErr error
 	off := 0
 	for off < len(payload) {
-		if off+commonHeaderLen > len(payload) {
+		packetLen, err := compoundPacketLen(payload, off)
+		if err != nil {
 			if firstErr == nil {
-				firstErr = ErrTruncated
+				firstErr = err
 			}
 			break
 		}
-		pt := payload[off+ptOffset]
-		lengthWords := int(binary.BigEndian.Uint16(payload[off+lengthOffset : off+commonHeaderLen]))
-		pktLen := (lengthWords + 1) * wordLen // RFC 3550: length is 32-bit words minus one
-		if off+pktLen > len(payload) {
-			if firstErr == nil {
-				firstErr = ErrTruncated
-			}
-			break
+		report, isReport, err := parseCompoundPacket(payload[off : off+packetLen])
+		if isReport && (err == nil || len(report.Blocks) > 0) {
+			reports = append(reports, report)
 		}
-
-		if pt == PTSenderReport || pt == PTReceiverReport {
-			rep, err := parseReport(payload[off:off+pktLen], pt)
-			if err != nil {
-				if len(rep.Blocks) > 0 {
-					reports = append(reports, rep)
-				}
-				if firstErr == nil {
-					firstErr = err
-				}
-			} else {
-				reports = append(reports, rep)
-			}
+		if err != nil && firstErr == nil {
+			firstErr = err
 		}
-		// SDES/BYE/APP and unknown PTs: skip — contents not needed.
-		off += pktLen
+		off += packetLen
 	}
 	return reports, firstErr
+}
+
+func compoundPacketLen(payload []byte, offset int) (int, error) {
+	if offset+commonHeaderLen > len(payload) {
+		return 0, ErrTruncated
+	}
+	lengthWords := int(binary.BigEndian.Uint16(payload[offset+lengthOffset : offset+commonHeaderLen]))
+	packetLen := (lengthWords + 1) * wordLen // RFC 3550: length is 32-bit words minus one
+	if offset+packetLen > len(payload) {
+		return 0, ErrTruncated
+	}
+	return packetLen, nil
+}
+
+func parseCompoundPacket(packet []byte) (Report, bool, error) {
+	packetType := packet[ptOffset]
+	if packetType != PTSenderReport && packetType != PTReceiverReport {
+		return Report{}, false, nil
+	}
+	report, err := parseReport(packet, packetType)
+	return report, true, err
 }
 
 // parseReport decodes one SR or RR sub-packet already sliced to its declared
@@ -166,7 +172,7 @@ func parseReportBlock(b []byte) ReportBlock {
 	raw := uint32(b[5])<<16 | uint32(b[6])<<8 | uint32(b[7])
 	cumLost := int32(raw)
 	if raw&0x800000 != 0 {
-		cumLost = int32(raw) - (1 << 24) // sign-extend 24-bit negative
+		cumLost = int32(raw) - (1 << signed24Bit) // sign-extend 24-bit negative
 	}
 	return ReportBlock{
 		SSRC:           binary.BigEndian.Uint32(b[0:4]),

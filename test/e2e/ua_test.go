@@ -3,7 +3,6 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,7 +10,7 @@ import (
 
 func TestUA(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const callCount = 50
 
 	type sippRun struct {
@@ -135,9 +134,9 @@ func TestUA(t *testing.T) {
 	}
 }
 
-func TestUA_CarrierAndUALabelsCombined(t *testing.T) {
+func TestUACarrierAndUALabelsCombined(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const callCount = 50
 	carriersYAML := loadCarriersYAML(t, "carriers.yaml")
 	env := newTestEnvWithCarrierAndUA(ctx, t, carriersYAML, "loopback-carrier", "user_agents.yaml")

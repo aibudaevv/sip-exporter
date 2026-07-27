@@ -52,12 +52,12 @@ func percentile(sorted []float64, p float64) float64 {
 	return sorted[lower]*(1-frac) + sorted[upper]*frac
 }
 
-func TestBenchmark_GCPauseDuration(t *testing.T) {
+func TestBenchmarkGCPauseDuration(t *testing.T) {
 	t.Setenv("SIP_EXPORTER_E2E_GODEBUG", "gctrace=1")
 
-	env := newTestEnv(context.Background(), t)
+	env := newTestEnv(t.Context(), t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 
 	callCount := 10000
@@ -85,7 +85,7 @@ func TestBenchmark_GCPauseDuration(t *testing.T) {
 	waitForContainerExit(ctx, t, uasContainer)
 	waitForMetricStable(t, env.endpoint)
 
-	logsReader, err := env.exporterContainer.Logs(context.Background())
+	logsReader, err := env.exporterContainer.Logs(t.Context())
 	require.NoError(t, err)
 	defer logsReader.Close()
 

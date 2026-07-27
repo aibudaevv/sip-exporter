@@ -14,10 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBenchmark_ScrapeLatencyUnderLoad(t *testing.T) {
-	env := newTestEnv(context.Background(), t)
+func TestBenchmarkScrapeLatencyUnderLoad(t *testing.T) {
+	env := newTestEnv(t.Context(), t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 
 	callCount := 10000
@@ -70,11 +70,20 @@ func TestBenchmark_ScrapeLatencyUnderLoad(t *testing.T) {
 			start := time.Now()
 			resp, err := client.Get(env.endpoint + "/metrics")
 			elapsed := time.Since(start)
-			if err == nil {
-				resp.Body.Close()
+			if err != nil {
+				mu.Lock()
+				results = append(results, scrapeResult{duration: elapsed, err: err})
+				mu.Unlock()
+				return
+			}
+			if err := resp.Body.Close(); err != nil {
+				mu.Lock()
+				results = append(results, scrapeResult{duration: elapsed, err: err})
+				mu.Unlock()
+				return
 			}
 			mu.Lock()
-			results = append(results, scrapeResult{duration: elapsed, err: err})
+			results = append(results, scrapeResult{duration: elapsed})
 			mu.Unlock()
 		}(i)
 		time.Sleep(scrapeInterval)

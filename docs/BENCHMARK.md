@@ -120,13 +120,13 @@ Each subtest runs N parallel SIPp UAC flood scenarios (`flood_uac.xml`, 1 INVITE
 # Build Docker image
 make docker_build
 
-# Run all load tests (whole package, sequential — includes TestBenchmark_* tests)
+# Run all load tests (whole package, sequential — includes TestBenchmark* tests)
 SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(cat VERSION) \
   go test -tags=e2e -v -count=1 -timeout 30m ./test/e2e/load/...
 
 # Run specific test
 SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(cat VERSION) \
-  go test -tags=e2e -v -count=1 -timeout 5m -run 'TestLoad_FullCallFlow/rate_1800' ./test/e2e/load/...
+  go test -tags=e2e -v -count=1 -timeout 5m -run 'TestLoadFullCallFlow/rate_1800' ./test/e2e/load/...
 
 # Run with single core (test scheduler sensitivity)
 SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(cat VERSION) SIP_EXPORTER_E2E_GOMAXPROCS=1 \
@@ -134,7 +134,7 @@ SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(cat VERSION) SIP_EXPORTER_E2E_GOMAXPROCS=1
 
 # Run with GC trace
 SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(cat VERSION) SIP_EXPORTER_E2E_GODEBUG=gctrace=1 \
-  go test -tags=e2e -v -count=1 -timeout 5m -run 'TestLoad_FullCallFlow/rate_1800' ./test/e2e/load/...
+  go test -tags=e2e -v -count=1 -timeout 5m -run 'TestLoadFullCallFlow/rate_1800' ./test/e2e/load/...
 ```
 
 ---

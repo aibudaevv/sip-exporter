@@ -22,7 +22,7 @@ const tcImage = "alpine:3.22.4"
 func startTCContainer(t *testing.T) string {
 	t.Helper()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 
 	out, err := exec.CommandContext(ctx, "docker", "run", "-d", "--rm",
@@ -50,7 +50,7 @@ func startTCContainer(t *testing.T) string {
 // test on error.
 func runTC(t *testing.T, id string, args ...string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	execArgs := append([]string{"exec", id, "tc"}, args...)
 	out, err := exec.CommandContext(ctx, "docker", execArgs...).CombinedOutput()
@@ -73,7 +73,7 @@ func applyNetem(t *testing.T, netemArgs []string, ports ...string) {
 	id := startTCContainer(t)
 
 	// Pre-clean any leftover qdisc from a failed prior run (ignore errors).
-	preCtx, preCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	preCtx, preCancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer preCancel()
 	_ = exec.CommandContext(preCtx, "docker", "exec", id,
 		"tc", "qdisc", "del", "dev", "lo", "root").Run()
@@ -117,7 +117,7 @@ func avgHistogramValue(t *testing.T, endpoint, name string) float64 {
 	return sum / cnt
 }
 
-// TestRTP_NetemDegradation verifies that RTP traffic degraded by tc netem
+// TestRTPNetemDegradation verifies that RTP traffic degraded by tc netem
 // (jitter + loss) produces elevated jitter metrics, detected packet loss and
 // degraded MOS on /metrics. Netem is applied only to the RTP media ports via
 // u32 port filters — SIP signalling and testcontainers traffic on lo are
@@ -134,18 +134,18 @@ func avgHistogramValue(t *testing.T, endpoint, name string) float64 {
 // The delay variation is kept ≤20ms (G.711 inter-packet interval) to avoid
 // packet reordering, which would conflate jitter and loss measurements in
 // this combined-degradation test.
-func TestRTP_NetemDegradation(t *testing.T) {
+func TestRTPNetemDegradation(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
+	endpoint := startExporter(t.Context(), t, httpPort, uasSIP, testInterface, "")
 
 	applyNetem(t,
 		[]string{"delay", "30ms", "10ms", "loss", "50%"},
 		uasMedia, uacMedia,
 	)
 
-	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
+	runSippRTP(t.Context(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 
 	// RTP packets must be observed (pipeline functional despite degradation).
 	require.Eventually(t, func() bool {
@@ -176,9 +176,9 @@ func TestRTP_NetemDegradation(t *testing.T) {
 	t.Logf("netem degradation: avg MOS=%.2f (target <3.0, clean≈4.4)", avgMOS)
 }
 
-// TestRTP_NetemPacketLoss verifies that sequence-gap loss detection produces a
+// TestRTPNetemPacketLoss verifies that sequence-gap loss detection produces a
 // loss rate approximately matching the injected netem rate. Unlike
-// TestRTP_NetemDegradation (combined jitter+loss, asserts only lost>0), this
+// TestRTPNetemDegradation (combined jitter+loss, asserts only lost>0), this
 // test applies loss-only netem and asserts the detected rate is quantitatively
 // correct.
 //
@@ -189,18 +189,18 @@ func TestRTP_NetemDegradation(t *testing.T) {
 // drops 30% → exporter receives ~140/leg, detects ~60 seq gaps/leg → lossRate
 // = lost/(lost+received) ≈ 30%. Margin [20%, 40%] covers netem randomness and
 // small-sample variance (at 400 packets, σ≈9.2).
-func TestRTP_NetemPacketLoss(t *testing.T) {
+func TestRTPNetemPacketLoss(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
+	endpoint := startExporter(t.Context(), t, httpPort, uasSIP, testInterface, "")
 
 	applyNetem(t,
 		[]string{"loss", "30%"},
 		uasMedia, uacMedia,
 	)
 
-	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
+	runSippRTP(t.Context(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 
 	// RTP packets must be observed.
 	require.Eventually(t, func() bool {

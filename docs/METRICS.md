@@ -799,6 +799,14 @@ All RTP metrics carry the `carrier`, `ua_type`, `codec`, and `source_country` la
 belongs to an established SIP dialog (after a 200 OK to INVITE with SDP) is
 counted; RTP without a correlated dialog is dropped.
 
+> **Measurement semantics:** RTP loss, jitter, PDV, and E-model MOS describe
+> packets observed at this capture point. Sequence gaps and arrival variation
+> can indicate a transport problem upstream of the sensor, but they are not a
+> subscriber's subjective score or proof of end-to-end impairment. Treat a
+> rising `sip_exporter_socket_packets_dropped_total` or
+> `sip_exporter_rtp_dropped_total` rate as a data-quality failure before using
+> these metrics for QoE alerting.
+
 > **RTP capture (SDP-driven mode):** The eBPF filter passes UDP only from
 > endpoints learned via SDP signaling. Media endpoints (IP:port) from INVITE
 > 200 OK SDP are inserted into a BPF LRU hash map (`rtp_endpoints`, 65536
@@ -864,7 +872,7 @@ These counters are evaluated at dialog teardown (BYE 200 OK or Session-Expires e
 
 ## RTCP Endpoint-Reported Metrics
 
-RTCP metrics are derived from RTCP Sender/Receiver Reports (RFC 3550 §6) captured by the eBPF filter and correlated to RTP streams by SSRC. They report the **endpoint's own observation** of quality (what the phone experiences, after its jitter buffer and packet concealment) — complementing the passive RTP metrics, which report what the sniffer observes on the wire. RTCP is universal (RFC 3550 mandates it for every RTP sender/receiver), so these metrics cover traffic that VQ (RFC 6035, end-of-call, opt-in) does not.
+RTCP metrics are derived from RTCP Sender/Receiver Reports (RFC 3550 §6) captured by the eBPF filter and correlated to RTP streams by SSRC. They report the **receiver's RTP statistics** for that stream, complementing passive RTP metrics observed at the capture point. They are not a subjective call-quality score and exist only when the endpoint, SBC, or mixer emits SR/RR that the sensor can see; do not assume every deployment produces them.
 
 > **Capture:** RTCP shares V=2 and (for rtcp-mux, RFC 5761) the RTP port with RTP; the eBPF filter distinguishes them by the 8-bit packet-type byte (200–204 for RTCP) and passes the **full** RTCP compound to userspace (RTP keeps a 64-byte header-only snapshot). rtcp-mux works with no extra configuration. Non-mux RTCP on a separate port is captured when the SDP declares it via `a=rtcp` (RFC 3605) — both the port and an optional unicast address (`a=rtcp:<port> IN IP4 <addr>`, RTCP on a host other than `c=`) are honoured (IPv4 only); absent both `a=rtcp-mux` and `a=rtcp`, legacy RTCP on `port+1` (RFC 3550 §9) is registered automatically.
 
@@ -884,7 +892,7 @@ All quality metrics inherit the labels of the correlated RTP stream: `carrier, u
 
 `sip_exporter_rtcp_orphan_reports_total` *(counter, label-less)*: RTCP reception report blocks whose SSRC could not be correlated to a tracked RTP stream (the SSRC is unknown, or two streams collide on the SSRC and the report's endpoints match neither). A non-zero rate indicates SDP/SSRC registration gaps or RTCP arriving for calls the exporter does not track. Label-less because the stream — and thus its carrier/codec context — is unknown.
 
-> **RTT vs everything else:** RTT has no passive-RTP equivalent — a single sniffer point cannot measure end-to-end RTT from RTP alone. The RTCP-derived RTT is the only source of network round-trip latency in sip-exporter, useful for echo diagnosis and E-model accuracy.
+> **RTT vs everything else:** RTT has no passive-RTP equivalent — a single sniffer point cannot measure end-to-end RTT from RTP alone. RTCP-derived RTT is the only source of network round-trip latency in sip-exporter. Use it to investigate routing, queuing, and conversational delay; it does not by itself diagnose acoustic echo.
 
 > **Correlation by SSRC:** a report block is matched to the RTP stream sending with its SSRC (destination-first, NAT-robust). On rare SSRC collision (two streams reuse an SSRC within the TTL window) the endpoint hints disambiguate; the loss delta and the labels always attribute to the same stream.
 
