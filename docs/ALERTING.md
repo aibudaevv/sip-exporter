@@ -6,10 +6,10 @@ This guide provides pre-configured alerting examples for monitoring SIP infrastr
 
 ### Manual Setup
 
-1. Copy [`examples/prometheus-recording-rules.yml`](../examples/prometheus-recording-rules.yml) into the directory loaded by your Prometheus-compatible rule engine
+1. Copy [`examples/prometheus-recording-rules.yml`](../examples/prometheus-recording-rules.yml) and [`examples/prometheus-alerts.yml`](../examples/prometheus-alerts.yml) into the directory loaded by your Prometheus-compatible rule engine
 2. Import Grafana dashboard JSON
 3. Configure Alertmanager receiver (Slack/PagerDuty/Email)
-4. Adjust alert thresholds based on your traffic patterns
+4. Adjust alert thresholds after observing normal traffic
 
 ## Recording Rules
 
@@ -25,6 +25,26 @@ The SIP and RTP records retain only `instance`, `carrier`, and `direction`; endp
 codec, and user-agent labels are aggregated away. Socket-drop records retain `instance` and `iface`,
 the only dimensions exposed by their source metrics. These are recording rules, not alerts: they do
 not set thresholds and do not replace the raw `sip_exporter_*` metrics.
+
+## Production Alert Pack
+
+`examples/prometheus-alerts.yml` is the conservative starting pack for a production sensor. It
+requires `prometheus-recording-rules.yml` to be loaded first and a scrape target whose `job` label is
+`sip-exporter`. Validate both files before reloading the rule engine:
+
+```bash
+promtool check rules /etc/prometheus/rules/prometheus-recording-rules.yml
+promtool check rules /etc/prometheus/rules/prometheus-alerts.yml
+```
+
+The pack covers exporter availability, kernel socket drops, internal channel saturation, degraded
+SER, RTP loss, missing RTP, and one-way RTP. Its 1% socket-drop, 80% channel, 90% SER, 5% RTP/media
+failure thresholds and traffic floor are safe starting points, not universal SLOs. Observe at least
+seven days of normal traffic before changing them. Exclude intentional one-way media such as paging,
+IVR, or voicemail before routing that alert to an escalation policy.
+
+Every alert links to this section and states the symptom with a likely cause. Use raw
+`sip_exporter_*` metrics and the dashboard to distinguish a network problem from incomplete capture.
 
 ## Prometheus Alert Rules
 
