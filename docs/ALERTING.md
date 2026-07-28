@@ -6,10 +6,25 @@ This guide provides pre-configured alerting examples for monitoring SIP infrastr
 
 ### Manual Setup
 
-1. Create a Prometheus rule file from the examples below: the first block defines the group, and the following blocks are entries to append to its `rules:` list
+1. Copy [`examples/prometheus-recording-rules.yml`](../examples/prometheus-recording-rules.yml) into the directory loaded by your Prometheus-compatible rule engine
 2. Import Grafana dashboard JSON
 3. Configure Alertmanager receiver (Slack/PagerDuty/Email)
-4. Adjust thresholds based on your traffic patterns
+4. Adjust alert thresholds based on your traffic patterns
+
+## Recording Rules
+
+`examples/prometheus-recording-rules.yml` provides 5-minute precomputed signals for INVITE rate,
+SER, ASR, RTP packet loss, dialogs missing RTP, and kernel socket drops. Load it as a Prometheus
+rule file, for example with `rule_files: ["/etc/prometheus/rules/*.yml"]`, then validate it with:
+
+```bash
+promtool check rules /etc/prometheus/rules/prometheus-recording-rules.yml
+```
+
+The SIP and RTP records retain only `instance`, `carrier`, and `direction`; endpoint, country,
+codec, and user-agent labels are aggregated away. Socket-drop records retain `instance` and `iface`,
+the only dimensions exposed by their source metrics. These are recording rules, not alerts: they do
+not set thresholds and do not replace the raw `sip_exporter_*` metrics.
 
 ## Prometheus Alert Rules
 

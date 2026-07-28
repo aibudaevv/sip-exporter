@@ -6,10 +6,25 @@
 
 ### Ручная настройка
 
-1. Создайте файл правил Prometheus по примерам ниже: первый блок определяет группу, последующие блоки — записи, которые нужно добавить в её список `rules:`
+1. Скопируйте [`examples/prometheus-recording-rules.yml`](../examples/prometheus-recording-rules.yml) в каталог, из которого ваш Prometheus-совместимый движок загружает rules
 2. Импортируйте JSON дашборда Grafana
 3. Настройте получателя Alertmanager (Slack/PagerDuty/Email)
-4. Скорректируйте пороги под ваши паттерны трафика
+4. Скорректируйте пороги алертов под ваши паттерны трафика
+
+## Recording rules
+
+`examples/prometheus-recording-rules.yml` содержит заранее вычисленные 5-минутные показатели:
+rate INVITE, SER, ASR, RTP packet loss, диалоги без RTP и потери kernel socket. Подключите файл
+как Prometheus rule, например через `rule_files: ["/etc/prometheus/rules/*.yml"]`, затем проверьте:
+
+```bash
+promtool check rules /etc/prometheus/rules/prometheus-recording-rules.yml
+```
+
+Записи SIP и RTP сохраняют только `instance`, `carrier` и `direction`; лейблы endpoint, стран,
+codec и User-Agent агрегируются. Записи socket drops сохраняют `instance` и `iface` — это
+единственные измерения исходной метрики. Это recording rules, а не алерты: в них нет порогов, и
+они не заменяют исходные метрики `sip_exporter_*`.
 
 ## Правила алертов Prometheus
 
