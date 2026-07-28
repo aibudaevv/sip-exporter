@@ -4,6 +4,7 @@ package rtp
 
 import (
 	"encoding/binary"
+	"fmt"
 	"net"
 	"strconv"
 	"testing"
@@ -11,6 +12,51 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+// startControlledSIPDialog emits each signalling message three times while
+// retaining both SIP ports as UDP listeners. This makes the BPF-map lifecycle
+// assertion independent of a single missed loopback AF_PACKET copy.
+func startControlledSIPDialog(t *testing.T, uasSIP, uacSIP, uasMedia, uacMedia string) func() {
+	t.Helper()
+
+	uasPort, err := strconv.Atoi(uasSIP)
+	require.NoError(t, err)
+	uacPort, err := strconv.Atoi(uacSIP)
+	require.NoError(t, err)
+	uasConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: uasPort})
+	require.NoError(t, err)
+	uacConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: uacPort})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = uasConn.Close()
+		_ = uacConn.Close()
+	})
+
+	callID := fmt.Sprintf("sdp-filter-%s-%s@127.0.0.1", uasSIP, uacSIP)
+	uacSDP := fmt.Sprintf("v=0\r\nc=IN IP4 127.0.0.1\r\nm=audio %s RTP/AVP 8\r\na=rtpmap:8 PCMA/8000\r\n", uacMedia)
+	uasSDP := fmt.Sprintf("v=0\r\nc=IN IP4 127.0.0.1\r\nm=audio %s RTP/AVP 8\r\na=rtpmap:8 PCMA/8000\r\n", uasMedia)
+	invite := fmt.Sprintf("INVITE sip:service@127.0.0.1:%s SIP/2.0\r\nFrom: sipp <sip:sipp@127.0.0.1:%s>;tag=uac\r\nTo: sut <sip:service@127.0.0.1:%s>\r\nCall-ID: %s\r\nCSeq: 1 INVITE\r\nUser-Agent: SIPp\r\nContent-Type: application/sdp\r\nContent-Length: %d\r\n\r\n%s", uasSIP, uacSIP, uasSIP, callID, len(uacSDP), uacSDP)
+	ok := fmt.Sprintf("SIP/2.0 200 OK\r\nFrom: sipp <sip:sipp@127.0.0.1:%s>;tag=uac\r\nTo: sut <sip:service@127.0.0.1:%s>;tag=uas\r\nCall-ID: %s\r\nCSeq: 1 INVITE\r\nUser-Agent: SIPp\r\nContent-Type: application/sdp\r\nContent-Length: %d\r\n\r\n%s", uacSIP, uasSIP, callID, len(uasSDP), uasSDP)
+	uasAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: uasPort}
+	uacAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: uacPort}
+	for range 3 {
+		_, err = uacConn.WriteToUDP([]byte(invite), uasAddr)
+		require.NoError(t, err)
+		_, err = uasConn.WriteToUDP([]byte(ok), uacAddr)
+		require.NoError(t, err)
+	}
+
+	return func() {
+		bye := fmt.Sprintf("BYE sip:service@127.0.0.1:%s SIP/2.0\r\nFrom: sipp <sip:sipp@127.0.0.1:%s>;tag=uac\r\nTo: sut <sip:service@127.0.0.1:%s>;tag=uas\r\nCall-ID: %s\r\nCSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n", uasSIP, uacSIP, uasSIP, callID)
+		byeOK := fmt.Sprintf("SIP/2.0 200 OK\r\nFrom: sipp <sip:sipp@127.0.0.1:%s>;tag=uac\r\nTo: sut <sip:service@127.0.0.1:%s>;tag=uas\r\nCall-ID: %s\r\nCSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n", uacSIP, uasSIP, callID)
+		for range 3 {
+			_, err = uacConn.WriteToUDP([]byte(bye), uasAddr)
+			require.NoError(t, err)
+			_, err = uasConn.WriteToUDP([]byte(byeOK), uacAddr)
+			require.NoError(t, err)
+		}
+	}
+}
 
 // sendNonRTPUDP sends count UDP packets with a non-RTP header (byte[0]=0x00,
 // V=0 instead of V=2) to 127.0.0.1:port. A local listener is bound to complete
@@ -198,9 +244,7 @@ func TestSDPFilterEntryLifecycle(t *testing.T) {
 				httpPort, uasSIP,
 				integrationCarriersYAML, integrationUserAgentsYAML, "")
 
-			wait := startSippContainers(t.Context(), t,
-				"uas_nortp.xml", "uac_nortp.xml",
-				uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
+			wait := startControlledSIPDialog(t, uasSIP, uacSIP, uasMedia, uacMedia)
 
 			require.Eventually(t, func() bool {
 				return getMetricByLabel(t, endpoint, "sip_exporter_sessions",
@@ -223,7 +267,7 @@ func TestSDPFilterEntryLifecycle(t *testing.T) {
 			if tt.afterBye {
 				sendNonRTPUDP(t, uasMediaNum, pktCount)
 			} else {
-				sendNonRTPToSippPort(t, uasMediaNum, pktCount)
+				sendNonRTPUDP(t, uasMediaNum, pktCount)
 			}
 
 			time.Sleep(2500 * time.Millisecond)
