@@ -58,14 +58,14 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 > |------|---------|----------------|
 > | **System** | `packets_total`, `system_error_total`, self-monitoring | *(none)* |
 > | **Base** | All SIP requests, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD/PBD, VQ reports, sessions, `reinvite_total`, registration health (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country, direction` |
-> | **Reg failure** | `register_failure_total` | `carrier, ua_type, source_country, code` |
-> | **Retransmission** | `sip_retransmission_total` | `carrier, ua_type, source_country, method` |
+> | **Reg failure** | `register_failure_total` | `carrier, ua_type, source_country, direction, code` |
+> | **Retransmission** | `sip_retransmission_total` | `carrier, ua_type, source_country, direction, method` |
 > | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_out_of_order_total`, `rtp_jitter_milliseconds`, `rtp_pdv_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country, direction` |
 > | **RTP dialog** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country, direction` |
 > | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, direction, destination_country, caller_host, called_host, iface` |
 > | **Fraud** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country, direction` |
 > | **Fraud (call-level)** | `fas_calls_total` | `carrier, ua_type, source_country, direction` |
-> | **Short calls** | `short_calls_total` | `carrier, ua_type, source_country, threshold` |
+> | **Short calls** | `short_calls_total` | `carrier, ua_type, source_country, direction, threshold` |
 > | **Traffic** | `billable_seconds_total` | `carrier, destination_country, direction` |
 > | **Capacity** | `sessions_limit`, `sessions_utilization` | `carrier` |
 
@@ -563,7 +563,7 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 `sip_exporter_update_total{carrier="...",ua_type="..."}`: total number of received SIP UPDATE requests.  
 `sip_exporter_message_total{carrier="...",ua_type="..."}`: total number of received SIP MESSAGE requests.
 
-`sip_exporter_sip_retransmission_total{carrier="...",ua_type="...",method="INVITE"}` *(counter)*: total number of retransmitted SIP requests detected via Timer A (RFC 3261 §17.1.1.2). A retransmission is identified when a duplicate INVITE with the same Call-ID arrives within the invite tracker TTL window (60s) without an active dialog. Currently INVITE-only; the `method` label is reserved for future generalization to REGISTER/OPTIONS.
+`sip_exporter_sip_retransmission_total{carrier="...",ua_type="...",direction="...",method="INVITE"}` *(counter)*: total number of retransmitted SIP requests detected via Timer A (RFC 3261 §17.1.1.2). A retransmission is identified when a duplicate INVITE with the same Call-ID arrives within the invite tracker TTL window (60s) without an active dialog. Currently INVITE-only; the `method` label is reserved for future generalization to REGISTER/OPTIONS.
 
 `sip_exporter_invite_200_total{carrier,ua_type,source_country,destination_country,caller_host,called_host,iface}`: total number of `200 OK` responses to INVITE requests (successful call establishments). This is the numerator for [SER-by-destination](#ser-by-destination-promql) PromQL calculations. Carries the full 8-label set — same as `invite_total`, including `iface`.
 
@@ -607,7 +607,7 @@ Registration metrics track the full lifecycle of SIP registrations (RFC 3261 §1
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
 | `sip_exporter_register_success_total` | counter | `carrier,ua_type,source_country,direction` | REGISTER responses with status `200 OK` |
-| `sip_exporter_register_failure_total` | counter | `carrier,ua_type,source_country,code` | REGISTER responses with status `3xx/4xx/5xx/6xx`, by code |
+| `sip_exporter_register_failure_total` | counter | `carrier,ua_type,source_country,direction,code` | REGISTER responses with status `3xx/4xx/5xx/6xx`, by code |
 | `sip_exporter_register_success_ratio` | gauge | `carrier,ua_type,source_country,direction` | `200 OK / (200 OK + terminal failures) × 100` |
 | `sip_exporter_active_registrations` | gauge | `carrier,ua_type,source_country,direction` | Currently active registrations (Expires-TTL tracked) |
 
@@ -761,7 +761,7 @@ sip_exporter_sessions_utilization > 90
 
 ## Short call counters
 
-`sip_exporter_short_calls_total{carrier="...",ua_type="...",threshold="20|60|180"}` *(counter)*: completed sessions with duration shorter than the threshold (20, 60, or 180 seconds). A single session can increment multiple thresholds (e.g., a 15-second call increments `threshold="20"`, `"60"`, and `"180"`). Short calls indicate abandoned calls, poor quality, or potential toll fraud.
+`sip_exporter_short_calls_total{carrier="...",ua_type="...",direction="...",threshold="20|60|180"}` *(counter)*: completed sessions with duration shorter than the threshold (20, 60, or 180 seconds). A single session can increment multiple thresholds (e.g., a 15-second call increments `threshold="20"`, `"60"`, and `"180"`). Short calls indicate abandoned calls, poor quality, or potential toll fraud.
 
 **PromQL examples:**
 ```promql

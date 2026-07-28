@@ -440,7 +440,7 @@ func (m *metrics) initRegistrationMetrics(reg *prometheus.Registry) {
 	m.registerFailureTotal = newCounterVecWithRegistry(
 		"sip_exporter_register_failure_total",
 		"Total number of failed REGISTER responses by status code (non-1xx, non-2xx)",
-		[]string{"carrier", "ua_type", "source_country", "code"}, reg)
+		[]string{"carrier", "ua_type", "source_country", "direction", "code"}, reg)
 	m.activeRegistrations = newGaugeVecWithRegistry(
 		"sip_exporter_active_registrations",
 		"Number of active SIP registrations tracked by Expires-TTL", cl, reg)
@@ -469,13 +469,13 @@ func (m *metrics) initRegistrationMetrics(reg *prometheus.Registry) {
 	m.sipRetransmission = newCounterVecWithRegistry(
 		"sip_exporter_sip_retransmission_total",
 		"Total retransmitted SIP requests (Timer A on UDP)",
-		[]string{"carrier", "ua_type", "source_country", "method"},
+		[]string{"carrier", "ua_type", "source_country", "direction", "method"},
 		reg,
 	)
 	m.shortCalls = newCounterVecWithRegistry(
 		"sip_exporter_short_calls_total",
 		"Completed sessions shorter than threshold seconds",
-		[]string{"carrier", "ua_type", "source_country", "threshold"},
+		[]string{"carrier", "ua_type", "source_country", "direction", "threshold"},
 		reg,
 	)
 	m.billableSeconds = newCounterVecWithRegistry(
@@ -1006,7 +1006,7 @@ func (m *metrics) RegisterSuccess(carrier, uaType, sourceCountry, direction stri
 }
 
 func (m *metrics) RegisterFailure(carrier, uaType, sourceCountry, direction, code string) {
-	m.registerFailureTotal.WithLabelValues(carrier, uaType, sourceCountry, code).Inc()
+	m.registerFailureTotal.WithLabelValues(carrier, uaType, sourceCountry, direction, code).Inc()
 	if isRegisterChallenge(code) || isRedirectStatus(code) {
 		return
 	}
@@ -1029,11 +1029,11 @@ func (m *metrics) FasCall(carrier, uaType, sourceCountry, direction string) {
 	m.fasCalls.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 }
 
-func (m *metrics) SIPRetransmission(carrier, uaType, sourceCountry, _, method string) {
-	m.sipRetransmission.WithLabelValues(carrier, uaType, sourceCountry, method).Inc()
+func (m *metrics) SIPRetransmission(carrier, uaType, sourceCountry, direction, method string) {
+	m.sipRetransmission.WithLabelValues(carrier, uaType, sourceCountry, direction, method).Inc()
 }
 
-func (m *metrics) UpdateShortCalls(carrier, uaType, sourceCountry, _ string, duration time.Duration) {
+func (m *metrics) UpdateShortCalls(carrier, uaType, sourceCountry, direction string, duration time.Duration) {
 	if duration <= 0 {
 		return
 	}
@@ -1046,7 +1046,7 @@ func (m *metrics) UpdateShortCalls(carrier, uaType, sourceCountry, _ string, dur
 		{"180", shortCallThreshold180},
 	} {
 		if duration < threshold.limit {
-			m.shortCalls.WithLabelValues(carrier, uaType, sourceCountry, threshold.label).Inc()
+			m.shortCalls.WithLabelValues(carrier, uaType, sourceCountry, direction, threshold.label).Inc()
 		}
 	}
 }

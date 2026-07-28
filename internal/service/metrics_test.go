@@ -339,47 +339,47 @@ func TestMetricserRequestAllMethodsSingleRun(t *testing.T) {
 
 func TestMetricsSIPRetransmission(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
-	m.SIPRetransmission("carrier-a", "yealink", "RU", "", "INVITE")
-	m.SIPRetransmission("carrier-a", "yealink", "RU", "", "INVITE")
-	m.SIPRetransmission("carrier-a", "yealink", "RU", "", "INVITE")
+	m.SIPRetransmission("carrier-a", "yealink", "RU", "inbound", "INVITE")
+	m.SIPRetransmission("carrier-a", "yealink", "RU", "inbound", "INVITE")
+	m.SIPRetransmission("carrier-a", "yealink", "RU", "inbound", "INVITE")
 
-	val := requestVecValue(m.sipRetransmission, "carrier-a", "yealink", "RU", "INVITE")
+	val := requestVecValue(m.sipRetransmission, "carrier-a", "yealink", "RU", "inbound", "INVITE")
 	require.InDelta(t, 3.0, val, 0.01)
 
-	m.SIPRetransmission("carrier-b", "cisco", "US", "", "INVITE")
+	m.SIPRetransmission("carrier-b", "cisco", "US", "outbound", "INVITE")
 	require.InDelta(t, 1.0,
-		requestVecValue(m.sipRetransmission, "carrier-b", "cisco", "US", "INVITE"), 0.01)
+		requestVecValue(m.sipRetransmission, "carrier-b", "cisco", "US", "outbound", "INVITE"), 0.01)
 }
 
 func TestMetricsShortCalls(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 
 	// 15s → all three thresholds (20/60/180) increment
-	m.UpdateShortCalls("", "", "", "", 15*time.Second)
-	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "20"), 0.01)
-	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "60"), 0.01)
-	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "180"), 0.01)
+	m.UpdateShortCalls("", "", "", "inbound", 15*time.Second)
+	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "inbound", "20"), 0.01)
+	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "inbound", "60"), 0.01)
+	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "inbound", "180"), 0.01)
 
 	// 30s → only 60 and 180 increment
-	m.UpdateShortCalls("", "", "", "", 30*time.Second)
-	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "20"), 0.01)
-	require.InDelta(t, 2.0, requestVecValue(m.shortCalls, "", "", "", "60"), 0.01)
-	require.InDelta(t, 2.0, requestVecValue(m.shortCalls, "", "", "", "180"), 0.01)
+	m.UpdateShortCalls("", "", "", "inbound", 30*time.Second)
+	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "inbound", "20"), 0.01)
+	require.InDelta(t, 2.0, requestVecValue(m.shortCalls, "", "", "", "inbound", "60"), 0.01)
+	require.InDelta(t, 2.0, requestVecValue(m.shortCalls, "", "", "", "inbound", "180"), 0.01)
 
 	// 200s → no threshold increments
-	m.UpdateShortCalls("", "", "", "", 200*time.Second)
-	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "20"), 0.01)
-	require.InDelta(t, 2.0, requestVecValue(m.shortCalls, "", "", "", "60"), 0.01)
-	require.InDelta(t, 2.0, requestVecValue(m.shortCalls, "", "", "", "180"), 0.01)
+	m.UpdateShortCalls("", "", "", "inbound", 200*time.Second)
+	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "inbound", "20"), 0.01)
+	require.InDelta(t, 2.0, requestVecValue(m.shortCalls, "", "", "", "inbound", "60"), 0.01)
+	require.InDelta(t, 2.0, requestVecValue(m.shortCalls, "", "", "", "inbound", "180"), 0.01)
 }
 
 func TestMetricsShortCallsZeroDuration(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateShortCalls("", "", "", "", 0)
 	m.UpdateShortCalls("", "", "", "", -1*time.Second)
-	require.InDelta(t, 0.0, requestVecValue(m.shortCalls, "", "", "", "20"), 0.01)
-	require.InDelta(t, 0.0, requestVecValue(m.shortCalls, "", "", "", "60"), 0.01)
-	require.InDelta(t, 0.0, requestVecValue(m.shortCalls, "", "", "", "180"), 0.01)
+	require.InDelta(t, 0.0, requestVecValue(m.shortCalls, "", "", "", "", "20"), 0.01)
+	require.InDelta(t, 0.0, requestVecValue(m.shortCalls, "", "", "", "", "60"), 0.01)
+	require.InDelta(t, 0.0, requestVecValue(m.shortCalls, "", "", "", "", "180"), 0.01)
 }
 
 func TestMetricsShortCallsBoundaries(t *testing.T) {
@@ -387,21 +387,21 @@ func TestMetricsShortCallsBoundaries(t *testing.T) {
 
 	// exact 20s: strict < → "20" does NOT increment, "60" and "180" do
 	m.UpdateShortCalls("", "", "", "", 20*time.Second)
-	require.InDelta(t, 0.0, requestVecValue(m.shortCalls, "", "", "", "20"), 0.01)
-	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "60"), 0.01)
-	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "180"), 0.01)
+	require.InDelta(t, 0.0, requestVecValue(m.shortCalls, "", "", "", "", "20"), 0.01)
+	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "", "60"), 0.01)
+	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "", "180"), 0.01)
 
 	// exact 60s: "20" and "60" do NOT increment, "180" does
 	m.UpdateShortCalls("", "", "", "", 60*time.Second)
-	require.InDelta(t, 0.0, requestVecValue(m.shortCalls, "", "", "", "20"), 0.01)
-	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "60"), 0.01)
-	require.InDelta(t, 2.0, requestVecValue(m.shortCalls, "", "", "", "180"), 0.01)
+	require.InDelta(t, 0.0, requestVecValue(m.shortCalls, "", "", "", "", "20"), 0.01)
+	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "", "60"), 0.01)
+	require.InDelta(t, 2.0, requestVecValue(m.shortCalls, "", "", "", "", "180"), 0.01)
 
 	// exact 180s: no threshold increments
 	m.UpdateShortCalls("", "", "", "", 180*time.Second)
-	require.InDelta(t, 0.0, requestVecValue(m.shortCalls, "", "", "", "20"), 0.01)
-	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "60"), 0.01)
-	require.InDelta(t, 2.0, requestVecValue(m.shortCalls, "", "", "", "180"), 0.01)
+	require.InDelta(t, 0.0, requestVecValue(m.shortCalls, "", "", "", "", "20"), 0.01)
+	require.InDelta(t, 1.0, requestVecValue(m.shortCalls, "", "", "", "", "60"), 0.01)
+	require.InDelta(t, 2.0, requestVecValue(m.shortCalls, "", "", "", "", "180"), 0.01)
 }
 
 func TestMetricsRequestSourceCountryLabel(t *testing.T) {
@@ -2582,9 +2582,9 @@ func TestMetricsRegisterSuccessIncrementsCounter(t *testing.T) {
 func TestMetricsRegisterFailureIncrementsCodeCounter(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 
-	m.RegisterFailure("carrier-a", "sip", "US", "", "403")
+	m.RegisterFailure("carrier-a", "sip", "US", "inbound", "403")
 
-	counter, err := m.registerFailureTotal.GetMetricWithLabelValues("carrier-a", "sip", "US", "403")
+	counter, err := m.registerFailureTotal.GetMetricWithLabelValues("carrier-a", "sip", "US", "inbound", "403")
 	require.NoError(t, err)
 	var d dto.Metric
 	require.NoError(t, counter.Write(&d))
@@ -2689,7 +2689,7 @@ func TestMetricsRegisterSuccessRatioViaPublicMethods(t *testing.T) {
 
 	// failure_total{code} records all codes including challenges.
 	for _, code := range []string{"401", "407", "403", "500"} {
-		counter, err := m.registerFailureTotal.GetMetricWithLabelValues("", "", "", code)
+		counter, err := m.registerFailureTotal.GetMetricWithLabelValues("", "", "", "", code)
 		require.NoError(t, err)
 		var d dto.Metric
 		require.NoError(t, counter.Write(&d))

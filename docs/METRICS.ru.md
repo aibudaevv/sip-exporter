@@ -58,14 +58,14 @@ SIP-метрики используют многоуровневую модел�
 > |---------|---------|----------------------|
 > | **Системные** | `packets_total`, `system_error_total`, самомониторинг | *(нет)* |
 > | **Базовый** | Все SIP-запросы, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD/PBD, VQ-отчёты, sessions, `reinvite_total`, здоровье регистраций (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country, direction` |
-> | **Ошибки рег.** | `register_failure_total` | `carrier, ua_type, source_country, code` |
-> | **Ретрансляции** | `sip_retransmission_total` | `carrier, ua_type, source_country, method` |
+> | **Ошибки рег.** | `register_failure_total` | `carrier, ua_type, source_country, direction, code` |
+> | **Ретрансляции** | `sip_retransmission_total` | `carrier, ua_type, source_country, direction, method` |
 > | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_out_of_order_total`, `rtp_jitter_milliseconds`, `rtp_pdv_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country, direction` |
 > | **RTP dialog** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country, direction` |
 > | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, direction, destination_country, caller_host, called_host, iface` |
 > | **Фрод** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country, direction` |
 > | **Фрод (call-level)** | `fas_calls_total` | `carrier, ua_type, source_country, direction` |
-> | **Короткие вызовы** | `short_calls_total` | `carrier, ua_type, source_country, threshold` |
+> | **Короткие вызовы** | `short_calls_total` | `carrier, ua_type, source_country, direction, threshold` |
 > | **Трафик** | `billable_seconds_total` | `carrier, destination_country, direction` |
 > | **Ёмкость** | `sessions_limit`, `sessions_utilization` | `carrier` |
 
@@ -561,7 +561,7 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 `sip_exporter_update_total{carrier="...",ua_type="..."}`: общее количество полученных SIP UPDATE-запросов.  
 `sip_exporter_message_total{carrier="...",ua_type="..."}`: общее количество полученных SIP MESSAGE-запросов.
 
-`sip_exporter_sip_retransmission_total{carrier="...",ua_type="...",method="INVITE"}` *(counter)*: общее количество ретранслированных SIP-запросов, обнаруженных через Timer A (RFC 3261 §17.1.1.2). Ретрансляция идентифицируется, когда дубликат INVITE с тем же Call-ID приходит в пределах окна TTL invite-трекера (60с) без активного диалога. Сейчас только для INVITE; лейбл `method` зарезервирован для будущего обобщения на REGISTER/OPTIONS.
+`sip_exporter_sip_retransmission_total{carrier="...",ua_type="...",direction="...",method="INVITE"}` *(counter)*: общее количество ретранслированных SIP-запросов, обнаруженных через Timer A (RFC 3261 §17.1.1.2). Ретрансляция идентифицируется, когда дубликат INVITE с тем же Call-ID приходит в пределах окна TTL invite-трекера (60с) без активного диалога. Сейчас только для INVITE; лейбл `method` зарезервирован для будущего обобщения на REGISTER/OPTIONS.
 
 `sip_exporter_invite_200_total{carrier,ua_type,source_country,destination_country,caller_host,called_host,iface}`: общее количество ответов `200 OK` на INVITE-запросы (успешные установления вызовов). Это числитель для [SER по направлению](#ser-по-направлению-promql) в PromQL. Несёт полный набор из 8 лейблов — как `invite_total`, включая `iface`.
 
@@ -605,7 +605,7 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 | Метрика | Тип | Лейблы | Описание |
 |---------|-----|--------|----------|
 | `sip_exporter_register_success_total` | counter | `carrier,ua_type,source_country,direction` | Ответы REGISTER со статусом `200 OK` |
-| `sip_exporter_register_failure_total` | counter | `carrier,ua_type,source_country,code` | Ответы REGISTER со статусом `3xx/4xx/5xx/6xx`, по коду |
+| `sip_exporter_register_failure_total` | counter | `carrier,ua_type,source_country,direction,code` | Ответы REGISTER со статусом `3xx/4xx/5xx/6xx`, по коду |
 | `sip_exporter_register_success_ratio` | gauge | `carrier,ua_type,source_country,direction` | `200 OK / (200 OK + терминальные ошибки) × 100` |
 | `sip_exporter_active_registrations` | gauge | `carrier,ua_type,source_country,direction` | Активные регистрации (отслеживание по Expires-TTL) |
 
@@ -759,7 +759,7 @@ sip_exporter_sessions_utilization > 90
 
 ## Счётчики коротких вызовов
 
-`sip_exporter_short_calls_total{carrier="...",ua_type="...",threshold="20|60|180"}` *(counter)*: завершённые сессии с длительностью меньше порога (20, 60 или 180 секунд). Одна сессия может инкрементировать несколько порогов (напр., 15-секундный вызов инкрементирует `threshold="20"`, `"60"` и `"180"`). Короткие вызовы свидетельствуют о брошенных вызовах, плохом качестве или потенциальном toll-fraud.
+`sip_exporter_short_calls_total{carrier="...",ua_type="...",direction="...",threshold="20|60|180"}` *(counter)*: завершённые сессии с длительностью меньше порога (20, 60 или 180 секунд). Одна сессия может инкрементировать несколько порогов (напр., 15-секундный вызов инкрементирует `threshold="20"`, `"60"` и `"180"`). Короткие вызовы свидетельствуют о брошенных вызовах, плохом качестве или потенциальном toll-fraud.
 
 **Примеры PromQL:**
 ```promql

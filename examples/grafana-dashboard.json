@@ -75,8 +75,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sip_exporter_sessions{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}}",
+              "expr": "sum(sip_exporter_sessions{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"})",
+              "legendFormat": "active sessions",
               "refId": "A"
             }
           ],
@@ -323,7 +323,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_pdd_bucket{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])) by (le))",
+              "expr": "histogram_quantile(0.95, sum(rate(sip_exporter_pdd_bucket{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) by (le))",
               "legendFormat": "PDD p95",
               "refId": "A"
             }
@@ -392,11 +392,11 @@
                 "uid": "${datasource}"
               },
               "expr": "histogram_quantile(0.5, sum(rate(sip_exporter_spd_bucket{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m])) by (le))",
-              "legendFormat": "ACD median",
+              "legendFormat": "median",
               "refId": "A"
             }
           ],
-          "title": "ACD (Average Call Duration)",
+          "title": "Median Session Duration",
           "type": "stat"
         },
         {
@@ -459,8 +459,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sip_exporter_asr{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}",
-              "legendFormat": "{{carrier}} / {{ua_type}}",
+              "expr": "100 * sum(rate(sip_exporter_invite_200_total{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\",destination_country=~\"$destination_country\"}[$__rate_interval])) / sum(rate(sip_exporter_invite_total{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\",destination_country=~\"$destination_country\"}[$__rate_interval]))",
+              "legendFormat": "ASR current window",
               "refId": "A"
             }
           ],
@@ -2858,7 +2858,7 @@
                   }
                 ]
               },
-              "unit": "ops"
+              "unit": "ms"
             },
             "overrides": []
           },
@@ -4005,7 +4005,7 @@
                   }
                 ]
               },
-              "unit": "ops"
+              "unit": "ms"
             },
             "overrides": []
           },
@@ -4235,12 +4235,12 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "topk(10, sum by (destination_country) (increase(sip_exporter_billable_seconds_total[1m]) / 60))",
+              "expr": "topk(10, sum by (destination_country) (increase(sip_exporter_billable_seconds_total{carrier=~\"$carrier\",direction=~\"$direction\",destination_country=~\"$destination_country\"}[$__rate_interval]) / 60))",
               "legendFormat": "{{destination_country}}",
               "refId": "A"
             }
           ],
-          "title": "Traffic Minutes (last 1m) by Destination",
+          "title": "Traffic Minutes by Destination",
           "type": "timeseries"
         },
         {
@@ -4325,12 +4325,12 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum by (destination_country) (rate(sip_exporter_billable_seconds_total[5m])) / 60 / clamp_min(sum by (destination_country) (rate(sip_exporter_invite_200_total[5m])), 1)",
-              "legendFormat": "{{destination_country}}",
+              "expr": "sum by (carrier) (rate(sip_exporter_billable_seconds_total{carrier=~\"$carrier\",direction=~\"$direction\",destination_country=~\"$destination_country\"}[$__rate_interval])) / 60",
+              "legendFormat": "{{carrier}}",
               "refId": "A"
             }
           ],
-          "title": "Avg Call Duration by Destination (last 5m)",
+          "title": "Traffic Minutes/min by Carrier",
           "type": "timeseries"
         }
       ],
@@ -4490,12 +4490,16 @@
                     "value": null
                   },
                   {
-                    "color": "red",
+                    "color": "yellow",
                     "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 3
                   }
                 ]
               },
-              "unit": "ops"
+              "unit": "percent"
             },
             "overrides": []
           },
@@ -4527,12 +4531,12 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(sip_exporter_rtp_packets_lost_total{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[5m]))",
-              "legendFormat": "lost/sec",
+              "expr": "100 * sum(rate(sip_exporter_rtp_packets_lost_total{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) / (sum(rate(sip_exporter_rtp_packets_total{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_rtp_packets_lost_total{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])))",
+              "legendFormat": "loss %",
               "refId": "A"
             }
           ],
-          "title": "RTP Packet Loss Rate",
+          "title": "RTP Packet Loss %",
           "type": "stat"
         },
         {
@@ -4734,7 +4738,7 @@
             },
             "overrides": []
           },
-          "gridPos": { "x": 0, "y": 154, "w": 12, "h": 8 },
+          "gridPos": { "x": 0, "y": 162, "w": 12, "h": 8 },
           "id": 320,
           "options": {
             "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
@@ -4769,7 +4773,7 @@
             },
             "overrides": []
           },
-          "gridPos": { "x": 12, "y": 154, "w": 12, "h": 8 },
+          "gridPos": { "x": 12, "y": 162, "w": 12, "h": 8 },
           "id": 321,
           "options": {
             "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
@@ -4804,7 +4808,7 @@
             },
             "overrides": []
           },
-          "gridPos": { "x": 0, "y": 162, "w": 12, "h": 8 },
+          "gridPos": { "x": 0, "y": 170, "w": 12, "h": 8 },
           "id": 322,
           "options": {
             "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
@@ -4839,7 +4843,7 @@
             },
             "overrides": []
           },
-          "gridPos": { "x": 12, "y": 162, "w": 12, "h": 8 },
+          "gridPos": { "x": 12, "y": 170, "w": 12, "h": 8 },
           "id": 323,
           "options": {
             "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
@@ -4874,7 +4878,7 @@
             },
             "overrides": []
           },
-          "gridPos": { "x": 0, "y": 170, "w": 24, "h": 8 },
+          "gridPos": { "x": 0, "y": 178, "w": 24, "h": 8 },
           "id": 324,
           "options": {
             "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
@@ -4909,7 +4913,7 @@
             },
             "overrides": []
           },
-          "gridPos": { "x": 0, "y": 178, "w": 24, "h": 8 },
+          "gridPos": { "x": 0, "y": 186, "w": 24, "h": 8 },
           "id": 325,
           "options": {
             "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
@@ -4944,7 +4948,7 @@
             },
             "overrides": []
           },
-          "gridPos": { "x": 0, "y": 186, "w": 24, "h": 8 },
+          "gridPos": { "x": 0, "y": 194, "w": 24, "h": 8 },
           "id": 326,
           "options": {
             "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
@@ -5023,8 +5027,8 @@
             "overrides": []
           },
           "gridPos": {
-            "x": 12,
-            "y": 146,
+            "x": 0,
+            "y": 154,
             "w": 12,
             "h": 8
           },
@@ -5109,13 +5113,13 @@
                   }
                 ]
               },
-              "unit": "ms"
+              "unit": "ops"
             },
             "overrides": []
           },
           "gridPos": {
             "x": 12,
-            "y": 146,
+            "y": 154,
             "w": 12,
             "h": 8
           },
@@ -5147,7 +5151,7 @@
               "refId": "A"
             }
           ],
-          "title": "FAS Calls Rate (False Answer Supervision)",
+          "title": "Suspected FAS Calls/s",
           "type": "timeseries"
         },
         {
@@ -5206,7 +5210,7 @@
           },
           "gridPos": {
             "x": 0,
-            "y": 154,
+            "y": 202,
             "w": 24,
             "h": 8
           },
@@ -5296,7 +5300,7 @@
           },
           "gridPos": {
             "x": 0,
-            "y": 162,
+            "y": 210,
             "w": 24,
             "h": 8
           },
@@ -5544,7 +5548,7 @@
         "w": 24,
         "h": 1
       },
-      "id": 90,
+      "id": 93,
       "panels": [
         {
           "datasource": {
@@ -5674,7 +5678,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "avg(sip_exporter_register_success_ratio{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"})",
+              "expr": "100 * sum(rate(sip_exporter_register_success_total{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) / (sum(rate(sip_exporter_register_success_total{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_register_failure_total{carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\",code!~\"3..|401|407\"}[$__rate_interval])))",
               "legendFormat": "success ratio",
               "refId": "A"
             }
@@ -5738,12 +5742,12 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(sip_exporter_register_scan_total{carrier=~\"$carrier\",direction=~\"$direction\",source_country=~\"$source_country\"})",
-              "legendFormat": "register_scan",
+              "expr": "sum(increase(sip_exporter_register_scan_total{carrier=~\"$carrier\",direction=~\"$direction\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "legendFormat": "events in interval",
               "refId": "A"
             }
           ],
-          "title": "Register Scan",
+          "title": "Register Scan Events",
           "type": "stat"
         },
         {
@@ -5802,12 +5806,12 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(sip_exporter_register_country_change_total{carrier=~\"$carrier\",direction=~\"$direction\",source_country=~\"$source_country\"})",
-              "legendFormat": "country_change",
+              "expr": "sum(increase(sip_exporter_register_country_change_total{carrier=~\"$carrier\",direction=~\"$direction\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "legendFormat": "events in interval",
               "refId": "A"
             }
           ],
-          "title": "Country Change",
+          "title": "Registration Country Change Events",
           "type": "stat"
         },
         {
@@ -6283,7 +6287,7 @@
       "type": "row"
     }
   ],
-  "refresh": "5s",
+  "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
   "tags": [
