@@ -34,6 +34,101 @@ func TestCorrelatorRegisterAndLookup(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestTrackerLearnSourceAlias(t *testing.T) {
+	tests := []struct {
+		name       string
+		endpoints  []MediaEndpoint
+		matched    MediaEndpoint
+		sourceIP   string
+		sourcePort uint16
+		want       MediaEndpoint
+		wantOK     bool
+	}{
+		{
+			name: "two endpoints with same peer IP learns remapped port",
+			endpoints: []MediaEndpoint{
+				{IP: "10.0.0.1", Port: 4000},
+				{IP: "10.0.0.2", Port: 5000},
+			},
+			matched:    MediaEndpoint{IP: "10.0.0.2", Port: 5000},
+			sourceIP:   "10.0.0.1",
+			sourcePort: 4100,
+			want:       MediaEndpoint{IP: "10.0.0.1", Port: 4100},
+			wantOK:     true,
+		},
+		{
+			name:       "one endpoint is rejected",
+			endpoints:  []MediaEndpoint{{IP: "10.0.0.2", Port: 5000}},
+			matched:    MediaEndpoint{IP: "10.0.0.2", Port: 5000},
+			sourceIP:   "10.0.0.1",
+			sourcePort: 4100,
+		},
+		{
+			name: "three endpoints are rejected",
+			endpoints: []MediaEndpoint{
+				{IP: "10.0.0.1", Port: 4000},
+				{IP: "10.0.0.2", Port: 5000},
+				{IP: "10.0.0.3", Port: 6000},
+			},
+			matched:    MediaEndpoint{IP: "10.0.0.2", Port: 5000},
+			sourceIP:   "10.0.0.1",
+			sourcePort: 4100,
+		},
+		{
+			name: "changed source IP is rejected",
+			endpoints: []MediaEndpoint{
+				{IP: "10.0.0.1", Port: 4000},
+				{IP: "10.0.0.2", Port: 5000},
+			},
+			matched:    MediaEndpoint{IP: "10.0.0.2", Port: 5000},
+			sourceIP:   "10.0.0.99",
+			sourcePort: 4100,
+		},
+		{
+			name: "unchanged source port is rejected",
+			endpoints: []MediaEndpoint{
+				{IP: "10.0.0.1", Port: 4000},
+				{IP: "10.0.0.2", Port: 5000},
+			},
+			matched:    MediaEndpoint{IP: "10.0.0.2", Port: 5000},
+			sourceIP:   "10.0.0.1",
+			sourcePort: 4000,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := NewTracker(30 * time.Second)
+			for _, endpoint := range tt.endpoints {
+				tr.Register(endpoint.IP, endpoint.Port, sampleLabels("call-1"))
+			}
+
+			got, ok := tr.LearnSourceAlias(
+				"call-1", tt.matched.IP, tt.matched.Port, tt.sourceIP, tt.sourcePort,
+			)
+			require.Equal(t, tt.wantOK, ok)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestTrackerLearnSourceAliasRejectsRepeatedAlias(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 4000, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5000, sampleLabels("call-1"))
+
+	_, ok := tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4100)
+	require.True(t, ok)
+
+	got, ok := tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4100)
+	require.False(t, ok)
+	require.Equal(t, MediaEndpoint{}, got)
+
+	got, ok = tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4200)
+	require.False(t, ok)
+	require.Equal(t, MediaEndpoint{}, got)
+}
+
 func TestCorrelatorUnregisterByCallID(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))

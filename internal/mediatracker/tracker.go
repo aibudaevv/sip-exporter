@@ -104,18 +104,20 @@ type (
 	// Tracker keeps per-flow RTP statistics and correlates RTP flows to SIP
 	// dialogs via the media-endpoint map (IP:port → labels) populated from SDP.
 	Tracker struct {
-		mu          sync.Mutex
-		streams     map[streamKey]*streamEntry
-		media       map[endpointKey]MediaLabels
-		mediaOwners map[endpointKey][]string
-		callMedia   map[string]map[endpointKey]MediaLabels
-		rtcpMedia   map[endpointKey]rtcpMediaEntry // RTCP endpoints for BPF cleanup and RTCP→RTP correlation
-		rtcpOwners  map[endpointKey][]string
-		callRTCP    map[string]map[endpointKey]rtcpMediaEntry
-		callRTP     map[string]map[endpointKey]struct{} // per-CallID endpoints that ever had RTP (TTL-independent)
-		ssrcIndex   map[uint32][]streamKey              // SSRC → stream keys (multi-valued: an SSRC may be reused across endpoints)
-		ttl         time.Duration
-		now         func() time.Time
+		mu             sync.Mutex
+		streams        map[streamKey]*streamEntry
+		media          map[endpointKey]MediaLabels
+		mediaOwners    map[endpointKey][]string
+		callMedia      map[string]map[endpointKey]MediaLabels
+		callMediaOrder map[string][]endpointKey
+		sourceAliases  map[string]map[endpointKey]endpointKey
+		rtcpMedia      map[endpointKey]rtcpMediaEntry // RTCP endpoints for BPF cleanup and RTCP→RTP correlation
+		rtcpOwners     map[endpointKey][]string
+		callRTCP       map[string]map[endpointKey]rtcpMediaEntry
+		callRTP        map[string]map[endpointKey]struct{} // per-CallID endpoints that ever had RTP (TTL-independent)
+		ssrcIndex      map[uint32][]streamKey              // SSRC → stream keys (multi-valued: an SSRC may be reused across endpoints)
+		ttl            time.Duration
+		now            func() time.Time
 	}
 
 	// streamEntry bundles a stream state with its correlation labels.
@@ -140,17 +142,19 @@ type (
 // NewTracker creates a Tracker that expires idle streams after ttl.
 func NewTracker(ttl time.Duration) *Tracker {
 	return &Tracker{
-		streams:     make(map[streamKey]*streamEntry),
-		media:       make(map[endpointKey]MediaLabels),
-		mediaOwners: make(map[endpointKey][]string),
-		callMedia:   make(map[string]map[endpointKey]MediaLabels),
-		rtcpMedia:   make(map[endpointKey]rtcpMediaEntry),
-		rtcpOwners:  make(map[endpointKey][]string),
-		callRTCP:    make(map[string]map[endpointKey]rtcpMediaEntry),
-		callRTP:     make(map[string]map[endpointKey]struct{}),
-		ssrcIndex:   make(map[uint32][]streamKey),
-		ttl:         ttl,
-		now:         time.Now,
+		streams:        make(map[streamKey]*streamEntry),
+		media:          make(map[endpointKey]MediaLabels),
+		mediaOwners:    make(map[endpointKey][]string),
+		callMedia:      make(map[string]map[endpointKey]MediaLabels),
+		callMediaOrder: make(map[string][]endpointKey),
+		sourceAliases:  make(map[string]map[endpointKey]endpointKey),
+		rtcpMedia:      make(map[endpointKey]rtcpMediaEntry),
+		rtcpOwners:     make(map[endpointKey][]string),
+		callRTCP:       make(map[string]map[endpointKey]rtcpMediaEntry),
+		callRTP:        make(map[string]map[endpointKey]struct{}),
+		ssrcIndex:      make(map[uint32][]streamKey),
+		ttl:            ttl,
+		now:            time.Now,
 	}
 }
 
@@ -182,6 +186,7 @@ func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) bool {
 	t.callMedia[labels.CallID][key] = labels
 	if !owned {
 		t.mediaOwners[key] = append(t.mediaOwners[key], labels.CallID)
+		t.callMediaOrder[labels.CallID] = append(t.callMediaOrder[labels.CallID], key)
 	}
 	t.media[key] = labels
 	return !owned
@@ -235,6 +240,8 @@ func (t *Tracker) Unregister(callID string) (RTPDialogResult, []MediaEndpoint) {
 		t.media[k] = t.callMedia[owner][k]
 	}
 	delete(t.callMedia, callID)
+	delete(t.callMediaOrder, callID)
+	delete(t.sourceAliases, callID)
 
 	for k := range t.callRTCP[callID] {
 		deleted = append(deleted, MediaEndpoint{IP: k.ip, Port: k.port})
@@ -276,6 +283,43 @@ func removeOwner(owners []string, callID string) []string {
 		}
 	}
 	return owners
+}
+
+// LearnSourceAlias returns a source-port alias for the peer endpoint of a
+// correlated RTP packet. Learning is limited to two-endpoint dialogs, keeps
+// the advertised peer IP unchanged, and records at most one alias per peer
+// endpoint until the dialog media revision is replaced.
+func (t *Tracker) LearnSourceAlias(
+	callID, matchedIP string, matchedPort uint16, sourceIP string, sourcePort uint16,
+) (MediaEndpoint, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	endpoints := t.callMediaOrder[callID]
+	if len(endpoints) != 2 {
+		return MediaEndpoint{}, false
+	}
+
+	matched := endpointKey{ip: matchedIP, port: matchedPort}
+	peer := endpoints[0]
+	if peer == matched {
+		peer = endpoints[1]
+	} else if endpoints[1] != matched {
+		return MediaEndpoint{}, false
+	}
+	if peer.ip != sourceIP || peer.port == sourcePort {
+		return MediaEndpoint{}, false
+	}
+
+	if t.sourceAliases[callID] == nil {
+		t.sourceAliases[callID] = make(map[endpointKey]endpointKey)
+	}
+	if _, exists := t.sourceAliases[callID][peer]; exists {
+		return MediaEndpoint{}, false
+	}
+	alias := endpointKey{ip: sourceIP, port: sourcePort}
+	t.sourceAliases[callID][peer] = alias
+	return MediaEndpoint{IP: alias.ip, Port: alias.port}, true
 }
 
 // Lookup resolves a media endpoint to its labels.
