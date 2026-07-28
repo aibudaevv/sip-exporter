@@ -18,6 +18,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 
 - [Key Features](#key-features)
 - [Quick Start](#quick-start)
+- [Installation Verification](docs/INSTALLATION.md)
 - [Core Technology](#core-technology)
 - [Architecture](#architecture)
 - [Performance](#performance)
@@ -51,32 +52,22 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 
 ## Quick Start
 
-```yaml
-# docker-compose.yml
-services:
-  sip-exporter:
-    image: frzq/sip-exporter:latest
-    privileged: true
-    network_mode: host
-    environment:
-      - SIP_EXPORTER_INTERFACE=eth0
-      - SIP_EXPORTER_HTTP_PORT=2112
-      - SIP_EXPORTER_SIP_PORTS=5060
-      # Optional: carrier labels for per-provider metrics
-      # - SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml
-      # Optional: user-agent labels for per-device-type metrics
-      # - SIP_EXPORTER_USER_AGENTS_CONFIG=/etc/sip-exporter/user_agents.yaml
-    # volumes:
-    #   - ./examples/carriers.yaml:/etc/sip-exporter/carriers.yaml:ro
-    #   - ./examples/user_agents.yaml:/etc/sip-exporter/user_agents.yaml:ro
-```
+Copy the [pinned production Compose example](examples/docker-compose.production.yml) to your host.
+Set `SIP_EXPORTER_INTERFACE` to the host interface that carries both SIP signaling and RTP media.
 
 ```bash
-docker compose up -d
+cp examples/docker-compose.production.yml docker-compose.yml
+SIP_EXPORTER_INTERFACE=eth0 docker compose up -d
 curl http://localhost:2112/metrics
 ```
 
+The example includes a pinned release image, restart policy, healthcheck, read-only filesystem, and
+every runtime setting listed below with its default value.
+
 Access metrics at `http://localhost:2112/metrics`. A `/health` endpoint is also exposed (returns `200 OK` when alive, `503` otherwise) — used by the Dockerfile `HEALTHCHECK` and suitable for orchestrator liveness/readiness probes.
+
+**First useful dashboard:** follow the [installation verification runbook](docs/INSTALLATION.md)
+to check health, scrape status, SIP, SDP/RTP visibility and drops before importing Grafana.
 
 ## Core Technology
 
@@ -188,19 +179,8 @@ This means:
 
 **Setup:**
 
-```yaml
-# docker-compose.yml
-services:
-  sip-exporter:
-    image: frzq/sip-exporter:latest
-    privileged: true
-    network_mode: host
-    environment:
-      - SIP_EXPORTER_INTERFACE=eth0
-      - SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml
-    volumes:
-      - ./examples/carriers.yaml:/etc/sip-exporter/carriers.yaml:ro
-```
+Add a read-only mount for your [carrier configuration](examples/carriers.yaml) to the production
+Compose file and set `SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml`.
 
 ```yaml
 # carriers.yaml — map your operators' IP subnets
@@ -251,19 +231,8 @@ This means:
 
 **Setup:**
 
-```yaml
-# docker-compose.yml
-services:
-  sip-exporter:
-    image: frzq/sip-exporter:latest
-    privileged: true
-    network_mode: host
-    environment:
-      - SIP_EXPORTER_INTERFACE=eth0
-      - SIP_EXPORTER_USER_AGENTS_CONFIG=/etc/sip-exporter/user_agents.yaml
-    volumes:
-      - ./examples/user_agents.yaml:/etc/sip-exporter/user_agents.yaml:ro
-```
+Add a read-only mount for your [User-Agent configuration](examples/user_agents.yaml) to the
+production Compose file and set `SIP_EXPORTER_USER_AGENTS_CONFIG=/etc/sip-exporter/user_agents.yaml`.
 
 ```yaml
 # user_agents.yaml — map User-Agent patterns to device types
@@ -334,20 +303,8 @@ The exporter adds geographic context to SIP metrics via two labels:
 
 **Setup:**
 
-```yaml
-# docker-compose.yml
-services:
-  sip-exporter:
-    image: frzq/sip-exporter:latest
-    privileged: true
-    network_mode: host
-    environment:
-      - SIP_EXPORTER_INTERFACE=eth0
-      - SIP_EXPORTER_GEOIP_COUNTRY_DB=/data/GeoLite2-Country.mmdb
-      - SIP_EXPORTER_LOCAL_COUNTRY_CODE=RU    # optional: domestic number fallback
-    volumes:
-      - ./GeoLite2-Country.mmdb:/data/GeoLite2-Country.mmdb:ro
-```
+Follow the [GeoIP setup guide](docs/geoip.md) to add the read-only database mount and
+`SIP_EXPORTER_GEOIP_COUNTRY_DB` to the production Compose file.
 
 Full reference with formulas and PromQL examples: [docs/METRICS.md > Geo-Enrichment Labels](docs/METRICS.md#geo-enrichment-labels)
 

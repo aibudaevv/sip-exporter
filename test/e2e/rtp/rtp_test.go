@@ -36,7 +36,8 @@ const (
 )
 
 var (
-	portMu sync.Mutex
+	portMu    sync.Mutex
+	usedPorts = make(map[int]struct{})
 )
 
 func projectRoot() string {
@@ -52,20 +53,25 @@ func exporterImage() string {
 	return image
 }
 
-// allocatePortsN returns n unique port numbers (as strings) using the kernel's
-// ephemeral port allocator. Each port is verified free at allocation time via
-// net.Listen(":0"), eliminating collisions between parallel subtests.
+// allocatePortsN returns n unique UDP port numbers (as strings). SIPp binds
+// UDP sockets, so TCP allocation cannot prove the selected port is available.
 func allocatePortsN(n int) []string {
 	portMu.Lock()
 	defer portMu.Unlock()
-	out := make([]string, n)
-	for i := range n {
-		l, err := net.Listen("tcp", "127.0.0.1:0")
+
+	out := make([]string, 0, n)
+	for len(out) < n {
+		l, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
 		if err != nil {
 			panic(fmt.Sprintf("allocatePortsN: failed to get free port: %v", err))
 		}
-		out[i] = strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
+		port := l.LocalAddr().(*net.UDPAddr).Port
 		l.Close()
+		if _, ok := usedPorts[port]; ok {
+			continue
+		}
+		usedPorts[port] = struct{}{}
+		out = append(out, strconv.Itoa(port))
 	}
 	return out
 }

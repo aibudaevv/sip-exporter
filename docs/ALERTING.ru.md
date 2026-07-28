@@ -6,10 +6,45 @@
 
 ### Ручная настройка
 
-1. Создайте файл правил Prometheus по примерам ниже: первый блок определяет группу, последующие блоки — записи, которые нужно добавить в её список `rules:`
+1. Скопируйте [`examples/prometheus-recording-rules.yml`](../examples/prometheus-recording-rules.yml) и [`examples/prometheus-alerts.yml`](../examples/prometheus-alerts.yml) в каталог, из которого ваш Prometheus-совместимый движок загружает rules
 2. Импортируйте JSON дашборда Grafana
 3. Настройте получателя Alertmanager (Slack/PagerDuty/Email)
-4. Скорректируйте пороги под ваши паттерны трафика
+4. Скорректируйте пороги после наблюдения нормального трафика
+
+## Recording rules
+
+`examples/prometheus-recording-rules.yml` содержит заранее вычисленные 5-минутные показатели:
+rate INVITE, SER, ASR, RTP packet loss, диалоги без RTP и потери kernel socket. Подключите файл
+как Prometheus rule, например через `rule_files: ["/etc/prometheus/rules/*.yml"]`, затем проверьте:
+
+```bash
+promtool check rules /etc/prometheus/rules/prometheus-recording-rules.yml
+```
+
+Записи SIP и RTP сохраняют только `instance`, `carrier` и `direction`; лейблы endpoint, стран,
+codec и User-Agent агрегируются. Записи socket drops сохраняют `instance` и `iface` — это
+единственные измерения исходной метрики. Это recording rules, а не алерты: в них нет порогов, и
+они не заменяют исходные метрики `sip_exporter_*`.
+
+## Production Alert Pack
+
+`examples/prometheus-alerts.yml` — консервативный стартовый набор для production-сенсора. Для него
+должен быть сначала загружен `prometheus-recording-rules.yml`, а scrape target обязан иметь label
+`job="sip-exporter"`. До reload rules проверьте оба файла:
+
+```bash
+promtool check rules /etc/prometheus/rules/prometheus-recording-rules.yml
+promtool check rules /etc/prometheus/rules/prometheus-alerts.yml
+```
+
+Набор покрывает доступность экспортёра, drops kernel socket, насыщение внутреннего канала, ухудшение
+SER, RTP loss, отсутствие RTP и one-way RTP. Пороги: 1% socket drops, 80% channel, 90% SER, 5%
+RTP/media failure и минимальный трафик — безопасные стартовые значения, а не универсальные SLO.
+Соберите не менее семи дней нормального трафика, прежде чем менять их. Исключите ожидаемое one-way
+медиа (paging, IVR, voicemail), прежде чем направлять этот алерт в escalation policy.
+
+Каждый алерт ссылается на этот раздел и содержит симптом с вероятной причиной. Используйте исходные
+метрики `sip_exporter_*` и dashboard, чтобы отличить сетевую проблему от неполного захвата.
 
 ## Правила алертов Prometheus
 

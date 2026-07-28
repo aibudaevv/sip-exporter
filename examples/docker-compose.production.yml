@@ -1,0 +1,53 @@
+services:
+  sip-exporter:
+    image: frzq/sip-exporter:1.8.0
+    restart: unless-stopped
+    privileged: true # Required to load eBPF and open AF_PACKET sockets.
+    network_mode: host # Required to capture traffic from the host interface.
+    read_only: true
+    environment:
+      # Required capture settings.
+      SIP_EXPORTER_INTERFACE: "${SIP_EXPORTER_INTERFACE:?set SIP_EXPORTER_INTERFACE to the capture NIC}"
+      SIP_EXPORTER_HTTP_PORT: "2112"
+      SIP_EXPORTER_LOGGER_LEVEL: "info"
+      SIP_EXPORTER_SIP_PORTS: "5060"
+      SIP_EXPORTER_OBJECT_FILE_PATH: "/usr/local/bin/sip.o"
+      SIP_EXPORTER_RTP_STREAM_TTL: "30s"
+      SIP_EXPORTER_IGNORE_OUTGOING: "false" # Enable only for loopback tests.
+
+      # Optional read-only configuration files. Set the matching mount below.
+      SIP_EXPORTER_CARRIERS_CONFIG: ""
+      SIP_EXPORTER_USER_AGENTS_CONFIG: ""
+      SIP_EXPORTER_GEOIP_COUNTRY_DB: ""
+      SIP_EXPORTER_SESSIONS_LIMITS: ""
+
+      # Optional labels and country fallback.
+      SIP_EXPORTER_LOCAL_COUNTRY_CODE: ""
+      SIP_EXPORTER_HOST_LABELS: "false"
+
+      # Anonymous usage telemetry and its persistent local ID.
+      SIP_EXPORTER_TELEMETRY: "true"
+      SIP_EXPORTER_TELEMETRY_URL: "https://telemetry.sip-exporter.com/v1/beacon"
+      SIP_EXPORTER_TELEMETRY_ID_FILE: "/var/lib/sip-exporter/anon_id"
+
+      # Fraud signal thresholds and rolling windows.
+      SIP_EXPORTER_FRAUD_REGISTER_SCAN_THRESHOLD: "10"
+      SIP_EXPORTER_FRAUD_REGISTER_SCAN_WINDOW: "60s"
+      SIP_EXPORTER_FRAUD_INVITE_BURST_THRESHOLD: "100"
+      SIP_EXPORTER_FRAUD_INVITE_BURST_WINDOW: "60s"
+      SIP_EXPORTER_FRAUD_FAS_THRESHOLD: "10s"
+    volumes:
+      - sip-exporter-state:/var/lib/sip-exporter
+      # - ./carriers.yaml:/etc/sip-exporter/carriers.yaml:ro
+      # - ./user_agents.yaml:/etc/sip-exporter/user_agents.yaml:ro
+      # - ./GeoLite2-Country.mmdb:/data/GeoLite2-Country.mmdb:ro
+      # - ./sessions_limits.yaml:/etc/sip-exporter/sessions_limits.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2112/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  sip-exporter-state:

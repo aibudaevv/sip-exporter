@@ -40,6 +40,27 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
+          "gridPos": {
+            "x": 0,
+            "y": 1,
+            "w": 24,
+            "h": 4
+          },
+          "id": 335,
+          "options": {
+            "content": "### Verify dashboard data\n\nIf a KPI is empty or looks incomplete, check the capture path in order: [scrape target](https://github.com/aibudaevv/sip-exporter/blob/develop/docs/INSTALLATION.md#verify-scrape) → [SIP capture](https://github.com/aibudaevv/sip-exporter/blob/develop/docs/INSTALLATION.md#verify-sip) → [dialog, SDP, and RTP visibility](https://github.com/aibudaevv/sip-exporter/blob/develop/docs/INSTALLATION.md#verify-dialog-sdp) → [socket and userspace drops](https://github.com/aibudaevv/sip-exporter/blob/develop/docs/INSTALLATION.md#verify-drops). Do not diagnose QoE until the preceding checks are healthy.",
+            "mode": "markdown"
+          },
+          "pluginVersion": "10.0.0",
+          "title": "Verify dashboard data",
+          "description": "Verify scrape, SIP capture, SDP/RTP visibility, and drops before diagnosing empty or incomplete KPIs.",
+          "type": "text"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -61,7 +82,7 @@
           },
           "gridPos": {
             "x": 0,
-            "y": 1,
+            "y": 5,
             "w": 6,
             "h": 5
           },
@@ -122,7 +143,7 @@
           },
           "gridPos": {
             "x": 6,
-            "y": 1,
+            "y": 5,
             "w": 6,
             "h": 5
           },
@@ -183,7 +204,7 @@
           },
           "gridPos": {
             "x": 12,
-            "y": 1,
+            "y": 5,
             "w": 6,
             "h": 5
           },
@@ -244,7 +265,7 @@
           },
           "gridPos": {
             "x": 18,
-            "y": 1,
+            "y": 5,
             "w": 6,
             "h": 5
           },
@@ -313,7 +334,7 @@
           },
           "gridPos": {
             "x": 0,
-            "y": 6,
+            "y": 10,
             "w": 6,
             "h": 5
           },
@@ -382,7 +403,7 @@
           },
           "gridPos": {
             "x": 6,
-            "y": 6,
+            "y": 10,
             "w": 6,
             "h": 5
           },
@@ -451,7 +472,7 @@
           },
           "gridPos": {
             "x": 12,
-            "y": 6,
+            "y": 10,
             "w": 6,
             "h": 5
           },
@@ -520,7 +541,7 @@
           },
           "gridPos": {
             "x": 18,
-            "y": 6,
+            "y": 10,
             "w": 6,
             "h": 5
           },
@@ -617,7 +638,7 @@
           },
           "gridPos": {
             "x": 18,
-            "y": 11,
+            "y": 15,
             "w": 6,
             "h": 5
           },
@@ -686,7 +707,7 @@
           },
           "gridPos": {
             "x": 0,
-            "y": 11,
+            "y": 15,
             "w": 6,
             "h": 5
           },
@@ -755,7 +776,7 @@
           },
           "gridPos": {
             "x": 6,
-            "y": 11,
+            "y": 15,
             "w": 6,
             "h": 5
           },
@@ -824,7 +845,7 @@
           },
           "gridPos": {
             "x": 12,
-            "y": 11,
+            "y": 15,
             "w": 6,
             "h": 5
           },

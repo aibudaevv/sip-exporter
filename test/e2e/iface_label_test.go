@@ -46,16 +46,16 @@ func setupVethNetns(t *testing.T) string {
 	t.Helper()
 
 	netnsMu.Lock()
+	defer netnsMu.Unlock()
 	netnsRef++
 	needCreate := netnsRef == 1
-	netnsMu.Unlock()
 
 	t.Cleanup(func() {
 		netnsMu.Lock()
+		defer netnsMu.Unlock()
 		netnsRef--
 		needDelete := netnsRef == 0
 		id := netnsID
-		netnsMu.Unlock()
 
 		if !needDelete {
 			return
@@ -65,16 +65,10 @@ func setupVethNetns(t *testing.T) string {
 			"sh", "-c", "ip link del "+nsVethHost+" 2>/dev/null || true",
 		).Run()
 		_ = exec.Command("docker", "rm", "-f", id).Run()
-		netnsMu.Lock()
 		netnsID = ""
-		netnsMu.Unlock()
 	})
 
 	if !needCreate {
-		require.Eventually(t, func() bool {
-			_, err := os.Stat("/sys/class/net/" + nsVethHost)
-			return err == nil
-		}, 30*time.Second, 200*time.Millisecond, "veth pair not created in time")
 		return netnsID
 	}
 
@@ -89,9 +83,7 @@ func setupVethNetns(t *testing.T) string {
 	require.NoError(t, err, "failed to create pause container")
 	id := strings.TrimSpace(string(pauseOut))
 
-	netnsMu.Lock()
 	netnsID = id
-	netnsMu.Unlock()
 
 	// 2. Get the pause container's PID (host-visible).
 	pidOut, err := exec.Command("docker", "inspect", "-f", "{{.State.Pid}}", id).Output()

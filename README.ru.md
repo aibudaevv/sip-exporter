@@ -17,6 +17,7 @@
 
 - [Возможности](#возможности)
 - [Быстрый старт](#быстрый-старт)
+- [Проверка установки](docs/INSTALLATION.ru.md)
 - [Технология](#технология)
 - [Архитектура](#архитектура)
 - [Производительность](#производительность)
@@ -50,32 +51,22 @@
 
 ## Быстрый старт
 
-```yaml
-# docker-compose.yml
-services:
-  sip-exporter:
-    image: frzq/sip-exporter:latest
-    privileged: true
-    network_mode: host
-    environment:
-      - SIP_EXPORTER_INTERFACE=eth0
-      - SIP_EXPORTER_HTTP_PORT=2112
-      - SIP_EXPORTER_SIP_PORTS=5060
-      # Опционально: метки carrier для мониторинга по операторам
-      # - SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml
-      # Опционально: метки ua_type для мониторинга по типам устройств
-      # - SIP_EXPORTER_USER_AGENTS_CONFIG=/etc/sip-exporter/user_agents.yaml
-    # volumes:
-    #   - ./examples/carriers.yaml:/etc/sip-exporter/carriers.yaml:ro
-    #   - ./examples/user_agents.yaml:/etc/sip-exporter/user_agents.yaml:ro
-```
+Скопируйте [production Compose-пример с закреплённой версией](examples/docker-compose.production.yml)
+на хост. Задайте `SIP_EXPORTER_INTERFACE` — интерфейс, через который проходят SIP-сигнализация и RTP-медиа.
 
 ```bash
-docker compose up -d
+cp examples/docker-compose.production.yml docker-compose.yml
+SIP_EXPORTER_INTERFACE=eth0 docker compose up -d
 curl http://localhost:2112/metrics
 ```
 
+Пример содержит pinned image, политику перезапуска, healthcheck, read-only filesystem и все
+перечисленные ниже runtime-параметры с их значениями по умолчанию.
+
 Метрики доступны на `http://localhost:2112/metrics`.
+
+**Первый полезный дашборд:** пройдите [runbook проверки установки](docs/INSTALLATION.ru.md):
+он последовательно проверяет health, scrape status, SIP, видимость SDP/RTP и drops до импорта Grafana.
 
 ## Технология
 
@@ -180,19 +171,8 @@ docker pull frzq/sip-exporter:latest
 
 **Настройка:**
 
-```yaml
-# docker-compose.yml
-services:
-  sip-exporter:
-    image: frzq/sip-exporter:latest
-    privileged: true
-    network_mode: host
-    environment:
-      - SIP_EXPORTER_INTERFACE=eth0
-      - SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml
-    volumes:
-      - ./examples/carriers.yaml:/etc/sip-exporter/carriers.yaml:ro
-```
+Добавьте в production Compose read-only mount для своей [carrier-конфигурации](examples/carriers.yaml)
+и переменную `SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml`.
 
 ```yaml
 # carriers.yaml — привязка IP-подсетей к операторам
@@ -243,19 +223,8 @@ sip_exporter_ser{carrier="other",ua_type="other"}                     0.0
 
 **Настройка:**
 
-```yaml
-# docker-compose.yml
-services:
-  sip-exporter:
-    image: frzq/sip-exporter:latest
-    privileged: true
-    network_mode: host
-    environment:
-      - SIP_EXPORTER_INTERFACE=eth0
-      - SIP_EXPORTER_USER_AGENTS_CONFIG=/etc/sip-exporter/user_agents.yaml
-    volumes:
-      - ./examples/user_agents.yaml:/etc/sip-exporter/user_agents.yaml:ro
-```
+Добавьте в production Compose read-only mount для своей [User-Agent-конфигурации](examples/user_agents.yaml)
+и переменную `SIP_EXPORTER_USER_AGENTS_CONFIG=/etc/sip-exporter/user_agents.yaml`.
 
 ```yaml
 # user_agents.yaml — привязка User-Agent паттернов к типам устройств
@@ -326,20 +295,8 @@ sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
 
 **Настройка:**
 
-```yaml
-# docker-compose.yml
-services:
-  sip-exporter:
-    image: frzq/sip-exporter:latest
-    privileged: true
-    network_mode: host
-    environment:
-      - SIP_EXPORTER_INTERFACE=eth0
-      - SIP_EXPORTER_GEOIP_COUNTRY_DB=/data/GeoLite2-Country.mmdb
-      - SIP_EXPORTER_LOCAL_COUNTRY_CODE=RU    # опционально: fallback для локальных номеров
-    volumes:
-      - ./GeoLite2-Country.mmdb:/data/GeoLite2-Country.mmdb:ro
-```
+Следуйте [руководству GeoIP](docs/geoip.ru.md), чтобы добавить read-only mount базы и
+`SIP_EXPORTER_GEOIP_COUNTRY_DB` в production Compose.
 
 Полный справочник с формулами и примерами PromQL: [docs/METRICS.ru.md > Лейблы геообогащения](docs/METRICS.ru.md#лейблы-геообогащения)
 
