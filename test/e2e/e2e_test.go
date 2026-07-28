@@ -141,15 +141,15 @@ func setupSecondaryIPs(t *testing.T) {
 	}
 
 	secondaryIPsMu.Lock()
+	defer secondaryIPsMu.Unlock()
 	secondaryIPsRef++
 	needAdd := secondaryIPsRef == 1
-	secondaryIPsMu.Unlock()
 
 	t.Cleanup(func() {
 		secondaryIPsMu.Lock()
+		defer secondaryIPsMu.Unlock()
 		secondaryIPsRef--
 		needRemove := secondaryIPsRef == 0
-		secondaryIPsMu.Unlock()
 
 		if !needRemove {
 			return

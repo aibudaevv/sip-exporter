@@ -40,15 +40,15 @@ func setupVethPair(t *testing.T) {
 	t.Helper()
 
 	vethMu.Lock()
+	defer vethMu.Unlock()
 	vethRef++
 	needCreate := vethRef == 1
-	vethMu.Unlock()
 
 	t.Cleanup(func() {
 		vethMu.Lock()
+		defer vethMu.Unlock()
 		vethRef--
 		needDelete := vethRef == 0
-		vethMu.Unlock()
 
 		if !needDelete {
 			return
@@ -61,12 +61,6 @@ func setupVethPair(t *testing.T) {
 	})
 
 	if !needCreate {
-		// Wait for the creating caller to finish — parallel top-level tests
-		// may reach setupVethPair before the first caller's docker run completes.
-		require.Eventually(t, func() bool {
-			_, err := os.Stat("/sys/class/net/" + veth0aName)
-			return err == nil
-		}, 15*time.Second, 200*time.Millisecond, "veth pair not created in time")
 		return
 	}
 

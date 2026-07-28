@@ -159,15 +159,30 @@ func TestRTPFullIntegrationMetricsVerified(t *testing.T) {
 func TestRTPStreamExpiry(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
+	uasMediaNum, _ := strconv.Atoi(uasMedia)
+	uacMediaNum, _ := strconv.Atoi(uacMedia)
 	endpoint := startExporter(t.Context(), t, httpPort, uasSIP, testInterface, "2s")
 
-	runSippRTP(t.Context(), t, uasSIP, uacSIP, uasMedia, uacMedia)
+	wait := startSippContainers(t.Context(), t,
+		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
 
-	// During the call both media directions are tracked.
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_active_streams") >= 2
-	}, 15*time.Second, 500*time.Millisecond,
-		"rtp_active_streams must reflect both media directions during the call")
+		return getMetricByLabel(t, endpoint, "sip_exporter_sessions") >= 1
+	}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
+
+	// Inject RTP while the dialog is active. The retry makes the assertion
+	// independent of a transiently missed loopback AF_PACKET packet.
+	rtpSeqs := []uint16{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	require.Eventually(t, func() bool {
+		if getRTPMetric(t, endpoint, "sip_exporter_rtp_active_streams") >= 2 {
+			return true
+		}
+		sendControlledRTP(t, uacMediaNum, rtpSeqs)
+		sendControlledRTP(t, uasMediaNum, rtpSeqs)
+		return false
+	}, 15*time.Second, 500*time.Millisecond, "rtp_active_streams must reflect both media directions during the call")
+
+	wait()
 
 	// After the idle TTL (2s) + the 1s snapshot cycle, streams expire and the
 	// gauge returns to 0 (the background ticker runs Cleanup() every second).
