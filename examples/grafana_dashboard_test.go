@@ -17,16 +17,16 @@ type dashboard struct {
 }
 
 type panel struct {
-	Description string      `json:"description"`
-	FieldConfig fieldConfig `json:"fieldConfig"`
-	ID          int         `json:"id"`
+	Description string       `json:"description"`
+	FieldConfig fieldConfig  `json:"fieldConfig"`
+	ID          int          `json:"id"`
 	Options     panelOptions `json:"options"`
-	Title       string      `json:"title"`
-	Type        string      `json:"type"`
-	GridPos     gridPos     `json:"gridPos"`
-	Panels      []panel     `json:"panels"`
-	Targets     []target    `json:"targets"`
-	Collapsed   bool        `json:"collapsed"`
+	Title       string       `json:"title"`
+	Type        string       `json:"type"`
+	GridPos     gridPos      `json:"gridPos"`
+	Panels      []panel      `json:"panels"`
+	Targets     []target     `json:"targets"`
+	Collapsed   bool         `json:"collapsed"`
 }
 
 type (
