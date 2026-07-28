@@ -20,6 +20,7 @@ type panel struct {
 	Description string      `json:"description"`
 	FieldConfig fieldConfig `json:"fieldConfig"`
 	ID          int         `json:"id"`
+	Options     panelOptions `json:"options"`
 	Title       string      `json:"title"`
 	Type        string      `json:"type"`
 	GridPos     gridPos     `json:"gridPos"`
@@ -50,6 +51,9 @@ type (
 	}
 	fieldConfig struct {
 		Defaults fieldDefaults `json:"defaults"`
+	}
+	panelOptions struct {
+		Content string `json:"content"`
 	}
 	fieldDefaults struct {
 		Thresholds thresholds `json:"thresholds"`
@@ -181,6 +185,32 @@ func TestGrafanaDashboardOperationalHelp(t *testing.T) {
 	}) {
 		t.Fatal("missing Exporter restarts annotation")
 	}
+}
+
+func TestGrafanaDashboardVerificationEntryPoint(t *testing.T) {
+	d := readDashboard(t)
+	overview, ok := rowByTitle(d, "Overview")
+	if !ok {
+		t.Fatal("Overview row is missing")
+	}
+
+	for _, p := range overview.Panels {
+		if p.Title != "Verify dashboard data" {
+			continue
+		}
+		if p.Type != "text" {
+			t.Fatalf("verification entry point type = %q, want text", p.Type)
+		}
+		for _, anchor := range []string{
+			"#verify-scrape", "#verify-sip", "#verify-dialog-sdp", "#verify-drops",
+		} {
+			if !strings.Contains(p.Options.Content, anchor) {
+				t.Fatalf("verification entry point lacks %q: %s", anchor, p.Options.Content)
+			}
+		}
+		return
+	}
+	t.Fatal("verification entry point is missing")
 }
 
 func TestGrafanaDashboardKPIContracts(t *testing.T) {
