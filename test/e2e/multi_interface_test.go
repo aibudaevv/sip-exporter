@@ -92,7 +92,7 @@ func setupVethPair(t *testing.T) {
 	require.NoError(t, err, "failed to create veth pair: %s", string(out))
 }
 
-// TestMultiInterface_RegisterOnBothNICs verifies that the exporter captures SIP
+// TestMultiInterfaceRegisterOnBothNICs verifies that the exporter captures SIP
 // traffic from multiple interfaces simultaneously and aggregates metrics across
 // all AF_PACKET sockets.
 //
@@ -112,9 +112,9 @@ func setupVethPair(t *testing.T) {
 //   - register_success_total ≥ 2*callCount (200 OK seen for both flows)
 //   - active_registrations ≥ 2 (two distinct AORs stored: 127.0.0.1 and 10.10.0.2)
 //   - socket_packets_received_total > 0 (stats aggregation across sockets works)
-func TestMultiInterface_RegisterOnBothNICs(t *testing.T) {
+func TestMultiInterfaceRegisterOnBothNICs(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	setupVethPair(t)
 
 	extraEnv := map[string]string{
@@ -150,7 +150,7 @@ func TestMultiInterface_RegisterOnBothNICs(t *testing.T) {
 	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
-// TestMultiInterface_SER verifies SER computation with traffic on BOTH lo and
+// TestMultiInterfaceSER verifies SER computation with traffic on BOTH lo and
 // veth pair simultaneously. Each subtest starts a fresh exporter and runs flows
 // on both interfaces, then verifies per-host metrics to prove multi-NIC capture.
 //
@@ -158,9 +158,9 @@ func TestMultiInterface_RegisterOnBothNICs(t *testing.T) {
 // The critical assertion is invite_200_total{called_host="10.10.0.1"} >= 10:
 // the 200 OK travels UAS(veth0a)→UAC(veth0b) and can only be counted if veth0b
 // is captured.
-func TestMultiInterface_SER(t *testing.T) {
+func TestMultiInterfaceSER(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	setupVethPair(t)
 
 	extraEnv := map[string]string{
@@ -272,7 +272,7 @@ func TestMultiInterface_SER(t *testing.T) {
 	}
 }
 
-// TestMultiInterface_ASR verifies ASR computation with traffic on BOTH lo and
+// TestMultiInterfaceASR verifies ASR computation with traffic on BOTH lo and
 // veth pair simultaneously. Each subtest starts a fresh exporter and runs flows
 // on both interfaces, then verifies per-host metrics to prove multi-NIC capture.
 //
@@ -280,9 +280,9 @@ func TestMultiInterface_SER(t *testing.T) {
 // the 200 OK travels UAS(veth0a)→UAC(veth0b) and can only be counted if veth0b
 // is captured. invite_total{called_host="127.0.0.1"} >= 10 proves lo captured
 // its traffic in the same test.
-func TestMultiInterface_ASR(t *testing.T) {
+func TestMultiInterfaceASR(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	setupVethPair(t)
 
 	extraEnv := map[string]string{
@@ -394,7 +394,7 @@ func TestMultiInterface_ASR(t *testing.T) {
 	}
 }
 
-// TestMultiInterface_SDC verifies SDC (Session Disconnect Count) with traffic on
+// TestMultiInterfaceSDC verifies SDC (Session Disconnect Count) with traffic on
 // BOTH lo and veth pair simultaneously. Each subtest starts a fresh exporter and
 // runs flows on both interfaces, then verifies per-host metrics to prove multi-NIC
 // capture.
@@ -404,9 +404,9 @@ func TestMultiInterface_ASR(t *testing.T) {
 // (BYE processed). The critical multi-NIC assertion: invite_200_total{called_host=
 // "10.10.0.1"} >= 10 proves veth0b captured the 200 OK, and SDC reflects sessions
 // that completed via cross-NIC BYE→200 OK correlation.
-func TestMultiInterface_SDC(t *testing.T) {
+func TestMultiInterfaceSDC(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	setupVethPair(t)
 
 	extraEnv := map[string]string{
@@ -517,7 +517,7 @@ func TestMultiInterface_SDC(t *testing.T) {
 	}
 }
 
-// TestMultiInterface_PDD verifies PDD (Post Dial Delay) measurement with traffic
+// TestMultiInterfacePDD verifies PDD (Post Dial Delay) measurement with traffic
 // on BOTH lo and veth pair simultaneously. Each subtest starts a fresh exporter
 // and runs flows on both interfaces, then verifies per-host metrics to prove
 // multi-NIC capture.
@@ -530,9 +530,9 @@ func TestMultiInterface_SDC(t *testing.T) {
 // The critical multi-NIC assertion in scenario 1: pdd_count >= 2*callCount proves
 // 180 Ringing was captured on BOTH lo and veth0b, and the dialog tracker measured
 // PDD from cross-NIC INVITE↔180 pairs.
-func TestMultiInterface_PDD(t *testing.T) {
+func TestMultiInterfacePDD(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	setupVethPair(t)
 
 	extraEnv := map[string]string{
@@ -687,7 +687,7 @@ func freePort(t *testing.T) string {
 // exercised by the existing multi-interface e2e suite.
 func TestMultiPortPerInterface(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	sipPorts := []string{freePort(t), freePort(t), freePort(t)}
 
@@ -717,7 +717,7 @@ func TestMultiPortPerInterface(t *testing.T) {
 	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
-// TestMultiPort_PerInterfaceDifferentPorts verifies that each interface gets
+// TestMultiPortPerInterfaceDifferentPorts verifies that each interface gets
 // its OWN port set — different SIP ports on different NICs — and traffic on
 // each interface's configured ports is captured.
 //
@@ -736,9 +736,9 @@ func TestMultiPortPerInterface(t *testing.T) {
 // has vethPort in its sip_ports map. If a bug applied lo's port set
 // [loPort1,loPort2] to all collections, vethPort traffic would be dropped by
 // the eBPF filter → register_total = 2*callCount, failing the assertion.
-func TestMultiPort_PerInterfaceDifferentPorts(t *testing.T) {
+func TestMultiPortPerInterfaceDifferentPorts(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	pauseID := setupVethNetns(t)
 
 	loPort1 := freePort(t)
@@ -811,7 +811,7 @@ func TestMultiPort_PerInterfaceDifferentPorts(t *testing.T) {
 	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
-// TestMultiPort_PerInterfacePortIsolation verifies that port sets are truly
+// TestMultiPortPerInterfacePortIsolation verifies that port sets are truly
 // per-interface: traffic on loPort sent via sipns0 (where loPort is NOT in
 // sipns0's port set) is silently dropped by the eBPF filter.
 //
@@ -825,9 +825,9 @@ func TestMultiPort_PerInterfaceDifferentPorts(t *testing.T) {
 //
 // The SIPp exchange in phase 2 succeeds because the eBPF socket filter only
 // affects the exporter's AF_PACKET copies, not normal kernel packet delivery.
-func TestMultiPort_PerInterfacePortIsolation(t *testing.T) {
+func TestMultiPortPerInterfacePortIsolation(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	pauseID := setupVethNetns(t)
 
 	loPort := freePort(t)
@@ -903,16 +903,16 @@ func TestMultiPort_PerInterfacePortIsolation(t *testing.T) {
 	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
-// TestMultiPort_UnconfiguredPortDropped verifies that SIP traffic on a port NOT
+// TestMultiPortUnconfiguredPortDropped verifies that SIP traffic on a port NOT
 // listed in SIP_EXPORTER_SIP_PORTS is silently dropped by the eBPF filter.
 //
 // Single interface (lo) with SIP_EXPORTER_SIP_PORTS=port1,port2.
 //
 // Phase 1 (positive): REGISTER on port1 → captured.
 // Phase 2 (negative): REGISTER on port3 (unconfigured) → eBPF drops it.
-func TestMultiPort_UnconfiguredPortDropped(t *testing.T) {
+func TestMultiPortUnconfiguredPortDropped(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	port1 := freePort(t)
 	port2 := freePort(t)
@@ -958,15 +958,15 @@ func TestMultiPort_UnconfiguredPortDropped(t *testing.T) {
 	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
-// TestMultiPort_INVITE_Flow verifies that INVITE→200 OK→BYE dialogs are captured
+// TestMultiPortINVITEFlow verifies that INVITE→200 OK→BYE dialogs are captured
 // across multiple configured SIP ports on a single interface.
 //
 // Single interface (lo) with 3 SIP ports. Each port runs a full INVITE flow
 // with callCount calls. The eBPF filter matches both dst_port (INVITE/BYE/ACK)
 // and src_port (200 OK responses) against the configured SIP ports.
-func TestMultiPort_INVITE_Flow(t *testing.T) {
+func TestMultiPortINVITEFlow(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	sipPorts := []string{freePort(t), freePort(t), freePort(t)}
 

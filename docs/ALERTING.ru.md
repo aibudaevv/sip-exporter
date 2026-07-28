@@ -6,7 +6,7 @@
 
 ### Ручная настройка
 
-1. Скопируйте правила алертов Prometheus в конфигурацию Prometheus
+1. Создайте файл правил Prometheus по примерам ниже: первый блок определяет группу, последующие блоки — записи, которые нужно добавить в её список `rules:`
 2. Импортируйте JSON дашборда Grafana
 3. Настройте получателя Alertmanager (Slack/PagerDuty/Email)
 4. Скорректируйте пороги под ваши паттерны трафика
@@ -17,7 +17,7 @@
 
 ```yaml
 groups:
-  - name: sip_exporter_critical
+  - name: sip_exporter
     interval: 30s
     rules:
       - alert: SIPExporterDown
@@ -50,7 +50,7 @@ groups:
           runbook_url: "https://wiki.example.com/runbooks/sip-ser-low"
 ```
 
-> **Примечание:** Значения `runbook_url` выше (и далее в этом руководстве) — иллюстративные заглушки с примером хоста `wiki.example.com`. Поставляемый `alerts.yml` не содержит `runbook_url`. Замените их на реальные расположения runbook вашего оператора перед развёртыванием.
+> **Примечание:** Значения `runbook_url` выше (и далее в этом руководстве) — иллюстративные заглушки с примером хоста `wiki.example.com`. Замените их на реальные расположения runbook вашего оператора перед развёртыванием.
 
 ### Warning-алерты
 
@@ -139,7 +139,7 @@ groups:
         annotations:
           summary: "Всплеск коротких звонков (< 20 с)"
           description: "Более 30% завершённых сессий у оператора {{ $labels.carrier }} короче 20 секунд. Возможны проблемы с качеством звонков, брошенные вызовы или toll fraud."
-      ```
+```
 
 ### Алерты здоровья регистраций
 
@@ -207,13 +207,16 @@ groups:
           description: "Один IP отправляет аномально высокий rate INVITE на {{ $labels.carrier }} из {{ $labels.source_country }}. Возможный toll fraud, DDoS или traffic pump."
 
       - alert: SIPFalseAnswerSupervision
-        expr: rate(sip_exporter_fas_calls_total[5m]) > 0
-        for: 1m
+        expr: |
+          (rate(sip_exporter_fas_calls_total[5m]) > 0)
+          unless on()
+          (rate(sip_exporter_rtp_dropped_total[5m]) > 100)
+        for: 2m
         labels:
-          severity: critical
+          severity: warning
         annotations:
           summary: "Подозрение на False Answer Supervision"
-          description: "Ответившие вызовы на {{ $labels.carrier }} (ua_type={{ $labels.ua_type }}, {{ $labels.source_country }}, {{ $labels.direction }}) не понесли RTP в течение FAS-threshold. Возможный биллинг-фрод — отвечающая сторона стартует биллинг без доставки медиа."
+          description: "Ответившие вызовы на {{ $labels.carrier }} (ua_type={{ $labels.ua_type }}, {{ $labels.source_country }}, {{ $labels.direction }}) не понесли answer-side RTP в течение threshold (sweep-path) или fasByeFloor 3 с (BYE-path). Возможный биллинг-фрод. Подавляется при RTP-дропах >100/с (деградация захвата). Проверьте sip_exporter_rtp_dropped_total и one-way-media эндпоинты (voicemail/IVR) перед реакцией."
 
       - alert: SIPSessionCapacityExhaustion
         expr: sip_exporter_sessions_utilization > 90
@@ -370,18 +373,28 @@ groups:
           summary: "Высокая endpoint-reported потеря (RTCP)"
           description: "95-й перцентиль отрепорченной через RTCP доли потерь для оператора {{ $labels.carrier }} — {{ $value | printf \"%.1f\" }}%. Приёмник теряет >5% пакетов — самый прямой QoE-сигнал; проверьте медиа-путь."
 
+      - alert: SIPRTCPReportedLossCritical
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtcp_loss_fraction_percent_bucket[5m]))) > 10
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Критическая endpoint-reported потеря (RTCP)"
+          description: "95-й перцентиль отрепорченной через RTCP доли потерь для оператора {{ $labels.carrier }} — {{ $value | printf \"%.1f\" }}%. Приёмник теряет >10% пакетов — качество звонка критически снижено."
+
       - alert: SIPRTCPSilence
         expr: |
-          (sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m])) > 10)
+          (sum by (carrier, ua_type) (rate(sip_exporter_rtp_packets_total[5m])) > 10)
           unless
-          (sum by (carrier) (rate(sip_exporter_rtcp_reports_total[5m])) > 0)
+          (sum by (carrier, ua_type) (rate(sip_exporter_rtcp_reports_total[5m])) > 0)
         for: 10m
         labels:
           severity: warning
         annotations:
-          summary: "RTCP не поступает при текучем RTP (оператор {{ $labels.carrier }})"
-          description: "RTP-пакеты идут для оператора {{ $labels.carrier }}, но RTCP-репорты не поступают примерно 15 минут (5-минутное окно rate плюс 10-минутная выдержка). RTCP обязателен (RFC 3550) — его отсутствие означает, что RTCP фильтруется, эндпоинты его не шлют, либо сломан захват/регистрация (проверьте sip_exporter_rtcp_orphan_reports_total)."
-      ```
+          summary: "RTCP не поступает при текучем RTP (оператор {{ $labels.carrier }}, ua_type {{ $labels.ua_type }})"
+          description: "Опциональный диагностический алерт: включайте его только после подтверждения, что эта группа carrier и endpoint'ов обычно шлёт SR/RR и видны оба направления медиа. Ноль репортов примерно 15 минут (5-минутное окно rate плюс 10-минутная выдержка) не доказывает аварию: policy endpoint'а, SBC/миксер или точка захвата могут подавлять либо переписывать RTCP. До эскалации проверьте sip_exporter_rtcp_orphan_reports_total и топологию захвата."
+```
 
 ### Алерты здоровья системы
 

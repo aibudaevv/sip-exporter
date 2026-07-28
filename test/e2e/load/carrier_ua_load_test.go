@@ -18,7 +18,7 @@ const (
 	dualUATestTimeout    = 30 * time.Second
 )
 
-func TestLoad_DualUAType(t *testing.T) {
+func TestLoadDualUAType(t *testing.T) {
 	carriersYAML := `carriers:
   - name: "loopback-carrier"
     cidrs:
@@ -35,9 +35,9 @@ func TestLoad_DualUAType(t *testing.T) {
 	rates := []int{500, 1000, 1800}
 	for _, rate := range rates {
 		t.Run(fmt.Sprintf("rate_%d", rate), func(t *testing.T) {
-			env := newTestEnvWithCarrierAndUA(context.Background(), t, carriersYAML, userAgentsYAML)
+			env := newTestEnvWithCarrierAndUA(t.Context(), t, carriersYAML, userAgentsYAML)
 
-			ctx, cancel := context.WithTimeout(context.Background(), dualUATestTimeout)
+			ctx, cancel := context.WithTimeout(t.Context(), dualUATestTimeout)
 			defer cancel()
 
 			callCountPerType := rate * 5

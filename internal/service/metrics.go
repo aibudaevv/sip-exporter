@@ -163,14 +163,15 @@ type (
 
 		carrierCounters sync.Map
 
-		socketPacketsReceived *prometheus.CounterVec
-		socketPacketsDropped  *prometheus.CounterVec
-		rtpDropped            prometheus.Counter
-		parseErrorsTotal      *prometheus.CounterVec
-		channelLength         prometheus.Gauge
-		channelCapacity       prometheus.Gauge
-		activeTrackers        *prometheus.GaugeVec
-		activeDialogs         prometheus.Gauge
+		socketPacketsReceived     *prometheus.CounterVec
+		socketPacketsDropped      *prometheus.CounterVec
+		rtpDropped                prometheus.Counter
+		rtpKernelTimestampMissing prometheus.Counter
+		parseErrorsTotal          *prometheus.CounterVec
+		channelLength             prometheus.Gauge
+		channelCapacity           prometheus.Gauge
+		activeTrackers            *prometheus.GaugeVec
+		activeDialogs             prometheus.Gauge
 	}
 
 	// Metricser records all SIP, RTP, and VQ-RTCPXR metrics exposed by the
@@ -226,6 +227,7 @@ type (
 		UpdateRTCPRTT(carrier, uaType, codec, sourceCountry, direction string, rttMs float64)
 		UpdateRTCPReport(carrier, uaType, sourceCountry, direction, reportType string)
 		UpdateRTCPOrphan()
+		RTPKernelTimestampMissing()
 		SystemError()
 		ParseError(errorType string)
 		SocketStats(stats []SocketStat)
@@ -438,7 +440,7 @@ func (m *metrics) initRegistrationMetrics(reg *prometheus.Registry) {
 	m.registerFailureTotal = newCounterVecWithRegistry(
 		"sip_exporter_register_failure_total",
 		"Total number of failed REGISTER responses by status code (non-1xx, non-2xx)",
-		[]string{"carrier", "ua_type", "source_country", "code"}, reg)
+		[]string{"carrier", "ua_type", "source_country", "direction", "code"}, reg)
 	m.activeRegistrations = newGaugeVecWithRegistry(
 		"sip_exporter_active_registrations",
 		"Number of active SIP registrations tracked by Expires-TTL", cl, reg)
@@ -467,13 +469,13 @@ func (m *metrics) initRegistrationMetrics(reg *prometheus.Registry) {
 	m.sipRetransmission = newCounterVecWithRegistry(
 		"sip_exporter_sip_retransmission_total",
 		"Total retransmitted SIP requests (Timer A on UDP)",
-		[]string{"carrier", "ua_type", "source_country", "method"},
+		[]string{"carrier", "ua_type", "source_country", "direction", "method"},
 		reg,
 	)
 	m.shortCalls = newCounterVecWithRegistry(
 		"sip_exporter_short_calls_total",
 		"Completed sessions shorter than threshold seconds",
-		[]string{"carrier", "ua_type", "source_country", "threshold"},
+		[]string{"carrier", "ua_type", "source_country", "direction", "threshold"},
 		reg,
 	)
 	m.billableSeconds = newCounterVecWithRegistry(
@@ -692,6 +694,11 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 	m.rtpActiveStreams = newGaugeVecWithRegistry(
 		"sip_exporter_rtp_active_streams",
 		"Number of active RTP streams correlated with SIP dialogs", rl, reg)
+	m.rtpKernelTimestampMissing = newCounterWithRegistry(
+		"sip_exporter_rtp_kernel_timestamp_missing_total",
+		"RTP packets missing kernel SO_TIMESTAMPNS (PDV fell back to processing time; growing rate means unreliable PDV)",
+		reg,
+	)
 }
 
 func (m *metrics) initRTCPMetrics(reg *prometheus.Registry) {
@@ -999,7 +1006,7 @@ func (m *metrics) RegisterSuccess(carrier, uaType, sourceCountry, direction stri
 }
 
 func (m *metrics) RegisterFailure(carrier, uaType, sourceCountry, direction, code string) {
-	m.registerFailureTotal.WithLabelValues(carrier, uaType, sourceCountry, code).Inc()
+	m.registerFailureTotal.WithLabelValues(carrier, uaType, sourceCountry, direction, code).Inc()
 	if isRegisterChallenge(code) || isRedirectStatus(code) {
 		return
 	}
@@ -1022,11 +1029,11 @@ func (m *metrics) FasCall(carrier, uaType, sourceCountry, direction string) {
 	m.fasCalls.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 }
 
-func (m *metrics) SIPRetransmission(carrier, uaType, sourceCountry, _, method string) {
-	m.sipRetransmission.WithLabelValues(carrier, uaType, sourceCountry, method).Inc()
+func (m *metrics) SIPRetransmission(carrier, uaType, sourceCountry, direction, method string) {
+	m.sipRetransmission.WithLabelValues(carrier, uaType, sourceCountry, direction, method).Inc()
 }
 
-func (m *metrics) UpdateShortCalls(carrier, uaType, sourceCountry, _ string, duration time.Duration) {
+func (m *metrics) UpdateShortCalls(carrier, uaType, sourceCountry, direction string, duration time.Duration) {
 	if duration <= 0 {
 		return
 	}
@@ -1039,7 +1046,7 @@ func (m *metrics) UpdateShortCalls(carrier, uaType, sourceCountry, _ string, dur
 		{"180", shortCallThreshold180},
 	} {
 		if duration < threshold.limit {
-			m.shortCalls.WithLabelValues(carrier, uaType, sourceCountry, threshold.label).Inc()
+			m.shortCalls.WithLabelValues(carrier, uaType, sourceCountry, direction, threshold.label).Inc()
 		}
 	}
 }
@@ -1256,6 +1263,10 @@ func (m *metrics) UpdateRTCPReport(carrier, uaType, sourceCountry, direction, re
 // the stream — and thus its carrier/codec context — is unknown.
 func (m *metrics) UpdateRTCPOrphan() {
 	m.rtcpOrphanReports.Inc()
+}
+
+func (m *metrics) RTPKernelTimestampMissing() {
+	m.rtpKernelTimestampMissing.Inc()
 }
 
 func (m *metrics) UpdateRTPMOS(carrier, uaType, codec, sourceCountry, direction string, mos float64) {

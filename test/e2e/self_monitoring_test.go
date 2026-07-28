@@ -3,16 +3,15 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestSelfMonitoring_SocketPacketsReceived(t *testing.T) {
+func TestSelfMonitoringSocketPacketsReceived(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("after_traffic_received_gt_zero", func(t *testing.T) {
 		t.Parallel()
@@ -26,9 +25,9 @@ func TestSelfMonitoring_SocketPacketsReceived(t *testing.T) {
 	})
 }
 
-func TestSelfMonitoring_SocketPacketsDropped(t *testing.T) {
+func TestSelfMonitoringSocketPacketsDropped(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("no_drops_under_normal_load", func(t *testing.T) {
 		t.Parallel()
@@ -44,9 +43,9 @@ func TestSelfMonitoring_SocketPacketsDropped(t *testing.T) {
 	})
 }
 
-func TestSelfMonitoring_ChannelMetrics(t *testing.T) {
+func TestSelfMonitoringChannelMetrics(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("channel_length_in_range", func(t *testing.T) {
 		t.Parallel()
@@ -70,9 +69,9 @@ func TestSelfMonitoring_ChannelMetrics(t *testing.T) {
 	})
 }
 
-func TestSelfMonitoring_ParseErrorsZeroForValidTraffic(t *testing.T) {
+func TestSelfMonitoringParseErrorsZeroForValidTraffic(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("all_error_types_zero", func(t *testing.T) {
 		t.Parallel()
@@ -91,9 +90,9 @@ func TestSelfMonitoring_ParseErrorsZeroForValidTraffic(t *testing.T) {
 	})
 }
 
-func TestSelfMonitoring_ActiveTrackers(t *testing.T) {
+func TestSelfMonitoringActiveTrackers(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("all_tracker_types_exist", func(t *testing.T) {
 		t.Parallel()
@@ -111,9 +110,9 @@ func TestSelfMonitoring_ActiveTrackers(t *testing.T) {
 	})
 }
 
-func TestSelfMonitoring_ActiveDialogs(t *testing.T) {
+func TestSelfMonitoringActiveDialogs(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("zero_before_traffic", func(t *testing.T) {
 		t.Parallel()

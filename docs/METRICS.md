@@ -58,14 +58,14 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 > |------|---------|----------------|
 > | **System** | `packets_total`, `system_error_total`, self-monitoring | *(none)* |
 > | **Base** | All SIP requests, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD/PBD, VQ reports, sessions, `reinvite_total`, registration health (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country, direction` |
-> | **Reg failure** | `register_failure_total` | `carrier, ua_type, source_country, code` |
-> | **Retransmission** | `sip_retransmission_total` | `carrier, ua_type, source_country, method` |
+> | **Reg failure** | `register_failure_total` | `carrier, ua_type, source_country, direction, code` |
+> | **Retransmission** | `sip_retransmission_total` | `carrier, ua_type, source_country, direction, method` |
 > | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_out_of_order_total`, `rtp_jitter_milliseconds`, `rtp_pdv_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country, direction` |
 > | **RTP dialog** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country, direction` |
 > | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, direction, destination_country, caller_host, called_host, iface` |
 > | **Fraud** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country, direction` |
 > | **Fraud (call-level)** | `fas_calls_total` | `carrier, ua_type, source_country, direction` |
-> | **Short calls** | `short_calls_total` | `carrier, ua_type, source_country, threshold` |
+> | **Short calls** | `short_calls_total` | `carrier, ua_type, source_country, direction, threshold` |
 > | **Traffic** | `billable_seconds_total` | `carrier, destination_country, direction` |
 > | **Capacity** | `sessions_limit`, `sessions_utilization` | `carrier` |
 
@@ -563,7 +563,7 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 `sip_exporter_update_total{carrier="...",ua_type="..."}`: total number of received SIP UPDATE requests.  
 `sip_exporter_message_total{carrier="...",ua_type="..."}`: total number of received SIP MESSAGE requests.
 
-`sip_exporter_sip_retransmission_total{carrier="...",ua_type="...",method="INVITE"}` *(counter)*: total number of retransmitted SIP requests detected via Timer A (RFC 3261 §17.1.1.2). A retransmission is identified when a duplicate INVITE with the same Call-ID arrives within the invite tracker TTL window (60s) without an active dialog. Currently INVITE-only; the `method` label is reserved for future generalization to REGISTER/OPTIONS.
+`sip_exporter_sip_retransmission_total{carrier="...",ua_type="...",direction="...",method="INVITE"}` *(counter)*: total number of retransmitted SIP requests detected via Timer A (RFC 3261 §17.1.1.2). A retransmission is identified when a duplicate INVITE with the same Call-ID arrives within the invite tracker TTL window (60s) without an active dialog. Currently INVITE-only; the `method` label is reserved for future generalization to REGISTER/OPTIONS.
 
 `sip_exporter_invite_200_total{carrier,ua_type,source_country,destination_country,caller_host,called_host,iface}`: total number of `200 OK` responses to INVITE requests (successful call establishments). This is the numerator for [SER-by-destination](#ser-by-destination-promql) PromQL calculations. Carries the full 8-label set — same as `invite_total`, including `iface`.
 
@@ -607,7 +607,7 @@ Registration metrics track the full lifecycle of SIP registrations (RFC 3261 §1
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
 | `sip_exporter_register_success_total` | counter | `carrier,ua_type,source_country,direction` | REGISTER responses with status `200 OK` |
-| `sip_exporter_register_failure_total` | counter | `carrier,ua_type,source_country,code` | REGISTER responses with status `3xx/4xx/5xx/6xx`, by code |
+| `sip_exporter_register_failure_total` | counter | `carrier,ua_type,source_country,direction,code` | REGISTER responses with status `3xx/4xx/5xx/6xx`, by code |
 | `sip_exporter_register_success_ratio` | gauge | `carrier,ua_type,source_country,direction` | `200 OK / (200 OK + terminal failures) × 100` |
 | `sip_exporter_active_registrations` | gauge | `carrier,ua_type,source_country,direction` | Currently active registrations (Expires-TTL tracked) |
 
@@ -719,10 +719,12 @@ This is a **signaling-only heuristic**. True FAS detection requires decoding the
 
 - **Adversarial defeat is inherent.** A party that controls the answering endpoint can send a short RTP burst (≥2 packets) to cancel the signal. The ≥2-packet gate only raises the bar against accidental/coincidental clears, not a determined adversary.
 - **Side-gated clearing (answer-side media required).** FAS is cleared only when media from the *answering* side is observed (it arrives at the offer/caller endpoint). Media from the *calling* side does **not** defeat FAS — a fraudster's false 200 OK can no longer be masked by the victim's own upstream RTP. This requires the INVITE offer SDP to have been cached; if the INVITE was not seen (exporter started mid-call, late offer), the originating side cannot be determined and FAS falls back to any-media-clears. Under NAT that remaps the answering side's source port, side detection degrades gracefully to that same fallback.
-- **DTLS-SRTP calls auto-grace.** When the answer SDP carries `a=fingerprint` (RFC 4572), the call receives a per-call grace (`fasSRTPGrace`, 15 s) on top of the base threshold, so ICE/DTLS setup does not false-positive on WebRTC-trunked calls. Plain-RTP calls keep the base threshold.
+- **DTLS-SRTP grace (sweep path only).** When the answer SDP carries `a=fingerprint` (RFC 4572) or `a=crypto:` (RFC 4568 SDES), the sweep deadline receives a per-call grace (`fasSRTPGrace`, 15 s) on top of the base threshold, so ICE/DTLS setup does not false-positive on WebRTC-trunked calls. The BYE path uses `fasByeFloor` (3 s) regardless of SRTP — a fake `a=fingerprint` must not let a fraudster evade detection by hanging up within the grace window. Tradeoff: a WebRTC call that fails ICE and hangs up after 3 s may false-positive.
 - **Short dead-air calls reported at BYE.** A call that answered with no answer-side RTP and ends via BYE before the sweep threshold is reported at teardown when answer→BYE ≥ `fasByeFloor` (3 s), covering the common FAS pattern where the caller hangs up on dead air. Shorter calls (immediate abandonment) are excluded.
 - **Re-INVITE un-hold blind spot.** If the initial 200 OK carried held SDP (`c=0.0.0.0`, no pending entry created) and a later re-INVITE offers real media, the call is never FAS-tracked. Rare (hold→unhold without any prior RTP).
 - **No audio-content analysis.** A fraudster streaming silence or comfort noise passes the media-established check.
+- **RTP capture dependency.** FAS reliability equals RTP capture completeness. SIP packets use a blocking channel send (never dropped); RTP packets use a non-blocking send and are dropped when the channel is full (`rtp_dropped_total`). Correlate `rate(sip_exporter_rtp_dropped_total[5m])` with `fas_calls_total` before alerting — a spike in drops during high traffic can cause false FAS positives by losing the answer-side RTP.
+- **One-way media false positives.** Servers that never send answer-side RTP (voicemail, IVR, paging, announcement playback) will trigger FAS by design. Tune the threshold or exclude these endpoints via alerting rules.
 
 ## Capacity Monitoring
 
@@ -759,7 +761,7 @@ sip_exporter_sessions_utilization > 90
 
 ## Short call counters
 
-`sip_exporter_short_calls_total{carrier="...",ua_type="...",threshold="20|60|180"}` *(counter)*: completed sessions with duration shorter than the threshold (20, 60, or 180 seconds). A single session can increment multiple thresholds (e.g., a 15-second call increments `threshold="20"`, `"60"`, and `"180"`). Short calls indicate abandoned calls, poor quality, or potential toll fraud.
+`sip_exporter_short_calls_total{carrier="...",ua_type="...",direction="...",threshold="20|60|180"}` *(counter)*: completed sessions with duration shorter than the threshold (20, 60, or 180 seconds). A single session can increment multiple thresholds (e.g., a 15-second call increments `threshold="20"`, `"60"`, and `"180"`). Short calls indicate abandoned calls, poor quality, or potential toll fraud.
 
 **PromQL examples:**
 ```promql
@@ -797,6 +799,14 @@ All RTP metrics carry the `carrier`, `ua_type`, `codec`, and `source_country` la
 belongs to an established SIP dialog (after a 200 OK to INVITE with SDP) is
 counted; RTP without a correlated dialog is dropped.
 
+> **Measurement semantics:** RTP loss, jitter, PDV, and E-model MOS describe
+> packets observed at this capture point. Sequence gaps and arrival variation
+> can indicate a transport problem upstream of the sensor, but they are not a
+> subscriber's subjective score or proof of end-to-end impairment. Treat a
+> rising `sip_exporter_socket_packets_dropped_total` or
+> `sip_exporter_rtp_dropped_total` rate as a data-quality failure before using
+> these metrics for QoE alerting.
+
 > **RTP capture (SDP-driven mode):** The eBPF filter passes UDP only from
 > endpoints learned via SDP signaling. Media endpoints (IP:port) from INVITE
 > 200 OK SDP are inserted into a BPF LRU hash map (`rtp_endpoints`, 65536
@@ -819,7 +829,7 @@ counted; RTP without a correlated dialog is dropped.
 
 `sip_exporter_rtp_jitter_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 0.1..500 ms)*: smoothed interarrival jitter (RFC 3550 A.8).
 
-`sip_exporter_rtp_pdv_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1..500 ms)*: Packet Delay Variation — the **raw** per-packet deviation `|arrivalDelta − tsDelta|` (unsmoothed), **observed per RTP packet** (parity with VoIPMonitor, which buckets each packet's deviation from the expected 20 ms spacing). Unlike `rtp_jitter_milliseconds` (an EWMA that smooths over spikes), PDV is the instantaneous per-packet deviation, so its histogram captures the true delay-variation distribution including transient spikes. Only forward (counted) packets contribute; reorder/duplicate do not (their timestamp delta is not a forward delta). The first packet of each stream (and after a stream restart) is skipped — it has no baseline to compute a delta. The arrival timestamp is the kernel `SO_TIMESTAMPNS` receive time (captured on the AF_PACKET socket), so Go scheduler/GC processing delay does not affect the measurement. Because the formula uses consecutive-packet deltas `(Rj−Ri)−(Sj−Si)` (the same drift-cancelling form as RFC 3550 jitter), it is immune to sender/receiver clock drift.
+`sip_exporter_rtp_pdv_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1..500 ms)*: Packet Delay Variation — the **raw** per-packet deviation `|arrivalDelta − tsDelta|` (unsmoothed), **observed per RTP packet** (parity with VoIPMonitor, which buckets each packet's deviation from the expected 20 ms spacing). Unlike `rtp_jitter_milliseconds` (an EWMA that smooths over spikes), PDV is the instantaneous per-packet deviation, so its histogram captures the true delay-variation distribution including transient spikes. Only forward (counted) packets contribute; reorder/duplicate do not (their timestamp delta is not a forward delta). The first packet of each stream (and after a stream restart) is skipped — it has no baseline to compute a delta. The arrival timestamp is the kernel `SO_TIMESTAMPNS` receive time (captured on the AF_PACKET socket), so Go scheduler/GC processing delay does not affect the measurement; if the timestamp is absent, `rtp_kernel_timestamp_missing_total` is incremented. Because the formula uses consecutive-packet deltas `(Rj−Ri)−(Sj−Si)` (the same drift-cancelling form as RFC 3550 jitter), it is immune to sender/receiver clock drift. The `direction` label reflects the SIP dialog direction (inbound/outbound), not the media direction — both forward and reverse streams of a call are aggregated into the same histogram (asymmetric delay is averaged out).
 
 `sip_exporter_rtp_mos_score{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1.0..5.0)*: MOS-LQ estimated via the ITU-T G.107 E-model with a 60 ms jitter buffer assumption.
 
@@ -862,7 +872,7 @@ These counters are evaluated at dialog teardown (BYE 200 OK or Session-Expires e
 
 ## RTCP Endpoint-Reported Metrics
 
-RTCP metrics are derived from RTCP Sender/Receiver Reports (RFC 3550 §6) captured by the eBPF filter and correlated to RTP streams by SSRC. They report the **endpoint's own observation** of quality (what the phone experiences, after its jitter buffer and packet concealment) — complementing the passive RTP metrics, which report what the sniffer observes on the wire. RTCP is universal (RFC 3550 mandates it for every RTP sender/receiver), so these metrics cover traffic that VQ (RFC 6035, end-of-call, opt-in) does not.
+RTCP metrics are derived from RTCP Sender/Receiver Reports (RFC 3550 §6) captured by the eBPF filter and correlated to RTP streams by SSRC. They report the **receiver's RTP statistics** for that stream, complementing passive RTP metrics observed at the capture point. They are not a subjective call-quality score and exist only when the endpoint, SBC, or mixer emits SR/RR that the sensor can see; do not assume every deployment produces them.
 
 > **Capture:** RTCP shares V=2 and (for rtcp-mux, RFC 5761) the RTP port with RTP; the eBPF filter distinguishes them by the 8-bit packet-type byte (200–204 for RTCP) and passes the **full** RTCP compound to userspace (RTP keeps a 64-byte header-only snapshot). rtcp-mux works with no extra configuration. Non-mux RTCP on a separate port is captured when the SDP declares it via `a=rtcp` (RFC 3605) — both the port and an optional unicast address (`a=rtcp:<port> IN IP4 <addr>`, RTCP on a host other than `c=`) are honoured (IPv4 only); absent both `a=rtcp-mux` and `a=rtcp`, legacy RTCP on `port+1` (RFC 3550 §9) is registered automatically.
 
@@ -876,13 +886,13 @@ All quality metrics inherit the labels of the correlated RTP stream: `carrier, u
 
 `sip_exporter_rtcp_cumulative_loss_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: cumulative packets lost reported by the receiver. The exporter diffs consecutive reports per SSRC: the **first** report for an SSRC establishes the baseline and emits no delta (so the counter reflects only losses observed since the exporter began tracking the stream, not the absolute cumulative total the endpoint carries), and a session reset or 24-bit wrap yields the current value as the delta. The counter is monotonic and `rate()`-able.
 
-`sip_exporter_rtcp_rtt_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1..5000 ms)*: network round-trip time computed from the RR's LSR/DLSR fields: `RTT = (now_NTP32 − LSR − DLSR) × 1000 / 65536` (RFC 3550 §6.4.1). Skipped when `LSR == 0` (no prior SR) or the result is negative (clock skew). Requires the host clock to be roughly NTP-synchronised.
+`sip_exporter_rtcp_rtt_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1..5000 ms)*: network round-trip time computed from the RR's LSR/DLSR fields: `RTT = (now_NTP32 − LSR − DLSR) × 1000 / 65536` (RFC 3550 §6.4.1). Skipped when `LSR` or `DLSR` is zero (no prior SR) or the result is negative (clock skew). Requires the host clock to be roughly NTP-synchronised.
 
 `sip_exporter_rtcp_reports_total{carrier,ua_type,source_country,direction,type}` *(counter)*: number of RTCP reception report blocks processed for tracked streams. `type` is `sr` (Sender Report, PT 200) or `rr` (Receiver Report, PT 201). Note: no `codec` label (a report describes reception, not a single codec); counted per report block.
 
 `sip_exporter_rtcp_orphan_reports_total` *(counter, label-less)*: RTCP reception report blocks whose SSRC could not be correlated to a tracked RTP stream (the SSRC is unknown, or two streams collide on the SSRC and the report's endpoints match neither). A non-zero rate indicates SDP/SSRC registration gaps or RTCP arriving for calls the exporter does not track. Label-less because the stream — and thus its carrier/codec context — is unknown.
 
-> **RTT vs everything else:** RTT has no passive-RTP equivalent — a single sniffer point cannot measure end-to-end RTT from RTP alone. The RTCP-derived RTT is the only source of network round-trip latency in sip-exporter, useful for echo diagnosis and E-model accuracy.
+> **RTT vs everything else:** RTT has no passive-RTP equivalent — a single sniffer point cannot measure end-to-end RTT from RTP alone. RTCP-derived RTT is the only source of network round-trip latency in sip-exporter. Use it to investigate routing, queuing, and conversational delay; it does not by itself diagnose acoustic echo.
 
 > **Correlation by SSRC:** a report block is matched to the RTP stream sending with its SSRC (destination-first, NAT-robust). On rare SSRC collision (two streams reuse an SSRC within the TTL window) the endpoint hints disambiguate; the loss delta and the labels always attribute to the same stream.
 
@@ -899,6 +909,7 @@ Self-monitoring metrics provide visibility into the exporter's internal health. 
 | `sip_exporter_socket_packets_received_total{iface}` | CounterVec | Total packets received from kernel AF_PACKET socket per interface |
 | `sip_exporter_socket_packets_dropped_total{iface}` | CounterVec | Total packets dropped by kernel due to socket receive buffer overflow per interface |
 | `sip_exporter_rtp_dropped_total` | Counter | Total RTP packets dropped in userspace when the internal messages channel is full |
+| `sip_exporter_rtp_kernel_timestamp_missing_total` | Counter | RTP packets where the kernel `SO_TIMESTAMPNS` was absent and PDV fell back to processing time (a growing rate means unreliable PDV readings) |
 | `sip_exporter_channel_length` | Gauge | Current number of packets in the internal messages channel buffer |
 | `sip_exporter_channel_capacity` | Gauge | Capacity of the internal messages channel buffer (constant: 10000) |
 | `sip_exporter_parse_errors_total{type="..."}` | CounterVec | Total packet parse errors by type |

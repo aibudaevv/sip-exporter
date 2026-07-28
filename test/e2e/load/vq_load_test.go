@@ -17,7 +17,7 @@ const (
 	fullCallVQPacketsPerCall = 9.0
 )
 
-func TestLoad_VQScenarios(t *testing.T) {
+func TestLoadVQScenarios(t *testing.T) {
 	tests := []struct {
 		name           string
 		uasScenario    string
@@ -83,9 +83,9 @@ func TestLoad_VQScenarios(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			for _, rate := range tt.rates {
 				t.Run(fmt.Sprintf("rate_%d", rate), func(t *testing.T) {
-					env := newTestEnv(context.Background(), t)
+					env := newTestEnv(t.Context(), t)
 
-					ctx, cancel := context.WithTimeout(context.Background(), subtestTimeout)
+					ctx, cancel := context.WithTimeout(t.Context(), subtestTimeout)
 					defer cancel()
 
 					callCount := rate * 5

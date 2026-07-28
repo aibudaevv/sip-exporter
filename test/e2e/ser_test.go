@@ -3,15 +3,14 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestSER_AllScenarios(t *testing.T) {
+func TestSERAllScenarios(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name        string
@@ -48,9 +47,9 @@ func TestSER_AllScenarios(t *testing.T) {
 	}
 }
 
-func TestSER_Mixed(t *testing.T) {
+func TestSERMixed(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	type sippRun struct {
 		uas, uac string
@@ -104,9 +103,9 @@ func TestSER_Mixed(t *testing.T) {
 	}
 }
 
-func TestSER_WithCarrierConfig(t *testing.T) {
+func TestSERWithCarrierConfig(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name        string
@@ -135,9 +134,9 @@ func TestSER_WithCarrierConfig(t *testing.T) {
 	}
 }
 
-func TestSER_MixedWithCarrierConfig(t *testing.T) {
+func TestSERMixedWithCarrierConfig(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnvWithCarriers(ctx, t)
 
 	const successCount = 140

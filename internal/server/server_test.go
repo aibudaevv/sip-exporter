@@ -47,7 +47,7 @@ func TestNewServer(t *testing.T) {
 	require.NotNil(t, s.exporter)
 }
 
-func TestServer_Run_Success(t *testing.T) {
+func TestServerRunSuccess(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	zap.ReplaceGlobals(logger)
 
@@ -87,7 +87,7 @@ func TestServer_Run_Success(t *testing.T) {
 	require.True(t, mExp.closeCalled)
 }
 
-func TestServer_Run_InitializeError(t *testing.T) {
+func TestServerRunInitializeError(t *testing.T) {
 	s := &server{
 		exporter: &mockExporter{
 			initializeErr: exporter.ErrUserNotRoot,
@@ -106,11 +106,11 @@ func TestServer_Run_InitializeError(t *testing.T) {
 	require.Contains(t, err.Error(), "failed to initialize exporter")
 }
 
-func TestShutDownTimeout_Constant(t *testing.T) {
+func TestShutDownTimeoutConstant(t *testing.T) {
 	require.Equal(t, 10*time.Second, shutDownTimeout)
 }
 
-func TestServer_Run_ContextDeadline(t *testing.T) {
+func TestServerRunContextDeadline(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	zap.ReplaceGlobals(logger)
 
@@ -146,7 +146,7 @@ func TestServer_Run_ContextDeadline(t *testing.T) {
 	}
 }
 
-func TestServer_MetricsHandler(t *testing.T) {
+func TestServerMetricsHandler(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

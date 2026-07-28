@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestINVITE_RetransmissionDedup verifies that INVITE retransmissions (RFC 3261
+// TestINVITERetransmissionDedup verifies that INVITE retransmissions (RFC 3261
 // Timer A) do not inflate sip_exporter_invite_total.
 //
 // The UAS runs with -d 600 (600ms delay before each send), so 100 Trying arrives
@@ -25,9 +25,9 @@ import (
 //
 // Without dedup: invite_total ≈ 2× callCount (original + 1 retransmission per call).
 // With dedup:    invite_total == callCount.
-func TestINVITE_RetransmissionDedup(t *testing.T) {
+func TestINVITERetransmissionDedup(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
 	const callCount = 10
@@ -97,7 +97,7 @@ func TestINVITE_RetransmissionDedup(t *testing.T) {
 	waitForSessionsZero(t, env.endpoint)
 }
 
-// TestSIPRetransmission_MetricObserved verifies that the new
+// TestSIPRetransmissionMetricObserved verifies that the new
 // sip_exporter_sip_retransmission_total counter is incremented when INVITE
 // retransmissions are detected (same Call-ID arriving twice within the
 // inviteTracker TTL, before dialog establishment).
@@ -105,9 +105,9 @@ func TestINVITE_RetransmissionDedup(t *testing.T) {
 // Sends two identical INVITE messages via raw UDP on loopback — no SIPp needed.
 // The eBPF filter captures both; the first is counted as Request + stored in
 // inviteTracker, the second triggers SIPRetransmission.
-func TestSIPRetransmission_MetricObserved(t *testing.T) {
+func TestSIPRetransmissionMetricObserved(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
 	// Bind a drain listener on the sipp port so the kernel delivers the packet

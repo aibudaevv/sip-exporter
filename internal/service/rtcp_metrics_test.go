@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRTCP_Jitter(t *testing.T) {
+func TestRTCPJitter(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTCPJitter("carrier-a", "yealink", "PCMU", "", "", 5.5)
 	m.UpdateRTCPJitter("carrier-a", "yealink", "PCMU", "", "", 12.5)
@@ -17,7 +17,7 @@ func TestRTCP_Jitter(t *testing.T) {
 	require.Equal(t, uint64(2), count)
 }
 
-func TestRTCP_LossFraction(t *testing.T) {
+func TestRTCPLossFraction(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTCPLossFraction("carrier-a", "yealink", "PCMU", "", "", 2.5)
 	m.UpdateRTCPLossFraction("carrier-a", "yealink", "PCMU", "", "", 7.5)
@@ -27,7 +27,7 @@ func TestRTCP_LossFraction(t *testing.T) {
 	require.Equal(t, uint64(2), count)
 }
 
-func TestRTCP_CumulativeLoss(t *testing.T) {
+func TestRTCPCumulativeLoss(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	// The caller passes the loss delta since the previous RR; the counter accumulates.
 	m.UpdateRTCPCumulativeLoss("carrier-a", "yealink", "PCMU", "", "", 5)
@@ -38,7 +38,7 @@ func TestRTCP_CumulativeLoss(t *testing.T) {
 	require.InDelta(t, 8.0, m.rtpCounter(m.rtcpCumulativeLoss, "carrier-a", "yealink", "PCMU"), 0.01)
 }
 
-func TestRTCP_RTT(t *testing.T) {
+func TestRTCPRTT(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTCPRTT("carrier-a", "yealink", "PCMU", "", "", 45.0)
 	m.UpdateRTCPRTT("carrier-a", "yealink", "PCMU", "", "", 75.0)
@@ -48,7 +48,7 @@ func TestRTCP_RTT(t *testing.T) {
 	require.Equal(t, uint64(2), count)
 }
 
-func TestRTCP_Reports(t *testing.T) {
+func TestRTCPReports(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTCPReport("carrier-a", "yealink", "RU", "inbound", "sr")
 	m.UpdateRTCPReport("carrier-a", "yealink", "RU", "inbound", "sr")
@@ -65,10 +65,10 @@ func TestRTCP_Reports(t *testing.T) {
 	require.InDelta(t, 1.0, dr.GetCounter().GetValue(), 0.01)
 }
 
-// TestRTCP_OrphanReports verifies the uncorrelated-RTCP counter: report blocks
+// TestRTCPOrphanReports verifies the uncorrelated-RTCP counter: report blocks
 // whose SSRC cannot be matched to a tracked stream are counted here, giving
 // visibility into SSRC/SDP registration health. The counter is label-less.
-func TestRTCP_OrphanReports(t *testing.T) {
+func TestRTCPOrphanReports(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTCPOrphan()
 	m.UpdateRTCPOrphan()

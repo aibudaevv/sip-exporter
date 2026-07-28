@@ -88,11 +88,11 @@ func recordResult(scenario string, metrics map[string]MetricEntry) {
 }
 
 func resultsFilePath() string {
-	return filepath.Join(projectRoot, "test", "e2e", "load", resultsFile)
+	return filepath.Join(projectRoot(), "test", "e2e", "load", resultsFile)
 }
 
 func baselineFilePath() string {
-	return filepath.Join(projectRoot, "test", "e2e", "load", baselineFile)
+	return filepath.Join(projectRoot(), "test", "e2e", "load", baselineFile)
 }
 
 func saveResults() error {
@@ -299,8 +299,8 @@ func formatMetricValue(v float64, unit string) string {
 }
 
 func shortenName(name string) string {
-	name = strings.TrimPrefix(name, "TestLoad_")
-	name = strings.TrimPrefix(name, "TestBenchmark_")
+	name = strings.TrimPrefix(name, "TestLoad")
+	name = strings.TrimPrefix(name, "TestBenchmark")
 	return name
 }
 

@@ -18,7 +18,7 @@ import (
 // "gauge present with value 0" from "gauge absent" — the core of the Reset() fix.
 func metricLineExists(t *testing.T, endpoint, metricName string, labelSubstrings ...string) bool {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/metrics", nil)
 	require.NoError(t, err)
@@ -47,7 +47,7 @@ func metricLineExists(t *testing.T, endpoint, metricName string, labelSubstrings
 	return false
 }
 
-// TestRTP_MetricsAfterCallCompletion verifies that after a SIPp dialog with RTP
+// TestRTPMetricsAfterCallCompletion verifies that after a SIPp dialog with RTP
 // completes (BYE processed), ALL RTP metrics are in the correct post-call state:
 //
 //   - rtp_active_streams gauge is PRESENT at 0 (not absent — the Reset() bug
@@ -55,13 +55,13 @@ func metricLineExists(t *testing.T, endpoint, metricName string, labelSubstrings
 //   - sessions gauge is PRESENT at 0 (same Reset() issue).
 //   - Cumulative counters and histograms retain their accumulated values.
 //   - active_dialogs is 0.
-func TestRTP_MetricsAfterCallCompletion(t *testing.T) {
+func TestRTPMetricsAfterCallCompletion(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
-	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP,
+	endpoint := startExporterWithCarrierUA(t.Context(), t, httpPort, uasSIP,
 		integrationCarriersYAML, integrationUserAgentsYAML, "")
 
-	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
+	runSippRTP(t.Context(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 
 	rtpLabels := []string{labelCarrier, labelUAType, labelCodec}
 	sipLabels := []string{labelCarrier, labelUAType}

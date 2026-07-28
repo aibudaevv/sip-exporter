@@ -3,7 +3,6 @@
 package e2e
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 
@@ -74,7 +73,7 @@ func TestSourceCountry(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.description, func(t *testing.T) {
 			t.Parallel()
-			ctx := context.Background()
+			ctx := t.Context()
 			callCount := 100
 
 			if tt.uacIP != "" {
@@ -87,7 +86,7 @@ func TestSourceCountry(t *testing.T) {
 				env = newTestEnvWithCarriersYAML(ctx, t, carriersYAML, "loopback-carrier")
 			} else {
 				addLoopbackIP(t, "81.2.69.142/32")
-				geoipDBPath := filepath.Join(projectRoot, "test", "e2e", "data", "GeoIP2-Country-Test.mmdb")
+				geoipDBPath := filepath.Join(projectRoot(), "test", "e2e", "data", "GeoIP2-Country-Test.mmdb")
 				env = newTestEnvWithGeoIP(ctx, t, geoipDBPath)
 			}
 

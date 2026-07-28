@@ -3,7 +3,6 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -64,7 +63,7 @@ func TestHostLabels(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.description, func(t *testing.T) {
 			t.Parallel()
-			ctx := context.Background()
+			ctx := t.Context()
 			callCount := 100
 
 			extraEnv := map[string]string{}

@@ -8,97 +8,97 @@ import (
 
 // ==================== ParseURI tests ====================
 
-func TestParseURI_SIPSchemeWithPortAndParams(t *testing.T) {
+func TestParseURISIPSchemeWithPortAndParams(t *testing.T) {
 	user, host := ParseURI([]byte(`<sip:bob@example.com:5060;tag=x>`))
 	require.Equal(t, []byte("bob"), user)
 	require.Equal(t, []byte("example.com"), host)
 }
 
-func TestParseURI_DisplayNameWithBrackets(t *testing.T) {
+func TestParseURIDisplayNameWithBrackets(t *testing.T) {
 	user, host := ParseURI([]byte(`"Bob" <sip:bob@example.com:5060>;tag=abc`))
 	require.Equal(t, []byte("bob"), user)
 	require.Equal(t, []byte("example.com"), host)
 }
 
-func TestParseURI_QuotedUserNoBrackets(t *testing.T) {
+func TestParseURIQuotedUserNoBrackets(t *testing.T) {
 	user, host := ParseURI([]byte(`"+74951234567"@10.0.0.1`))
 	require.Equal(t, []byte("+74951234567"), user)
 	require.Equal(t, []byte("10.0.0.1"), host)
 }
 
-func TestParseURI_AnonymousNoScheme(t *testing.T) {
+func TestParseURIAnonymousNoScheme(t *testing.T) {
 	user, host := ParseURI([]byte(`anonymous@anonymous.invalid`))
 	require.Equal(t, []byte("anonymous"), user)
 	require.Equal(t, []byte("anonymous.invalid"), host)
 }
 
-func TestParseURI_IPv6Host(t *testing.T) {
+func TestParseURIIPv6Host(t *testing.T) {
 	user, host := ParseURI([]byte(`<sip:bob@[2001:db8::1]:5060>`))
 	require.Equal(t, []byte("bob"), user)
 	require.Equal(t, []byte("2001:db8::1"), host)
 }
 
-func TestParseURI_HostOnly(t *testing.T) {
+func TestParseURIHostOnly(t *testing.T) {
 	user, host := ParseURI([]byte(`<sip:example.com:5060;transport=udp>`))
 	require.Empty(t, user)
 	require.Equal(t, []byte("example.com"), host)
 }
 
-func TestParseURI_NoBracketsWithParams(t *testing.T) {
+func TestParseURINoBracketsWithParams(t *testing.T) {
 	user, host := ParseURI([]byte(`sip:bob@example.com;tag=abc`))
 	require.Equal(t, []byte("bob"), user)
 	require.Equal(t, []byte("example.com"), host)
 }
 
-func TestParseURI_SIPSScheme(t *testing.T) {
+func TestParseURISIPSScheme(t *testing.T) {
 	user, host := ParseURI([]byte(`<sips:bob@example.com:5061>`))
 	require.Equal(t, []byte("bob"), user)
 	require.Equal(t, []byte("example.com"), host)
 }
 
-func TestParseURI_SIPSchemeCaseInsensitive(t *testing.T) {
+func TestParseURISIPSchemeCaseInsensitive(t *testing.T) {
 	user, host := ParseURI([]byte(`<SIP:bob@example.com>`))
 	require.Equal(t, []byte("bob"), user)
 	require.Equal(t, []byte("example.com"), host)
 }
 
-func TestParseURI_UserWithPassword(t *testing.T) {
+func TestParseURIUserWithPassword(t *testing.T) {
 	user, host := ParseURI([]byte(`<sip:bob:secret@example.com>`))
 	require.Equal(t, []byte("bob"), user)
 	require.Equal(t, []byte("example.com"), host)
 }
 
-func TestParseURI_UserWithParams(t *testing.T) {
+func TestParseURIUserWithParams(t *testing.T) {
 	user, host := ParseURI([]byte(`<sip:bob;phone-context=+7@example.com>`))
 	require.Equal(t, []byte("bob"), user)
 	require.Equal(t, []byte("example.com"), host)
 }
 
-func TestParseURI_IPAddress(t *testing.T) {
+func TestParseURIIPAddress(t *testing.T) {
 	user, host := ParseURI([]byte(`<sip:1000@192.168.0.89>`))
 	require.Equal(t, []byte("1000"), user)
 	require.Equal(t, []byte("192.168.0.89"), host)
 }
 
-func TestParseURI_NoPort(t *testing.T) {
+func TestParseURINoPort(t *testing.T) {
 	user, host := ParseURI([]byte(`<sip:bob@example.com>`))
 	require.Equal(t, []byte("bob"), user)
 	require.Equal(t, []byte("example.com"), host)
 }
 
-func TestParseURI_EmptyInput(t *testing.T) {
+func TestParseURIEmptyInput(t *testing.T) {
 	user, host := ParseURI([]byte(``))
 	require.Empty(t, user)
 	require.Empty(t, host)
 }
 
-func TestParseURI_NoUserPart(t *testing.T) {
+func TestParseURINoUserPart(t *testing.T) {
 	user, host := ParseURI([]byte(`<sip:example.com>`))
 	require.Empty(t, user)
 	require.Equal(t, []byte("example.com"), host)
 }
 
-func TestParseURI_RealWorldFromHeader(t *testing.T) {
+func TestParseURIRealWorldFromHeader(t *testing.T) {
 	user, host := ParseURI([]byte(`<sip:1000@192.168.0.89>;tag=e2540aafe5474bd7a5f9059b0ffccfec`))
 	require.Equal(t, []byte("1000"), user)
 	require.Equal(t, []byte("192.168.0.89"), host)
@@ -106,7 +106,7 @@ func TestParseURI_RealWorldFromHeader(t *testing.T) {
 
 // ==================== parseHeaders integration ====================
 
-func TestSIPPacketParse_FromToUserHost(t *testing.T) {
+func TestSIPPacketParseFromToUserHost(t *testing.T) {
 	e := exporter{}
 
 	input := []byte("INVITE sip:1001@192.168.0.89 SIP/2.0\r\n" +
@@ -123,7 +123,7 @@ func TestSIPPacketParse_FromToUserHost(t *testing.T) {
 	require.Equal(t, []byte("192.168.0.89"), p.To.Addr)
 }
 
-func TestSIPPacketParse_FromToQuotedNumber(t *testing.T) {
+func TestSIPPacketParseFromToQuotedNumber(t *testing.T) {
 	e := exporter{}
 
 	input := []byte("INVITE sip:test SIP/2.0\r\n" +

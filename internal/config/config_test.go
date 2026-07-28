@@ -33,7 +33,7 @@ func unsetConfigEnv(t *testing.T) {
 	}
 }
 
-func TestGetConfig_Defaults(t *testing.T) {
+func TestGetConfigDefaults(t *testing.T) {
 	unsetConfigEnv(t)
 	t.Setenv("SIP_EXPORTER_INTERFACE", "eth0")
 
@@ -65,7 +65,7 @@ func TestGetConfig_Defaults(t *testing.T) {
 	}
 }
 
-func TestGetConfig_Custom(t *testing.T) {
+func TestGetConfigCustom(t *testing.T) {
 	tests := []struct {
 		name   string
 		envKey string
@@ -153,17 +153,17 @@ func TestGetConfig_Custom(t *testing.T) {
 	}
 }
 
-func TestGetConfig_RequiredInterfaceMissing(t *testing.T) {
+func TestGetConfigRequiredInterfaceMissing(t *testing.T) {
 	unsetConfigEnv(t)
 
 	cfg, err := GetConfig()
 
 	require.Error(t, err)
 	require.Nil(t, cfg)
-	require.Contains(t, err.Error(), "read env:")
+	require.Contains(t, err.Error(), "read env (info:")
 }
 
-func TestApp_ParsedInterfaces(t *testing.T) {
+func TestAppParsedInterfaces(t *testing.T) {
 	cases := []struct {
 		name      string
 		input     string
@@ -204,7 +204,7 @@ func TestApp_ParsedInterfaces(t *testing.T) {
 	}
 }
 
-func TestApp_ParsedSIPPorts(t *testing.T) {
+func TestAppParsedSIPPorts(t *testing.T) {
 	cases := []struct {
 		name       string
 		sipPorts   string

@@ -68,7 +68,7 @@ func newRTPTestEnv(ctx context.Context, t *testing.T) *testEnv {
 	}
 
 	req := testcontainers.ContainerRequest{
-		Image:       exporterImage,
+		Image:       exporterImage(),
 		Privileged:  true,
 		NetworkMode: "host",
 		Env:         envVars,
@@ -93,18 +93,18 @@ func newRTPTestEnv(ctx context.Context, t *testing.T) *testEnv {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
 		if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
-			logs, logErr := c.Logs(context.Background())
+			logs, logErr := c.Logs(cleanupCtx)
 			if logErr == nil {
 				defer logs.Close()
 				logBytes, _ := io.ReadAll(logs)
 				t.Logf("Exporter logs:\n%s", strings.TrimSpace(string(logBytes)))
 			}
 		}
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer stopCancel()
-		_ = c.Stop(stopCtx, nil)
-		_ = c.Terminate(context.Background())
+		_ = c.Stop(cleanupCtx, nil)
+		_ = c.Terminate(cleanupCtx)
 	})
 
 	return &testEnv{
@@ -230,17 +230,17 @@ func runSippRTPLoad(
 	return result
 }
 
-// TestLoad_FullCallWithRTP measures combined SIP+RTP throughput. Each call
+// TestLoadFullCallWithRTP measures combined SIP+RTP throughput. Each call
 // runs a full SIP dialog (INVITE→200→ACK→BYE→200) plus 4s of G.711a RTP media
 // in both directions. Rates are 10× lower than SIP-only tests because RTP adds
 // ~400 packets per call (2 × 50pps × 4s).
-func TestLoad_FullCallWithRTP(t *testing.T) {
+func TestLoadFullCallWithRTP(t *testing.T) {
 	rates := []int{10, 25, 50, 100}
 	for _, rate := range rates {
 		t.Run(fmt.Sprintf("rate_%d", rate), func(t *testing.T) {
-			env := newRTPTestEnv(context.Background(), t)
+			env := newRTPTestEnv(t.Context(), t)
 
-			ctx, cancel := context.WithTimeout(context.Background(), rtpLoadTimeout)
+			ctx, cancel := context.WithTimeout(t.Context(), rtpLoadTimeout)
 			defer cancel()
 
 			callCount := rate * 5
@@ -278,11 +278,11 @@ func TestLoad_FullCallWithRTP(t *testing.T) {
 	}
 }
 
-// TestBenchmark_MemoryPerRTPStream measures memory overhead per active RTP
+// TestBenchmarkMemoryPerRTPStream measures memory overhead per active RTP
 // stream. Each concurrent SIPp call produces 2 RTP streams (UAC→UAS and
 // UAS→UAC). The -l flag limits concurrent calls; RTP streams persist for the
 // tracker TTL after the call ends, so the gauge reflects both directions.
-func TestBenchmark_MemoryPerRTPStream(t *testing.T) {
+func TestBenchmarkMemoryPerRTPStream(t *testing.T) {
 	limits := []int{0, 50, 100, 200, 500}
 	type streamMeasurement struct {
 		streams int
@@ -293,7 +293,7 @@ func TestBenchmark_MemoryPerRTPStream(t *testing.T) {
 
 	for _, limit := range limits {
 		t.Run(fmt.Sprintf("streams_%d", limit), func(t *testing.T) {
-			env := newRTPTestEnv(context.Background(), t)
+			env := newRTPTestEnv(t.Context(), t)
 
 			var streams float64
 			if limit > 0 {
@@ -304,7 +304,7 @@ func TestBenchmark_MemoryPerRTPStream(t *testing.T) {
 				}
 				callCount := limit * 3
 
-				ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
+				ctx, cancel := context.WithTimeout(t.Context(), 300*time.Second)
 				defer cancel()
 
 				uasPath := absScenarioPath(t, "uas_rtp.xml")

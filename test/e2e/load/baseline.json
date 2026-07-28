@@ -3,7 +3,7 @@
   "updated": "2026-07-25T14:41:51+03:00",
   "commit": "ac07622",
   "results": {
-    "TestBenchmark_GCPauseDuration": {
+    "TestBenchmarkGCPauseDuration": {
       "metrics": {
         "avg_ms": {
           "value": 0.3171086956521739,
@@ -27,7 +27,7 @@
         }
       }
     },
-    "TestBenchmark_MemoryPerDialog/dialogs_0": {
+    "TestBenchmarkMemoryPerDialog/dialogs_0": {
       "metrics": {
         "mem_mb": {
           "value": 14.38671875,
@@ -36,7 +36,7 @@
         }
       }
     },
-    "TestBenchmark_MemoryPerDialog/dialogs_100": {
+    "TestBenchmarkMemoryPerDialog/dialogs_100": {
       "metrics": {
         "mem_mb": {
           "value": 17.34765625,
@@ -50,7 +50,7 @@
         }
       }
     },
-    "TestBenchmark_MemoryPerDialog/dialogs_1000": {
+    "TestBenchmarkMemoryPerDialog/dialogs_1000": {
       "metrics": {
         "mem_mb": {
           "value": 23.91015625,
@@ -64,7 +64,7 @@
         }
       }
     },
-    "TestBenchmark_MemoryPerDialog/dialogs_2000": {
+    "TestBenchmarkMemoryPerDialog/dialogs_2000": {
       "metrics": {
         "mem_mb": {
           "value": 20.71484375,
@@ -78,7 +78,7 @@
         }
       }
     },
-    "TestBenchmark_MemoryPerDialog/dialogs_500": {
+    "TestBenchmarkMemoryPerDialog/dialogs_500": {
       "metrics": {
         "mem_mb": {
           "value": 20.3984375,
@@ -92,7 +92,7 @@
         }
       }
     },
-    "TestBenchmark_MemoryPerDialog/dialogs_5000": {
+    "TestBenchmarkMemoryPerDialog/dialogs_5000": {
       "metrics": {
         "mem_mb": {
           "value": 22.0703125,
@@ -106,7 +106,7 @@
         }
       }
     },
-    "TestBenchmark_MemoryPerRTPStream/streams_0": {
+    "TestBenchmarkMemoryPerRTPStream/streams_0": {
       "metrics": {
         "mem_mb": {
           "value": 14.51953125,
@@ -115,7 +115,7 @@
         }
       }
     },
-    "TestBenchmark_MemoryPerRTPStream/streams_100": {
+    "TestBenchmarkMemoryPerRTPStream/streams_100": {
       "metrics": {
         "mem_mb": {
           "value": 29.28125,
@@ -129,7 +129,7 @@
         }
       }
     },
-    "TestBenchmark_MemoryPerRTPStream/streams_200": {
+    "TestBenchmarkMemoryPerRTPStream/streams_200": {
       "metrics": {
         "mem_mb": {
           "value": 39.73828125,
@@ -143,7 +143,7 @@
         }
       }
     },
-    "TestBenchmark_MemoryPerRTPStream/streams_50": {
+    "TestBenchmarkMemoryPerRTPStream/streams_50": {
       "metrics": {
         "mem_mb": {
           "value": 21.25390625,
@@ -157,7 +157,7 @@
         }
       }
     },
-    "TestBenchmark_MemoryPerRTPStream/streams_500": {
+    "TestBenchmarkMemoryPerRTPStream/streams_500": {
       "metrics": {
         "mem_mb": {
           "value": 65.59765625,
@@ -171,7 +171,7 @@
         }
       }
     },
-    "TestBenchmark_ScrapeLatencyUnderLoad": {
+    "TestBenchmarkScrapeLatencyUnderLoad": {
       "metrics": {
         "avg_ms": {
           "value": 5.0997,
@@ -195,7 +195,7 @@
         }
       }
     },
-    "TestLoad_ConcurrentSessions/concurrent_1000": {
+    "TestLoadConcurrentSessions/concurrent_1000": {
       "metrics": {
         "cpu_avg": {
           "value": 0.4200349637938378,
@@ -224,7 +224,7 @@
         }
       }
     },
-    "TestLoad_ConcurrentSessions/concurrent_2000": {
+    "TestLoadConcurrentSessions/concurrent_2000": {
       "metrics": {
         "cpu_avg": {
           "value": 0.6415817940924323,
@@ -253,7 +253,7 @@
         }
       }
     },
-    "TestLoad_ConcurrentSessions/concurrent_500": {
+    "TestLoadConcurrentSessions/concurrent_500": {
       "metrics": {
         "cpu_avg": {
           "value": 0.3012392354547364,
@@ -282,7 +282,7 @@
         }
       }
     },
-    "TestLoad_DualUAType/rate_1000": {
+    "TestLoadDualUAType/rate_1000": {
       "metrics": {
         "actual_pps": {
           "value": 6167.352133436599,
@@ -331,7 +331,7 @@
         }
       }
     },
-    "TestLoad_DualUAType/rate_1800": {
+    "TestLoadDualUAType/rate_1800": {
       "metrics": {
         "actual_pps": {
           "value": 11072.546695428426,
@@ -380,7 +380,7 @@
         }
       }
     },
-    "TestLoad_DualUAType/rate_500": {
+    "TestLoadDualUAType/rate_500": {
       "metrics": {
         "actual_pps": {
           "value": 3095.3393848710557,
@@ -429,7 +429,7 @@
         }
       }
     },
-    "TestLoad_FullCallFlow/rate_100": {
+    "TestLoadFullCallFlow/rate_100": {
       "metrics": {
         "actual_pps": {
           "value": 593.5955924093137,
@@ -463,7 +463,7 @@
         }
       }
     },
-    "TestLoad_FullCallFlow/rate_1000": {
+    "TestLoadFullCallFlow/rate_1000": {
       "metrics": {
         "actual_pps": {
           "value": 5918.438629338334,
@@ -497,7 +497,7 @@
         }
       }
     },
-    "TestLoad_FullCallFlow/rate_1200": {
+    "TestLoadFullCallFlow/rate_1200": {
       "metrics": {
         "actual_pps": {
           "value": 7086.331507116809,
@@ -531,7 +531,7 @@
         }
       }
     },
-    "TestLoad_FullCallFlow/rate_1400": {
+    "TestLoadFullCallFlow/rate_1400": {
       "metrics": {
         "actual_pps": {
           "value": 8423.027128104151,
@@ -565,7 +565,7 @@
         }
       }
     },
-    "TestLoad_FullCallFlow/rate_1600": {
+    "TestLoadFullCallFlow/rate_1600": {
       "metrics": {
         "actual_pps": {
           "value": 9394.10548955287,
@@ -599,7 +599,7 @@
         }
       }
     },
-    "TestLoad_FullCallFlow/rate_1800": {
+    "TestLoadFullCallFlow/rate_1800": {
       "metrics": {
         "actual_pps": {
           "value": 10555.49843225113,
@@ -633,7 +633,7 @@
         }
       }
     },
-    "TestLoad_FullCallFlow/rate_500": {
+    "TestLoadFullCallFlow/rate_500": {
       "metrics": {
         "actual_pps": {
           "value": 2965.002860834686,
@@ -667,7 +667,7 @@
         }
       }
     },
-    "TestLoad_FullCallWithRTP/rate_10": {
+    "TestLoadFullCallWithRTP/rate_10": {
       "metrics": {
         "actual_pps": {
           "value": 21.4460783770565,
@@ -706,7 +706,7 @@
         }
       }
     },
-    "TestLoad_FullCallWithRTP/rate_100": {
+    "TestLoadFullCallWithRTP/rate_100": {
       "metrics": {
         "actual_pps": {
           "value": 213.4205198157939,
@@ -745,7 +745,7 @@
         }
       }
     },
-    "TestLoad_FullCallWithRTP/rate_25": {
+    "TestLoadFullCallWithRTP/rate_25": {
       "metrics": {
         "actual_pps": {
           "value": 53.20554224347293,
@@ -784,7 +784,7 @@
         }
       }
     },
-    "TestLoad_FullCallWithRTP/rate_50": {
+    "TestLoadFullCallWithRTP/rate_50": {
       "metrics": {
         "actual_pps": {
           "value": 105.32141828130784,
@@ -823,7 +823,7 @@
         }
       }
     },
-    "TestLoad_INVITEFlood/rate_100": {
+    "TestLoadINVITEFlood/rate_100": {
       "metrics": {
         "actual_pps": {
           "value": 95.55560364847852,
@@ -852,7 +852,7 @@
         }
       }
     },
-    "TestLoad_INVITEFlood/rate_1000": {
+    "TestLoadINVITEFlood/rate_1000": {
       "metrics": {
         "actual_pps": {
           "value": 957.4747708686803,
@@ -881,7 +881,7 @@
         }
       }
     },
-    "TestLoad_INVITEFlood/rate_2000": {
+    "TestLoadINVITEFlood/rate_2000": {
       "metrics": {
         "actual_pps": {
           "value": 1913.3723690686022,
@@ -910,7 +910,7 @@
         }
       }
     },
-    "TestLoad_INVITEFlood/rate_500": {
+    "TestLoadINVITEFlood/rate_500": {
       "metrics": {
         "actual_pps": {
           "value": 478.13288072718933,
@@ -939,7 +939,7 @@
         }
       }
     },
-    "TestLoad_INVITEFlood/rate_5000": {
+    "TestLoadINVITEFlood/rate_5000": {
       "metrics": {
         "actual_pps": {
           "value": 4764.524478968993,
@@ -968,7 +968,7 @@
         }
       }
     },
-    "TestLoad_MultiInterface/interfaces_1": {
+    "TestLoadMultiInterface/interfaces_1": {
       "metrics": {
         "actual_pps": {
           "value": 371.0812819805758,
@@ -1012,7 +1012,7 @@
         }
       }
     },
-    "TestLoad_MultiInterface/interfaces_2": {
+    "TestLoadMultiInterface/interfaces_2": {
       "metrics": {
         "actual_pps": {
           "value": 802.6773263692535,
@@ -1056,7 +1056,7 @@
         }
       }
     },
-    "TestLoad_MultiInterface/interfaces_3": {
+    "TestLoadMultiInterface/interfaces_3": {
       "metrics": {
         "actual_pps": {
           "value": 1139.8428538323951,
@@ -1100,7 +1100,7 @@
         }
       }
     },
-    "TestLoad_VQScenarios/FullCallWithVQReport/rate_100": {
+    "TestLoadVQScenarios/FullCallWithVQReport/rate_100": {
       "metrics": {
         "actual_pps": {
           "value": 727.1616389507362,
@@ -1139,7 +1139,7 @@
         }
       }
     },
-    "TestLoad_VQScenarios/FullCallWithVQReport/rate_1000": {
+    "TestLoadVQScenarios/FullCallWithVQReport/rate_1000": {
       "metrics": {
         "actual_pps": {
           "value": 7317.1803073390465,
@@ -1178,7 +1178,7 @@
         }
       }
     },
-    "TestLoad_VQScenarios/FullCallWithVQReport/rate_500": {
+    "TestLoadVQScenarios/FullCallWithVQReport/rate_500": {
       "metrics": {
         "actual_pps": {
           "value": 3618.056866803015,
@@ -1217,7 +1217,7 @@
         }
       }
     },
-    "TestLoad_VQScenarios/VQHighRateWithResponse/rate_100": {
+    "TestLoadVQScenarios/VQHighRateWithResponse/rate_100": {
       "metrics": {
         "actual_pps": {
           "value": 164.6329938181516,
@@ -1251,7 +1251,7 @@
         }
       }
     },
-    "TestLoad_VQScenarios/VQHighRateWithResponse/rate_1000": {
+    "TestLoadVQScenarios/VQHighRateWithResponse/rate_1000": {
       "metrics": {
         "actual_pps": {
           "value": 1653.0388602942803,
@@ -1285,7 +1285,7 @@
         }
       }
     },
-    "TestLoad_VQScenarios/VQHighRateWithResponse/rate_500": {
+    "TestLoadVQScenarios/VQHighRateWithResponse/rate_500": {
       "metrics": {
         "actual_pps": {
           "value": 827.1901427340034,
@@ -1319,7 +1319,7 @@
         }
       }
     },
-    "TestLoad_VQScenarios/VQReportFlood/rate_100": {
+    "TestLoadVQScenarios/VQReportFlood/rate_100": {
       "metrics": {
         "actual_pps": {
           "value": 93.09694394166291,
@@ -1353,7 +1353,7 @@
         }
       }
     },
-    "TestLoad_VQScenarios/VQReportFlood/rate_1000": {
+    "TestLoadVQScenarios/VQReportFlood/rate_1000": {
       "metrics": {
         "actual_pps": {
           "value": 935.4009863777958,
@@ -1387,7 +1387,7 @@
         }
       }
     },
-    "TestLoad_VQScenarios/VQReportFlood/rate_2000": {
+    "TestLoadVQScenarios/VQReportFlood/rate_2000": {
       "metrics": {
         "actual_pps": {
           "value": 1874.059904203024,
@@ -1421,7 +1421,7 @@
         }
       }
     },
-    "TestLoad_VQScenarios/VQReportFlood/rate_500": {
+    "TestLoadVQScenarios/VQReportFlood/rate_500": {
       "metrics": {
         "actual_pps": {
           "value": 469.7090609732378,

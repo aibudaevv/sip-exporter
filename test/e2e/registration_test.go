@@ -3,7 +3,6 @@
 package e2e
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -20,12 +19,12 @@ const percentScale = 100.0
 
 // S4-2.1: Registration Counters & Ratio
 
-// TestRegisterSuccess_CountersAndRatio verifies that 50 successful REGISTER
+// TestRegisterSuccessCountersAndRatio verifies that 50 successful REGISTER
 // transactions (200 OK) produce register_success_total=50 and ratio=100%.
 // Also checks active_registrations=1 (all calls share the same AOR).
-func TestRegisterSuccess_CountersAndRatio(t *testing.T) {
+func TestRegisterSuccessCountersAndRatio(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
 	const callCount = 50
@@ -51,14 +50,14 @@ func TestRegisterSuccess_CountersAndRatio(t *testing.T) {
 	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
-// TestRegister_FailureCodes consolidates terminal-failure and challenge/redirect
+// TestRegisterFailureCodes consolidates terminal-failure and challenge/redirect
 // registration tests. Each subtest runs N failed registrations and verifies:
 //   - register_success_total absent (0 successes)
 //   - register_failure_total{code=X}=N
 //   - register_success_ratio=0%
-func TestRegister_FailureCodes(t *testing.T) {
+func TestRegisterFailureCodes(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const callCount = 50
 
 	tests := []struct {
@@ -107,13 +106,13 @@ func TestRegister_FailureCodes(t *testing.T) {
 	}
 }
 
-// TestRegister_MixedRatio consolidates mixed success+failure ratio tests.
+// TestRegisterMixedRatio consolidates mixed success+failure ratio tests.
 // Each subtest runs 30 successful + 30 failed registrations and verifies
 // the ratio formula: success / (success + terminal_failures) * 100.
 // Challenges (401) and redirects (302) are excluded from the denominator.
-func TestRegister_MixedRatio(t *testing.T) {
+func TestRegisterMixedRatio(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const successCount = 30
 	const failCount = 30
 
@@ -162,10 +161,10 @@ func TestRegister_MixedRatio(t *testing.T) {
 
 // S4-2.2 + S4-1: Active Registrations & Expires
 
-// TestRegister_ActiveRegistrations consolidates AOR dedup and multi-AOR tests.
-func TestRegister_ActiveRegistrations(t *testing.T) {
+// TestRegisterActiveRegistrations consolidates AOR dedup and multi-AOR tests.
+func TestRegisterActiveRegistrations(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name        string
@@ -194,12 +193,12 @@ func TestRegister_ActiveRegistrations(t *testing.T) {
 	}
 }
 
-// TestActiveRegistrations_Expiry verifies the full TTL lifecycle:
+// TestActiveRegistrationsExpiry verifies the full TTL lifecycle:
 // 1. 5 registrations with Expires:3 are stored → active=5
 // 2. After expiry + cleanup tick → active=0
-func TestActiveRegistrations_Expiry(t *testing.T) {
+func TestActiveRegistrationsExpiry(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
 	const callCount = 5
@@ -224,12 +223,12 @@ func TestActiveRegistrations_Expiry(t *testing.T) {
 
 // S4-2.1 + S4-2.2: Carrier Labels
 
-// TestRegister_WithCarrierConfig verifies that all registration metrics carry
+// TestRegisterWithCarrierConfig verifies that all registration metrics carry
 // the carrier label when carriers.yaml is configured: success, failure{code},
 // ratio, and active_registrations.
-func TestRegister_WithCarrierConfig(t *testing.T) {
+func TestRegisterWithCarrierConfig(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnvWithCarriers(ctx, t)
 
 	const successCount = 30
@@ -269,13 +268,13 @@ func TestRegister_WithCarrierConfig(t *testing.T) {
 
 // S4-2.1 Integration: Auth Completion
 
-// TestRegisterAuthCompletion_401ChallengeThenSuccess verifies the full
+// TestRegisterAuthCompletion401ChallengeThenSuccess verifies the full
 // digest-auth registration flow: REGISTER → 401 Challenge → REGISTER+Auth → 200 OK.
 // register_total=2N (initial + retry), failure{code="401"}=N, success=N,
 // ratio=100% (401 challenges excluded from denominator), active=1.
-func TestRegisterAuthCompletion_401ChallengeThenSuccess(t *testing.T) {
+func TestRegisterAuthCompletion401ChallengeThenSuccess(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
 	const callCount = 10

@@ -3,22 +3,21 @@
 package e2e
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-// TestShortCalls_MetricObserved verifies that sip_exporter_short_calls_total
+// TestShortCallsMetricObserved verifies that sip_exporter_short_calls_total
 // is incremented for all three thresholds (20/60/180s) when calls complete
 // with duration < 20s (the normal case for fast SIPp E2E calls).
 //
 // Flow: standard uac_100/uas_100 with carriers config — 50 calls, each lasting
 // ~100ms (well under 20s). Each call increments thresholds "20", "60", "180".
-func TestShortCalls_MetricObserved(t *testing.T) {
+func TestShortCallsMetricObserved(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnvWithCarriers(ctx, t)
 
 	const callCount = 50

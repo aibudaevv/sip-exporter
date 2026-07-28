@@ -3,7 +3,6 @@
 package rtp
 
 import (
-	"context"
 	"strconv"
 	"testing"
 	"time"
@@ -13,7 +12,7 @@ import (
 
 const fasE2EThreshold = 3 * time.Second
 
-// TestFAS_NoRTPFiresAfterThreshold verifies the FAS detection happy path
+// TestFASNoRTPFiresAfterThreshold verifies the FAS detection happy path
 // end-to-end: a SIP dialog is established with SDP (media endpoints registered),
 // but no RTP flows. After the FAS threshold, sip_exporter_fas_calls_total must
 // fire — the call answered (200 OK) but carried no media within the window.
@@ -21,13 +20,13 @@ const fasE2EThreshold = 3 * time.Second
 // Uses the no-RTP SIPp scenarios (uas_nortp/uac_nortp): they exchange INVITE +
 // 200 OK with SDP, pause 10s (call held up), then BYE. No RTP is injected, so
 // the FAS pending entry outlives the (short, 3s) threshold.
-func TestFAS_NoRTPFiresAfterThreshold(t *testing.T) {
+func TestFASNoRTPFiresAfterThreshold(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
-	endpoint := startExporterWithExtraEnv(context.Background(), t, httpPort, uasSIP, testInterface, "",
+	endpoint := startExporterWithExtraEnv(t.Context(), t, httpPort, uasSIP, testInterface, "",
 		map[string]string{"SIP_EXPORTER_FRAUD_FAS_THRESHOLD": fasE2EThreshold.String()})
 
-	wait := startSippContainers(context.Background(), t,
+	wait := startSippContainers(t.Context(), t,
 		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
 
 	// Dialog established (200 OK processed → FAS pending stored).
@@ -44,19 +43,19 @@ func TestFAS_NoRTPFiresAfterThreshold(t *testing.T) {
 	wait()
 }
 
-// TestFAS_RTPPreventsFire verifies the FAS clear path end-to-end: when ≥2 RTP
+// TestFASRTPPreventsFire verifies the FAS clear path end-to-end: when ≥2 RTP
 // packets arrive for the dialog's media endpoint before the threshold, FAS must
 // NOT fire (real media observed). Complements the unit tests
-// (TestFAS_RTPBeforeThresholdPreventsFire / TestFAS_SingleRTPDoesNotClear) by
+// (TestFASRTPBeforeThresholdPreventsFire / TestFASSingleRTPDoesNotClear) by
 // exercising the full BPF → correlation → clear → sweep path through the binary.
-func TestFAS_RTPPreventsFire(t *testing.T) {
+func TestFASRTPPreventsFire(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 	uacMediaNum, _ := strconv.Atoi(uacMedia)
-	endpoint := startExporterWithExtraEnv(context.Background(), t, httpPort, uasSIP, testInterface, "",
+	endpoint := startExporterWithExtraEnv(t.Context(), t, httpPort, uasSIP, testInterface, "",
 		map[string]string{"SIP_EXPORTER_FRAUD_FAS_THRESHOLD": fasE2EThreshold.String()})
 
-	wait := startSippContainers(context.Background(), t,
+	wait := startSippContainers(t.Context(), t,
 		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
 
 	// Wait for the 200 OK to register media endpoints (FAS pending stored).

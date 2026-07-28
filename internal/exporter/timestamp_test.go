@@ -42,3 +42,18 @@ func TestParseTimestampNS(t *testing.T) {
 	binary.NativeEndian.PutUint32(other[12:16], uint32(0x9999)) // unrelated type
 	require.True(t, parseTimestampNS(other).IsZero(), "non-timestamp cmsg must be zero time")
 }
+
+func BenchmarkParseTimestampNS(b *testing.B) {
+	oob := make([]byte, unix.CmsgSpace(tsCmsgLen))
+	binary.NativeEndian.PutUint64(oob[0:8], uint64(unix.CmsgLen(tsCmsgLen)))
+	binary.NativeEndian.PutUint32(oob[8:12], uint32(unix.SOL_SOCKET))
+	binary.NativeEndian.PutUint32(oob[12:16], uint32(unix.SCM_TIMESTAMPNS))
+	binary.NativeEndian.PutUint64(oob[16:24], 1_700_000_000)
+	binary.NativeEndian.PutUint64(oob[24:32], 123_456_789)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		parseTimestampNS(oob)
+	}
+}

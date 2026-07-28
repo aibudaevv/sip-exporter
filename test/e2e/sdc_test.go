@@ -3,16 +3,15 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestSDC_AllScenarios(t *testing.T) {
+func TestSDCAllScenarios(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name        string
@@ -51,9 +50,9 @@ func TestSDC_AllScenarios(t *testing.T) {
 	}
 }
 
-func TestSDC_Mixed(t *testing.T) {
+func TestSDCMixed(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	type sippRun struct {
 		uas, uac string
@@ -90,9 +89,9 @@ func TestSDC_Mixed(t *testing.T) {
 	}
 }
 
-func TestSDC_SessionExpires(t *testing.T) {
+func TestSDCSessionExpires(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
 	sdcBefore := getSDC(t, env.endpoint)
@@ -111,9 +110,9 @@ func TestSDC_SessionExpires(t *testing.T) {
 	require.Equal(t, sdcBefore+float64(callCount), sdcAfter, "SDC should increase by %d after Session-Expires timeout", callCount)
 }
 
-func TestSDC_WithCarrierConfig(t *testing.T) {
+func TestSDCWithCarrierConfig(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const callCount = 200
 	env := newTestEnvWithCarriers(ctx, t)
 
@@ -126,9 +125,9 @@ func TestSDC_WithCarrierConfig(t *testing.T) {
 	env.waitForSessionsZeroByCarrier(t)
 }
 
-func TestSDC_MixedWithCarrierConfig(t *testing.T) {
+func TestSDCMixedWithCarrierConfig(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const completedCount = 140
 	const failCount = 60
 	env := newTestEnvWithCarriers(ctx, t)

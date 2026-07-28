@@ -38,9 +38,9 @@ func fraudEnv(ctx context.Context, t *testing.T, carriersYAML string, extraEnv m
 // Register Scan (S6-9.1)
 // ---------------------------------------------------------------------------
 
-func TestFraud_RegisterScan(t *testing.T) {
+func TestFraudRegisterScan(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	type ipRun struct {
 		uas, uac, srcIP, dstIP string
@@ -140,9 +140,9 @@ func TestFraud_RegisterScan(t *testing.T) {
 // Country Change (S6-9.2)
 // ---------------------------------------------------------------------------
 
-func TestFraud_CountryChange(t *testing.T) {
+func TestFraudCountryChange(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name       string
@@ -180,9 +180,9 @@ func TestFraud_CountryChange(t *testing.T) {
 // INVITE Burst (S6-9.3)
 // ---------------------------------------------------------------------------
 
-func TestFraud_InviteBurst(t *testing.T) {
+func TestFraudInviteBurst(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name       string
@@ -222,7 +222,7 @@ func TestFraud_InviteBurst(t *testing.T) {
 
 func TestSessionsUtilization(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name      string

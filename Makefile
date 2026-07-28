@@ -33,7 +33,7 @@ test-e2e: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
 		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 1 -timeout 45m ./test/e2e/
 
-#example: make test-e2e-run TEST=TestSER_AllScenarios/100_percent
+#example: make test-e2e-run TEST=TestSERAllScenarios/100_percent
 test-e2e-run: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
 		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 2 -failfast -timeout 10m -run "$(TEST)" ./test/e2e/
@@ -54,7 +54,7 @@ test-load-run: docker_build
 
 test-load-rtp: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
-		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -timeout 10m -run 'TestLoad_FullCallWithRTP|TestBenchmark_MemoryPerRTPStream' ./test/e2e/load/...
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -timeout 10m -run 'TestLoadFullCallWithRTP|TestBenchmarkMemoryPerRTPStream' ./test/e2e/load/...
 
 test-load-update-baseline:
 	cp test/e2e/load/load_result.json test/e2e/load/baseline.json

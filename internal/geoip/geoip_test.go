@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestReader_EmptyPath_DisabledLookup(t *testing.T) {
+func TestReaderEmptyPathDisabledLookup(t *testing.T) {
 	r, err := New("")
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, r.Close()) })
@@ -19,7 +19,7 @@ func TestReader_EmptyPath_DisabledLookup(t *testing.T) {
 	require.Equal(t, "unknown", country)
 }
 
-func TestReader_EmptyPath_NilIP(t *testing.T) {
+func TestReaderEmptyPathNilIP(t *testing.T) {
 	r, err := New("")
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, r.Close()) })
@@ -29,7 +29,7 @@ func TestReader_EmptyPath_NilIP(t *testing.T) {
 	require.Equal(t, "unknown", country)
 }
 
-func TestReader_MissingFile_DisabledLookup(t *testing.T) {
+func TestReaderMissingFileDisabledLookup(t *testing.T) {
 	r, err := New(filepath.Join(t.TempDir(), "nonexistent.mmdb"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, r.Close()) })
@@ -39,7 +39,7 @@ func TestReader_MissingFile_DisabledLookup(t *testing.T) {
 	require.Equal(t, "unknown", country)
 }
 
-func TestReader_CorruptFile_DegradesToUnknown(t *testing.T) {
+func TestReaderCorruptFileDegradesToUnknown(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "corrupt.mmdb")
 	require.NoError(t, os.WriteFile(path, []byte("not a valid mmdb"), 0o600))
 
@@ -52,7 +52,7 @@ func TestReader_CorruptFile_DegradesToUnknown(t *testing.T) {
 	require.Equal(t, "unknown", country)
 }
 
-func TestReader_EmptyPath_Reload_NoOp(t *testing.T) {
+func TestReaderEmptyPathReloadNoOp(t *testing.T) {
 	r, err := New("")
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, r.Close()) })
@@ -60,7 +60,7 @@ func TestReader_EmptyPath_Reload_NoOp(t *testing.T) {
 	require.NoError(t, r.Reload())
 }
 
-func TestReader_MissingFile_Reload_Error(t *testing.T) {
+func TestReaderMissingFileReloadError(t *testing.T) {
 	r, err := New(filepath.Join(t.TempDir(), "nonexistent.mmdb"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, r.Close()) })
@@ -68,7 +68,7 @@ func TestReader_MissingFile_Reload_Error(t *testing.T) {
 	require.Error(t, r.Reload())
 }
 
-func TestReader_DoubleClose(t *testing.T) {
+func TestReaderDoubleClose(t *testing.T) {
 	r, err := New("")
 	require.NoError(t, err)
 
@@ -76,7 +76,7 @@ func TestReader_DoubleClose(t *testing.T) {
 	require.NoError(t, r.Close())
 }
 
-func TestReader_Lookup_RealDB(t *testing.T) {
+func TestReaderLookupRealDB(t *testing.T) {
 	dbPath := os.Getenv("GEOIP_TEST_DB")
 	if dbPath == "" {
 		t.Skip("set GEOIP_TEST_DB to run this test")
@@ -106,7 +106,7 @@ func TestReader_Lookup_RealDB(t *testing.T) {
 	}
 }
 
-func TestReader_Reload_RealDB(t *testing.T) {
+func TestReaderReloadRealDB(t *testing.T) {
 	dbPath := os.Getenv("GEOIP_TEST_DB")
 	if dbPath == "" {
 		t.Skip("set GEOIP_TEST_DB to run this test")

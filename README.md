@@ -43,9 +43,9 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - 🏷️ **Per-carrier metrics** — CIDR-based carrier resolution for all SIP metrics
 - 🏷️ **Per-device-type metrics** — User-Agent classification for all SIP metrics
 - 🌍 **Geo-enrichment** — `source_country` (GeoIP) and `destination_country` (E.164 prefix) labels on SIP metrics
-- 🔀 **Traffic direction** — `inbound`/`outbound` label on all metrics via kernel `pkttype`, zero-config
+- 🔀 **Traffic direction** — `inbound`/`outbound` label on SIP and RTP traffic metrics via kernel `pkttype`, zero-config
 - 📞 **Voice quality (RFC 6035)** — MOS scores, jitter, packet loss from SIP PUBLISH/NOTIFY
-- 🎧 **RTP media analysis** — jitter, packet loss, MOS (E-model G.107), and Packet Delay Variation (PDV, per-packet, VoIPMonitor-parity) from RTP streams correlated with SIP dialogs, with no voice payload captured (header-only)
+- 🎧 **RTP media analysis** — jitter, packet loss, MOS (E-model G.107), and Packet Delay Variation (PDV, per-packet, VoIPMonitor-parity) from RTP streams correlated with SIP dialogs
 - 📊 **RTCP endpoint-reported quality** — loss, jitter, and round-trip time (RTT) from RTCP SR/RR (RFC 3550), correlated by SSRC; supports rtcp-mux (RFC 5761), explicit `a=rtcp` (RFC 3605), and legacy port+1
 - 🛡️ **Fraud detection** — registration scan, INVITE burst, account-takeover (country change), and False Answer Supervision (FAS) signals ([docs/fraud-detection.md](docs/fraud-detection.md))
 
@@ -81,7 +81,7 @@ Access metrics at `http://localhost:2112/metrics`. A `/health` endpoint is also 
 ## Core Technology
 
 This service uses eBPF (extended Berkeley Packet Filter) attached to `AF_PACKET` sockets to
-intercept SIP packets (UDP/5060) at L4 without overhead of iptables/nftables or userspace daemons like tcpdump.
+intercept IPv4 SIP packets over UDP (default port 5060) at L4 without overhead of iptables/nftables or userspace daemons like tcpdump. SIP over TCP or TLS is not captured.
 Filtered packets are delivered to userspace via the socket for efficient Go processing.
 
 ## Architecture
@@ -91,7 +91,7 @@ SIP + RTP Traffic → NIC → eBPF socket filter → AF_PACKET socket → Go pol
 
 ## Performance
 
-Zero packet loss up to **2,000 CPS** (~28,000 PPS) with full SIP dialog lifecycle, at **<15% CPU** and **~15 MB RAM**. GC stop-the-world pauses under **1 ms** — 400× smaller than socket buffer capacity, ensuring packets are never lost due to GC. Memory is stable under sustained load with no leaks detected.
+Zero packet loss in the measured full SIP dialog lifecycle up to **1,800 CPS** (~21,200 PPS), at **<15% CPU** and **9–16 MB RAM**. GC stop-the-world pauses under **1 ms** in the measured workload, leaving substantial headroom relative to the socket buffer. Memory remained stable during the benchmark run.
 
 Go micro-benchmarks:
 
@@ -144,6 +144,17 @@ Coverage depends on what the host actually sees:
 - **SIP only** (signaling passes through, media does not) → SIP metrics only; RTP metrics stay empty.
 - **RTP only** (media passes through, signaling does not) → the exporter cannot correlate streams to dialogs, because it learns RTP endpoints from the SDP carried inside SIP messages. Place it where signaling is also visible.
 - **SIP + RTP** → full metrics.
+
+### Capture Support Matrix
+
+| Scenario | Status | Operational requirement or limitation |
+|----------|--------|--------------------------------------|
+| SIP and RTP/RTCP over IPv4/UDP | Supported | The sensor must see signaling and both media directions on the same call path. |
+| `rtcp-mux`, SDP `a=rtcp`, or legacy RTP/RTCP port+1 | Supported | The final IPv4 endpoint and port must be present in SDP visible to the exporter. |
+| NAT/SBC with stable SDP-advertised media endpoints | Conditional | RTP correlation uses the advertised source IP:port; source-port remapping (symmetric RTP) is not correlated. |
+| SIP over TCP/TLS, IPv6 SIP/SDP/media, or fragmented UDP | Unsupported | The capture and SDP path are IPv4/UDP-only and do not reassemble IP fragments. |
+| RTP without visible SDP, or ICE/TURN endpoint changes after SDP | Unsupported | The kernel filter has no endpoint to register, so the media is dropped. |
+| SPAN/TAP or other mirrored traffic | Not supported for QoE/direction | Packet collection may occur, but `direction` is not trustworthy because the sensor does not own the traffic IPs. Deploy on the forwarding host. |
 
 ## Metrics
 
@@ -353,7 +364,7 @@ sum by (destination_country) (rate(sip_exporter_invite_total[5m]))
 
 ### RTP Media Analysis
 
-In addition to SIP signaling, the exporter can capture and analyze RTP media streams to measure real call quality (jitter, packet loss, MOS). RTP streams are **correlated with SIP dialogs**: when a `200 OK` to INVITE carries SDP, the exporter registers the negotiated media endpoints and tracks the matching RTP flows until BYE (or Session-Expires expiry). This means RTP metrics inherit the dialog's `carrier`, `ua_type`, and the negotiated `codec` labels.
+In addition to SIP signaling, the exporter captures RTP media streams to estimate transport quality at the **capture point** (jitter, sequence gaps, and E-model MOS). RTP streams are **correlated with SIP dialogs**: when a `200 OK` to INVITE carries SDP, the exporter registers the negotiated media endpoints and tracks the matching RTP flows until BYE (or Session-Expires expiry). This means RTP metrics inherit the dialog's `carrier`, `ua_type`, and the negotiated `codec` labels.
 
 Metrics produced:
 
@@ -365,11 +376,13 @@ Metrics produced:
 | `sip_exporter_rtp_mos_score` | histogram | MOS-LQ via ITU-T G.107 E-model (1.0–4.5) |
 | `sip_exporter_rtp_active_streams` | gauge | active RTP streams correlated with dialogs |
 
-**Privacy:** only the 12-byte RTP header is captured — voice payload is truncated in the kernel (eBPF) before reaching userspace, so no call audio is inspected or stored.
+**Privacy:** RTP packets are copied to userspace in snapshots capped at 64 bytes, so a small prefix of payload can accompany the headers. The application parses only the fixed 12-byte RTP header and does not inspect or persist audio. Matched RTCP compounds are copied up to the Ethernet MTU so their report blocks can be parsed.
 
 RTP capture is always enabled. RTP without a correlated SIP dialog (no SDP exchange seen) is dropped, so only media for monitored calls is counted.
 
 The eBPF filter uses **SDP-driven RTP detection**: media endpoints (IP:port) learned from INVITE 200 OK SDP are inserted into a BPF LRU hash map. Only UDP packets matching a registered endpoint pass the kernel filter — all other UDP is dropped. This eliminates false positives from random UDP traffic on public IPs.
+
+**How to interpret QoE:** RTP loss, jitter, PDV, and MOS are observations of packets that reached this sensor; they are not a subscriber's subjective score or proof of end-to-end impairment. RTCP SR/RR adds the receiver's own RTP statistics for a correlated SSRC, but still covers only reports and media visible to the sensor. Before acting on QoE alerts, verify `sip_exporter_socket_packets_dropped_total`, `sip_exporter_rtp_dropped_total`, and the deployment topology above.
 
 ```PromQL
 # Average MOS over the last 5m (per codec)
@@ -413,19 +426,19 @@ Full setup, metrics reference, and alerting guidance: [docs/fraud-detection.md](
 | `internal/exporter` | 64.0% |
 
 Test suite:
-- **Unit tests** — MC/DC standard, all business logic covered
-- **120+ table-driven E2E cases** — real SIP traffic via SIPp + testcontainers-go, validates all RFC 6076, RFC 6035, and RTP metrics
-- **11 load tests** — PPS throughput, VQ reports, concurrent sessions, memory stability, GC pauses, scrape latency
+- **Unit tests** — MC/DC-oriented coverage of business logic
+- **Table-driven E2E tests** — real SIP traffic via SIPp + testcontainers-go, covering RFC 6076, RFC 6035, RTP, RTCP, fraud, and multi-interface behavior
+- **Load tests** — PPS throughput, VQ reports, concurrent sessions, memory stability, GC pauses, and scrape latency
 
 ## Benchmark
 
-Load testing results: **0% packet loss at 2,000 CPS (28,000 PPS)**.
+Load testing results: **0% packet loss at 1,800 CPS (~21,200 PPS) for the measured full call flow**.
 
 See [BENCHMARK.md](./docs/BENCHMARK.md) for detailed results, methodology, and optimization notes.
 
 ## Alerting
 
-Pre-configured Grafana dashboard and Prometheus alert rules are included in the repository.
+The repository includes a Grafana dashboard and documented Prometheus alert-rule examples.
 
 **Grafana dashboard** — import manually:
 
@@ -453,13 +466,13 @@ See [LICENSE](LICENSE) for full text.
 
 ### Third-Party Data Licenses
 
-- **MaxMind GeoLite2** (`source_country`) — free for internal use with attribution; redistribution/bundling requires a [Commercial License](https://www.maxmind.com/en/geolite2/eula). Users download the database separately.
+- **MaxMind GeoLite2** (`source_country`) — users download the database separately. Use, attribution, redistribution, and update obligations are governed by the [GeoLite EULA](https://www.maxmind.com/en/geolite/eula) and the incorporated CC BY-SA 4.0 terms.
 - **Google libphonenumber** (`destination_country`) — [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0). E.164 prefix data embedded in the binary at compile time.
 
 ### Commercial Use
 - ✅ Free for personal and educational use
 - ✅ Free for commercial use with conditions
-- ⚠️ If you modify and run as a public service, you must open-source your modifications
+- ⚠️ If you modify the program and let users interact with that modified version over a network, AGPL-3.0 §13 requires offering its Corresponding Source to those users
 - 📧 For commercial licensing without AGPL requirements, contact the author
 
 ## Changelog

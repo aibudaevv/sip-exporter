@@ -22,7 +22,7 @@
 // must arrive whole, so they bypass this cap (see the PT peek below) but are
 // themselves capped at the Ethernet MTU — every real RTCP compound fits.
 #define RTP_SNAPSHOT_CAP 64
-#define RTCP_SNAPSHOT_CAP 1500
+#define RTCP_SNAPSHOT_CAP 1518
 
 // Map for SIP ports (configured from userspace)
 struct {

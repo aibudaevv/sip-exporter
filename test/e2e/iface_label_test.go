@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,6 +25,12 @@ const (
 	nsGuestIP   = "10.210.0.2"
 )
 
+var (
+	netnsMu  sync.Mutex
+	netnsRef int
+	netnsID  string
+)
+
 // setupVethNetns creates a veth pair bridging the host and an isolated network
 // namespace (pause container). Traffic from a container sharing the pause
 // container's netns physically traverses the host veth (sipns0), allowing
@@ -31,14 +38,48 @@ const (
 //
 // Returns the pause container ID (for use with --network container:<id>).
 //
-// Unlike setupVethPair (which puts both ends in the host netns), this function
-// puts the guest end in a separate netns, so the kernel local routing table
-// does NOT redirect traffic through lo.
+// Reference-counted: the pause container and veth pair persist until the last
+// parallel test finishes, mirroring setupVethPair. Without refcounting, parallel
+// tests collide on the fixed container name (sip-pause-<pid>) and fixed veth
+// names (sipns0/sipns1), causing Docker exit status 125.
 func setupVethNetns(t *testing.T) string {
 	t.Helper()
 
+	netnsMu.Lock()
+	netnsRef++
+	needCreate := netnsRef == 1
+	netnsMu.Unlock()
+
+	t.Cleanup(func() {
+		netnsMu.Lock()
+		netnsRef--
+		needDelete := netnsRef == 0
+		id := netnsID
+		netnsMu.Unlock()
+
+		if !needDelete {
+			return
+		}
+		_ = exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
+			"--entrypoint", "", "alpine",
+			"sh", "-c", "ip link del "+nsVethHost+" 2>/dev/null || true",
+		).Run()
+		_ = exec.Command("docker", "rm", "-f", id).Run()
+		netnsMu.Lock()
+		netnsID = ""
+		netnsMu.Unlock()
+	})
+
+	if !needCreate {
+		require.Eventually(t, func() bool {
+			_, err := os.Stat("/sys/class/net/" + nsVethHost)
+			return err == nil
+		}, 30*time.Second, 200*time.Millisecond, "veth pair not created in time")
+		return netnsID
+	}
+
 	// 1. Create pause container with isolated network namespace.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	pauseOut, err := exec.CommandContext(ctx, "docker", "run", "-d", "--rm",
 		"--network", "none", "--cap-add", "NET_ADMIN",
@@ -46,19 +87,18 @@ func setupVethNetns(t *testing.T) string {
 		"--entrypoint", "", "alpine", "sleep", "infinity",
 	).Output()
 	require.NoError(t, err, "failed to create pause container")
-	pauseID := strings.TrimSpace(string(pauseOut))
-	t.Cleanup(func() {
-		_ = exec.Command("docker", "rm", "-f", pauseID).Run()
-	})
+	id := strings.TrimSpace(string(pauseOut))
+
+	netnsMu.Lock()
+	netnsID = id
+	netnsMu.Unlock()
 
 	// 2. Get the pause container's PID (host-visible).
-	pidOut, err := exec.Command("docker", "inspect", "-f", "{{.State.Pid}}", pauseID).Output()
+	pidOut, err := exec.Command("docker", "inspect", "-f", "{{.State.Pid}}", id).Output()
 	require.NoError(t, err, "failed to get pause container PID")
 	pid := strings.TrimSpace(string(pidOut))
 
 	// 3. Create veth pair, move guest end into pause netns, configure IPs.
-	//    Runs in a privileged host-network host-pid Alpine container so that
-	//    nsenter can access the pause container's network namespace.
 	script := strings.Join([]string{
 		"set -e",
 		"apk add --no-cache iproute2 > /dev/null",
@@ -71,7 +111,7 @@ func setupVethNetns(t *testing.T) string {
 		"nsenter -t " + pid + " -n ip link set lo up",
 	}, "\n")
 
-	setupCtx, setupCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	setupCtx, setupCancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer setupCancel()
 	out, err := exec.CommandContext(setupCtx, "docker", "run", "--rm",
 		"--privileged", "--network", "host", "--pid", "host",
@@ -80,15 +120,7 @@ func setupVethNetns(t *testing.T) string {
 	).CombinedOutput()
 	require.NoError(t, err, "failed to create veth netns: %s", string(out))
 
-	// 4. Cleanup: delete host veth (auto-removes the guest end).
-	t.Cleanup(func() {
-		_ = exec.Command("docker", "run", "--rm", "--privileged", "--network", "host",
-			"--entrypoint", "", "alpine",
-			"sh", "-c", "ip link del "+nsVethHost+" 2>/dev/null || true",
-		).Run()
-	})
-
-	return pauseID
+	return id
 }
 
 // runSippUACInNetns runs a SIPp UAC inside the pause container's network
@@ -122,7 +154,7 @@ func runSippUACInNetns(ctx context.Context, t *testing.T, pauseID, uacScenario s
 	require.NoError(t, cmd.Run(), "SIPp UAC in netns failed")
 }
 
-// TestIfaceLabel_MultiInterface verifies that the iface label correctly
+// TestIfaceLabelMultiInterface verifies that the iface label correctly
 // identifies which NIC captured each packet, using a real second interface
 // (separate network namespace via pause container + veth pair).
 //
@@ -136,9 +168,9 @@ func runSippUACInNetns(ctx context.Context, t *testing.T, pauseID, uacScenario s
 // On sipns0, IGNORE_OUTGOING=true captures only RX (UAC→UAS direction). The
 // 200 OK (UAS→UAC, TX on sipns0) is not captured, so invite_200_total is only
 // asserted on lo.
-func TestIfaceLabel_MultiInterface(t *testing.T) {
+func TestIfaceLabelMultiInterface(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	pauseID := setupVethNetns(t)
 

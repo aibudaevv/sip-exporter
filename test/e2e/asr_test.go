@@ -3,15 +3,14 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestASR_AllScenarios(t *testing.T) {
+func TestASRAllScenarios(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name        string
@@ -48,9 +47,9 @@ func TestASR_AllScenarios(t *testing.T) {
 	}
 }
 
-func TestASR_Mixed(t *testing.T) {
+func TestASRMixed(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	type sippRun struct {
 		uas, uac string
@@ -88,9 +87,9 @@ func TestASR_Mixed(t *testing.T) {
 	}
 }
 
-func TestASR_WithCarrierConfig(t *testing.T) {
+func TestASRWithCarrierConfig(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const callCount = 200
 	env := newTestEnvWithCarriers(ctx, t)
 
@@ -104,9 +103,9 @@ func TestASR_WithCarrierConfig(t *testing.T) {
 	env.waitForSessionsZeroByCarrier(t)
 }
 
-func TestASR_MixedWithCarrierConfig(t *testing.T) {
+func TestASRMixedWithCarrierConfig(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const successCount = 140
 	const failCount = 60
 	env := newTestEnvWithCarriers(ctx, t)

@@ -84,19 +84,19 @@ type (
 var (
 	portMu       sync.Mutex
 	nextBasePort = 30000
-
-	projectRoot   string
-	exporterImage string
 )
 
-func init() {
+func projectRoot() string {
 	_, file, _, _ := runtime.Caller(0)
-	projectRoot = filepath.Join(filepath.Dir(file), "..", "..", "..")
+	return filepath.Join(filepath.Dir(file), "..", "..", "..")
+}
 
-	exporterImage = os.Getenv("SIP_EXPORTER_E2E_IMAGE")
-	if exporterImage == "" {
-		exporterImage = "sip-exporter:latest"
+func exporterImage() string {
+	image := os.Getenv("SIP_EXPORTER_E2E_IMAGE")
+	if image == "" {
+		return "sip-exporter:latest"
 	}
+	return image
 }
 
 func allocatePorts() (exporter, sipp, sippClient string) {
@@ -148,7 +148,7 @@ func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
 	}
 
 	req := testcontainers.ContainerRequest{
-		Image:       exporterImage,
+		Image:       exporterImage(),
 		Privileged:  true,
 		NetworkMode: "host",
 		Env:         envVars,
@@ -173,18 +173,18 @@ func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
 		if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
-			logs, logErr := c.Logs(context.Background())
+			logs, logErr := c.Logs(cleanupCtx)
 			if logErr == nil {
 				defer logs.Close()
 				logBytes, _ := io.ReadAll(logs)
 				t.Logf("Exporter logs:\n%s", strings.TrimSpace(string(logBytes)))
 			}
 		}
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer stopCancel()
-		_ = c.Stop(stopCtx, nil)
-		_ = c.Terminate(ctx)
+		_ = c.Stop(cleanupCtx, nil)
+		_ = c.Terminate(cleanupCtx)
 		for i := 0; i < 10; i++ {
 			conn, dialErr := net.DialTimeout("tcp", "localhost:"+exporterHTTPPort, 500*time.Millisecond)
 			if dialErr != nil {
@@ -263,7 +263,7 @@ func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML,
 	}
 
 	req := testcontainers.ContainerRequest{
-		Image:       exporterImage,
+		Image:       exporterImage(),
 		Privileged:  true,
 		NetworkMode: "host",
 		Env:         envVars,
@@ -289,18 +289,18 @@ func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML,
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
 		if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
-			logs, logErr := c.Logs(context.Background())
+			logs, logErr := c.Logs(cleanupCtx)
 			if logErr == nil {
 				defer logs.Close()
 				logBytes, _ := io.ReadAll(logs)
 				t.Logf("Exporter logs:\n%s", strings.TrimSpace(string(logBytes)))
 			}
 		}
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer stopCancel()
-		_ = c.Stop(stopCtx, nil)
-		_ = c.Terminate(ctx)
+		_ = c.Stop(cleanupCtx, nil)
+		_ = c.Terminate(cleanupCtx)
 		for i := 0; i < 10; i++ {
 			conn, dialErr := net.DialTimeout("tcp", "localhost:"+exporterHTTPPort, 500*time.Millisecond)
 			if dialErr != nil {
@@ -323,7 +323,7 @@ func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML,
 
 func fetchMetricsBody(t *testing.T, endpoint string) []byte {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/metrics", nil)
 	require.NoError(t, err)
@@ -394,11 +394,11 @@ func waitForMetricStable(t *testing.T, endpoint string) {
 
 func absScenarioPath(t *testing.T, filename string) string {
 	t.Helper()
-	localPath := filepath.Join(projectRoot, "test", "e2e", "load", "sipp", filename)
+	localPath := filepath.Join(projectRoot(), "test", "e2e", "load", "sipp", filename)
 	if _, err := os.Stat(localPath); err == nil {
 		return localPath
 	}
-	return filepath.Join(projectRoot, "test", "e2e", "sipp", filename)
+	return filepath.Join(projectRoot(), "test", "e2e", "sipp", filename)
 }
 
 func (w *testWriter) Write(p []byte) (int, error) {

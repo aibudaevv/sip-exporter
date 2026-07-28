@@ -3,15 +3,14 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestISA_AllScenarios(t *testing.T) {
+func TestISAAllScenarios(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name        string
@@ -43,9 +42,9 @@ func TestISA_AllScenarios(t *testing.T) {
 	}
 }
 
-func TestISA_Mixed(t *testing.T) {
+func TestISAMixed(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	type sippRun struct {
 		uas, uac string
@@ -83,9 +82,9 @@ func TestISA_Mixed(t *testing.T) {
 	}
 }
 
-func TestISA_WithCarrierConfig(t *testing.T) {
+func TestISAWithCarrierConfig(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const callCount = 200
 	env := newTestEnvWithCarriers(ctx, t)
 
@@ -99,9 +98,9 @@ func TestISA_WithCarrierConfig(t *testing.T) {
 	env.waitForSessionsZeroByCarrier(t)
 }
 
-func TestISA_MixedWithCarrierConfig(t *testing.T) {
+func TestISAMixedWithCarrierConfig(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const ineffectiveCount = 100
 	const effectiveCount = 100
 	env := newTestEnvWithCarriers(ctx, t)

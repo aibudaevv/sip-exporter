@@ -3,7 +3,6 @@
 package rtp
 
 import (
-	"context"
 	"strconv"
 	"testing"
 	"time"
@@ -11,18 +10,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestRTP_BothDirections verifies that both legs of the media flow are captured.
+// TestRTPBothDirections verifies that both legs of the media flow are captured.
 // A SIPp dialog establishes SDP-registered endpoints, then sendControlledRTP
 // sends deterministic RTP to both media ports. The exporter must track two
 // distinct streams (keyed by media endpoint + SSRC).
-func TestRTP_BothDirections(t *testing.T) {
+func TestRTPBothDirections(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 	uasMediaNum, _ := strconv.Atoi(uasMedia)
 	uacMediaNum, _ := strconv.Atoi(uacMedia)
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
+	endpoint := startExporter(t.Context(), t, httpPort, uasSIP, testInterface, "")
 
-	wait := startSippContainers(context.Background(), t,
+	wait := startSippContainers(t.Context(), t,
 		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
 
 	require.Eventually(t, func() bool {
@@ -59,7 +58,7 @@ const (
 	labelCodec   = `codec="PCMA"`
 )
 
-// TestRTP_FullIntegration_MetricsVerified drives a complete SIP dialog with
+// TestRTPFullIntegrationMetricsVerified drives a complete SIP dialog with
 // controlled RTP through the exporter (carrier+UA config mounted) and asserts:
 //   - all RTP metrics are present with the concrete carrier/ua_type/codec labels
 //     (packets, jitter, MOS, active_streams; loss is 0 on clean G.711a), and
@@ -68,15 +67,15 @@ const (
 //
 // Uses sendControlledRTP (deterministic) instead of SIPp's rtp_stream (which
 // intermittently fails to start in one direction).
-func TestRTP_FullIntegration_MetricsVerified(t *testing.T) {
+func TestRTPFullIntegrationMetricsVerified(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
 	uasMediaNum, _ := strconv.Atoi(uasMedia)
 	uacMediaNum, _ := strconv.Atoi(uacMedia)
-	endpoint := startExporterWithCarrierUA(context.Background(), t, httpPort, uasSIP,
+	endpoint := startExporterWithCarrierUA(t.Context(), t, httpPort, uasSIP,
 		integrationCarriersYAML, integrationUserAgentsYAML, "")
 
-	wait := startSippContainers(context.Background(), t,
+	wait := startSippContainers(t.Context(), t,
 		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
 
 	require.Eventually(t, func() bool {
@@ -152,17 +151,17 @@ func TestRTP_FullIntegration_MetricsVerified(t *testing.T) {
 	}, 10*time.Second, 500*time.Millisecond, "SER must be ~100%% (RTP capture must not break SIP metrics)")
 }
 
-// TestRTP_StreamExpiry verifies the RFC 3550 §6.3.5 idle-timeout end-to-end:
+// TestRTPStreamExpiry verifies the RFC 3550 §6.3.5 idle-timeout end-to-end:
 // with a short SIP_EXPORTER_RTP_STREAM_TTL (2s) the rtp_active_streams gauge
 // rises to >=2 during the SIPp dialog, then falls back to 0 once the streams
 // have been idle past the TTL and the 1s snapshot cycle has run Cleanup().
 // A hardcoded 30s TTL previously made this path too slow to cover on e2e.
-func TestRTP_StreamExpiry(t *testing.T) {
+func TestRTPStreamExpiry(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "2s")
+	endpoint := startExporter(t.Context(), t, httpPort, uasSIP, testInterface, "2s")
 
-	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
+	runSippRTP(t.Context(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 
 	// During the call both media directions are tracked.
 	require.Eventually(t, func() bool {

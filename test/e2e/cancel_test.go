@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCancel_InviteTrackerCleanup(t *testing.T) {
+func TestCancelInviteTrackerCleanup(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
 	env := newTestEnv(ctx, t)

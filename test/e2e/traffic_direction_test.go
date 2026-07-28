@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestTrafficDirection_Inbound verifies that on loopback with
+// TestTrafficDirectionInbound verifies that on loopback with
 // IgnoreOutgoing=true, SIP requests are classified as inbound via pkttype
 // (PACKET_HOST) and that direction propagates to dialog-level metrics.
 //
@@ -24,9 +24,9 @@ import (
 // PACKET_HOST → inbound. INVITE responses inherit the INVITE's direction via
 // inviteTracker override → also inbound. Dialog teardown (SDC) inherits from
 // the dialog entry → inbound.
-func TestTrafficDirection_Inbound(t *testing.T) {
+func TestTrafficDirectionInbound(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
 	callCount := 10
@@ -49,7 +49,7 @@ func TestTrafficDirection_Inbound(t *testing.T) {
 	waitForSessionsZero(t, env.endpoint)
 }
 
-// TestTrafficDirection_Outbound verifies that on a veth pair bridging to an
+// TestTrafficDirectionOutbound verifies that on a veth pair bridging to an
 // isolated network namespace (pause container), SIP requests sent by a
 // host-side UAC are classified as outbound via pkttype (PACKET_OUTGOING).
 //
@@ -61,8 +61,8 @@ func TestTrafficDirection_Inbound(t *testing.T) {
 // UAC (host, 10.210.0.1) → INVITE → sipns0 TX (PACKET_OUTGOING) → sipns1 → UAS.
 // UAS (netns, 10.210.0.2) → 200 OK → sipns1 → sipns0 RX (PACKET_HOST, overridden
 // from inviteTracker) → UAC.
-func TestTrafficDirection_Outbound(t *testing.T) {
-	ctx := context.Background()
+func TestTrafficDirectionOutbound(t *testing.T) {
+	ctx := t.Context()
 	pauseID := setupVethNetns(t)
 
 	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()

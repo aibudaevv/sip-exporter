@@ -6,7 +6,7 @@ This guide provides pre-configured alerting examples for monitoring SIP infrastr
 
 ### Manual Setup
 
-1. Copy Prometheus alert rules to your Prometheus configuration
+1. Create a Prometheus rule file from the examples below: the first block defines the group, and the following blocks are entries to append to its `rules:` list
 2. Import Grafana dashboard JSON
 3. Configure Alertmanager receiver (Slack/PagerDuty/Email)
 4. Adjust thresholds based on your traffic patterns
@@ -17,7 +17,7 @@ This guide provides pre-configured alerting examples for monitoring SIP infrastr
 
 ```yaml
 groups:
-  - name: sip_exporter_critical
+  - name: sip_exporter
     interval: 30s
     rules:
       - alert: SIPExporterDown
@@ -50,7 +50,7 @@ groups:
           runbook_url: "https://wiki.example.com/runbooks/sip-ser-low"
 ```
 
-> **Note:** The `runbook_url` values above (and throughout this guide) are illustrative placeholders using the example host `wiki.example.com`. The shipped `alerts.yml` carries no `runbook_url`. Replace them with your operator's real runbook location before deploying.
+> **Note:** The `runbook_url` values above (and throughout this guide) are illustrative placeholders using the example host `wiki.example.com`. Replace them with your operator's real runbook location before deploying.
 
 ### Warning Alerts
 
@@ -139,7 +139,7 @@ groups:
         annotations:
           summary: "Spike in short calls (< 20s)"
           description: "More than 30% of completed sessions on carrier {{ $labels.carrier }} are shorter than 20 seconds. Possible call quality issues, abandoned calls, or toll fraud."
-      ```
+```
 
 ### Registration Health Alerts
 
@@ -207,13 +207,16 @@ These alerts detect suspicious SIP patterns: account takeover, registration enum
           description: "Single IP is sending an unusually high rate of INVITEs on {{ $labels.carrier }} from {{ $labels.source_country }}. Possible toll fraud, DDoS, or traffic pump."
 
       - alert: SIPFalseAnswerSupervision
-        expr: rate(sip_exporter_fas_calls_total[5m]) > 0
-        for: 1m
+        expr: |
+          (rate(sip_exporter_fas_calls_total[5m]) > 0)
+          unless on()
+          (rate(sip_exporter_rtp_dropped_total[5m]) > 100)
+        for: 2m
         labels:
-          severity: critical
+          severity: warning
         annotations:
           summary: "False Answer Supervision suspected"
-          description: "Answered calls on {{ $labels.carrier }} (ua_type={{ $labels.ua_type }}, {{ $labels.source_country }}, {{ $labels.direction }}) carried no RTP within the FAS threshold. Possible billing fraud — the answering side starts billing without delivering media."
+          description: "Answered calls on {{ $labels.carrier }} (ua_type={{ $labels.ua_type }}, {{ $labels.source_country }}, {{ $labels.direction }}) carried no answer-side RTP within the threshold (sweep path) or fasByeFloor 3 s (BYE path). Possible billing fraud. Suppressed when RTP drops exceed 100/s (capture degradation). Check sip_exporter_rtp_dropped_total and one-way-media endpoints (voicemail/IVR) before acting."
 
       - alert: SIPSessionCapacityExhaustion
         expr: sip_exporter_sessions_utilization > 90
@@ -279,7 +282,7 @@ These alerts monitor voice quality metrics extracted from SIP PUBLISH/NOTIFY wit
         annotations:
           summary: "High interarrival jitter"
           description: "95th percentile interarrival jitter is {{ $value | printf \"%.1f\" }}ms. High jitter causes audio artifacts. Check network queueing and jitter buffer configuration."
-      ```
+```
 
 ### RTP Media Alerts
 
@@ -370,18 +373,28 @@ These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) mea
           summary: "High endpoint-reported loss (RTCP)"
           description: "95th percentile RTCP-reported loss fraction for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}%. The receiver reports losing >5% of packets — the most direct QoE signal; check the media path."
 
+      - alert: SIPRTCPReportedLossCritical
+        expr: |
+          histogram_quantile(0.95, sum by (le, carrier) (rate(sip_exporter_rtcp_loss_fraction_percent_bucket[5m]))) > 10
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical endpoint-reported loss (RTCP)"
+          description: "95th percentile RTCP-reported loss fraction for carrier {{ $labels.carrier }} is {{ $value | printf \"%.1f\" }}%. The receiver reports losing >10% of packets — call quality is severely degraded."
+
       - alert: SIPRTCPSilence
         expr: |
-          (sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m])) > 10)
+          (sum by (carrier, ua_type) (rate(sip_exporter_rtp_packets_total[5m])) > 10)
           unless
-          (sum by (carrier) (rate(sip_exporter_rtcp_reports_total[5m])) > 0)
+          (sum by (carrier, ua_type) (rate(sip_exporter_rtcp_reports_total[5m])) > 0)
         for: 10m
         labels:
           severity: warning
         annotations:
-          summary: "No RTCP received while RTP flows (carrier {{ $labels.carrier }})"
-          description: "RTP packets are flowing for carrier {{ $labels.carrier }} but zero RTCP reports have been received for approximately 15 minutes (a 5-minute rate window plus the 10-minute hold). RTCP is mandatory (RFC 3550) — its absence suggests RTCP is filtered, endpoints do not send it, or capture/registration is broken (check sip_exporter_rtcp_orphan_reports_total)."
-      ```
+          summary: "No RTCP received while RTP flows (carrier {{ $labels.carrier }}, ua_type {{ $labels.ua_type }})"
+          description: "Optional diagnostic alert: enable it only after confirming that this carrier and endpoint group normally sends SR/RR and both media directions are visible. Zero reports for approximately 15 minutes (a 5-minute rate window plus the 10-minute hold) does not prove an outage: endpoint policy, an SBC/mixer, or capture placement can suppress or rewrite RTCP. Check sip_exporter_rtcp_orphan_reports_total and the capture topology before escalating."
+```
 
 ### System Health Alerts
 

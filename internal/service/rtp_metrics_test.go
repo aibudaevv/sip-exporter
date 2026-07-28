@@ -46,7 +46,7 @@ func (m *metrics) rtpGauge(gv *prometheus.GaugeVec, carrier, uaType, codec strin
 	return d.GetGauge().GetValue()
 }
 
-func TestRTP_PacketsAndLoss(t *testing.T) {
+func TestRTPPacketsAndLoss(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTPPackets("carrier-a", "yealink", "PCMU", "", "")
 	m.UpdateRTPPackets("carrier-a", "yealink", "PCMU", "", "")
@@ -60,7 +60,7 @@ func TestRTP_PacketsAndLoss(t *testing.T) {
 	require.InDelta(t, 3.0, m.rtpCounter(m.rtpLost, "carrier-a", "yealink", "PCMU"), 0.01)
 }
 
-func TestRTP_Duplicates(t *testing.T) {
+func TestRTPDuplicates(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTPDuplicates("carrier-a", "yealink", "PCMU", "", "")
 	m.UpdateRTPDuplicates("carrier-a", "yealink", "PCMU", "", "")
@@ -72,7 +72,7 @@ func TestRTP_Duplicates(t *testing.T) {
 	require.InDelta(t, 1.0, m.rtpCounter(m.rtpDuplicate, "carrier-b", "cisco", "G.729"), 0.01)
 }
 
-func TestRTP_OutOfOrder(t *testing.T) {
+func TestRTPOutOfOrder(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTPOutOfOrder("carrier-a", "yealink", "PCMU", "", "")
 	m.UpdateRTPOutOfOrder("carrier-a", "yealink", "PCMU", "", "")
@@ -85,7 +85,7 @@ func TestRTP_OutOfOrder(t *testing.T) {
 	require.InDelta(t, 1.0, m.rtpCounter(m.rtpOutOfOrder, "carrier-b", "cisco", "G.729"), 0.01)
 }
 
-func TestRTP_JitterAndMOS(t *testing.T) {
+func TestRTPJitterAndMOS(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTPJitter("carrier-a", "yealink", "PCMU", "", "", 5.5)
 	m.UpdateRTPJitter("carrier-a", "yealink", "PCMU", "", "", 10.5)
@@ -100,7 +100,7 @@ func TestRTP_JitterAndMOS(t *testing.T) {
 	require.Equal(t, uint64(1), mcount)
 }
 
-func TestRTP_RFactor(t *testing.T) {
+func TestRTPRFactor(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTPRFactor("carrier-a", "polycom", "PCMU", "", "", 93.2)
 	m.UpdateRTPRFactor("carrier-a", "polycom", "PCMU", "", "", 70.0)
@@ -110,7 +110,7 @@ func TestRTP_RFactor(t *testing.T) {
 	require.Equal(t, uint64(2), count)
 }
 
-func TestRTP_LossDistribution(t *testing.T) {
+func TestRTPLossDistribution(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTPLossDistribution("carrier-b", "cisco", "G.729", "", "", 75.0, 25.0)
 	m.UpdateRTPLossDistribution("carrier-b", "cisco", "G.729", "", "", 50.0, 50.0)
@@ -124,7 +124,7 @@ func TestRTP_LossDistribution(t *testing.T) {
 	require.Equal(t, uint64(2), gCount)
 }
 
-func TestRTP_MOSVariants(t *testing.T) {
+func TestRTPMOSVariants(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTPMOSVariants("carrier-c", "grandstream", "PCMA", "", "", 3.5, 4.0, 4.2)
 	m.UpdateRTPMOSVariants("carrier-c", "grandstream", "PCMA", "", "", 3.0, 3.8, 4.1)
@@ -142,7 +142,7 @@ func TestRTP_MOSVariants(t *testing.T) {
 	require.Equal(t, uint64(2), adaptCount)
 }
 
-func TestRTP_OneWayAndMissing(t *testing.T) {
+func TestRTPOneWayAndMissing(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.OneWayCall("carrier-a", "yealink", "US", "")
 	m.OneWayCall("carrier-a", "yealink", "US", "")
@@ -156,7 +156,7 @@ func TestRTP_OneWayAndMissing(t *testing.T) {
 	require.InDelta(t, 1.0, d.GetCounter().GetValue(), 0.01)
 }
 
-func TestRTP_ActiveStreams(t *testing.T) {
+func TestRTPActiveStreams(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTPActiveStreams([]LabeledCount{
 		{Labels: map[string]string{

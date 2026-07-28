@@ -17,7 +17,7 @@ func getSingleMemSample(t *testing.T, containerID string) float64 {
 	stats, err := newStatsCollector(containerID)
 	require.NoError(t, err)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	stats.start(ctx, containerID)
@@ -37,7 +37,7 @@ func waitForSessions(t *testing.T, endpoint string, target float64) {
 	}, 120*time.Second, 500*time.Millisecond, "sessions did not reach %.0f", target)
 }
 
-func TestBenchmark_MemoryPerDialog(t *testing.T) {
+func TestBenchmarkMemoryPerDialog(t *testing.T) {
 	limits := []int{0, 100, 500, 1000, 2000, 5000}
 	type dialogMeasurement struct {
 		dialogs int
@@ -48,7 +48,7 @@ func TestBenchmark_MemoryPerDialog(t *testing.T) {
 
 	for _, limit := range limits {
 		t.Run(fmt.Sprintf("dialogs_%d", limit), func(t *testing.T) {
-			env := newTestEnv(context.Background(), t)
+			env := newTestEnv(t.Context(), t)
 
 			var sessions float64
 			if limit > 0 {
@@ -58,7 +58,7 @@ func TestBenchmark_MemoryPerDialog(t *testing.T) {
 					rate = 50
 				}
 
-				ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
+				ctx, cancel := context.WithTimeout(t.Context(), 300*time.Second)
 				defer cancel()
 
 				uasPath := absScenarioPath(t, "concurrent_uas.xml")

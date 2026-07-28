@@ -3,13 +3,12 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestVQ_SessionReports(t *testing.T) {
+func TestVQSessionReports(t *testing.T) {
 	t.Parallel()
 
 	const callCount = 5
@@ -85,7 +84,7 @@ func TestVQ_SessionReports(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			ctx := context.Background()
+			ctx := t.Context()
 
 			var env *testEnv
 			if tt.carrier {
@@ -109,9 +108,9 @@ func TestVQ_SessionReports(t *testing.T) {
 	}
 }
 
-func TestVQ_MultipleVendors(t *testing.T) {
+func TestVQMultipleVendors(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
 	yealinkCalls := 3
@@ -151,9 +150,9 @@ func TestVQ_MultipleVendors(t *testing.T) {
 	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
-func TestVQ_PartialReport(t *testing.T) {
+func TestVQPartialReport(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
 	const callCount = 5
@@ -199,9 +198,9 @@ func TestVQ_PartialReport(t *testing.T) {
 	assertSelfMonitoringHealthy(t, env.endpoint)
 }
 
-func TestVQ_MalformedReport(t *testing.T) {
+func TestVQMalformedReport(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
 	errorsBefore := getMetric(t, env.endpoint, "sip_exporter_system_error_total")

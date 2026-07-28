@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestClassifier_Classify_Yealink(t *testing.T) {
+func TestClassifierClassifyYealink(t *testing.T) {
 	c, err := NewClassifier([]Pattern{
 		{Regex: `(?i)^Yealink`, Label: "yealink"},
 		{Regex: `(?i)^Grandstream`, Label: "grandstream"},
@@ -16,7 +16,7 @@ func TestClassifier_Classify_Yealink(t *testing.T) {
 	require.Equal(t, "yealink", c.Classify([]byte("Yealink SIP-T46S 66.15.0.10")))
 }
 
-func TestClassifier_Classify_Grandstream(t *testing.T) {
+func TestClassifierClassifyGrandstream(t *testing.T) {
 	c, err := NewClassifier([]Pattern{
 		{Regex: `(?i)^Yealink`, Label: "yealink"},
 		{Regex: `(?i)^Grandstream`, Label: "grandstream"},
@@ -25,7 +25,7 @@ func TestClassifier_Classify_Grandstream(t *testing.T) {
 	require.Equal(t, "grandstream", c.Classify([]byte("Grandstream GXP2160 1.0.9.50")))
 }
 
-func TestClassifier_Classify_NoMatch(t *testing.T) {
+func TestClassifierClassifyNoMatch(t *testing.T) {
 	c, err := NewClassifier([]Pattern{
 		{Regex: `(?i)^Yealink`, Label: "yealink"},
 	})
@@ -33,7 +33,7 @@ func TestClassifier_Classify_NoMatch(t *testing.T) {
 	require.Equal(t, "other", c.Classify([]byte("UnknownClient/1.0")))
 }
 
-func TestClassifier_Classify_EmptyInput(t *testing.T) {
+func TestClassifierClassifyEmptyInput(t *testing.T) {
 	c, err := NewClassifier([]Pattern{
 		{Regex: `(?i)^Yealink`, Label: "yealink"},
 	})
@@ -42,32 +42,32 @@ func TestClassifier_Classify_EmptyInput(t *testing.T) {
 	require.Equal(t, "other", c.Classify([]byte{}))
 }
 
-func TestClassifier_Classify_NilClassifier(t *testing.T) {
+func TestClassifierClassifyNilClassifier(t *testing.T) {
 	var c *Classifier
 	require.Equal(t, "other", c.Classify([]byte("Yealink SIP-T46S")))
 }
 
-func TestClassifier_EmptyPatterns(t *testing.T) {
+func TestClassifierEmptyPatterns(t *testing.T) {
 	c, err := NewClassifier(nil)
 	require.NoError(t, err)
 	require.Equal(t, "other", c.Classify([]byte("Yealink SIP-T46S")))
 }
 
-func TestClassifier_InvalidRegex(t *testing.T) {
+func TestClassifierInvalidRegex(t *testing.T) {
 	_, err := NewClassifier([]Pattern{
 		{Regex: `[invalid`, Label: "bad"},
 	})
 	require.Error(t, err)
 }
 
-func TestClassifier_EmptyLabel(t *testing.T) {
+func TestClassifierEmptyLabel(t *testing.T) {
 	_, err := NewClassifier([]Pattern{
 		{Regex: `(?i)^Yealink`, Label: ""},
 	})
 	require.Error(t, err)
 }
 
-func TestClassifier_FirstMatchWins(t *testing.T) {
+func TestClassifierFirstMatchWins(t *testing.T) {
 	c, err := NewClassifier([]Pattern{
 		{Regex: `(?i)^Yealink`, Label: "yealink"},
 		{Regex: `(?i)^Y`, Label: "y-vendor"},
@@ -76,7 +76,7 @@ func TestClassifier_FirstMatchWins(t *testing.T) {
 	require.Equal(t, "yealink", c.Classify([]byte("Yealink SIP-T46S")))
 }
 
-func TestClassifier_CaseInsensitive(t *testing.T) {
+func TestClassifierCaseInsensitive(t *testing.T) {
 	c, err := NewClassifier([]Pattern{
 		{Regex: `(?i)^Kamailio`, Label: "kamailio"},
 	})
@@ -85,7 +85,7 @@ func TestClassifier_CaseInsensitive(t *testing.T) {
 	require.Equal(t, "kamailio", c.Classify([]byte("kamailio (5.7.4)")))
 }
 
-func TestLoadConfig_ValidYAML(t *testing.T) {
+func TestLoadConfigValidYAML(t *testing.T) {
 	tmpFile, err := os.CreateTemp(t.TempDir(), "user-agents-*.yaml")
 	require.NoError(t, err)
 
@@ -99,12 +99,12 @@ func TestLoadConfig_ValidYAML(t *testing.T) {
 	require.Equal(t, "yealink", c.Classify([]byte("Yealink SIP-T46S")))
 }
 
-func TestLoadConfig_FileNotFound(t *testing.T) {
+func TestLoadConfigFileNotFound(t *testing.T) {
 	_, err := LoadConfig("/nonexistent/user_agents.yaml")
 	require.Error(t, err)
 }
 
-func TestLoadConfig_InvalidYAML(t *testing.T) {
+func TestLoadConfigInvalidYAML(t *testing.T) {
 	tmpFile, err := os.CreateTemp(t.TempDir(), "user-agents-*.yaml")
 	require.NoError(t, err)
 
@@ -116,7 +116,7 @@ func TestLoadConfig_InvalidYAML(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestLoadConfig_InvalidRegexInFile(t *testing.T) {
+func TestLoadConfigInvalidRegexInFile(t *testing.T) {
 	tmpFile, err := os.CreateTemp(t.TempDir(), "user-agents-*.yaml")
 	require.NoError(t, err)
 

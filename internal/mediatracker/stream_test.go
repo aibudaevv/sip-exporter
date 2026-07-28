@@ -15,7 +15,7 @@ func newHeader(seq uint16, ts uint32) rtp.Header {
 	return rtp.Header{Version: 2, SequenceNumber: seq, Timestamp: ts, SSRC: 0x11223344}
 }
 
-func TestStreamState_FirstPacket(t *testing.T) {
+func TestStreamStateFirstPacket(t *testing.T) {
 	s := newStreamState(0x11223344, "PCMU", g711Clock, time.Unix(0, 0))
 	s.Observe(newHeader(1, 160), time.Unix(0, 0))
 
@@ -24,7 +24,7 @@ func TestStreamState_FirstPacket(t *testing.T) {
 	require.InDelta(t, 0.0, s.JitterMs(), 0.0001)
 }
 
-func TestStreamState_InOrderNoGap(t *testing.T) {
+func TestStreamStateInOrderNoGap(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
 	s.Observe(newHeader(1, 160), t0)
@@ -36,7 +36,7 @@ func TestStreamState_InOrderNoGap(t *testing.T) {
 	require.InDelta(t, 0.0, s.JitterMs(), 0.001)
 }
 
-func TestStreamState_SequenceGapCountsLoss(t *testing.T) {
+func TestStreamStateSequenceGapCountsLoss(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
 	s.Observe(newHeader(1, 160), t0)
@@ -46,7 +46,7 @@ func TestStreamState_SequenceGapCountsLoss(t *testing.T) {
 	require.Equal(t, uint64(4), s.packetsLost, "seq 1->6 = 4 lost")
 }
 
-func TestStreamState_ReorderNotLoss(t *testing.T) {
+func TestStreamStateReorderNotLoss(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
 	s.Observe(newHeader(1, 160), t0)
@@ -59,7 +59,7 @@ func TestStreamState_ReorderNotLoss(t *testing.T) {
 	require.Equal(t, uint64(1), s.packetsReorder, "reorder packet must increment packetsReorder")
 }
 
-func TestStreamState_ReorderNoDoubleCountLoss(t *testing.T) {
+func TestStreamStateReorderNoDoubleCountLoss(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
 	s.Observe(newHeader(1, 160), t0)                          // first
@@ -73,7 +73,7 @@ func TestStreamState_ReorderNoDoubleCountLoss(t *testing.T) {
 	require.Equal(t, uint64(3), s.packetsTotal)
 }
 
-func TestStreamState_DuplicateIgnored(t *testing.T) {
+func TestStreamStateDuplicateIgnored(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
 	s.Observe(newHeader(1, 160), t0)
@@ -84,7 +84,7 @@ func TestStreamState_DuplicateIgnored(t *testing.T) {
 	require.Equal(t, uint64(1), s.packetsDuplicate, "duplicate must be counted")
 }
 
-func TestStreamState_StreamRestartNoHugeLoss(t *testing.T) {
+func TestStreamStateStreamRestartNoHugeLoss(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
 	s.Observe(newHeader(1, 160), t0)
@@ -95,7 +95,7 @@ func TestStreamState_StreamRestartNoHugeLoss(t *testing.T) {
 	require.Equal(t, uint64(0), s.packetsLost, "restart must not count 4998 lost")
 }
 
-func TestStreamState_RestartResetsDuplicate(t *testing.T) {
+func TestStreamStateRestartResetsDuplicate(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
 	s.Observe(newHeader(1, 160), t0)
@@ -107,7 +107,7 @@ func TestStreamState_RestartResetsDuplicate(t *testing.T) {
 	require.Equal(t, uint64(0), s.packetsDuplicate, "restart must reset duplicate counter")
 }
 
-func TestStreamState_RestartResetsJitter(t *testing.T) {
+func TestStreamStateRestartResetsJitter(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
 	s.Observe(newHeader(1, 160), t0)
@@ -119,7 +119,7 @@ func TestStreamState_RestartResetsJitter(t *testing.T) {
 	require.InDelta(t, 0.0, s.JitterMs(), 0.0001, "jitter must reset on stream restart")
 }
 
-func TestStreamState_SeqWraparound(t *testing.T) {
+func TestStreamStateSeqWraparound(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
 	s.Observe(newHeader(0xFFFF, 160), t0)
@@ -130,7 +130,7 @@ func TestStreamState_SeqWraparound(t *testing.T) {
 	require.Equal(t, uint64(3), s.packetsLost)
 }
 
-func TestStreamState_JitterRFC3550(t *testing.T) {
+func TestStreamStateJitterRFC3550(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
 	// pkt1: ts=160 @ t0
@@ -145,7 +145,7 @@ func TestStreamState_JitterRFC3550(t *testing.T) {
 	require.InDelta(t, 0.3125, s.JitterMs(), 0.0001)
 }
 
-func TestStreamState_ReorderJitterNoWraparound(t *testing.T) {
+func TestStreamStateReorderJitterNoWraparound(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
 	// seq 1 → 3: forward gap (1 lost), perfect spacing (d=0, jitter stays 0)
@@ -160,7 +160,7 @@ func TestStreamState_ReorderJitterNoWraparound(t *testing.T) {
 		"reorder timestamp delta must be signed (int32), not wrapped uint32")
 }
 
-func TestStreamState_LossRate(t *testing.T) {
+func TestStreamStateLossRate(t *testing.T) {
 	// LossRate = lost / (received + lost) = 5 / (100 + 5)
 	s := &StreamState{packetsTotal: 100, packetsLost: 5}
 	require.InDelta(t, 5.0/105.0, s.LossRate(), 0.0001)
@@ -170,7 +170,7 @@ func TestStreamState_LossRate(t *testing.T) {
 	require.InDelta(t, 0.0, empty.LossRate(), 0.0001)
 }
 
-func TestStreamState_ZeroClockRateSkipsJitter(t *testing.T) {
+func TestStreamStateZeroClockRateSkipsJitter(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "unknown", 0, t0)
 	s.Observe(newHeader(1, 160), t0)
@@ -179,7 +179,7 @@ func TestStreamState_ZeroClockRateSkipsJitter(t *testing.T) {
 	require.InDelta(t, 0.0, s.JitterMs(), 0.0001, "clockRate=0 must skip jitter calculation")
 }
 
-func TestStreamState_EarlyArrivalNegativeDAbs(t *testing.T) {
+func TestStreamStateEarlyArrivalNegativeDAbs(t *testing.T) {
 	// Packet arrives earlier than timestamp spacing predicts → d<0 → abs.
 	// ts delta = 160 ticks (20ms), but arrival after only 10ms → arrivalDelta=80
 	// d = 80 - 160 = -80 → abs = 80
@@ -192,7 +192,7 @@ func TestStreamState_EarlyArrivalNegativeDAbs(t *testing.T) {
 	require.InDelta(t, 0.625, s.JitterMs(), 0.001, "negative d must be abs'd correctly")
 }
 
-func TestStreamState_BurstLoss(t *testing.T) {
+func TestStreamStateBurstLoss(t *testing.T) {
 	// seq 1 → 6: 4 lost, then seq 7 arrives → lossRun=4 classified as burst
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
@@ -204,7 +204,7 @@ func TestStreamState_BurstLoss(t *testing.T) {
 	require.Equal(t, uint64(0), s.gapLoss)
 }
 
-func TestStreamState_GapLoss(t *testing.T) {
+func TestStreamStateGapLoss(t *testing.T) {
 	// seq 1 → 3: 1 lost, then seq 4 arrives → lossRun=1 classified as gap
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
@@ -216,7 +216,7 @@ func TestStreamState_GapLoss(t *testing.T) {
 	require.Equal(t, uint64(0), s.burstLoss)
 }
 
-func TestStreamState_MixedBurstGap(t *testing.T) {
+func TestStreamStateMixedBurstGap(t *testing.T) {
 	// seq 1 → 3 (1 lost=gap), seq 4 → 8 (3 lost=burst)
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
@@ -232,13 +232,13 @@ func TestStreamState_MixedBurstGap(t *testing.T) {
 	require.InDelta(t, 25.0, s.GapLossDensity(), 0.01, "1 of 4 = 25%")
 }
 
-func TestStreamState_NoLossZeroDensity(t *testing.T) {
+func TestStreamStateNoLossZeroDensity(t *testing.T) {
 	s := &StreamState{packetsTotal: 100}
 	require.InDelta(t, 0.0, s.BurstLossDensity(), 0.0001)
 	require.InDelta(t, 0.0, s.GapLossDensity(), 0.0001)
 }
 
-func TestStreamState_PDV_PerForwardPacket(t *testing.T) {
+func TestStreamStatePDVPerForwardPacket(t *testing.T) {
 	// PDV (lastPacketDelayVariationMs) = raw |arrivalDelta − tsDelta| of the last
 	// forward packet, observed per-packet. EWMA jitter smooths the same value.
 	t0 := time.Unix(1000, 0)
@@ -253,7 +253,7 @@ func TestStreamState_PDV_PerForwardPacket(t *testing.T) {
 		"PDV must be the raw deviation of the last forward packet, not EWMA-smoothed")
 }
 
-func TestStreamState_PDV_NotUpdatedOnReorder(t *testing.T) {
+func TestStreamStatePDVNotUpdatedOnReorder(t *testing.T) {
 	// Reorder calls updateJitter (EWMA) but must not overwrite the last forward PDV.
 	t0 := time.Unix(1000, 0)
 	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
@@ -269,7 +269,7 @@ func TestStreamState_PDV_NotUpdatedOnReorder(t *testing.T) {
 		"PDV must not update on reorder (unreliable tsDelta)")
 }
 
-func TestStreamState_PDV_ResetOnRestart(t *testing.T) {
+func TestStreamStatePDVResetOnRestart(t *testing.T) {
 	// Stream restart (huge seq gap > maxGap → SSRC reuse / new flow instance)
 	// resets all counters including PDV (the new flow has no baseline yet).
 	t0 := time.Unix(1000, 0)
@@ -281,4 +281,53 @@ func TestStreamState_PDV_ResetOnRestart(t *testing.T) {
 	s.Observe(newHeader(2000, 480), t0.Add(50*time.Millisecond)) // seq gap 1998 > maxGap → restart
 	require.InDelta(t, 0.0, s.lastPacketDelayVariationMs, 0.0001, "PDV reset on stream restart")
 	require.Equal(t, uint64(1), s.packetsTotal, "restart resets packetsTotal to 1 (new flow)")
+}
+
+func TestStreamStateNonAudioDoesNotContaminatePDV(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
+	s.Observe(newHeader(1, 160), t0)
+	s.Observe(newHeader(2, 320), t0.Add(20*time.Millisecond))
+	s.Observe(newHeader(3, 480), t0.Add(45*time.Millisecond))
+	require.InDelta(t, 5.0, s.lastPacketDelayVariationMs, 0.0001, "audio PDV baseline")
+
+	s.ObserveNonAudio(newHeader(4, 640), t0.Add(65*time.Millisecond))
+	s.ObserveNonAudio(newHeader(5, 640), t0.Add(85*time.Millisecond))
+	s.ObserveNonAudio(newHeader(6, 640), t0.Add(105*time.Millisecond))
+
+	require.InDelta(t, 5.0, s.lastPacketDelayVariationMs, 0.0001,
+		"DTMF packets must not affect PDV")
+	require.InDelta(t, 0.3125, s.JitterMs(), 0.0001,
+		"DTMF packets must not affect jitter EWMA")
+
+	s.Observe(newHeader(7, 800), t0.Add(125*time.Millisecond))
+	require.InDelta(t, 40.0, s.lastPacketDelayVariationMs, 0.001,
+		"audio after DTMF must compute PDV from last audio baseline, not DTMF")
+
+	require.Equal(t, uint64(7), s.packetsTotal, "DTMF packets must be counted")
+}
+
+func TestStreamStateReorderDoesNotContaminateNextForwardPDV(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
+	s.Observe(newHeader(1, 160), t0)
+	s.Observe(newHeader(3, 480), t0.Add(40*time.Millisecond))
+	require.InDelta(t, 0.0, s.lastPacketDelayVariationMs, 0.0001, "perfect forward spacing")
+
+	s.Observe(newHeader(2, 320), t0.Add(50*time.Millisecond))
+
+	s.Observe(newHeader(4, 640), t0.Add(60*time.Millisecond))
+	require.InDelta(t, 0.0, s.lastPacketDelayVariationMs, 0.001,
+		"reorder must not overwrite baseline: next forward PDV computed vs last forward packet")
+}
+
+func TestStreamStateDuplicateDoesNotContaminateNextForwardPDV(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	s := newStreamState(0x11223344, "PCMU", g711Clock, t0)
+	s.Observe(newHeader(1, 160), t0)
+	s.Observe(newHeader(1, 160), t0.Add(5*time.Millisecond))
+
+	s.Observe(newHeader(2, 320), t0.Add(20*time.Millisecond))
+	require.InDelta(t, 0.0, s.lastPacketDelayVariationMs, 0.001,
+		"duplicate must not overwrite baseline: next forward PDV computed vs original packet")
 }

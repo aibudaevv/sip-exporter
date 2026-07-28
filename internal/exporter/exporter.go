@@ -40,6 +40,7 @@ const (
 	ethPAll                   = 0x0003
 	readBufSize               = 65536
 	tsCmsgLen                 = 16 // sizeof struct timespec (SCM_TIMESTAMPNS payload) on 64-bit linux
+	tsCmsgHdr                 = 16 // sizeof struct Cmsghdr on 64-bit linux (Len 8 + Level 4 + Type 4)
 	defaultRegisterTTL        = 60 * time.Second
 	defaultInviteTTL          = 60 * time.Second
 	defaultOptionsTTL         = 60 * time.Second
@@ -763,24 +764,22 @@ func (e *exporter) handleReadError(err error) bool {
 
 // parseTimestampNS extracts the kernel SO_TIMESTAMPNS receive timestamp from a
 // Recvmsg out-of-band buffer. Returns the zero time when the cmsg is absent or
-// malformed so the caller falls back to time.Now(). Uses encoding/binary (not
-// unsafe) to stay go-vet -unsafeptr clean.
+// malformed so the caller falls back to time.Now(). Parses the Cmsghdr + timespec
+// layout directly (no unix.ParseSocketControlMessage) to avoid per-packet heap
+// allocation on the hot path.
 func parseTimestampNS(oob []byte) time.Time {
-	if len(oob) == 0 {
+	if len(oob) < tsCmsgHdr+tsCmsgLen {
 		return time.Time{}
 	}
-	msgs, err := unix.ParseSocketControlMessage(oob)
-	if err != nil {
+	if int32(binary.NativeEndian.Uint32(oob[8:12])) != unix.SOL_SOCKET {
 		return time.Time{}
 	}
-	for _, m := range msgs {
-		if m.Header.Level == unix.SOL_SOCKET && m.Header.Type == unix.SCM_TIMESTAMPNS && len(m.Data) >= tsCmsgLen {
-			sec := int64(binary.NativeEndian.Uint64(m.Data[0:8]))
-			nsec := int64(binary.NativeEndian.Uint64(m.Data[8:16]))
-			return time.Unix(sec, nsec)
-		}
+	if int32(binary.NativeEndian.Uint32(oob[12:16])) != unix.SCM_TIMESTAMPNS {
+		return time.Time{}
 	}
-	return time.Time{}
+	sec := int64(binary.NativeEndian.Uint64(oob[tsCmsgHdr : tsCmsgHdr+8]))
+	nsec := int64(binary.NativeEndian.Uint64(oob[tsCmsgHdr+8 : tsCmsgHdr+tsCmsgLen]))
+	return time.Unix(sec, nsec)
 }
 
 func (e *exporter) readSocket(idx int) {
@@ -1156,7 +1155,7 @@ func nowNTP32(t time.Time) uint32 {
 // tracked RTP stream sending with that SSRC (destination-first, NAT-robust) and
 // emits jitter / loss-fraction / cumulative-loss / RTT metrics inheriting the
 // stream's labels. RTT is computed as (now_NTP32 − LSR − DLSR) and skipped when
-// LSR is zero (no prior SR) or the result is negative (clock skew). Blocks whose
+// LSR or DLSR is zero (no prior SR) or the result is negative (clock skew). Blocks whose
 // SSRC is not tracked are dropped — consistent with RTP correlation.
 func (e *exporter) handleRTCP(
 	srcIP net.IP, srcPort uint16,
@@ -1173,44 +1172,60 @@ func (e *exporter) handleRTCP(
 	if len(reports) == 0 {
 		return "", nil
 	}
-	nowNTP := nowNTP32(time.Now())
+	ts := e.pktTimestamp
+	if ts.IsZero() {
+		ts = time.Now()
+	}
+	nowNTP := nowNTP32(ts)
 	sIP, dIP := srcIP.String(), dstIP.String()
 
 	for _, rep := range reports {
-		reportType := "rr"
-		if rep.Type == rtcp.PTSenderReport {
-			reportType = "sr"
-		}
-		for _, blk := range rep.Blocks {
-			ctx, lossDelta, ok := e.mediaTracker.RecordRTCP(blk.SSRC, blk.CumulativeLost, sIP, srcPort, dIP, dstPort)
-			if !ok {
-				e.services.metricser.UpdateRTCPOrphan()
-				zap.L().Debug("RTCP orphan: SSRC not tracked at this endpoint",
-					zap.Uint32("ssrc", blk.SSRC), zap.String("src", sIP), zap.String("dst", dIP))
-				continue
-			}
-			carrier, uaType, codec := ctx.Labels.Carrier, ctx.Labels.UAType, ctx.Codec
-			sourceCountry, direction := ctx.Labels.SourceCountry, ctx.Labels.Direction
-
-			e.services.metricser.UpdateRTCPJitter(carrier, uaType, codec, sourceCountry, direction,
-				rtcpJitterMs(blk.Jitter, ctx.ClockRate))
-			e.services.metricser.UpdateRTCPLossFraction(carrier, uaType, codec, sourceCountry, direction,
-				float64(blk.FractionLost)/fracLostScale*percentScale)
-			if lossDelta > 0 {
-				e.services.metricser.UpdateRTCPCumulativeLoss(carrier, uaType, codec, sourceCountry, direction,
-					lossDelta)
-			}
-			if blk.LSR != 0 {
-				rttUnits := nowNTP - blk.LSR - blk.DLSR
-				if int32(rttUnits) > 0 {
-					e.services.metricser.UpdateRTCPRTT(carrier, uaType, codec, sourceCountry, direction,
-						float64(rttUnits)/ntp32Scale*msPerSec)
-				}
-			}
-			e.services.metricser.UpdateRTCPReport(carrier, uaType, sourceCountry, direction, reportType)
-		}
+		e.handleRTCPReport(rep, nowNTP, sIP, srcPort, dIP, dstPort)
 	}
 	return "", nil
+}
+
+func (e *exporter) handleRTCPReport(
+	report rtcp.Report,
+	nowNTP uint32,
+	srcIP string,
+	srcPort uint16,
+	dstIP string,
+	dstPort uint16,
+) {
+	reportType := "rr"
+	if report.Type == rtcp.PTSenderReport {
+		reportType = "sr"
+	}
+	for _, block := range report.Blocks {
+		ctx, lossDelta, ok := e.mediaTracker.RecordRTCP(
+			block.SSRC, block.CumulativeLost, srcIP, srcPort, dstIP, dstPort)
+		if !ok {
+			e.services.metricser.UpdateRTCPOrphan()
+			zap.L().Debug("RTCP orphan: SSRC not tracked at this endpoint",
+				zap.Uint32("ssrc", block.SSRC), zap.String("src", srcIP), zap.String("dst", dstIP))
+			continue
+		}
+		carrier, uaType, codec := ctx.Labels.Carrier, ctx.Labels.UAType, ctx.Codec
+		sourceCountry, direction := ctx.Labels.SourceCountry, ctx.Labels.Direction
+
+		e.services.metricser.UpdateRTCPJitter(carrier, uaType, codec, sourceCountry, direction,
+			rtcpJitterMs(block.Jitter, ctx.ClockRate))
+		e.services.metricser.UpdateRTCPLossFraction(carrier, uaType, codec, sourceCountry, direction,
+			float64(block.FractionLost)/fracLostScale*percentScale)
+		if lossDelta > 0 {
+			e.services.metricser.UpdateRTCPCumulativeLoss(carrier, uaType, codec, sourceCountry, direction,
+				lossDelta)
+		}
+		if block.LSR != 0 && block.DLSR != 0 {
+			rttUnits := nowNTP - block.LSR - block.DLSR
+			if int32(rttUnits) > 0 {
+				e.services.metricser.UpdateRTCPRTT(carrier, uaType, codec, sourceCountry, direction,
+					float64(rttUnits)/ntp32Scale*msPerSec)
+			}
+		}
+		e.services.metricser.UpdateRTCPReport(carrier, uaType, sourceCountry, direction, reportType)
+	}
 }
 
 // rtcpJitterMs converts an RTCP interarrival-jitter field (in RTP timestamp units)
@@ -1244,7 +1259,8 @@ func (e *exporter) handleRTP(
 	}
 	arrival := e.pktTimestamp
 	if arrival.IsZero() {
-		arrival = time.Now() // direct test invocation without a captured socket timestamp
+		arrival = time.Now()
+		e.services.metricser.RTPKernelTimestampMissing()
 	}
 	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, dstIP.String(), dstPort, header, arrival)
 	if !ok {
@@ -1253,7 +1269,7 @@ func (e *exporter) handleRTP(
 	}
 	if res.Counted {
 		e.fasTracker.clearIfAnswerMedia(
-			res.CallID, fasEndpoint{ip: res.MatchedIP, port: res.MatchedPort}, res.StreamPacketsTotal,
+			res.CallID, fasEndpoint{ip: res.MatchedIP, port: res.MatchedPort}, res.StreamPacketsTotal, res.MatchedBy,
 		)
 		e.services.metricser.UpdateRTPPackets(res.Carrier, res.UAType, res.Codec, res.SourceCountry, res.Direction)
 		if res.StreamPacketsTotal > 1 {
@@ -2072,25 +2088,10 @@ func (e *exporter) registerMediaEndpoints(
 		ml.ClockRates = m.ClockRates
 		e.mediaTracker.Register(m.IP, m.Port, ml)
 		e.rtpEndpointInsert(m.IP, m.Port)
-		// Register the RTCP endpoint so non-mux RTCP is captured. Explicit a=rtcp
-		// (RFC 3605) wins; otherwise rtcp-mux (RFC 5761) shares the RTP port
-		// (already registered); otherwise assume legacy RTCP on port+1 (RFC 3550 §9).
-		switch {
-		case m.RTCPPort != 0:
-			// Explicit a=rtcp (RFC 3605): register the RTCP endpoint. The
-			// address defaults to the c= connection IP but may be a different
-			// host when a=rtcp carries a unicast address.
-			rtcpIP := m.IP
-			if m.RTCPAddr != "" {
-				rtcpIP = m.RTCPAddr
-			}
-			e.rtpEndpointInsert(rtcpIP, m.RTCPPort)
-		case m.RTCPMux:
-			// RTCP on the RTP port — nothing extra to register.
-		default:
-			if m.Port < maxUDPPort {
-				e.rtpEndpointInsert(m.IP, m.Port+1)
-			}
+		// Register a separate RTCP endpoint for non-mux capture.
+		if rtcpIP, rtcpPort, ok := resolveRTCEndpoint(m); ok {
+			e.mediaTracker.RegisterRTCP(rtcpIP, rtcpPort, m.IP, m.Port, labels.CallID)
+			e.rtpEndpointInsert(rtcpIP, rtcpPort)
 		}
 		zap.L().Debug("RTP media endpoint registered",
 			zap.String("ip", m.IP), zap.Uint16("port", m.Port),
@@ -2101,6 +2102,28 @@ func (e *exporter) registerMediaEndpoints(
 		}
 	}
 	return endpoints, srtp
+}
+
+// resolveRTCEndpoint determines the RTCP endpoint (IP, port) for an SDP media
+// description. Explicit a=rtcp (RFC 3605) wins; rtcp-mux (RFC 5761) shares the
+// RTP port and needs no separate registration; otherwise legacy RTCP on port+1
+// (RFC 3550 §9) is assumed. ok is false when no separate endpoint is needed.
+func resolveRTCEndpoint(m sdp.Media) (string, uint16, bool) {
+	switch {
+	case m.RTCPPort != 0:
+		ip := m.IP
+		if m.RTCPAddr != "" {
+			ip = m.RTCPAddr
+		}
+		return ip, m.RTCPPort, true
+	case m.RTCPMux:
+		return "", 0, false
+	default:
+		if m.Port < maxUDPPort {
+			return m.IP, m.Port + 1, true
+		}
+		return "", 0, false
+	}
 }
 
 // ipPortToKey converts an IP address string and port to a BPF map key.

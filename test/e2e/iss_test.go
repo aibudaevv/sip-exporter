@@ -3,15 +3,14 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestISS_AllScenarios(t *testing.T) {
+func TestISSAllScenarios(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name        string
@@ -50,9 +49,9 @@ func TestISS_AllScenarios(t *testing.T) {
 	}
 }
 
-func TestISS_Mixed(t *testing.T) {
+func TestISSMixed(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const successCount = 80
 	const busyCount = 60
 	const errorCount = 60
@@ -71,9 +70,9 @@ func TestISS_Mixed(t *testing.T) {
 	waitForSessionsZero(t, env.endpoint)
 }
 
-func TestISS_WithCarrierConfig(t *testing.T) {
+func TestISSWithCarrierConfig(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	const callCount = 200
 	env := newTestEnvWithCarriers(ctx, t)
 

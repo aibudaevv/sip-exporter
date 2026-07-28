@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestParseReport_FullReport(t *testing.T) {
+func TestParseReportFullReport(t *testing.T) {
 	fullReportBody := []byte("VQSessionReport: CallTerm\r\n" +
 		"CallID: abc123@10.0.1.5\r\n" +
 		"LocalID: sip:user1@example.com\r\n" +
@@ -41,7 +41,7 @@ func TestParseReport_FullReport(t *testing.T) {
 	require.Equal(t, expectedPresent, report.Present)
 }
 
-func TestParseReport_PartialReport(t *testing.T) {
+func TestParseReportPartialReport(t *testing.T) {
 	body := []byte("VQSessionReport: CallTerm\nMOSLQ=4.5 NLR=1.0\n")
 	report, err := ParseReport(body)
 	require.NoError(t, err)
@@ -52,17 +52,17 @@ func TestParseReport_PartialReport(t *testing.T) {
 	require.True(t, report.Present["NLR"])
 }
 
-func TestParseReport_EmptyBody(t *testing.T) {
+func TestParseReportEmptyBody(t *testing.T) {
 	_, err := ParseReport([]byte{})
 	require.ErrorIs(t, err, ErrInvalidReport)
 }
 
-func TestParseReport_InvalidFormat(t *testing.T) {
+func TestParseReportInvalidFormat(t *testing.T) {
 	_, err := ParseReport([]byte("NOT A VALID REPORT\nNLR=1.0\n"))
 	require.ErrorIs(t, err, ErrInvalidReport)
 }
 
-func TestParseReport_UnknownKeysIgnored(t *testing.T) {
+func TestParseReportUnknownKeysIgnored(t *testing.T) {
 	body := []byte("VQSessionReport: CallTerm\nFOOBAR=123 NLR=1.0\n")
 	report, err := ParseReport(body)
 	require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestParseReport_UnknownKeysIgnored(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestParseReport_InvalidValueSkipped(t *testing.T) {
+func TestParseReportInvalidValueSkipped(t *testing.T) {
 	body := []byte("VQSessionReport: CallTerm\nMOSLQ=abc NLR=1.0\n")
 	report, err := ParseReport(body)
 	require.NoError(t, err)
@@ -80,7 +80,7 @@ func TestParseReport_InvalidValueSkipped(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestParseReport_HeaderLinesIgnored(t *testing.T) {
+func TestParseReportHeaderLinesIgnored(t *testing.T) {
 	body := []byte("VQSessionReport: CallTerm\nCallID: abc123@10.0.1.5\nLocalID: sip:user1@example.com\nNLR=1.0\n")
 	report, err := ParseReport(body)
 	require.NoError(t, err)
@@ -88,7 +88,7 @@ func TestParseReport_HeaderLinesIgnored(t *testing.T) {
 	require.Len(t, report.Present, 1)
 }
 
-func TestParseReport_MultiValueLine(t *testing.T) {
+func TestParseReportMultiValueLine(t *testing.T) {
 	body := []byte("VQSessionReport: CallTerm\nNLR=0.50 JDR=1.20 MOSLQ=4.5\n")
 	report, err := ParseReport(body)
 	require.NoError(t, err)
@@ -98,7 +98,7 @@ func TestParseReport_MultiValueLine(t *testing.T) {
 	require.Len(t, report.Present, 3)
 }
 
-func TestParseReport_LFLineEndings(t *testing.T) {
+func TestParseReportLFLineEndings(t *testing.T) {
 	body := []byte("VQSessionReport: CallTerm\nNLR=1.0\nJDR=2.0\n")
 	report, err := ParseReport(body)
 	require.NoError(t, err)
@@ -106,103 +106,103 @@ func TestParseReport_LFLineEndings(t *testing.T) {
 	require.InDelta(t, 2.0, report.JDR, 0.01)
 }
 
-func TestParseReport_NilBody(t *testing.T) {
+func TestParseReportNilBody(t *testing.T) {
 	_, err := ParseReport(nil)
 	require.ErrorIs(t, err, ErrInvalidReport)
 }
 
-func TestParseReport_NLR(t *testing.T) {
+func TestParseReportNLR(t *testing.T) {
 	report, err := ParseReport([]byte("VQSessionReport: CallTerm\nNLR=0.75\n"))
 	require.NoError(t, err)
 	require.InDelta(t, 0.75, report.NLR, 0.01)
 	require.True(t, report.Present["NLR"])
 }
 
-func TestParseReport_JDR(t *testing.T) {
+func TestParseReportJDR(t *testing.T) {
 	report, err := ParseReport([]byte("VQSessionReport: CallTerm\nJDR=2.5\n"))
 	require.NoError(t, err)
 	require.InDelta(t, 2.5, report.JDR, 0.01)
 	require.True(t, report.Present["JDR"])
 }
 
-func TestParseReport_BLD(t *testing.T) {
+func TestParseReportBLD(t *testing.T) {
 	report, err := ParseReport([]byte("VQSessionReport: CallTerm\nBLD=0.40\n"))
 	require.NoError(t, err)
 	require.InDelta(t, 0.40, report.BLD, 0.01)
 	require.True(t, report.Present["BLD"])
 }
 
-func TestParseReport_GLD(t *testing.T) {
+func TestParseReportGLD(t *testing.T) {
 	report, err := ParseReport([]byte("VQSessionReport: CallTerm\nGLD=0.15\n"))
 	require.NoError(t, err)
 	require.InDelta(t, 0.15, report.GLD, 0.01)
 	require.True(t, report.Present["GLD"])
 }
 
-func TestParseReport_RTD(t *testing.T) {
+func TestParseReportRTD(t *testing.T) {
 	report, err := ParseReport([]byte("VQSessionReport: CallTerm\nRTD=50.0\n"))
 	require.NoError(t, err)
 	require.InDelta(t, 50.0, report.RTD, 0.01)
 	require.True(t, report.Present["RTD"])
 }
 
-func TestParseReport_ESD(t *testing.T) {
+func TestParseReportESD(t *testing.T) {
 	report, err := ParseReport([]byte("VQSessionReport: CallTerm\nESD=15.7\n"))
 	require.NoError(t, err)
 	require.InDelta(t, 15.7, report.ESD, 0.01)
 	require.True(t, report.Present["ESD"])
 }
 
-func TestParseReport_IAJ(t *testing.T) {
+func TestParseReportIAJ(t *testing.T) {
 	report, err := ParseReport([]byte("VQSessionReport: CallTerm\nIAJ=6.3\n"))
 	require.NoError(t, err)
 	require.InDelta(t, 6.3, report.IAJ, 0.01)
 	require.True(t, report.Present["IAJ"])
 }
 
-func TestParseReport_MAJ(t *testing.T) {
+func TestParseReportMAJ(t *testing.T) {
 	report, err := ParseReport([]byte("VQSessionReport: CallTerm\nMAJ=4.2\n"))
 	require.NoError(t, err)
 	require.InDelta(t, 4.2, report.MAJ, 0.01)
 	require.True(t, report.Present["MAJ"])
 }
 
-func TestParseReport_MOSLQ(t *testing.T) {
+func TestParseReportMOSLQ(t *testing.T) {
 	report, err := ParseReport([]byte("VQSessionReport: CallTerm\nMOSLQ=3.8\n"))
 	require.NoError(t, err)
 	require.InDelta(t, 3.8, report.MOSLQ, 0.01)
 	require.True(t, report.Present["MOSLQ"])
 }
 
-func TestParseReport_MOSCQ(t *testing.T) {
+func TestParseReportMOSCQ(t *testing.T) {
 	report, err := ParseReport([]byte("VQSessionReport: CallTerm\nMOSCQ=3.5\n"))
 	require.NoError(t, err)
 	require.InDelta(t, 3.5, report.MOSCQ, 0.01)
 	require.True(t, report.Present["MOSCQ"])
 }
 
-func TestParseReport_RLQ(t *testing.T) {
+func TestParseReportRLQ(t *testing.T) {
 	report, err := ParseReport([]byte("VQSessionReport: CallTerm\nRLQ=90.0\n"))
 	require.NoError(t, err)
 	require.InDelta(t, 90.0, report.RLQ, 0.01)
 	require.True(t, report.Present["RLQ"])
 }
 
-func TestParseReport_RCQ(t *testing.T) {
+func TestParseReportRCQ(t *testing.T) {
 	report, err := ParseReport([]byte("VQSessionReport: CallTerm\nRCQ=85.0\n"))
 	require.NoError(t, err)
 	require.InDelta(t, 85.0, report.RCQ, 0.01)
 	require.True(t, report.Present["RCQ"])
 }
 
-func TestParseReport_RERL(t *testing.T) {
+func TestParseReportRERL(t *testing.T) {
 	report, err := ParseReport([]byte("VQSessionReport: CallTerm\nRERL=60.0\n"))
 	require.NoError(t, err)
 	require.InDelta(t, 60.0, report.RERL, 0.01)
 	require.True(t, report.Present["RERL"])
 }
 
-func TestParseReport_RFCFormat_CategoryHeaders(t *testing.T) {
+func TestParseReportRFCFormatCategoryHeaders(t *testing.T) {
 	body := []byte("VQSessionReport: CallTerm\r\n" +
 		"CallID: 12345@atlanta.example.com\r\n" +
 		"LocalMetrics:\r\n" +
@@ -237,7 +237,7 @@ func TestParseReport_RFCFormat_CategoryHeaders(t *testing.T) {
 	require.Equal(t, expectedPresent, report.Present)
 }
 
-func TestParseReport_RemoteMetricsSkipped(t *testing.T) {
+func TestParseReportRemoteMetricsSkipped(t *testing.T) {
 	body := []byte("VQSessionReport: CallTerm\r\n" +
 		"LocalMetrics:\r\n" +
 		"NLR=5.0 MOSLQ=4.1\r\n" +
@@ -254,7 +254,7 @@ func TestParseReport_RemoteMetricsSkipped(t *testing.T) {
 	require.True(t, report.Present["MOSLQ"])
 }
 
-func TestParseReport_RemoteMetricsNoLocal(t *testing.T) {
+func TestParseReportRemoteMetricsNoLocal(t *testing.T) {
 	body := []byte("VQSessionReport: CallTerm\r\n" +
 		"RemoteMetrics:\r\n" +
 		"NLR=3.0 MOSLQ=4.5\r\n")
@@ -264,7 +264,7 @@ func TestParseReport_RemoteMetricsNoLocal(t *testing.T) {
 	require.Empty(t, report.Present)
 }
 
-func TestParseReport_LocalMetricsAfterRemote(t *testing.T) {
+func TestParseReportLocalMetricsAfterRemote(t *testing.T) {
 	body := []byte("VQSessionReport: CallTerm\r\n" +
 		"LocalMetrics:\r\n" +
 		"NLR=5.0\r\n" +
@@ -280,12 +280,12 @@ func TestParseReport_LocalMetricsAfterRemote(t *testing.T) {
 	require.True(t, report.Present["MOSLQ"])
 }
 
-func TestParseReport_InvalidPrefix(t *testing.T) {
+func TestParseReportInvalidPrefix(t *testing.T) {
 	_, err := ParseReport([]byte("XVQSessionReport: CallTerm\nNLR=1.0\n"))
 	require.ErrorIs(t, err, ErrInvalidReport)
 }
 
-func TestParseReport_FlatFormatNoRemoteMetrics(t *testing.T) {
+func TestParseReportFlatFormatNoRemoteMetrics(t *testing.T) {
 	body := []byte("VQSessionReport: CallTerm\n" +
 		"NLR=0.50 JDR=1.20\n" +
 		"MOSLQ=4.5\n")

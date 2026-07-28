@@ -17,13 +17,13 @@ const (
 	subtestTimeout         = 20 * time.Second
 )
 
-func TestLoad_INVITEFlood(t *testing.T) {
+func TestLoadINVITEFlood(t *testing.T) {
 	rates := []int{100, 500, 1000, 2000, 5000}
 	for _, rate := range rates {
 		t.Run(fmt.Sprintf("rate_%d", rate), func(t *testing.T) {
-			env := newTestEnv(context.Background(), t)
+			env := newTestEnv(t.Context(), t)
 
-			ctx, cancel := context.WithTimeout(context.Background(), subtestTimeout)
+			ctx, cancel := context.WithTimeout(t.Context(), subtestTimeout)
 			defer cancel()
 
 			callCount := rate * 5
@@ -53,13 +53,13 @@ func TestLoad_INVITEFlood(t *testing.T) {
 	}
 }
 
-func TestLoad_FullCallFlow(t *testing.T) {
+func TestLoadFullCallFlow(t *testing.T) {
 	rates := []int{100, 500, 1000, 1200, 1400, 1600, 1800}
 	for _, rate := range rates {
 		t.Run(fmt.Sprintf("rate_%d", rate), func(t *testing.T) {
-			env := newTestEnv(context.Background(), t)
+			env := newTestEnv(t.Context(), t)
 
-			ctx, cancel := context.WithTimeout(context.Background(), subtestTimeout)
+			ctx, cancel := context.WithTimeout(t.Context(), subtestTimeout)
 			defer cancel()
 
 			callCount := rate * 5
@@ -95,16 +95,16 @@ func TestLoad_FullCallFlow(t *testing.T) {
 	}
 }
 
-func TestLoad_ConcurrentSessions(t *testing.T) {
+func TestLoadConcurrentSessions(t *testing.T) {
 	limits := []int{500, 1000, 2000}
 	for _, limit := range limits {
 		t.Run(fmt.Sprintf("concurrent_%d", limit), func(t *testing.T) {
-			env := newTestEnv(context.Background(), t)
+			env := newTestEnv(t.Context(), t)
 
 			callCount := limit * 2
 			rate := 100
 
-			result := runConcurrentLoad(context.Background(), t,
+			result := runConcurrentLoad(t.Context(), t,
 				"concurrent_uas.xml", "concurrent_uac.xml",
 				callCount, rate, limit, env)
 

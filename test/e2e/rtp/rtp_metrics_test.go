@@ -27,7 +27,7 @@ const pcmaFilter = `codec="PCMA"`
 // Returns 0 if not found.
 func getRTPMetric(t *testing.T, endpoint, name string) float64 {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/metrics", nil)
 	require.NoError(t, err)
@@ -50,13 +50,30 @@ func getRTPMetric(t *testing.T, endpoint, name string) float64 {
 	return 0
 }
 
+// metricExists checks whether a metric family is present in the /metrics body.
+// Call this before getRTPMetric/getMetricByLabel value reads to avoid false-zero
+// when the metric is missing (AGENTS.md metricExists rule).
+func metricExists(t *testing.T, endpoint, name string) bool {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/metrics", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return strings.Contains(string(body), name)
+}
+
 // getMetricByLabel scrapes a metric value whose label set contains ALL the given
 // label substrings (e.g. `carrier="loopback"`, `codec="PCMA"`), in any order
 // (Prometheus emits labels alphabetically, not in registration order). Returns 0
 // if no matching sample is found.
 func getMetricByLabel(t *testing.T, endpoint, name string, labels ...string) float64 {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/metrics", nil)
 	require.NoError(t, err)
@@ -105,7 +122,7 @@ func startSippContainers(
 ) func() {
 	t.Helper()
 
-	scenarioDir := filepath.Join(projectRoot, "test", "e2e", "sipp")
+	scenarioDir := filepath.Join(projectRoot(), "test", "e2e", "sipp")
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	t.Cleanup(cancel)
@@ -196,15 +213,15 @@ func runSippRTPWithIPs(ctx context.Context, t *testing.T, uasSIP, uacSIP, uasMed
 	startSippContainers(ctx, t, "uas_rtp.xml", "uac_rtp.xml", uasSIP, uacSIP, uasMedia, uacMedia, uasIP, uacIP)()
 }
 
-// TestRTP_MetricsFromSIPpStream verifies the full pipeline end-to-end: a real SIP
+// TestRTPMetricsFromSIPpStream verifies the full pipeline end-to-end: a real SIP
 // dialog (INVITE/200 OK with SDP) + real G.711a RTP streamed by SIPp produces the
 // labelled RTP metrics on /metrics. Closes review item I3.
-func TestRTP_MetricsFromSIPpStream(t *testing.T) {
+func TestRTPMetricsFromSIPpStream(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
-	endpoint := startExporter(context.Background(), t, httpPort, uasSIP, testInterface, "")
+	endpoint := startExporter(t.Context(), t, httpPort, uasSIP, testInterface, "")
 
-	runSippRTP(context.Background(), t, uasSIP, uacSIP, uasMedia, uacMedia)
+	runSippRTP(t.Context(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 
 	// RTP packets counter (cumulative) must be > 0: RTP was correlated and observed.
 	require.Eventually(t, func() bool {

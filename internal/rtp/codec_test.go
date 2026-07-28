@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCodecName_StaticPT(t *testing.T) {
+func TestCodecNameStaticPT(t *testing.T) {
 	tests := []struct {
 		name string
 		pt   uint8
@@ -27,14 +27,14 @@ func TestCodecName_StaticPT(t *testing.T) {
 	}
 }
 
-func TestCodecName_ReservedPT2_NotG726(t *testing.T) {
+func TestCodecNameReservedPT2NotG726(t *testing.T) {
 	// RFC 3551 Table 4: PT 2 is reserved (was G.721, now unused).
 	// G.726 has no static PT — it must use dynamic PT via SDP a=rtpmap.
 	require.Equal(t, CodecUnknown, CodecName(2, nil),
 		"PT 2 is reserved, not G.726-32")
 }
 
-func TestCodecName_DynamicPT_FromSDP(t *testing.T) {
+func TestCodecNameDynamicPTFromSDP(t *testing.T) {
 	sdp := map[uint8]string{
 		96:  "opus",
 		101: "telephone-event",
@@ -45,19 +45,28 @@ func TestCodecName_DynamicPT_FromSDP(t *testing.T) {
 	require.Equal(t, "opus", CodecName(111, sdp))
 }
 
-func TestCodecName_SDPTakesPrecedenceOverStatic(t *testing.T) {
+func TestCodecNameSDPTakesPrecedenceOverStatic(t *testing.T) {
 	// PT 0 is statically PCMU, but SDP may override (rare but valid)
 	sdp := map[uint8]string{0: "custom-codec"}
 	require.Equal(t, "custom-codec", CodecName(0, sdp))
 }
 
-func TestCodecName_UnknownPT(t *testing.T) {
+func TestCodecNameUnknownPT(t *testing.T) {
 	require.Equal(t, CodecUnknown, CodecName(127, nil))
 	require.Equal(t, CodecUnknown, CodecName(127, map[uint8]string{}))
 }
 
-func TestCodecName_EmptySDPValue_FallsBack(t *testing.T) {
+func TestCodecNameEmptySDPValueFallsBack(t *testing.T) {
 	// Empty string in SDP map for a PT should fall back to static table
 	sdp := map[uint8]string{0: ""}
 	require.Equal(t, "PCMU", CodecName(0, sdp))
+}
+
+func TestIsAudioCodec(t *testing.T) {
+	require.True(t, IsAudioCodec("PCMU"))
+	require.True(t, IsAudioCodec("PCMA"))
+	require.True(t, IsAudioCodec("opus"))
+	require.True(t, IsAudioCodec(CodecUnknown))
+	require.False(t, IsAudioCodec("telephone-event"))
+	require.False(t, IsAudioCodec("CN"))
 }

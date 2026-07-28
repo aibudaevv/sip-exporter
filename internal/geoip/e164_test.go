@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-func TestLookupDestination_International(t *testing.T) {
+func TestLookupDestinationInternational(t *testing.T) {
 	tests := []struct {
 		name   string
 		number string
@@ -39,7 +39,7 @@ func TestLookupDestination_International(t *testing.T) {
 	}
 }
 
-func TestLookupDestination_SubdivisionProof(t *testing.T) {
+func TestLookupDestinationSubdivisionProof(t *testing.T) {
 	tests := []struct {
 		name   string
 		number string
@@ -60,7 +60,7 @@ func TestLookupDestination_SubdivisionProof(t *testing.T) {
 	}
 }
 
-func TestLookupDestination_LocalFallback(t *testing.T) {
+func TestLookupDestinationLocalFallback(t *testing.T) {
 	tests := []struct {
 		name         string
 		number       string
@@ -86,7 +86,7 @@ func TestLookupDestination_LocalFallback(t *testing.T) {
 	}
 }
 
-func TestLookupDestination_EdgeCases(t *testing.T) {
+func TestLookupDestinationEdgeCases(t *testing.T) {
 	tests := []struct {
 		name   string
 		number string

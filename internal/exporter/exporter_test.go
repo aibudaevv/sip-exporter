@@ -21,77 +21,79 @@ import (
 	"github.com/aibudaevv/sip-exporter/internal/dto"
 	"github.com/aibudaevv/sip-exporter/internal/geoip"
 	"github.com/aibudaevv/sip-exporter/internal/mediatracker"
+	"github.com/aibudaevv/sip-exporter/internal/sdp"
 	"github.com/aibudaevv/sip-exporter/internal/service"
 	"github.com/aibudaevv/sip-exporter/internal/vq"
 )
 
 // Mock services for testing.
 type mockMetricser struct {
-	requestCalled             []byte
-	requestCount              int
-	reinviteCalled            bool
-	sipRetransmissionCalls    int
-	sipRetransmissionMethod   string
-	responseCalled            []byte
-	responseIsInvite          bool
-	sessionUpdated            int
-	systemErrorCalled         bool
-	packetsIncremented        int
-	invite200OKCalled         bool
-	sessionCompletedFlag      bool
-	rrdUpdated                bool
-	rrdDelay                  float64
-	responseWithMetricsCalled bool
-	spdUpdated                bool
-	spdDuration               time.Duration
-	ttrUpdated                bool
-	ttrDelay                  float64
-	pddUpdated                bool
-	pddDelay                  float64
-	ordUpdated                bool
-	ordDelay                  float64
-	lrdUpdated                bool
-	lrdDelay                  float64
-	pbdUpdated                bool
-	pbdDelay                  float64
-	shortCallsUpdated         bool
-	shortCallsDuration        time.Duration
-	billableCalled            bool
-	billableCarrier           string
-	billableDestCountry       string
-	billableDuration          time.Duration
-	registerSuccessCalls      int
-	registerFailureCodes      []string
-	registerCountryChange     []string
-	registerScanCalls         int
-	inviteBurstCalls          int
-	fasCalls                  int
-	fasCallsLabels            []carrierCall
-	vqReportCalled            bool
-	vqCarrier                 string
-	vqUAType                  string
-	vqReport                  *vq.SessionReport
-	rtpPacketsCalls           int
-	rtpLossCalls              int
-	rtpLossValue              uint64
-	rtpDuplicateCalls         int
-	rtpOutOfOrderCalls        int
-	rtpDroppedCount           int
-	parseErrorCalls           int
-	parseErrorType            string
-	rtcpJitterCalls           int
-	rtcpJitterVal             float64
-	rtcpLossFracCalls         int
-	rtcpLossFracVal           float64
-	rtcpCumLossCalls          int
-	rtcpCumLossVal            uint64
-	rtcpRTTCalls              int
-	rtcpRTTVal                float64
-	rtcpReportCalls           int
-	rtcpReportType            string
-	rtcpReportCarrier         string
-	rtcpReportDirection       string
-	rtcpOrphanCalls           int
+	requestCalled                  []byte
+	requestCount                   int
+	reinviteCalled                 bool
+	sipRetransmissionCalls         int
+	sipRetransmissionMethod        string
+	responseCalled                 []byte
+	responseIsInvite               bool
+	sessionUpdated                 int
+	systemErrorCalled              bool
+	packetsIncremented             int
+	invite200OKCalled              bool
+	sessionCompletedFlag           bool
+	rrdUpdated                     bool
+	rrdDelay                       float64
+	responseWithMetricsCalled      bool
+	spdUpdated                     bool
+	spdDuration                    time.Duration
+	ttrUpdated                     bool
+	ttrDelay                       float64
+	pddUpdated                     bool
+	pddDelay                       float64
+	ordUpdated                     bool
+	ordDelay                       float64
+	lrdUpdated                     bool
+	lrdDelay                       float64
+	pbdUpdated                     bool
+	pbdDelay                       float64
+	shortCallsUpdated              bool
+	shortCallsDuration             time.Duration
+	billableCalled                 bool
+	billableCarrier                string
+	billableDestCountry            string
+	billableDuration               time.Duration
+	registerSuccessCalls           int
+	registerFailureCodes           []string
+	registerCountryChange          []string
+	registerScanCalls              int
+	inviteBurstCalls               int
+	fasCalls                       int
+	fasCallsLabels                 []carrierCall
+	vqReportCalled                 bool
+	vqCarrier                      string
+	vqUAType                       string
+	vqReport                       *vq.SessionReport
+	rtpPacketsCalls                int
+	rtpLossCalls                   int
+	rtpLossValue                   uint64
+	rtpDuplicateCalls              int
+	rtpOutOfOrderCalls             int
+	rtpDroppedCount                int
+	parseErrorCalls                int
+	parseErrorType                 string
+	rtcpJitterCalls                int
+	rtcpJitterVal                  float64
+	rtcpLossFracCalls              int
+	rtcpLossFracVal                float64
+	rtcpCumLossCalls               int
+	rtcpCumLossVal                 uint64
+	rtcpRTTCalls                   int
+	rtcpRTTVal                     float64
+	rtcpReportCalls                int
+	rtcpReportType                 string
+	rtcpReportCarrier              string
+	rtcpReportDirection            string
+	rtcpOrphanCalls                int
+	rtpKernelTimestampMissingCalls int
 }
 
 func (m *mockMetricser) UpdateSessions(_ []service.LabeledCount) {}
@@ -290,6 +292,9 @@ func (m *mockMetricser) UpdateRTCPReport(carrier, _, _, direction, reportType st
 func (m *mockMetricser) UpdateRTCPOrphan() {
 	m.rtcpOrphanCalls++
 }
+func (m *mockMetricser) RTPKernelTimestampMissing() {
+	m.rtpKernelTimestampMissingCalls++
+}
 
 type dialogCreateArgs struct {
 	expiresAt          time.Time
@@ -398,37 +403,37 @@ func TestNormalizeDialogID(t *testing.T) {
 	}
 }
 
-func TestNormalizeDialogID_EmptyFromTag(t *testing.T) {
+func TestNormalizeDialogIDEmptyFromTag(t *testing.T) {
 	_, err := normalizeDialogID([]byte("call-id"), []byte(""), []byte("to-tag"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "from tag or to tag is empty")
 }
 
-func TestNormalizeDialogID_EmptyToTag(t *testing.T) {
+func TestNormalizeDialogIDEmptyToTag(t *testing.T) {
 	_, err := normalizeDialogID([]byte("call-id"), []byte("from-tag"), []byte(""))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "from tag or to tag is empty")
 }
 
-func TestNormalizeDialogID_BothEmptyTags(t *testing.T) {
+func TestNormalizeDialogIDBothEmptyTags(t *testing.T) {
 	_, err := normalizeDialogID([]byte("call-id"), []byte(""), []byte(""))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "from tag or to tag is empty")
 }
 
-func TestNormalizeDialogID_FromTagLessThanToTag(t *testing.T) {
+func TestNormalizeDialogIDFromTagLessThanToTag(t *testing.T) {
 	result, err := normalizeDialogID([]byte("test-call"), []byte("aaa"), []byte("zzz"))
 	require.NoError(t, err)
 	require.Equal(t, "test-call:aaa:zzz", result)
 }
 
-func TestNormalizeDialogID_FromTagGreaterThanToTag(t *testing.T) {
+func TestNormalizeDialogIDFromTagGreaterThanToTag(t *testing.T) {
 	result, err := normalizeDialogID([]byte("test-call"), []byte("zzz"), []byte("aaa"))
 	require.NoError(t, err)
 	require.Equal(t, "test-call:aaa:zzz", result)
 }
 
-func TestNormalizeDialogID_EqualTags(t *testing.T) {
+func TestNormalizeDialogIDEqualTags(t *testing.T) {
 	result, err := normalizeDialogID([]byte("test-call"), []byte("same"), []byte("same"))
 	require.NoError(t, err)
 	require.Equal(t, "test-call:same:same", result)
@@ -436,43 +441,43 @@ func TestNormalizeDialogID_EqualTags(t *testing.T) {
 
 // ==================== splitHeader tests ====================
 
-func TestSplitHeader_Normal(t *testing.T) {
+func TestSplitHeaderNormal(t *testing.T) {
 	header, value := splitHeader([]byte("Content-Type: application/sdp"))
 	require.Equal(t, []byte("Content-Type"), header)
 	require.Equal(t, []byte("application/sdp"), value)
 }
 
-func TestSplitHeader_NoColon(t *testing.T) {
+func TestSplitHeaderNoColon(t *testing.T) {
 	header, value := splitHeader([]byte("NoColonHere"))
 	require.Nil(t, header)
 	require.Nil(t, value)
 }
 
-func TestSplitHeader_EmptyValue(t *testing.T) {
+func TestSplitHeaderEmptyValue(t *testing.T) {
 	header, value := splitHeader([]byte("Header:"))
 	require.Equal(t, []byte("Header"), header)
 	require.Empty(t, value)
 }
 
-func TestSplitHeader_EmptyLine(t *testing.T) {
+func TestSplitHeaderEmptyLine(t *testing.T) {
 	header, value := splitHeader([]byte(""))
 	require.Nil(t, header)
 	require.Nil(t, value)
 }
 
-func TestSplitHeader_OnlyColon(t *testing.T) {
+func TestSplitHeaderOnlyColon(t *testing.T) {
 	header, value := splitHeader([]byte(":"))
 	require.Empty(t, header)
 	require.Empty(t, value)
 }
 
-func TestSplitHeader_MultipleColons(t *testing.T) {
+func TestSplitHeaderMultipleColons(t *testing.T) {
 	header, value := splitHeader([]byte("Header: value: with: colons"))
 	require.Equal(t, []byte("Header"), header)
 	require.Equal(t, []byte("value: with: colons"), value)
 }
 
-func TestSplitHeader_WithSpaces(t *testing.T) {
+func TestSplitHeaderWithSpaces(t *testing.T) {
 	header, value := splitHeader([]byte("  Header  :  Value  "))
 	require.Equal(t, []byte("Header"), header)
 	require.Equal(t, []byte("Value"), value)
@@ -480,67 +485,67 @@ func TestSplitHeader_WithSpaces(t *testing.T) {
 
 // ==================== extractTag tests ====================
 
-func TestExtractTag_Normal(t *testing.T) {
+func TestExtractTagNormal(t *testing.T) {
 	tag := extractTag([]byte("<sip:user@domain>;tag=abc123"))
 	require.Equal(t, []byte("abc123"), tag)
 }
 
-func TestExtractTag_NoTag(t *testing.T) {
+func TestExtractTagNoTag(t *testing.T) {
 	tag := extractTag([]byte("<sip:user@domain>"))
 	require.Nil(t, tag)
 }
 
-func TestExtractTag_TagWithSemicolon(t *testing.T) {
+func TestExtractTagTagWithSemicolon(t *testing.T) {
 	tag := extractTag([]byte("<sip:user@domain>;tag=abc123;other=param"))
 	require.Equal(t, []byte("abc123"), tag)
 }
 
-func TestExtractTag_TagWithSpace(t *testing.T) {
+func TestExtractTagTagWithSpace(t *testing.T) {
 	tag := extractTag([]byte("<sip:user@domain>;tag=abc123 other"))
 	require.Equal(t, []byte("abc123"), tag)
 }
 
-func TestExtractTag_TagWithGreaterThan(t *testing.T) {
+func TestExtractTagTagWithGreaterThan(t *testing.T) {
 	tag := extractTag([]byte("<sip:user@domain>;tag=abc123>"))
 	require.Equal(t, []byte("abc123"), tag)
 }
 
-func TestExtractTag_TagWithNewline(t *testing.T) {
+func TestExtractTagTagWithNewline(t *testing.T) {
 	tag := extractTag([]byte("<sip:user@domain>;tag=abc123\r\n"))
 	require.Equal(t, []byte("abc123"), tag)
 }
 
-func TestExtractTag_EmptyTag(t *testing.T) {
+func TestExtractTagEmptyTag(t *testing.T) {
 	tag := extractTag([]byte("<sip:user@domain>;tag="))
 	require.Equal(t, []byte(""), tag)
 }
 
-func TestExtractTag_OnlyTagMarker(t *testing.T) {
+func TestExtractTagOnlyTagMarker(t *testing.T) {
 	tag := extractTag([]byte(";tag="))
 	require.Equal(t, []byte(""), tag)
 }
 
 // ==================== extractCSeq tests ====================
 
-func TestExtractCSeq_Normal(t *testing.T) {
+func TestExtractCSeqNormal(t *testing.T) {
 	id, method := extractCSeq([]byte("12345 INVITE"))
 	require.Equal(t, []byte("12345"), id)
 	require.Equal(t, []byte("INVITE"), method)
 }
 
-func TestExtractCSeq_NoSpace(t *testing.T) {
+func TestExtractCSeqNoSpace(t *testing.T) {
 	id, method := extractCSeq([]byte("12345"))
 	require.Nil(t, id)
 	require.Nil(t, method)
 }
 
-func TestExtractCSeq_Empty(t *testing.T) {
+func TestExtractCSeqEmpty(t *testing.T) {
 	id, method := extractCSeq([]byte(""))
 	require.Nil(t, id)
 	require.Nil(t, method)
 }
 
-func TestExtractCSeq_MultipleSpaces(t *testing.T) {
+func TestExtractCSeqMultipleSpaces(t *testing.T) {
 	id, method := extractCSeq([]byte("12345 INVITE extra"))
 	require.Equal(t, []byte("12345"), id)
 	require.Equal(t, []byte("INVITE"), method)
@@ -548,56 +553,56 @@ func TestExtractCSeq_MultipleSpaces(t *testing.T) {
 
 // ==================== extractSessionExpires tests ====================
 
-func TestExtractSessionExpires_OnlyNumber(t *testing.T) {
+func TestExtractSessionExpiresOnlyNumber(t *testing.T) {
 	expires := extractSessionExpires([]byte("1800"))
 	require.Equal(t, 1800, expires)
 }
 
-func TestExtractSessionExpires_WithRefresher(t *testing.T) {
+func TestExtractSessionExpiresWithRefresher(t *testing.T) {
 	expires := extractSessionExpires([]byte("1800;refresher=uac"))
 	require.Equal(t, 1800, expires)
 }
 
-func TestExtractSessionExpires_Empty(t *testing.T) {
+func TestExtractSessionExpiresEmpty(t *testing.T) {
 	expires := extractSessionExpires([]byte(""))
 	require.Equal(t, 0, expires)
 }
 
-func TestExtractSessionExpires_InvalidNumber(t *testing.T) {
+func TestExtractSessionExpiresInvalidNumber(t *testing.T) {
 	expires := extractSessionExpires([]byte("invalid"))
 	require.Equal(t, 0, expires)
 }
 
-func TestExtractSessionExpires_Zero(t *testing.T) {
+func TestExtractSessionExpiresZero(t *testing.T) {
 	expires := extractSessionExpires([]byte("0"))
 	require.Equal(t, 0, expires)
 }
 
 // ==================== extractExpires tests ====================
 
-func TestExtractExpires_NormalValue(t *testing.T) {
+func TestExtractExpiresNormalValue(t *testing.T) {
 	expires := extractExpires([]byte("3600"))
 	require.Equal(t, 3600, expires)
 }
 
-func TestExtractExpires_Zero(t *testing.T) {
+func TestExtractExpiresZero(t *testing.T) {
 	expires := extractExpires([]byte("0"))
 	require.Equal(t, 0, expires)
 }
 
-func TestExtractExpires_Empty(t *testing.T) {
+func TestExtractExpiresEmpty(t *testing.T) {
 	expires := extractExpires([]byte(""))
 	require.Equal(t, 0, expires)
 }
 
-func TestExtractExpires_InvalidNumber(t *testing.T) {
+func TestExtractExpiresInvalidNumber(t *testing.T) {
 	expires := extractExpires([]byte("invalid"))
 	require.Equal(t, 0, expires)
 }
 
 // ==================== parseRawPacket tests ====================
 
-func TestParseRawPacket_TooShort(t *testing.T) {
+func TestParseRawPacketTooShort(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -614,7 +619,7 @@ func TestParseRawPacket_TooShort(t *testing.T) {
 	require.Contains(t, err.Error(), "wrong len packet")
 }
 
-func TestParseRawPacket_NotIPv4(t *testing.T) {
+func TestParseRawPacketNotIPv4(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -635,7 +640,7 @@ func TestParseRawPacket_NotIPv4(t *testing.T) {
 	require.Contains(t, err.Error(), "not IPv4 packet")
 }
 
-func TestParseRawPacket_NotUDP(t *testing.T) {
+func TestParseRawPacketNotUDP(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -658,7 +663,7 @@ func TestParseRawPacket_NotUDP(t *testing.T) {
 	require.Contains(t, err.Error(), "not UDP packet")
 }
 
-func TestParseRawPacket_NoSIPPayload(t *testing.T) {
+func TestParseRawPacketNoSIPPayload(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -681,7 +686,7 @@ func TestParseRawPacket_NoSIPPayload(t *testing.T) {
 	require.Contains(t, err.Error(), "no SIP payload")
 }
 
-func TestParseRawPacket_NotSIPMethod(t *testing.T) {
+func TestParseRawPacketNotSIPMethod(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -705,7 +710,7 @@ func TestParseRawPacket_NotSIPMethod(t *testing.T) {
 	require.Contains(t, err.Error(), "not a SIP packet")
 }
 
-func TestParseRawPacket_VLAN_Tagged(t *testing.T) {
+func TestParseRawPacketVLANTagged(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -730,7 +735,7 @@ func TestParseRawPacket_VLAN_Tagged(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestParseRawPacket_IPHeaderTooShort(t *testing.T) {
+func TestParseRawPacketIPHeaderTooShort(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -752,7 +757,7 @@ func TestParseRawPacket_IPHeaderTooShort(t *testing.T) {
 	require.Contains(t, err.Error(), "wrong len")
 }
 
-func TestParseRawPacket_UDPHeaderTooShort(t *testing.T) {
+func TestParseRawPacketUDPHeaderTooShort(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -776,7 +781,7 @@ func TestParseRawPacket_UDPHeaderTooShort(t *testing.T) {
 	require.Contains(t, err.Error(), "wrong len")
 }
 
-func TestParseRawPacket_SIPPayloadTooSmall(t *testing.T) {
+func TestParseRawPacketSIPPayloadTooSmall(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -800,7 +805,7 @@ func TestParseRawPacket_SIPPayloadTooSmall(t *testing.T) {
 	require.Contains(t, err.Error(), "packet too small for SIP")
 }
 
-func TestParseRawPacket_ErrorTypes(t *testing.T) {
+func TestParseRawPacketErrorTypes(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -915,7 +920,7 @@ func TestParseRawPacket_ErrorTypes(t *testing.T) {
 	}
 }
 
-func TestParseRawPacket_SuccessReturnsEmptyType(t *testing.T) {
+func TestParseRawPacketSuccessReturnsEmptyType(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -941,7 +946,7 @@ func TestParseRawPacket_SuccessReturnsEmptyType(t *testing.T) {
 
 // ==================== sipPacketParse tests ====================
 
-func TestSIPPacketParse_EmptyInput(t *testing.T) {
+func TestSIPPacketParseEmptyInput(t *testing.T) {
 	e := exporter{}
 
 	_, err := e.sipPacketParse([]byte(""))
@@ -949,7 +954,7 @@ func TestSIPPacketParse_EmptyInput(t *testing.T) {
 	require.Contains(t, err.Error(), "malformed request line")
 }
 
-func TestSIPPacketParse_GarbageInput(t *testing.T) {
+func TestSIPPacketParseGarbageInput(t *testing.T) {
 	e := exporter{}
 
 	_, err := e.sipPacketParse([]byte("GARBAGE\r\n"))
@@ -957,7 +962,7 @@ func TestSIPPacketParse_GarbageInput(t *testing.T) {
 	require.Contains(t, err.Error(), "malformed request line")
 }
 
-func TestSIPPacketParse_NoFromTag(t *testing.T) {
+func TestSIPPacketParseNoFromTag(t *testing.T) {
 	e := exporter{}
 
 	input := []byte("INVITE sip:test SIP/2.0\r\n" +
@@ -972,7 +977,7 @@ func TestSIPPacketParse_NoFromTag(t *testing.T) {
 	require.Contains(t, err.Error(), "<sip:user@domain>")
 }
 
-func TestSIPPacketParse_MissingCallID(t *testing.T) {
+func TestSIPPacketParseMissingCallID(t *testing.T) {
 	e := exporter{}
 
 	input := []byte("INVITE sip:test SIP/2.0\r\n" +
@@ -985,7 +990,7 @@ func TestSIPPacketParse_MissingCallID(t *testing.T) {
 	require.Contains(t, err.Error(), "missing Call-ID")
 }
 
-func TestSIPPacketParse_WithSessionExpires(t *testing.T) {
+func TestSIPPacketParseWithSessionExpires(t *testing.T) {
 	e := exporter{}
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
@@ -1000,7 +1005,7 @@ func TestSIPPacketParse_WithSessionExpires(t *testing.T) {
 	require.Equal(t, 1800, p.SessionExpires)
 }
 
-func TestSIPPacketParse_InvalidSessionExpires(t *testing.T) {
+func TestSIPPacketParseInvalidSessionExpires(t *testing.T) {
 	e := exporter{}
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
@@ -1015,7 +1020,7 @@ func TestSIPPacketParse_InvalidSessionExpires(t *testing.T) {
 	require.Equal(t, 0, p.SessionExpires)
 }
 
-func TestSIPPacketParse_WithExpires(t *testing.T) {
+func TestSIPPacketParseWithExpires(t *testing.T) {
 	e := exporter{}
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
@@ -1030,7 +1035,7 @@ func TestSIPPacketParse_WithExpires(t *testing.T) {
 	require.Equal(t, 3600, p.Expires)
 }
 
-func TestSIPPacketParse_ExpiresAbsenceIsZero(t *testing.T) {
+func TestSIPPacketParseExpiresAbsenceIsZero(t *testing.T) {
 	e := exporter{}
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
@@ -1044,7 +1049,7 @@ func TestSIPPacketParse_ExpiresAbsenceIsZero(t *testing.T) {
 	require.Equal(t, 0, p.Expires)
 }
 
-func TestSIPPacketParse_ExpiresZero(t *testing.T) {
+func TestSIPPacketParseExpiresZero(t *testing.T) {
 	e := exporter{}
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
@@ -1059,7 +1064,7 @@ func TestSIPPacketParse_ExpiresZero(t *testing.T) {
 	require.Equal(t, 0, p.Expires)
 }
 
-func TestSIPPacketParse_NoCSeqMethod(t *testing.T) {
+func TestSIPPacketParseNoCSeqMethod(t *testing.T) {
 	e := exporter{}
 
 	input := []byte("INVITE sip:test SIP/2.0\r\n" +
@@ -1073,7 +1078,7 @@ func TestSIPPacketParse_NoCSeqMethod(t *testing.T) {
 	require.Contains(t, err.Error(), "failed to extract CSeq from")
 }
 
-func TestSIPPacketParse_CSeqMultipleSpaces(t *testing.T) {
+func TestSIPPacketParseCSeqMultipleSpaces(t *testing.T) {
 	e := exporter{}
 
 	tests := []struct {
@@ -1100,7 +1105,7 @@ func TestSIPPacketParse_CSeqMultipleSpaces(t *testing.T) {
 	}
 }
 
-func TestSIPPacketParse_CaseInsensitiveHeaders(t *testing.T) {
+func TestSIPPacketParseCaseInsensitiveHeaders(t *testing.T) {
 	e := exporter{}
 
 	tests := []struct {
@@ -1133,7 +1138,7 @@ func TestSIPPacketParse_CaseInsensitiveHeaders(t *testing.T) {
 	}
 }
 
-func TestSIPPacketParse_CompactHeaders(t *testing.T) {
+func TestSIPPacketParseCompactHeaders(t *testing.T) {
 	e := exporter{}
 
 	tests := []struct {
@@ -1163,7 +1168,7 @@ func TestSIPPacketParse_CompactHeaders(t *testing.T) {
 	}
 }
 
-func TestSIPPacketParse_FoldedHeader(t *testing.T) {
+func TestSIPPacketParseFoldedHeader(t *testing.T) {
 	e := exporter{}
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
@@ -1179,7 +1184,7 @@ func TestSIPPacketParse_FoldedHeader(t *testing.T) {
 	require.Equal(t, []byte("xyz"), p.To.Tag)
 }
 
-func TestSIPPacketParse_CaseInsensitiveTag(t *testing.T) {
+func TestSIPPacketParseCaseInsensitiveTag(t *testing.T) {
 	e := exporter{}
 
 	tests := []struct {
@@ -1206,7 +1211,7 @@ func TestSIPPacketParse_CaseInsensitiveTag(t *testing.T) {
 	}
 }
 
-func TestExtractTag_QuotedDisplayName(t *testing.T) {
+func TestExtractTagQuotedDisplayName(t *testing.T) {
 	tests := []struct {
 		name  string
 		value []byte
@@ -1224,7 +1229,7 @@ func TestExtractTag_QuotedDisplayName(t *testing.T) {
 	}
 }
 
-func TestSIPPacketParse_TruncatedStatusLine(t *testing.T) {
+func TestSIPPacketParseTruncatedStatusLine(t *testing.T) {
 	e := exporter{}
 
 	tests := []struct {
@@ -1254,7 +1259,7 @@ func TestSIPPacketParse_TruncatedStatusLine(t *testing.T) {
 
 // ==================== handleMessage tests ====================
 
-func TestHandleMessage_Request(t *testing.T) {
+func TestHandleMessageRequest(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -1284,7 +1289,7 @@ func TestHandleMessage_Request(t *testing.T) {
 	require.Equal(t, []byte("INVITE"), mm.requestCalled)
 }
 
-func TestHandleMessage_INVITE_Retransmission_Dedup(t *testing.T) {
+func TestHandleMessageINVITERetransmissionDedup(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -1337,7 +1342,7 @@ func TestHandleMessage_INVITE_Retransmission_Dedup(t *testing.T) {
 	require.Equal(t, 2, mm.requestCount, "different Call-ID must be counted as new INVITE")
 }
 
-func TestHandleMessage_Response200_INVITE(t *testing.T) {
+func TestHandleMessageResponse200INVITE(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -1370,7 +1375,7 @@ func TestHandleMessage_Response200_INVITE(t *testing.T) {
 	require.Len(t, md.created, 1)
 }
 
-func TestHandleMessage_ReINVITE_CountedAsReinvite(t *testing.T) {
+func TestHandleMessageReINVITECountedAsReinvite(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -1410,7 +1415,7 @@ func TestHandleMessage_ReINVITE_CountedAsReinvite(t *testing.T) {
 	require.False(t, hasTracker)
 }
 
-func TestHandleMessage_InitialINVITE_CountedAsInvite(t *testing.T) {
+func TestHandleMessageInitialINVITECountedAsInvite(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -1441,7 +1446,7 @@ func TestHandleMessage_InitialINVITE_CountedAsInvite(t *testing.T) {
 	require.False(t, mm.reinviteCalled)
 }
 
-func TestHandleMessage_ReINVITE_200OK_DoesNotInflateMetrics(t *testing.T) {
+func TestHandleMessageReINVITE200OKDoesNotInflateMetrics(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -1483,7 +1488,7 @@ func TestHandleMessage_ReINVITE_200OK_DoesNotInflateMetrics(t *testing.T) {
 	require.False(t, mm.responseIsInvite)
 }
 
-func TestHandleMessage_Response200_BYE(t *testing.T) {
+func TestHandleMessageResponse200BYE(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -1515,7 +1520,7 @@ func TestHandleMessage_Response200_BYE(t *testing.T) {
 	require.Len(t, md.deleted, 1)
 }
 
-func TestHandleMessage_Response200_REGISTER(t *testing.T) {
+func TestHandleMessageResponse200REGISTER(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -1546,7 +1551,7 @@ func TestHandleMessage_Response200_REGISTER(t *testing.T) {
 	require.False(t, mm.invite200OKCalled)
 }
 
-func TestHandleMessage_RRD_FullCycle(t *testing.T) {
+func TestHandleMessageRRDFullCycle(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -1588,7 +1593,7 @@ func TestHandleMessage_RRD_FullCycle(t *testing.T) {
 	require.Greater(t, mm.rrdDelay, 0.0)
 }
 
-func TestHandleMessage_Register200OK_CallsRegisterSuccess(t *testing.T) {
+func TestHandleMessageRegister200OKCallsRegisterSuccess(t *testing.T) {
 	mm := &mockMetricser{}
 	e := &exporter{
 		services: services{
@@ -1609,7 +1614,7 @@ func TestHandleMessage_Register200OK_CallsRegisterSuccess(t *testing.T) {
 	require.Empty(t, mm.registerFailureCodes)
 }
 
-func TestHandleMessage_Register403_CallsRegisterFailure(t *testing.T) {
+func TestHandleMessageRegister403CallsRegisterFailure(t *testing.T) {
 	mm := &mockMetricser{}
 	e := &exporter{
 		services: services{
@@ -1633,7 +1638,7 @@ func TestHandleMessage_Register403_CallsRegisterFailure(t *testing.T) {
 
 // Challenge 401 is recorded in failure_total{code} (for brute-force detection)
 // even though it does not affect register_success_ratio.
-func TestHandleMessage_Register401Challenge_CallsRegisterFailure(t *testing.T) {
+func TestHandleMessageRegister401ChallengeCallsRegisterFailure(t *testing.T) {
 	mm := &mockMetricser{}
 	e := &exporter{
 		services: services{
@@ -1655,7 +1660,7 @@ func TestHandleMessage_Register401Challenge_CallsRegisterFailure(t *testing.T) {
 }
 
 // 1xx provisional response must NOT be counted as a registration failure.
-func TestHandleMessage_Register100Trying_NotAFailure(t *testing.T) {
+func TestHandleMessageRegister100TryingNotAFailure(t *testing.T) {
 	mm := &mockMetricser{}
 	e := &exporter{
 		services: services{
@@ -1691,7 +1696,7 @@ func newExporterWithRegTracker() *exporter {
 	}
 }
 
-func TestRegisterExpiryTracker_NewRegistration(t *testing.T) {
+func TestRegisterExpiryTrackerNewRegistration(t *testing.T) {
 	e := newExporterWithRegTracker()
 
 	e.storeRegistration("sip:user1@example.com", "c", "sip", "US", "", "", 3600)
@@ -1701,7 +1706,7 @@ func TestRegisterExpiryTracker_NewRegistration(t *testing.T) {
 	require.Equal(t, 1, counts[0].Count)
 }
 
-func TestRegisterExpiryTracker_RefreshNoDoubleCount(t *testing.T) {
+func TestRegisterExpiryTrackerRefreshNoDoubleCount(t *testing.T) {
 	e := newExporterWithRegTracker()
 	aor := "sip:user1@example.com"
 
@@ -1714,7 +1719,7 @@ func TestRegisterExpiryTracker_RefreshNoDoubleCount(t *testing.T) {
 	require.Equal(t, 1, counts[0].Count, "refresh of same AOR must not double-count")
 }
 
-func TestRegisterExpiryTracker_DifferentAORs(t *testing.T) {
+func TestRegisterExpiryTrackerDifferentAORs(t *testing.T) {
 	e := newExporterWithRegTracker()
 
 	e.storeRegistration("sip:user1@example.com", "c", "sip", "US", "", "", 3600)
@@ -1725,7 +1730,7 @@ func TestRegisterExpiryTracker_DifferentAORs(t *testing.T) {
 	require.Equal(t, 2, counts[0].Count)
 }
 
-func TestRegisterExpiryTracker_GroupsByLabels(t *testing.T) {
+func TestRegisterExpiryTrackerGroupsByLabels(t *testing.T) {
 	e := newExporterWithRegTracker()
 
 	e.storeRegistration("sip:u1@a", "carrier-A", "sip", "US", "", "", 3600)
@@ -1742,7 +1747,7 @@ func TestRegisterExpiryTracker_GroupsByLabels(t *testing.T) {
 	require.Equal(t, 1, byCarrier["carrier-B"])
 }
 
-func TestRegisterExpiryTracker_CleanupExpired(t *testing.T) {
+func TestRegisterExpiryTrackerCleanupExpired(t *testing.T) {
 	e := newExporterWithRegTracker()
 
 	e.storeRegistration("sip:user1@example.com", "c", "sip", "US", "", "", 1)
@@ -1761,7 +1766,7 @@ func TestRegisterExpiryTracker_CleanupExpired(t *testing.T) {
 	require.Empty(t, counts, "expired registration must be removed")
 }
 
-func TestRegisterExpiryTracker_RefreshKeepsActive(t *testing.T) {
+func TestRegisterExpiryTrackerRefreshKeepsActive(t *testing.T) {
 	e := newExporterWithRegTracker()
 	aor := "sip:user1@example.com"
 
@@ -1784,7 +1789,7 @@ func TestRegisterExpiryTracker_RefreshKeepsActive(t *testing.T) {
 	require.Len(t, counts, 1, "refreshed registration must survive old-expiry cleanup")
 }
 
-func TestRegisterExpiryTracker_ConcurrentAccess(t *testing.T) {
+func TestRegisterExpiryTrackerConcurrentAccess(t *testing.T) {
 	e := newExporterWithRegTracker()
 	var wg sync.WaitGroup
 
@@ -1821,7 +1826,7 @@ func TestRegisterExpiryTracker_ConcurrentAccess(t *testing.T) {
 
 // ==================== S6-9.2: Registration Country Change ====================
 
-func TestRegisterCountryChange_DifferentCountry(t *testing.T) {
+func TestRegisterCountryChangeDifferentCountry(t *testing.T) {
 	mm := &mockMetricser{}
 	e := &exporter{
 		services:              services{metricser: mm, dialoger: &mockDialoger{}},
@@ -1837,7 +1842,7 @@ func TestRegisterCountryChange_DifferentCountry(t *testing.T) {
 	require.Equal(t, "GE", mm.registerCountryChange[0])
 }
 
-func TestRegisterCountryChange_SameCountry(t *testing.T) {
+func TestRegisterCountryChangeSameCountry(t *testing.T) {
 	mm := &mockMetricser{}
 	e := &exporter{
 		services:              services{metricser: mm, dialoger: &mockDialoger{}},
@@ -1851,7 +1856,7 @@ func TestRegisterCountryChange_SameCountry(t *testing.T) {
 	require.Empty(t, mm.registerCountryChange, "same country must not signal")
 }
 
-func TestRegisterCountryChange_FirstRegistration(t *testing.T) {
+func TestRegisterCountryChangeFirstRegistration(t *testing.T) {
 	mm := &mockMetricser{}
 	e := &exporter{
 		services:              services{metricser: mm, dialoger: &mockDialoger{}},
@@ -1863,7 +1868,7 @@ func TestRegisterCountryChange_FirstRegistration(t *testing.T) {
 	require.Empty(t, mm.registerCountryChange, "first registration has no baseline")
 }
 
-func TestRegisterCountryChange_EmptyPreviousCountry(t *testing.T) {
+func TestRegisterCountryChangeEmptyPreviousCountry(t *testing.T) {
 	mm := &mockMetricser{}
 	e := &exporter{
 		services:              services{metricser: mm, dialoger: &mockDialoger{}},
@@ -1886,7 +1891,7 @@ func TestRegisterCountryChange_EmptyPreviousCountry(t *testing.T) {
 
 // ==================== S6-9.1: Registration Scan Detection ====================
 
-func TestRegisterScanTracker_SignalsAtThreshold(t *testing.T) {
+func TestRegisterScanTrackerSignalsAtThreshold(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newRegisterScanTracker(3, time.Minute)
 
@@ -1899,7 +1904,7 @@ func TestRegisterScanTracker_SignalsAtThreshold(t *testing.T) {
 	require.Equal(t, 1, mm.registerScanCalls, "at threshold must signal")
 }
 
-func TestRegisterScanTracker_IncrementsPerAORAboveThreshold(t *testing.T) {
+func TestRegisterScanTrackerIncrementsPerAORAboveThreshold(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newRegisterScanTracker(3, time.Minute)
 
@@ -1909,7 +1914,7 @@ func TestRegisterScanTracker_IncrementsPerAORAboveThreshold(t *testing.T) {
 	require.Equal(t, 3, mm.registerScanCalls, "must increment for each AOR at or above threshold (5-3+1=3)")
 }
 
-func TestRegisterScanTracker_UniqueAORsOnly(t *testing.T) {
+func TestRegisterScanTrackerUniqueAORsOnly(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newRegisterScanTracker(3, time.Minute)
 
@@ -1920,7 +1925,7 @@ func TestRegisterScanTracker_UniqueAORsOnly(t *testing.T) {
 	require.Zero(t, mm.registerScanCalls, "same AOR must not count as scan")
 }
 
-func TestRegisterScanTracker_NilTrackerSafe(t *testing.T) {
+func TestRegisterScanTrackerNilTrackerSafe(t *testing.T) {
 	mm := &mockMetricser{}
 	var tracker *registerScanTracker
 
@@ -1928,7 +1933,7 @@ func TestRegisterScanTracker_NilTrackerSafe(t *testing.T) {
 	require.Zero(t, mm.registerScanCalls, "nil tracker must be no-op")
 }
 
-func TestRegisterScanTracker_EmptySrcIPSkipped(t *testing.T) {
+func TestRegisterScanTrackerEmptySrcIPSkipped(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newRegisterScanTracker(1, time.Minute)
 
@@ -1938,7 +1943,7 @@ func TestRegisterScanTracker_EmptySrcIPSkipped(t *testing.T) {
 
 // ==================== S6-A.1: Memory Cap ====================
 
-func TestRegisterScanTracker_MemoryBoundedAtMaxEntries(t *testing.T) {
+func TestRegisterScanTrackerMemoryBoundedAtMaxEntries(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newRegisterScanTracker(3, time.Minute)
 
@@ -1951,7 +1956,7 @@ func TestRegisterScanTracker_MemoryBoundedAtMaxEntries(t *testing.T) {
 	require.Positive(t, mm.registerScanCalls, "must have signalled above threshold")
 }
 
-func TestRegisterScanTracker_EvictionWorksAfterCap(t *testing.T) {
+func TestRegisterScanTrackerEvictionWorksAfterCap(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newRegisterScanTracker(3, 50*time.Millisecond)
 
@@ -1973,7 +1978,7 @@ func TestRegisterScanTracker_EvictionWorksAfterCap(t *testing.T) {
 	require.Equal(t, 2, mm.registerScanCalls, "new burst after eviction must signal again")
 }
 
-func TestRegisterScanTracker_MultipleIPsIndependent(t *testing.T) {
+func TestRegisterScanTrackerMultipleIPsIndependent(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newRegisterScanTracker(3, time.Minute)
 
@@ -1989,9 +1994,9 @@ func TestRegisterScanTracker_MultipleIPsIndependent(t *testing.T) {
 
 // ==================== S6-A.13: Wasted Event Fix ====================
 
-// TestRegisterScanTracker_NoWastedEventAfterExpiry verifies that the first
+// TestRegisterScanTrackerNoWastedEventAfterExpiry verifies that the first
 // event after window expiry IS recorded (not silently dropped).
-func TestRegisterScanTracker_NoWastedEventAfterExpiry(t *testing.T) {
+func TestRegisterScanTrackerNoWastedEventAfterExpiry(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newRegisterScanTracker(3, 50*time.Millisecond)
 
@@ -2009,9 +2014,9 @@ func TestRegisterScanTracker_NoWastedEventAfterExpiry(t *testing.T) {
 		"first event after window expiry must be recorded, not wasted")
 }
 
-// TestRegisterScanTracker_RetriggerAtExactThreshold verifies that after
+// TestRegisterScanTrackerRetriggerAtExactThreshold verifies that after
 // window expiry, exactly `threshold` new events re-trigger the signal.
-func TestRegisterScanTracker_RetriggerAtExactThreshold(t *testing.T) {
+func TestRegisterScanTrackerRetriggerAtExactThreshold(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newRegisterScanTracker(3, 50*time.Millisecond)
 
@@ -2034,7 +2039,7 @@ func TestRegisterScanTracker_RetriggerAtExactThreshold(t *testing.T) {
 
 // ==================== S6-9.3: INVITE Burst Detection ====================
 
-func TestInviteBurstTracker_SignalsAtThreshold(t *testing.T) {
+func TestInviteBurstTrackerSignalsAtThreshold(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newInviteBurstTracker(5, time.Minute)
 
@@ -2047,7 +2052,7 @@ func TestInviteBurstTracker_SignalsAtThreshold(t *testing.T) {
 	require.Equal(t, 1, mm.inviteBurstCalls, "at threshold must signal")
 }
 
-func TestInviteBurstTracker_IncrementsPerInviteAboveThreshold(t *testing.T) {
+func TestInviteBurstTrackerIncrementsPerInviteAboveThreshold(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newInviteBurstTracker(3, time.Minute)
 
@@ -2057,7 +2062,7 @@ func TestInviteBurstTracker_IncrementsPerInviteAboveThreshold(t *testing.T) {
 	require.Equal(t, 8, mm.inviteBurstCalls, "must increment for each INVITE at or above threshold (10-3+1=8)")
 }
 
-func TestInviteBurstTracker_NilTrackerSafe(t *testing.T) {
+func TestInviteBurstTrackerNilTrackerSafe(t *testing.T) {
 	mm := &mockMetricser{}
 	var tracker *inviteBurstTracker
 
@@ -2065,7 +2070,7 @@ func TestInviteBurstTracker_NilTrackerSafe(t *testing.T) {
 	require.Zero(t, mm.inviteBurstCalls, "nil tracker must be no-op")
 }
 
-func TestInviteBurstTracker_EmptySrcIPSkipped(t *testing.T) {
+func TestInviteBurstTrackerEmptySrcIPSkipped(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newInviteBurstTracker(1, time.Minute)
 
@@ -2075,7 +2080,7 @@ func TestInviteBurstTracker_EmptySrcIPSkipped(t *testing.T) {
 
 // ==================== S11-2: FAS (False Answer Supervision) Detection ====================
 
-func TestFasTracker_SignalsAfterThreshold(t *testing.T) {
+func TestFasTrackerSignalsAfterThreshold(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newFasTracker(60 * time.Millisecond)
 
@@ -2096,7 +2101,7 @@ func TestFasTracker_SignalsAfterThreshold(t *testing.T) {
 	require.Empty(t, tracker.entries, "fired entry must be removed")
 }
 
-func TestFasTracker_NoSignalBeforeThreshold(t *testing.T) {
+func TestFasTrackerNoSignalBeforeThreshold(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newFasTracker(time.Second)
 
@@ -2111,7 +2116,7 @@ func TestFasTracker_NoSignalBeforeThreshold(t *testing.T) {
 	require.Len(t, tracker.entries, 1, "entry must remain pending")
 }
 
-func TestFasTracker_ClearPreventsSignal(t *testing.T) {
+func TestFasTrackerClearPreventsSignal(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newFasTracker(60 * time.Millisecond)
 
@@ -2128,7 +2133,7 @@ func TestFasTracker_ClearPreventsSignal(t *testing.T) {
 	require.Zero(t, mm.fasCalls, "RTP observed (clear) before threshold must prevent FAS")
 }
 
-func TestFasTracker_PreservesLabelsOnFire(t *testing.T) {
+func TestFasTrackerPreservesLabelsOnFire(t *testing.T) {
 	mm := &mockMetricser{}
 	tracker := newFasTracker(50 * time.Millisecond)
 
@@ -2150,7 +2155,7 @@ func TestFasTracker_PreservesLabelsOnFire(t *testing.T) {
 	require.Equal(t, "outbound", got.direction)
 }
 
-func TestFasTracker_NilTrackerSafe(t *testing.T) {
+func TestFasTrackerNilTrackerSafe(t *testing.T) {
 	mm := &mockMetricser{}
 	var tracker *fasTracker
 
@@ -2216,7 +2221,7 @@ func fasRTPPacket(seq uint16) []byte {
 	return []byte{0x80, 0x00, byte(seq >> 8), byte(seq), 0x00, 0x00, 0x00, 0xA0, 0x11, 0x22, 0x33, 0x44}
 }
 
-func TestFAS_HeldSDPNotTracked(t *testing.T) {
+func TestFASHeldSDPNotTracked(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, time.Second)
 
@@ -2227,7 +2232,7 @@ func TestFAS_HeldSDPNotTracked(t *testing.T) {
 	require.Empty(t, e.fasTracker.entries, "held SDP (c=0.0.0.0) registers no media → not a FAS candidate")
 }
 
-func TestFAS_200OKThenNoRTPFiresAfterThreshold(t *testing.T) {
+func TestFAS200OKThenNoRTPFiresAfterThreshold(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, 60*time.Millisecond)
 
@@ -2245,7 +2250,7 @@ func TestFAS_200OKThenNoRTPFiresAfterThreshold(t *testing.T) {
 	require.Equal(t, 1, mm.fasCalls, "no RTP within threshold → FAS fires")
 }
 
-func TestFAS_RTPBeforeThresholdPreventsFire(t *testing.T) {
+func TestFASRTPBeforeThresholdPreventsFire(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, 60*time.Millisecond)
 
@@ -2268,12 +2273,12 @@ func TestFAS_RTPBeforeThresholdPreventsFire(t *testing.T) {
 	require.Zero(t, mm.fasCalls, "established media before threshold must prevent FAS")
 }
 
-// TestFAS_CallerRTPDoesNotClear is the core S11-4 regression: when both offer
+// TestFASCallerRTPDoesNotClear is the core S11-4 regression: when both offer
 // (caller) and answer (callee) media endpoints are registered, RTP from the
 // calling side (arriving at the answer endpoint) must NOT defeat FAS — only
 // answer-side media (arriving at the offer endpoint) clears it. This prevents a
 // fraudster's false 200 OK from being masked by the victim's own upstream RTP.
-func TestFAS_CallerRTPDoesNotClear(t *testing.T) {
+func TestFASCallerRTPDoesNotClear(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, 60*time.Millisecond)
 
@@ -2308,7 +2313,86 @@ func TestFAS_CallerRTPDoesNotClear(t *testing.T) {
 		"answer-side RTP (arriving at offer endpoint) must clear FAS")
 }
 
-func TestFAS_SingleRTPDoesNotClear(t *testing.T) {
+// TestFASRetransmit200OKPreservesOfferSet verifies that a retransmitted 200 OK
+// (Timer G, UDP) does not destroy the offer-side gating established by the first
+// 200 OK. On retransmission the cached INVITE SDP is already consumed, so
+// updateOffer receives empty endpoints — it must NOT delete the existing offer
+// set. Otherwise the caller's own RTP clears FAS via the legacy fallback.
+func TestFASRetransmit200OKPreservesOfferSet(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Hour)
+
+	e.storeInviteSDP("call-1", []byte(fasSdpOffer))
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
+	)
+	require.Len(t, e.fasTracker.offer["call-1"], 1, "first 200 OK must populate offer endpoints")
+
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), true),
+	)
+	require.Contains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: "10.0.0.2", port: 5004},
+		"retransmitted 200 OK must not delete the offer set")
+
+	for _, seq := range []uint16{1, 2, 3} {
+		_, err := e.handleRTP(net.ParseIP("10.0.0.2"), 5004, net.ParseIP("10.0.0.1"), 5004, fasRTPPacket(seq))
+		require.NoError(t, err)
+	}
+	require.Len(t, e.fasTracker.entries, 1,
+		"caller RTP must not clear FAS after retransmitted 200 OK — side-gating preserved")
+}
+
+// TestFASLateOfferCallerRTPDoesNotClear closes the src-fallback hole: when
+// the INVITE offer was cached (offer map populated) but the 200 OK carried no
+// SDP (late offer — ISUP gateways), the answer endpoint is never registered.
+// Caller RTP then matches by src-fallback on the offer endpoint. Without the
+// fix this falsely clears FAS (caller's own media masks fraud). The match-by
+// must be "src" and, with a non-empty offer map, must not clear.
+func TestFASLateOfferCallerRTPDoesNotClear(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, 60*time.Millisecond)
+
+	e.storeInviteSDP("call-late", []byte(fasSdpOffer))
+
+	pkt := fasInvite200OK("call-late", "")
+	pkt.ContentType = nil
+	require.NoError(t, e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", pkt, false))
+	require.Len(t, e.fasTracker.entries, 1, "offer endpoints from cached INVITE must open FAS pending")
+	require.Len(t, e.fasTracker.offer["call-late"], 1, "offer endpoint tracked for side gating")
+
+	for _, seq := range []uint16{1, 2, 3} {
+		_, err := e.handleRTP(net.ParseIP("10.0.0.2"), 5004, net.ParseIP("10.0.0.1"), 5004, fasRTPPacket(seq))
+		require.NoError(t, err)
+	}
+	require.Len(t, e.fasTracker.entries, 1,
+		"caller RTP matched by src-fallback on offer endpoint must not clear FAS")
+}
+
+// TestFASLateOfferAnswerRTPClears is the MC/DC complement to the negative
+// test above: in the same late-offer scenario (answer endpoint not registered),
+// genuine answer-side media (callee→caller, dst-match on the offer endpoint)
+// must still clear FAS. This proves the guard is matchedBy-specific, not a
+// blanket block on late-offer calls.
+func TestFASLateOfferAnswerRTPClears(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, 60*time.Millisecond)
+
+	e.storeInviteSDP("call-late", []byte(fasSdpOffer))
+
+	pkt := fasInvite200OK("call-late", "")
+	pkt.ContentType = nil
+	require.NoError(t, e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", pkt, false))
+	require.Len(t, e.fasTracker.entries, 1)
+
+	for _, seq := range []uint16{1, 2} {
+		_, err := e.handleRTP(net.ParseIP("10.0.0.1"), 5004, net.ParseIP("10.0.0.2"), 5004, fasRTPPacket(seq))
+		require.NoError(t, err)
+	}
+	require.Empty(t, e.fasTracker.entries,
+		"answer RTP (dst-match on offer endpoint) must clear FAS even in late-offer scenario")
+}
+
+func TestFASSingleRTPDoesNotClear(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, 60*time.Millisecond)
 
@@ -2327,7 +2411,7 @@ func TestFAS_SingleRTPDoesNotClear(t *testing.T) {
 	require.Equal(t, 1, mm.fasCalls, "one stray packet does not establish media → FAS fires after threshold")
 }
 
-func TestFAS_ByeBeforeThresholdPreventsFire(t *testing.T) {
+func TestFASByeBeforeThresholdPreventsFire(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, 60*time.Millisecond)
 
@@ -2345,11 +2429,11 @@ func TestFAS_ByeBeforeThresholdPreventsFire(t *testing.T) {
 	require.Zero(t, mm.fasCalls, "short call without RTP (BYE before threshold) must not be misreported as FAS")
 }
 
-// TestFAS_ByePath_FiresAfterFloor verifies that a call answered with no
+// TestFASByePathFiresAfterFloor verifies that a call answered with no
 // answer-side RTP, terminated by BYE after the floor duration, is reported as
 // FAS at teardown — covering short dead-air calls that end before the sweep
 // threshold (S11-7 / F5).
-func TestFAS_ByePath_FiresAfterFloor(t *testing.T) {
+func TestFASByePathFiresAfterFloor(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, time.Hour) // long threshold: only the BYE path can fire
 
@@ -2372,9 +2456,9 @@ func TestFAS_ByePath_FiresAfterFloor(t *testing.T) {
 	require.Empty(t, e.fasTracker.entries, "entry cleared after BYE finalize")
 }
 
-// TestFAS_ByePath_BelowFloorNoFire verifies that a very short call (caller
+// TestFASByePathBelowFloorNoFire verifies that a very short call (caller
 // abandoned immediately) is not reported as FAS — not fraud, just a quick hangup.
-func TestFAS_ByePath_BelowFloorNoFire(t *testing.T) {
+func TestFASByePathBelowFloorNoFire(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, time.Hour)
 
@@ -2386,9 +2470,9 @@ func TestFAS_ByePath_BelowFloorNoFire(t *testing.T) {
 	require.Zero(t, mm.fasCalls, "BYE before floor must not fire FAS")
 }
 
-// TestFAS_ByePath_NoFire_WhenMediaCleared verifies the BYE path is a no-op when
+// TestFASByePathNoFireWhenMediaCleared verifies the BYE path is a no-op when
 // answer-side media already cleared the pending entry (the normal good case).
-func TestFAS_ByePath_NoFire_WhenMediaCleared(t *testing.T) {
+func TestFASByePathNoFireWhenMediaCleared(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, time.Hour)
 
@@ -2408,42 +2492,55 @@ func TestFAS_ByePath_NoFire_WhenMediaCleared(t *testing.T) {
 	require.Zero(t, mm.fasCalls, "no FAS when media already cleared the entry")
 }
 
-// TestFAS_ByePath_SRTPRespectsGrace is the S11-6 × S11-7 interaction regression:
-// an SRTP call (a=fingerprint) ending via BYE WITHIN the DTLS/ICE grace window
-// must NOT fire FAS — the grace that protects the sweep path must also protect
-// the BYE path. Otherwise WebRTC calls that fail ICE and hang up false-positive.
-func TestFAS_ByePath_SRTPRespectsGrace(t *testing.T) {
+// TestFASByePathSRTPBelowFloorNoFire verifies that an SRTP call ending via
+// BYE below fasByeFloor does not fire — the floor protects short calls from
+// false positives (caller abandoned before media could start). The floor is
+// the same for plain RTP and SRTP (S11-16: grace extends only the sweep path).
+func TestFASByePathSRTPBelowFloorNoFire(t *testing.T) {
 	mm := &mockMetricser{}
-	e := newFasTestExporter(mm, 100*time.Millisecond)
+	e := newFasTestExporter(mm, 10*time.Second)
 
-	const srtpSDP = "v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\nc=IN IP4 10.0.0.1\r\n" +
-		"t=0 0\r\nm=audio 5004 RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\n" +
-		"a=fingerprint:sha-256 AB:CD:01:02\r\na=setup:actpass\r\n"
+	t0 := time.Unix(1_700_000_000, 0)
+	e.fasTracker.SetNow(func() time.Time { return t0 })
+
 	require.NoError(t,
-		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", srtpSDP), false),
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpSRTP), false),
 	)
 	require.Len(t, e.fasTracker.entries, 1)
 
-	// Elapsed (5s) is past fasByeFloor (3s) but well within the SRTP grace
-	// window (deadline = base 100ms + grace 15s ≈ 15.1s). A plain-RTP call here
-	// WOULD fire at BYE; an SRTP call must NOT — still in ICE/DTLS tolerance.
-	const elapsed = 5 * time.Second
-	e.fasTracker.mu.Lock()
-	ent := e.fasTracker.entries["call-1"]
-	ent.createdAt = time.Now().Add(-elapsed)
-	ent.deadline = ent.deadline.Add(-elapsed)
-	ent.byeFloor = ent.byeFloor.Add(-elapsed)
-	e.fasTracker.entries["call-1"] = ent
-	e.fasTracker.mu.Unlock()
-
+	e.fasTracker.SetNow(func() time.Time { return t0.Add(1 * time.Second) })
 	require.NoError(t, e.handleBye200OK(fasInvite200OK("call-1", ""), ""))
-	require.Zero(t, mm.fasCalls, "SRTP call ending within grace must not fire FAS at BYE")
+	require.Zero(t, mm.fasCalls, "SRTP call BYE below fasByeFloor must not fire")
 }
 
-// TestFAS_SRTP_ExtendsThreshold verifies the DTLS-SRTP grace: a call whose
+// TestFASByePathSRTPFakeFingerprintStillFires closes the DTLS-grace evasion
+// on the BYE path (S11-16): a fraudster can add a fake a=fingerprint to the 200
+// OK and get byeFloor = full deadline (25s), hanging up before any media without
+// detection. byeFloor must always be fasByeFloor (3s) regardless of SRTP — the
+// grace protects only the sweep path, where the fraudster does not control timing.
+func TestFASByePathSRTPFakeFingerprintStillFires(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, 10*time.Second)
+
+	t0 := time.Unix(1_700_000_000, 0)
+	e.fasTracker.SetNow(func() time.Time { return t0 })
+
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpSRTP), false),
+	)
+	require.Len(t, e.fasTracker.entries, 1)
+
+	// 5s elapsed: past fasByeFloor (3s), well within the SRTP sweep deadline
+	// (10s + 15s grace = 25s). A fraudster hangs up here — FAS must fire.
+	e.fasTracker.SetNow(func() time.Time { return t0.Add(5 * time.Second) })
+	require.NoError(t, e.handleBye200OK(fasInvite200OK("call-1", ""), ""))
+	require.Equal(t, 1, mm.fasCalls, "SRTP BYE after fasByeFloor must fire despite fake fingerprint")
+}
+
+// TestFASSRTPExtendsThreshold verifies the DTLS-SRTP grace: a call whose
 // answer SDP carries a=fingerprint does NOT fire FAS at the base threshold, but
 // does fire after base+grace (S11-6 / F2).
-func TestFAS_SRTP_ExtendsThreshold(t *testing.T) {
+func TestFASSRTPExtendsThreshold(t *testing.T) {
 	mm := &mockMetricser{}
 	base := 60 * time.Millisecond
 	e := newFasTestExporter(mm, base)
@@ -2471,7 +2568,7 @@ func TestFAS_SRTP_ExtendsThreshold(t *testing.T) {
 	require.Equal(t, 1, mm.fasCalls, "SRTP call must fire after base+grace with no RTP")
 }
 
-func TestFAS_ReinviteDoesNotOpenPending(t *testing.T) {
+func TestFASReinviteDoesNotOpenPending(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, time.Second)
 
@@ -2482,10 +2579,10 @@ func TestFAS_ReinviteDoesNotOpenPending(t *testing.T) {
 	require.Empty(t, e.fasTracker.entries, "re-INVITE refreshes a dialog, not a new answer → no FAS pending")
 }
 
-// TestFAS_Reinvite_UpdatesOfferEndpoints verifies that a re-INVITE changing the
+// TestFASReinviteUpdatesOfferEndpoints verifies that a re-INVITE changing the
 // caller's media endpoint updates the FAS offer map — otherwise answer-side
 // media arriving at the new endpoint would NOT clear FAS (stale offer).
-func TestFAS_Reinvite_UpdatesOfferEndpoints(t *testing.T) {
+func TestFASReinviteUpdatesOfferEndpoints(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, time.Hour)
 
@@ -2516,10 +2613,10 @@ func TestFAS_Reinvite_UpdatesOfferEndpoints(t *testing.T) {
 	require.Empty(t, e.fasTracker.entries, "answer-side RTP at re-INVITE offer endpoint must clear FAS")
 }
 
-// TestFAS_Reinvite_SRTP_ExtendsDeadline verifies that a re-INVITE upgrading
+// TestFASReinviteSRTPExtendsDeadline verifies that a re-INVITE upgrading
 // plain-RTP to SRTP extends the FAS deadline by the grace window — otherwise
 // the sweep fires on the original (too-short) plain-RTP deadline.
-func TestFAS_Reinvite_SRTP_ExtendsDeadline(t *testing.T) {
+func TestFASReinviteSRTPExtendsDeadline(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, 100*time.Millisecond)
 
@@ -2538,15 +2635,15 @@ func TestFAS_Reinvite_SRTP_ExtendsDeadline(t *testing.T) {
 	newDeadline := e.fasTracker.entries["call-1"].deadline
 	require.True(t, newDeadline.After(origDeadline.Add(fasSRTPGrace-time.Second)),
 		"re-INVITE to SRTP must extend deadline by ~fasSRTPGrace")
-	require.True(t, newDeadline.Equal(e.fasTracker.entries["call-1"].byeFloor),
-		"byeFloor must track the extended deadline for SRTP")
+	require.True(t, e.fasTracker.entries["call-1"].byeFloor.Before(newDeadline),
+		"byeFloor must remain at fasByeFloor, not track the SRTP grace deadline")
 }
 
-// TestFAS_ConcurrentSweepClearBye verifies thread safety of fasTracker under
+// TestFASConcurrentSweepClearBye verifies thread safety of fasTracker under
 // concurrent access from the three goroutines that touch it in production:
 // sipDialogMetricsUpdate (sweep), readPackets/handleRTP (clearIfAnswerMedia),
 // and readPackets/handleBye200OK (finalizeOnBye). Run with -race.
-func TestFAS_ConcurrentSweepClearBye(t *testing.T) {
+func TestFASConcurrentSweepClearBye(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, time.Hour)
 
@@ -2562,7 +2659,7 @@ func TestFAS_ConcurrentSweepClearBye(t *testing.T) {
 			defer wg.Done()
 			for range 200 {
 				e.fasTracker.sweep(mm)
-				e.fasTracker.clearIfAnswerMedia("call-1", fasEndpoint{ip: "10.0.0.2", port: 5004}, 5)
+				e.fasTracker.clearIfAnswerMedia("call-1", fasEndpoint{ip: "10.0.0.2", port: 5004}, 5, "dst")
 				e.fasTracker.finalizeOnBye("call-1", mm)
 			}
 		}()
@@ -2572,10 +2669,10 @@ func TestFAS_ConcurrentSweepClearBye(t *testing.T) {
 	// on which goroutine wins the entry — the test verifies safety, not value.
 }
 
-// TestFAS_SweepThenClear_NoDoubleFire verifies that dialog-expiry cleanup
+// TestFASSweepThenClearNoDoubleFire verifies that dialog-expiry cleanup
 // calling fasTracker.clear after sweep already fired does NOT double-increment
 // fasCalls (sweep deleted the entry; clear is a no-op).
-func TestFAS_SweepThenClear_NoDoubleFire(t *testing.T) {
+func TestFASSweepThenClearNoDoubleFire(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, 100*time.Millisecond)
 
@@ -2597,7 +2694,170 @@ func TestFAS_SweepThenClear_NoDoubleFire(t *testing.T) {
 	require.Empty(t, e.fasTracker.entries)
 }
 
-func TestHandleMessage_ReINVITE_ExcludedFromBurst(t *testing.T) {
+// blockingFasMetricser wraps mockMetricser so FasCall signals called and then
+// blocks until block is closed. Used to prove that sweep/finalizeOnBye release
+// the fasTracker lock before invoking reportFAS (metricser + zap must run
+// outside the critical section so packet processing is not stalled).
+type blockingFasMetricser struct {
+	mockMetricser
+
+	called chan struct{}
+	block  chan struct{}
+}
+
+func (m *blockingFasMetricser) FasCall(_, _, _, _ string) {
+	m.called <- struct{}{}
+	<-m.block
+}
+
+func TestFASSweepDoesNotHoldLockDuringReport(t *testing.T) {
+	ft := newFasTracker(time.Hour)
+	t0 := time.Unix(1_700_000_000, 0)
+	ft.SetNow(func() time.Time { return t0 })
+
+	ft.store("expired-1", fasEntry{}, nil, false)
+	ft.store("expired-2", fasEntry{}, nil, false)
+
+	ft.SetNow(func() time.Time { return t0.Add(2 * time.Hour) })
+
+	blockMM := &blockingFasMetricser{
+		called: make(chan struct{}, 2),
+		block:  make(chan struct{}),
+	}
+
+	sweepDone := make(chan struct{})
+	go func() {
+		ft.sweep(blockMM)
+		close(sweepDone)
+	}()
+
+	<-blockMM.called // FasCall invoked — sweep is inside reportFAS.
+
+	// If sweep holds t.mu during reportFAS, Size blocks until FasCall returns.
+	sizeDone := make(chan struct{})
+	go func() {
+		_ = ft.Size()
+		close(sizeDone)
+	}()
+
+	select {
+	case <-sizeDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("sweep held fasTracker.mu during reportFAS; Size blocked >200ms")
+	}
+
+	close(blockMM.block)
+	<-sweepDone
+}
+
+func TestFASFinalizeOnByeDoesNotHoldLockDuringReport(t *testing.T) {
+	ft := newFasTracker(time.Hour)
+	t0 := time.Unix(1_700_000_000, 0)
+	ft.SetNow(func() time.Time { return t0 })
+
+	ft.store("call-bye", fasEntry{}, nil, false)
+
+	// Advance past byeFloor so finalizeOnBye will report.
+	ft.SetNow(func() time.Time { return t0.Add(2 * time.Hour) })
+
+	blockMM := &blockingFasMetricser{
+		called: make(chan struct{}, 1),
+		block:  make(chan struct{}),
+	}
+
+	byeDone := make(chan struct{})
+	go func() {
+		ft.finalizeOnBye("call-bye", blockMM)
+		close(byeDone)
+	}()
+
+	<-blockMM.called // FasCall invoked — finalizeOnBye is inside reportFAS.
+
+	sizeDone := make(chan struct{})
+	go func() {
+		_ = ft.Size()
+		close(sizeDone)
+	}()
+
+	select {
+	case <-sizeDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("finalizeOnBye held fasTracker.mu during reportFAS; Size blocked >200ms")
+	}
+
+	close(blockMM.block)
+	<-byeDone
+}
+
+// TestHandleRTPKernelTimestampMissingCounter verifies the wiring (MC/DC):
+// handleRTP calls RTPKernelTimestampMissing when pktTimestamp is zero and does
+// NOT call it when a kernel timestamp is present.
+func TestHandleRTPKernelTimestampMissingCounter(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Hour)
+
+	_, err := e.handleRTP(net.ParseIP("10.0.0.1"), 5004, net.ParseIP("10.0.0.2"), 5004, fasRTPPacket(1))
+	require.NoError(t, err)
+	require.Equal(t, 1, mm.rtpKernelTimestampMissingCalls,
+		"zero pktTimestamp (no SO_TIMESTAMPNS) must increment the counter")
+
+	e.pktTimestamp = time.Unix(1_700_000_000, 0)
+	_, err = e.handleRTP(net.ParseIP("10.0.0.1"), 5004, net.ParseIP("10.0.0.2"), 5004, fasRTPPacket(2))
+	require.NoError(t, err)
+	require.Equal(t, 1, mm.rtpKernelTimestampMissingCalls,
+		"non-zero pktTimestamp must not increment the counter")
+}
+
+// TestFASSweepLatency10kEntries is a performance regression guard: sweeping
+// 10k expired entries must stay well under the threshold. A spike indicates
+// accidental O(n²) behavior or a regression of the S11-14 lock-release fix.
+func TestFASSweepLatency10kEntries(t *testing.T) {
+	mm := &mockMetricser{}
+	ft := newFasTracker(time.Hour)
+	t0 := time.Unix(1_700_000_000, 0)
+	ft.SetNow(func() time.Time { return t0 })
+
+	for i := range 10_000 {
+		ft.store(fmt.Sprintf("call-%d", i), fasEntry{}, nil, false)
+	}
+	ft.SetNow(func() time.Time { return t0.Add(2 * time.Hour) })
+
+	start := time.Now()
+	ft.sweep(mm)
+	elapsed := time.Since(start)
+
+	require.Equal(t, 10_000, mm.fasCalls, "all 10k entries must fire")
+	require.Less(t, elapsed, 200*time.Millisecond,
+		"sweep of 10k entries must complete <200ms (got %v)", elapsed)
+}
+
+func BenchmarkHandleRTP_FASHotPath(b *testing.B) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Hour)
+	e.pktTimestamp = time.Unix(1_700_000_000, 0)
+
+	for i := range 1000 {
+		e.fasTracker.store(fmt.Sprintf("filler-%d", i), fasEntry{}, nil, false)
+	}
+	e.storeInviteSDP("bench", []byte(fasSdpOffer))
+	require.NoError(b,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("bench", fasSdpNormal), false),
+	)
+
+	dst := net.ParseIP("10.0.0.2")
+	src := net.ParseIP("10.0.0.1")
+	pkt := fasRTPPacket(0)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := range b.N {
+		pkt[2] = byte(uint16(i) >> 8)
+		pkt[3] = byte(uint16(i))
+		_, _ = e.handleRTP(src, 5004, dst, 5004, pkt)
+	}
+}
+
+func TestHandleMessageReINVITEExcludedFromBurst(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -2637,7 +2897,7 @@ func TestHandleMessage_ReINVITE_ExcludedFromBurst(t *testing.T) {
 
 // End-to-end: REGISTER then 200 OK populates the expiry tracker from the
 // parsed From URI and labels.
-func TestHandleMessage_Register200OK_PopulatesExpiryTracker(t *testing.T) {
+func TestHandleMessageRegister200OKPopulatesExpiryTracker(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -2668,7 +2928,7 @@ func TestHandleMessage_Register200OK_PopulatesExpiryTracker(t *testing.T) {
 	}())
 }
 
-func TestHandleMessage_Response401(t *testing.T) {
+func TestHandleMessageResponse401(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -2696,7 +2956,7 @@ func TestHandleMessage_Response401(t *testing.T) {
 	require.False(t, mm.responseIsInvite)
 }
 
-func TestHandleMessage_Response302_INVITE(t *testing.T) {
+func TestHandleMessageResponse302INVITE(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -2725,7 +2985,7 @@ func TestHandleMessage_Response302_INVITE(t *testing.T) {
 }
 
 // Integration test for SER change via handleMessage.
-func TestHandleMessage_SER_Integration(t *testing.T) {
+func TestHandleMessageSERIntegration(t *testing.T) {
 	m := &mockMetricser{}
 	d := &mockDialoger{}
 
@@ -2783,7 +3043,7 @@ func TestHandleMessage_SER_Integration(t *testing.T) {
 	require.True(t, m.responseIsInvite, "Response must be flagged as INVITE response")
 }
 
-func TestHandleMessage_ParseError(t *testing.T) {
+func TestHandleMessageParseError(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -2805,7 +3065,7 @@ func TestHandleMessage_ParseError(t *testing.T) {
 	require.Contains(t, err.Error(), "malformed request line")
 }
 
-func TestHandleMessage_Response200_InvalidDialogID(t *testing.T) {
+func TestHandleMessageResponse200InvalidDialogID(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -2834,7 +3094,7 @@ func TestHandleMessage_Response200_InvalidDialogID(t *testing.T) {
 
 // ==================== Tests for all SIP methods ====================
 
-func TestParseRawPacket_AllSIPMethods(t *testing.T) {
+func TestParseRawPacketAllSIPMethods(t *testing.T) {
 	methods := []string{
 		"INVITE", "ACK", "BYE", "CANCEL", "OPTIONS",
 		"REGISTER", "SUBSCRIBE", "NOTIFY", "PUBLISH", "INFO",
@@ -2876,7 +3136,7 @@ func TestParseRawPacket_AllSIPMethods(t *testing.T) {
 	}
 }
 
-func TestParseRawPacket_SIPResponse(t *testing.T) {
+func TestParseRawPacketSIPResponse(t *testing.T) {
 	responses := []struct {
 		code   string
 		packet string
@@ -2958,7 +3218,7 @@ func TestHtons(t *testing.T) {
 
 // ==================== SIP method prefix tests ====================
 
-func TestParseRawPacket_SIPMethodsBytesPrefix(t *testing.T) {
+func TestParseRawPacketSIPMethodsBytesPrefix(t *testing.T) {
 	testCases := []struct {
 		method      string
 		shouldMatch bool
@@ -3007,7 +3267,7 @@ func TestParseRawPacket_SIPMethodsBytesPrefix(t *testing.T) {
 
 // ==================== Additional sipPacketParse tests ====================
 
-func TestSIPPacketParse_Response401(t *testing.T) {
+func TestSIPPacketParseResponse401(t *testing.T) {
 	e := exporter{}
 
 	input := []byte("SIP/2.0 401 Unauthorized\r\n" +
@@ -3020,7 +3280,7 @@ func TestSIPPacketParse_Response401(t *testing.T) {
 	require.Equal(t, []byte("401"), p.ResponseStatus)
 }
 
-func TestSIPPacketParse_INVITE(t *testing.T) {
+func TestSIPPacketParseINVITE(t *testing.T) {
 	e := exporter{}
 
 	input := []byte("INVITE sip:1001@192.168.0.89 SIP/2.0\r\n" +
@@ -3042,7 +3302,7 @@ func TestSIPPacketParse_INVITE(t *testing.T) {
 	require.Equal(t, []byte("INVITE"), p.CSeq.Method)
 }
 
-func TestParseResponsesPacket_401(t *testing.T) {
+func TestParseResponsesPacket401(t *testing.T) {
 	e := exporter{}
 
 	input := []byte("SIP/2.0 401 Unauthorized\r\n" +
@@ -3064,7 +3324,7 @@ func TestParseResponsesPacket_401(t *testing.T) {
 	require.Equal(t, []byte("REGISTER"), p.CSeq.Method)
 }
 
-func TestParseResponsesPacket_200(t *testing.T) {
+func TestParseResponsesPacket200(t *testing.T) {
 	e := exporter{}
 
 	input := []byte("SIP/2.0 200 OK\r\n" +
@@ -3110,7 +3370,7 @@ func TestParseRegisterPacket(t *testing.T) {
 
 // ==================== Register Tracker tests ====================
 
-func TestExporter_RegisterTracker_StoreAndRemove(t *testing.T) {
+func TestExporterRegisterTrackerStoreAndRemove(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -3139,7 +3399,7 @@ func TestExporter_RegisterTracker_StoreAndRemove(t *testing.T) {
 	require.False(t, exists, "entry should not exist after remove")
 }
 
-func TestExporter_RegisterTracker_401Removes(t *testing.T) {
+func TestExporterRegisterTracker401Removes(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -3185,7 +3445,7 @@ func TestExporter_RegisterTracker_401Removes(t *testing.T) {
 	require.False(t, mm.rrdUpdated, "RRD should NOT be updated for 401")
 }
 
-func TestExporter_RegisterTracker_403Removes(t *testing.T) {
+func TestExporterRegisterTracker403Removes(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -3224,7 +3484,7 @@ func TestExporter_RegisterTracker_403Removes(t *testing.T) {
 	require.False(t, mm.rrdUpdated, "RRD should NOT be updated for 403")
 }
 
-func TestExporter_RegisterTracker_500Removes(t *testing.T) {
+func TestExporterRegisterTracker500Removes(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -3263,7 +3523,7 @@ func TestExporter_RegisterTracker_500Removes(t *testing.T) {
 	require.False(t, mm.rrdUpdated, "RRD should NOT be updated for 500")
 }
 
-func TestExporter_RegisterTracker_TTLExpired(t *testing.T) {
+func TestExporterRegisterTrackerTTLExpired(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -3299,7 +3559,7 @@ func TestExporter_RegisterTracker_TTLExpired(t *testing.T) {
 	require.True(t, freshExists, "fresh entry should remain")
 }
 
-func TestExporter_RegisterTracker_TTLNotExpired(t *testing.T) {
+func TestExporterRegisterTrackerTTLNotExpired(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -3323,7 +3583,7 @@ func TestExporter_RegisterTracker_TTLNotExpired(t *testing.T) {
 	require.True(t, exists, "entry at 30s should remain (TTL=60s)")
 }
 
-func TestExporter_RegisterTracker_Retransmit200OK(t *testing.T) {
+func TestExporterRegisterTrackerRetransmit200OK(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -3373,7 +3633,7 @@ func TestExporter_RegisterTracker_Retransmit200OK(t *testing.T) {
 	require.False(t, exists, "entry should be removed after 200 OK")
 }
 
-func TestExporter_RegisterTracker_Retransmit401(t *testing.T) {
+func TestExporterRegisterTrackerRetransmit401(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -3417,7 +3677,7 @@ func TestExporter_RegisterTracker_Retransmit401(t *testing.T) {
 	require.False(t, exists, "entry should be removed after 401")
 }
 
-func TestExporter_RegisterTracker_DifferentCallID(t *testing.T) {
+func TestExporterRegisterTrackerDifferentCallID(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -3487,7 +3747,7 @@ func TestExporter_RegisterTracker_DifferentCallID(t *testing.T) {
 	require.False(t, exists2, "call-id-2 should be removed")
 }
 
-func TestSIPDialogMetricsUpdate_ExpiredIncrementsSessionCompleted(t *testing.T) {
+func TestSIPDialogMetricsUpdateExpiredIncrementsSessionCompleted(t *testing.T) {
 	start := time.Now()
 	mm := &mockMetricser{}
 	md := &mockDialoger{
@@ -3517,7 +3777,7 @@ func TestSIPDialogMetricsUpdate_ExpiredIncrementsSessionCompleted(t *testing.T) 
 
 // ==================== Invite Tracker tests ====================
 
-func TestExporter_InviteTracker_StoreAndMeasure(t *testing.T) {
+func TestExporterInviteTrackerStoreAndMeasure(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -3542,7 +3802,7 @@ func TestExporter_InviteTracker_StoreAndMeasure(t *testing.T) {
 	require.False(t, e.readInviteEntry(callID).Ok, "entry should not exist after remove")
 }
 
-func TestExporter_InviteTracker_StoreAndRemove(t *testing.T) {
+func TestExporterInviteTrackerStoreAndRemove(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -3563,7 +3823,7 @@ func TestExporter_InviteTracker_StoreAndRemove(t *testing.T) {
 	require.False(t, ok, "entry should not exist after remove")
 }
 
-func TestExporter_InviteTracker_MeasureNonExistent(t *testing.T) {
+func TestExporterInviteTrackerMeasureNonExistent(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -3581,7 +3841,7 @@ func TestExporter_InviteTracker_MeasureNonExistent(t *testing.T) {
 	require.Empty(t, r.Carrier)
 }
 
-func TestExporter_InviteTracker_RemoveNonExistent(_ *testing.T) {
+func TestExporterInviteTrackerRemoveNonExistent(_ *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -3596,7 +3856,7 @@ func TestExporter_InviteTracker_RemoveNonExistent(_ *testing.T) {
 	e.removeInviteTime("nonexistent")
 }
 
-func TestExporter_InviteTracker_TTLExpired(t *testing.T) {
+func TestExporterInviteTrackerTTLExpired(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -3627,7 +3887,7 @@ func TestExporter_InviteTracker_TTLExpired(t *testing.T) {
 	require.True(t, freshExists, "fresh entry should remain")
 }
 
-func TestExporter_InviteTracker_TTLNotExpired(t *testing.T) {
+func TestExporterInviteTrackerTTLNotExpired(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -3648,7 +3908,7 @@ func TestExporter_InviteTracker_TTLNotExpired(t *testing.T) {
 	require.True(t, exists, "entry at 30s should remain (TTL=60s)")
 }
 
-func TestExporter_InviteTracker_DifferentCallIDs(t *testing.T) {
+func TestExporterInviteTrackerDifferentCallIDs(t *testing.T) {
 	e := &exporter{
 		services: services{
 			metricser: &mockMetricser{},
@@ -3675,7 +3935,7 @@ func TestExporter_InviteTracker_DifferentCallIDs(t *testing.T) {
 
 // ==================== TTR integration tests ====================
 
-func TestHandleMessage_TTR_100Trying(t *testing.T) {
+func TestHandleMessageTTR100Trying(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -3717,7 +3977,7 @@ func TestHandleMessage_TTR_100Trying(t *testing.T) {
 	require.Greater(t, mm.ttrDelay, 0.0)
 }
 
-func TestHandleMessage_TTR_180Ringing(t *testing.T) {
+func TestHandleMessageTTR180Ringing(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -3756,7 +4016,7 @@ func TestHandleMessage_TTR_180Ringing(t *testing.T) {
 	require.Greater(t, mm.ttrDelay, 0.0)
 }
 
-func TestHandleMessage_TTR_183SessionProgress(t *testing.T) {
+func TestHandleMessageTTR183SessionProgress(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -3795,7 +4055,7 @@ func TestHandleMessage_TTR_183SessionProgress(t *testing.T) {
 	require.Greater(t, mm.ttrDelay, 0.0)
 }
 
-func TestHandleMessage_TTR_NoProvisionalResponse(t *testing.T) {
+func TestHandleMessageTTRNoProvisionalResponse(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -3833,7 +4093,7 @@ func TestHandleMessage_TTR_NoProvisionalResponse(t *testing.T) {
 	require.False(t, mm.ttrUpdated, "TTR should NOT be measured when no 1xx received")
 }
 
-func TestHandleMessage_TTR_OnlyFirstProvisionalMeasured(t *testing.T) {
+func TestHandleMessageTTROnlyFirstProvisionalMeasured(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -3884,7 +4144,7 @@ func TestHandleMessage_TTR_OnlyFirstProvisionalMeasured(t *testing.T) {
 	require.InDelta(t, firstTTR, mm.ttrDelay, 0.01, "TTR should NOT be measured again on second 1xx")
 }
 
-func TestHandleMessage_TTR_RetransmitOverwrites(t *testing.T) {
+func TestHandleMessageTTRRetransmitOverwrites(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -3927,7 +4187,7 @@ func TestHandleMessage_TTR_RetransmitOverwrites(t *testing.T) {
 	require.Greater(t, mm.ttrDelay, 0.0)
 }
 
-func TestHandleMessage_TTR_FinalResponseRemovesTracker(t *testing.T) {
+func TestHandleMessageTTRFinalResponseRemovesTracker(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -3967,7 +4227,7 @@ func TestHandleMessage_TTR_FinalResponseRemovesTracker(t *testing.T) {
 	require.False(t, ok, "tracker entry should be removed after final response")
 }
 
-func TestHandleMessage_TTR_NonInviteResponse_Ignored(t *testing.T) {
+func TestHandleMessageTTRNonInviteResponseIgnored(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -4004,7 +4264,7 @@ func TestHandleMessage_TTR_NonInviteResponse_Ignored(t *testing.T) {
 	require.False(t, mm.ttrUpdated, "TTR should NOT be measured for REGISTER 100 Trying")
 }
 
-func TestHandleMessage_TTR_FullCallFlow(t *testing.T) {
+func TestHandleMessageTTRFullCallFlow(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -4077,7 +4337,7 @@ func TestHandleMessage_TTR_FullCallFlow(t *testing.T) {
 
 // ==================== PDD integration tests ====================
 
-func TestHandleMessage_PDD_180Ringing(t *testing.T) {
+func TestHandleMessagePDD180Ringing(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -4118,7 +4378,7 @@ func TestHandleMessage_PDD_180Ringing(t *testing.T) {
 	require.InDelta(t, mm.ttrDelay, mm.pddDelay, 0.01, "PDD and TTR delay should be equal for direct 180")
 }
 
-func TestHandleMessage_PDD_100TryingThen180Ringing(t *testing.T) {
+func TestHandleMessagePDD100TryingThen180Ringing(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -4169,7 +4429,7 @@ func TestHandleMessage_PDD_100TryingThen180Ringing(t *testing.T) {
 	require.Greater(t, mm.pddDelay, 0.0)
 }
 
-func TestHandleMessage_PDD_183NoPDD(t *testing.T) {
+func TestHandleMessagePDD183NoPDD(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -4208,7 +4468,7 @@ func TestHandleMessage_PDD_183NoPDD(t *testing.T) {
 	require.False(t, mm.pddUpdated, "PDD should NOT be measured on 183 Session Progress")
 }
 
-func TestHandleMessage_PDD_No180NoPDD(t *testing.T) {
+func TestHandleMessagePDDNo180NoPDD(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -4247,7 +4507,7 @@ func TestHandleMessage_PDD_No180NoPDD(t *testing.T) {
 	require.False(t, mm.ttrUpdated, "TTR should NOT be measured when no 1xx received")
 }
 
-func TestHandleMessage_PDD_NonInviteResponse_Ignored(t *testing.T) {
+func TestHandleMessagePDDNonInviteResponseIgnored(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -4281,7 +4541,7 @@ func TestHandleMessage_PDD_NonInviteResponse_Ignored(t *testing.T) {
 	require.False(t, mm.pddUpdated, "PDD should NOT be measured for REGISTER 180 Ringing")
 }
 
-func TestHandleMessage_CarrierPropagation_FullDialog(t *testing.T) {
+func TestHandleMessageCarrierPropagationFullDialog(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -4340,7 +4600,7 @@ func TestHandleMessage_CarrierPropagation_FullDialog(t *testing.T) {
 	require.True(t, mm.spdUpdated)
 }
 
-func TestHandleMessage_CarrierPropagation_MultiCarrierDialogs(t *testing.T) {
+func TestHandleMessageCarrierPropagationMultiCarrierDialogs(t *testing.T) {
 	md := &mockDialoger{}
 
 	e := &exporter{
@@ -4618,6 +4878,7 @@ func (m *carrierTrackingMetricser) UpdateRTCPCumulativeLoss(string, string, stri
 func (m *carrierTrackingMetricser) UpdateRTCPRTT(string, string, string, string, string, float64) {}
 func (m *carrierTrackingMetricser) UpdateRTCPReport(string, string, string, string, string)       {}
 func (m *carrierTrackingMetricser) UpdateRTCPOrphan()                                             {}
+func (m *carrierTrackingMetricser) RTPKernelTimestampMissing()                                    {}
 
 // ==================== SIP message builders for MC/DC tests ====================
 
@@ -4741,7 +5002,7 @@ func countCarrierMethod(calls []carrierCall, carrier, method string) int {
 
 // ==================== MC/DC Carrier Propagation Tests ====================
 
-func TestMCDC_TC1_InviteResponse_CarrierFromTracker(t *testing.T) {
+func TestMCDCTC1InviteResponseCarrierFromTracker(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -4753,7 +5014,7 @@ func TestMCDC_TC1_InviteResponse_CarrierFromTracker(t *testing.T) {
 	require.Equal(t, "carrier-A", md.created["tc1:ft1:tt1"].carrier)
 }
 
-func TestMCDC_TC2_InviteResponse_CarrierFallbackWithoutTracker(t *testing.T) {
+func TestMCDCTC2InviteResponseCarrierFallbackWithoutTracker(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -4765,7 +5026,7 @@ func TestMCDC_TC2_InviteResponse_CarrierFallbackWithoutTracker(t *testing.T) {
 	require.Equal(t, "carrier-B", mm.responseWithMetrics[0].carrier)
 }
 
-func TestMCDC_TC3_RegisterResponse_CarrierFromTracker(t *testing.T) {
+func TestMCDCTC3RegisterResponseCarrierFromTracker(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -4777,7 +5038,7 @@ func TestMCDC_TC3_RegisterResponse_CarrierFromTracker(t *testing.T) {
 	require.Equal(t, "carrier-A", mm.rrdCalls[0].carrier)
 }
 
-func TestMCDC_TC4_RegisterResponse_CarrierFallbackWithoutTracker(t *testing.T) {
+func TestMCDCTC4RegisterResponseCarrierFallbackWithoutTracker(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -4793,7 +5054,7 @@ func TestMCDC_TC4_RegisterResponse_CarrierFallbackWithoutTracker(t *testing.T) {
 	require.Equal(t, "carrier-B", mm.responseWithMetrics[0].carrier)
 }
 
-func TestMCDC_TC5_TTR_1xxResponse_CarrierFromTracker(t *testing.T) {
+func TestMCDCTC5TTR1xxResponseCarrierFromTracker(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -4805,7 +5066,7 @@ func TestMCDC_TC5_TTR_1xxResponse_CarrierFromTracker(t *testing.T) {
 	require.Equal(t, "carrier-A", mm.ttrCalls[0].carrier)
 }
 
-func TestMCDC_TC6_TTR_Non1xxResponse_NotMeasured(t *testing.T) {
+func TestMCDCTC6TTRNon1xxResponseNotMeasured(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -4818,7 +5079,7 @@ func TestMCDC_TC6_TTR_Non1xxResponse_NotMeasured(t *testing.T) {
 	require.False(t, e.readInviteEntry("tc6").Ok)
 }
 
-func TestMCDC_TC7_TTR_NonInviteResponse_Ignored(t *testing.T) {
+func TestMCDCTC7TTRNonInviteResponseIgnored(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -4830,7 +5091,7 @@ func TestMCDC_TC7_TTR_NonInviteResponse_Ignored(t *testing.T) {
 	require.Empty(t, mm.ttrCalls)
 }
 
-func TestMCDC_TC8_DialogCreatedWithTrackerCarrier_Mismatch(t *testing.T) {
+func TestMCDCTC8DialogCreatedWithTrackerCarrierMismatch(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -4845,7 +5106,7 @@ func TestMCDC_TC8_DialogCreatedWithTrackerCarrier_Mismatch(t *testing.T) {
 		"invite200OK metric must use INVITE tracker carrier")
 }
 
-func TestMCDC_TC9_DialogCreatedWithTrackerCarrier_SameCarrier(t *testing.T) {
+func TestMCDCTC9DialogCreatedWithTrackerCarrierSameCarrier(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -4857,7 +5118,7 @@ func TestMCDC_TC9_DialogCreatedWithTrackerCarrier_SameCarrier(t *testing.T) {
 	require.Equal(t, "carrier-A", md.created["tc9:ft9:tt9"].carrier)
 }
 
-func TestMCDC_TC10_Bye200OK_CarrierFromDialog(t *testing.T) {
+func TestMCDCTC10Bye200OKCarrierFromDialog(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -4880,7 +5141,7 @@ func TestMCDC_TC10_Bye200OK_CarrierFromDialog(t *testing.T) {
 		"UpdateSPD must use dialog carrier")
 }
 
-func TestMCDC_TC11_Bye200OK_NonExistingDialog_NoMetrics(t *testing.T) {
+func TestMCDCTC11Bye200OKNonExistingDialogNoMetrics(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -4897,7 +5158,7 @@ func TestMCDC_TC11_Bye200OK_NonExistingDialog_NoMetrics(t *testing.T) {
 	require.Empty(t, mm.spdCalls)
 }
 
-func TestMCDC_TC12_DialogExpiry_CarrierFromDialog(t *testing.T) {
+func TestMCDCTC12DialogExpiryCarrierFromDialog(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{
 		cleanupResults: []service.CleanupResult{
@@ -4917,7 +5178,7 @@ func TestMCDC_TC12_DialogExpiry_CarrierFromDialog(t *testing.T) {
 	require.Equal(t, "carrier-A", mm.spdCalls[0].carrier)
 }
 
-func TestBillable_Bye200OK(t *testing.T) {
+func TestBillableBye200OK(t *testing.T) {
 	tests := []struct {
 		name         string
 		preCreate    bool
@@ -4954,7 +5215,7 @@ func TestBillable_Bye200OK(t *testing.T) {
 	}
 }
 
-func TestBillable_CleanupExpiry(t *testing.T) {
+func TestBillableCleanupExpiry(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{
 		cleanupResults: []service.CleanupResult{
@@ -4976,7 +5237,7 @@ func TestBillable_CleanupExpiry(t *testing.T) {
 	require.InDelta(t, 300.0, mm.billableCalls[0].value, 0.01)
 }
 
-func TestMCDC_TC13_DialogExpiry_DifferentCarrier(t *testing.T) {
+func TestMCDCTC13DialogExpiryDifferentCarrier(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{
 		cleanupResults: []service.CleanupResult{
@@ -4994,7 +5255,7 @@ func TestMCDC_TC13_DialogExpiry_DifferentCarrier(t *testing.T) {
 	require.Equal(t, "carrier-B", mm.sessionCompleted[0].carrier)
 }
 
-func TestMCDC_TC14_Register200OK_RRDCarrierFromTracker(t *testing.T) {
+func TestMCDCTC14Register200OKRRDCarrierFromTracker(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -5007,7 +5268,7 @@ func TestMCDC_TC14_Register200OK_RRDCarrierFromTracker(t *testing.T) {
 	require.Greater(t, mm.rrdCalls[0].value, 0.0)
 }
 
-func TestMCDC_TC15_Register3xx_LRDCarrierFromTracker(t *testing.T) {
+func TestMCDCTC15Register3xxLRDCarrierFromTracker(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -5019,7 +5280,7 @@ func TestMCDC_TC15_Register3xx_LRDCarrierFromTracker(t *testing.T) {
 	require.Equal(t, "carrier-A", mm.lrdCalls[0].carrier)
 }
 
-func TestMCDC_TC16_OptionsResponse_ORDCarrierFromTracker(t *testing.T) {
+func TestMCDCTC16OptionsResponseORDCarrierFromTracker(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -5031,7 +5292,7 @@ func TestMCDC_TC16_OptionsResponse_ORDCarrierFromTracker(t *testing.T) {
 	require.Equal(t, "carrier-A", mm.ordCalls[0].carrier)
 }
 
-func TestMCDC_TC17_MultiCarrier_CorrectAttribution(t *testing.T) {
+func TestMCDCTC17MultiCarrierCorrectAttribution(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -5073,7 +5334,7 @@ func TestMCDC_TC17_MultiCarrier_CorrectAttribution(t *testing.T) {
 	require.Equal(t, 0, countCarrier(mm.invite200OK, "carrier-C"))
 }
 
-func TestMCDC_TC18_TrackerTTLExpired_FallbackToPacketCarrier(t *testing.T) {
+func TestMCDCTC18TrackerTTLExpiredFallbackToPacketCarrier(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -5094,7 +5355,7 @@ func TestMCDC_TC18_TrackerTTLExpired_FallbackToPacketCarrier(t *testing.T) {
 		"when tracker entry expired, should fall back to packet carrier")
 }
 
-func TestMCDC_TC19_Retransmit_PreservesOriginalCarrier(t *testing.T) {
+func TestMCDCTC19RetransmitPreservesOriginalCarrier(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -5108,7 +5369,7 @@ func TestMCDC_TC19_Retransmit_PreservesOriginalCarrier(t *testing.T) {
 		"retransmitted INVITE must not overwrite original carrier in tracker")
 }
 
-func TestMCDC_TC20_OtherCarrier_20Known_10Other(t *testing.T) {
+func TestMCDCTC20OtherCarrier20Known10Other(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -5146,7 +5407,7 @@ func TestMCDC_TC20_OtherCarrier_20Known_10Other(t *testing.T) {
 	require.Equal(t, 0, carrierB)
 }
 
-func TestHandleMessage_CANCEL_RemovesInviteTracker(t *testing.T) {
+func TestHandleMessageCANCELRemovesInviteTracker(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -5188,7 +5449,7 @@ func TestHandleMessage_CANCEL_RemovesInviteTracker(t *testing.T) {
 	require.False(t, ok, "inviteTracker entry should be removed after CANCEL")
 }
 
-func TestHandleMessage_CANCEL_NoEntry_NoOp(t *testing.T) {
+func TestHandleMessageCANCELNoEntryNoOp(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -5214,7 +5475,7 @@ func TestHandleMessage_CANCEL_NoEntry_NoOp(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestHandleMessage_CANCEL_ThenProvisional_NoTTR(t *testing.T) {
+func TestHandleMessageCANCELThenProvisionalNoTTR(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -5264,7 +5525,7 @@ func TestHandleMessage_CANCEL_ThenProvisional_NoTTR(t *testing.T) {
 	require.False(t, mm.ttrUpdated, "TTR should not be measured after CANCEL removed tracker entry")
 }
 
-func TestHandleRequest_PUBLISH_VQReport(t *testing.T) {
+func TestHandleRequestPUBLISHVQReport(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -5289,7 +5550,7 @@ func TestHandleRequest_PUBLISH_VQReport(t *testing.T) {
 	require.Equal(t, "carrier-a", mm.vqReports[0].carrier)
 }
 
-func TestHandleRequest_NOTIFY_VQReport(t *testing.T) {
+func TestHandleRequestNOTIFYVQReport(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -5314,7 +5575,7 @@ func TestHandleRequest_NOTIFY_VQReport(t *testing.T) {
 	require.Equal(t, "carrier-b", mm.vqReports[0].carrier)
 }
 
-func TestHandleRequest_PUBLISH_NoVQContentType(t *testing.T) {
+func TestHandleRequestPUBLISHNoVQContentType(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -5334,7 +5595,7 @@ func TestHandleRequest_PUBLISH_NoVQContentType(t *testing.T) {
 	require.Empty(t, mm.vqReports, "VQ handler should not be called for non-vq content type")
 }
 
-func TestHandleRequest_NOTIFY_NoVQContentType(t *testing.T) {
+func TestHandleRequestNOTIFYNoVQContentType(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -5354,7 +5615,7 @@ func TestHandleRequest_NOTIFY_NoVQContentType(t *testing.T) {
 	require.Empty(t, mm.vqReports, "VQ handler should not be called for non-vq content type")
 }
 
-func TestHandleRequest_PUBLISH_VQEmptyBody(t *testing.T) {
+func TestHandleRequestPUBLISHVQEmptyBody(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -5373,7 +5634,7 @@ func TestHandleRequest_PUBLISH_VQEmptyBody(t *testing.T) {
 	require.Empty(t, mm.vqReports, "VQ handler should not report metrics for empty body")
 }
 
-func TestHandleRequest_NOTIFY_VQInvalidBody(t *testing.T) {
+func TestHandleRequestNOTIFYVQInvalidBody(t *testing.T) {
 	mm := newCarrierTrackingMetricser()
 	md := &mockDialoger{}
 	e := newTestExporter(mm, md)
@@ -5393,11 +5654,11 @@ func TestHandleRequest_NOTIFY_VQInvalidBody(t *testing.T) {
 	require.Empty(t, mm.vqReports, "VQ handler should not report metrics for invalid body")
 }
 
-// TestExporter_GracefulShutdown verifies that readSocket exits cleanly when
+// TestExporterGracefulShutdown verifies that readSocket exits cleanly when
 // Close() is called (no EBADF spin loop), and that Close() completes within a
 // reasonable timeout. readPackets and sipDialogMetricsUpdate also receive the
 // done signal and wind down asynchronously.
-func TestExporter_GracefulShutdown(t *testing.T) {
+func TestExporterGracefulShutdown(t *testing.T) {
 	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM, 0)
 	require.NoError(t, err)
 	defer unix.Close(fds[1])
@@ -5477,14 +5738,14 @@ func newRollbackExporter() *exporter {
 	}
 }
 
-// TestInitialize_RollbackOnInvalidInterface verifies that when Initialize
+// TestInitializeRollbackOnInvalidInterface verifies that when Initialize
 // fails partway through interface processing (some sockets already created),
 // all created sockets are closed, the BPF collection is released, e.socks and
 // e.collection are left in a clean state, and no file descriptors leak.
 //
 // Covers risk R2 (Initialize partial failure → FD/collection leak) from
 // SPRINT_014.
-func TestInitialize_RollbackOnInvalidInterface(t *testing.T) {
+func TestInitializeRollbackOnInvalidInterface(t *testing.T) {
 	if syscall.Geteuid() != 0 {
 		t.Skip("requires root privileges for AF_PACKET")
 	}
@@ -5512,10 +5773,10 @@ func TestInitialize_RollbackOnInvalidInterface(t *testing.T) {
 	require.Equal(t, before, after, "FD leak detected after failed Initialize")
 }
 
-// TestInitialize_FirstInterfaceInvalid covers the case where the very first
+// TestInitializeFirstInterfaceInvalid covers the case where the very first
 // interface fails: createdSocks is empty, rollback loop closes nothing, but
 // the collection must still be released and e.collection set to nil.
-func TestInitialize_FirstInterfaceInvalid(t *testing.T) {
+func TestInitializeFirstInterfaceInvalid(t *testing.T) {
 	if syscall.Geteuid() != 0 {
 		t.Skip("requires root privileges for AF_PACKET")
 	}
@@ -5538,12 +5799,12 @@ func TestInitialize_FirstInterfaceInvalid(t *testing.T) {
 	require.Equal(t, before, after, "FD leak detected")
 }
 
-// TestReadSocketStats_Aggregation verifies that readSocketStats sums
+// TestReadSocketStatsAggregation verifies that readSocketStats sums
 // PACKET_STATISTICS across multiple sockets rather than reading only one.
 // Two AF_PACKET sockets are bound to lo; traffic is generated by sending UDP
 // packets to 127.0.0.1; both sockets should observe packets, and the
 // aggregated count must exceed what either single socket reports.
-func TestReadSocketStats_Aggregation(t *testing.T) {
+func TestReadSocketStatsAggregation(t *testing.T) {
 	if syscall.Geteuid() != 0 {
 		t.Skip("requires root privileges for AF_PACKET")
 	}
@@ -5758,7 +6019,7 @@ func TestIsSIPPacket(t *testing.T) {
 	}
 }
 
-func TestSendPacket_RTPDropWhenFull(t *testing.T) {
+func TestSendPacketRTPDropWhenFull(t *testing.T) {
 	mm := &mockMetricser{}
 	e := &exporter{
 		messages: make(chan *rawPacket, 1),
@@ -5786,7 +6047,7 @@ func TestSendPacket_RTPDropWhenFull(t *testing.T) {
 	)
 }
 
-func TestSendPacket_SuccessPaths(t *testing.T) {
+func TestSendPacketSuccessPaths(t *testing.T) {
 	t.Run("SIP success", func(t *testing.T) {
 		e := &exporter{
 			messages: make(chan *rawPacket, 1),
@@ -5932,17 +6193,17 @@ func TestResolveSourceCountry(t *testing.T) {
 	}
 }
 
-// TestSIPDialogMetricsUpdate_TrackerLenNoRace verifies that len() calls on
+// TestSIPDialogMetricsUpdateTrackerLenNoRace verifies that len() calls on
 // registerTracker, inviteTracker, and optionsTracker in sipDialogMetricsUpdate
 // do not race with concurrent writes from readPackets.
 //
-// Run with: go test -race -run TestSIPDialogMetricsUpdate_TrackerLenNoRace
+// Run with: go test -race -run TestSIPDialogMetricsUpdateTrackerLenNoRace
 //
 // Before S14-7.2 fix, the three len() calls at exporter.go:516-518 read map
 // headers without holding the matching mutex, while readPackets (simulated
 // here by a writer goroutine) mutates those maps under lock. Under -race this
 // produces "concurrent map read and map write" — a fatal runtime error.
-func TestSIPDialogMetricsUpdate_TrackerLenNoRace(t *testing.T) {
+func TestSIPDialogMetricsUpdateTrackerLenNoRace(t *testing.T) {
 	e := newRollbackExporter()
 
 	// Writer goroutine: intensively writes/deletes tracker entries under locks,
@@ -5990,7 +6251,7 @@ func TestSIPDialogMetricsUpdate_TrackerLenNoRace(t *testing.T) {
 	require.NotPanics(t, func() { e.Close() })
 }
 
-// TestReadSocket_FailStopNoSystemError verifies that readSocket returns cleanly
+// TestReadSocketFailStopNoSystemError verifies that readSocket returns cleanly
 // without incrementing SystemError when the socket becomes invalid (EBADF).
 // This is the same return-path used for ENETDOWN/ENODEV hot-unplug (S14-7.1):
 // the goroutine stops silently rather than spamming Error+SystemError every
@@ -5998,7 +6259,7 @@ func TestSIPDialogMetricsUpdate_TrackerLenNoRace(t *testing.T) {
 //
 // A dedicated ENETDOWN test requires veth-pair infrastructure (root-gated)
 // and is deferred to S15 (S14-7.5 readSocket error-branch MC/DC tests).
-func TestReadSocket_FailStopNoSystemError(t *testing.T) {
+func TestReadSocketFailStopNoSystemError(t *testing.T) {
 	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM, 0)
 	require.NoError(t, err)
 	defer unix.Close(fds[1])
@@ -6071,7 +6332,7 @@ func (m *directionTrackingMetricser) ResponseWithMetrics(_, _, _, direction stri
 	m.responseDirections = append(m.responseDirections, direction)
 }
 
-func TestHandleMessage_DirectionFromPkttype(t *testing.T) {
+func TestHandleMessageDirectionFromPkttype(t *testing.T) {
 	tests := []struct {
 		name      string
 		pktType   uint8
@@ -6175,7 +6436,7 @@ func TestIPPortToKey(t *testing.T) {
 
 // ==================== S10-R1: Exporter-layer wiring tests ====================
 
-func TestHandleRequest_RetransmissionMetric(t *testing.T) {
+func TestHandleRequestRetransmissionMetric(t *testing.T) {
 	mm := &mockMetricser{}
 	e := &exporter{
 		services: services{
@@ -6205,7 +6466,7 @@ func TestHandleRequest_RetransmissionMetric(t *testing.T) {
 	require.Equal(t, 1, mm.sipRetransmissionCalls, "retransmitted INVITE should trigger SipRetransmission")
 }
 
-func TestRTP_HandleRTP_OutOfOrderMetric(t *testing.T) {
+func TestRTPHandleRTPOutOfOrderMetric(t *testing.T) {
 	mm := &mockMetricser{}
 	e := &exporter{
 		services:       services{metricser: mm, dialoger: &mockDialoger{}},
@@ -6230,7 +6491,7 @@ func TestRTP_HandleRTP_OutOfOrderMetric(t *testing.T) {
 	require.Equal(t, 1, mm.rtpOutOfOrderCalls, "seq=3 after maxSeq=5 should trigger UpdateRTPOutOfOrder")
 }
 
-func TestHandleBye200OK_PBDMetric(t *testing.T) {
+func TestHandleBye200OKPBDMetric(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -6281,7 +6542,7 @@ func TestHandleBye200OK_PBDMetric(t *testing.T) {
 	require.Greater(t, mm.pbdDelay, 0.0, "PBD delay must be positive")
 }
 
-func TestHandleBye200OK_ShortCallsMetric(t *testing.T) {
+func TestHandleBye200OKShortCallsMetric(t *testing.T) {
 	mm := &mockMetricser{}
 	md := &mockDialoger{}
 
@@ -6330,7 +6591,7 @@ func TestHandleBye200OK_ShortCallsMetric(t *testing.T) {
 	require.Greater(t, mm.shortCallsDuration, time.Duration(0), "duration must be positive")
 }
 
-func TestCleanupByeTracker_TTLExpiry(t *testing.T) {
+func TestCleanupByeTrackerTTLExpiry(t *testing.T) {
 	e := &exporter{
 		byeTracker: make(map[string]byeEntry),
 	}
@@ -6348,4 +6609,49 @@ func TestCleanupByeTracker_TTLExpiry(t *testing.T) {
 	_, freshKept := e.byeTracker["fresh"]
 	require.False(t, expiredGone, "expired entry must be cleaned up")
 	require.True(t, freshKept, "fresh entry must survive cleanup")
+}
+
+func TestResolveRTCEndpoint(t *testing.T) {
+	tests := []struct {
+		name     string
+		m        sdp.Media
+		wantIP   string
+		wantPort uint16
+		wantOK   bool
+	}{
+		{
+			name:   "a=rtcp with unicast address",
+			m:      sdp.Media{IP: "10.0.0.1", Port: 5004, RTCPPort: 5005, RTCPAddr: "10.0.0.99"},
+			wantIP: "10.0.0.99", wantPort: 5005, wantOK: true,
+		},
+		{
+			name:   "a=rtcp port only (no address)",
+			m:      sdp.Media{IP: "10.0.0.1", Port: 5004, RTCPPort: 5005},
+			wantIP: "10.0.0.1", wantPort: 5005, wantOK: true,
+		},
+		{
+			name:   "rtcp-mux shares RTP port",
+			m:      sdp.Media{IP: "10.0.0.1", Port: 5004, RTCPMux: true},
+			wantIP: "", wantPort: 0, wantOK: false,
+		},
+		{
+			name:   "legacy port+1",
+			m:      sdp.Media{IP: "10.0.0.1", Port: 5004},
+			wantIP: "10.0.0.1", wantPort: 5005, wantOK: true,
+		},
+		{
+			name:   "port at max skips legacy",
+			m:      sdp.Media{IP: "10.0.0.1", Port: maxUDPPort},
+			wantIP: "", wantPort: 0, wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ip, port, ok := resolveRTCEndpoint(tt.m)
+			require.Equal(t, tt.wantIP, ip)
+			require.Equal(t, tt.wantPort, port)
+			require.Equal(t, tt.wantOK, ok)
+		})
+	}
 }

@@ -3,22 +3,21 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-// TestRFC6076_Invariants verifies cross-metric invariants defined in RFC 6076:
+// TestRFC6076Invariants verifies cross-metric invariants defined in RFC 6076:
 //   - SEER ≥ SER (always)
 //   - SCR ≤ SER (always)
 //   - All ratios ∈ [0, 100]
 //
 // Traffic mix: 100×200 OK + 50×486 Busy + 50×500 Server Error (total 200 INVITE, no 3xx).
 // Expected: SER=50%, SEER=75%, SCR=50%, NER=75%.
-func TestRFC6076_Invariants(t *testing.T) {
+func TestRFC6076Invariants(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
 	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 100, env)
