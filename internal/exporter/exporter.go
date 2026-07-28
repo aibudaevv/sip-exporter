@@ -382,14 +382,21 @@ func (e *exporter) Initialize(cfg InitConfig) error {
 	e.socks = createdSocks
 	e.sipPortSets = cfg.SIPPorts
 
-	zap.L().Info("all interfaces initialized",
-		zap.Int("interfaces_count", len(e.socks)))
-
 	e.startWorkers()
 
 	e.initialized.Store(true)
+	logCaptureConfigured(cfg)
 
 	return nil
+}
+
+func logCaptureConfigured(cfg InitConfig) {
+	zap.L().Info("capture configured",
+		zap.Strings("interfaces", cfg.Interfaces),
+		zap.Any("sip_ports", cfg.SIPPorts),
+		zap.String("capture_mode", "host"),
+		zap.String("rtp_filter", "sdp-strict"),
+		zap.Bool("ignore_outgoing", cfg.IgnoreOutgoing))
 }
 
 // createSocketForInterface creates an AF_PACKET socket, binds it to the named

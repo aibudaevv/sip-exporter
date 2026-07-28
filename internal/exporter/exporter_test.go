@@ -15,6 +15,8 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"golang.org/x/sys/unix"
 
 	"github.com/aibudaevv/sip-exporter/internal/carriers"
@@ -5736,6 +5738,29 @@ func newRollbackExporter() *exporter {
 		inviteSDP:       make(map[string]inviteSDPEntity),
 		optionsTracker:  make(map[string]optionsEntry),
 	}
+}
+
+func TestCaptureStartupSummary(t *testing.T) {
+	core, logs := observer.New(zap.InfoLevel)
+	t.Cleanup(zap.ReplaceGlobals(zap.New(core)))
+
+	logCaptureConfigured(InitConfig{
+		Interfaces:     []string{"eth0", "eth1"},
+		SIPPorts:       [][]uint16{{5060, 5061}, {5060}},
+		IgnoreOutgoing: true,
+	})
+
+	captureLogs := logs.FilterMessage("capture configured").All()
+	require.Len(t, captureLogs, 1)
+	fields := captureLogs[0].ContextMap()
+	require.Equal(t, []any{"eth0", "eth1"}, fields["interfaces"])
+	require.Equal(t, [][]uint16{{5060, 5061}, {5060}}, fields["sip_ports"])
+	require.Equal(t, "host", fields["capture_mode"])
+	require.Equal(t, "sdp-strict", fields["rtp_filter"])
+	require.Equal(t, true, fields["ignore_outgoing"])
+	require.NotContains(t, fields, "call_id")
+	require.NotContains(t, fields, "src_ip")
+	require.NotContains(t, fields, "dst_ip")
 }
 
 // TestInitializeRollbackOnInvalidInterface verifies that when Initialize
