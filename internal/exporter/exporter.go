@@ -179,6 +179,8 @@ type (
 	exporter struct {
 		collections      []*ebpf.Collection
 		rtpEndpointsMaps []*ebpf.Map
+		rtpEndpointRefs  map[rtpEndpointKey]uint
+		rtpEndpointMutex sync.Mutex
 		socks            []sockEntry
 		messages         chan *rawPacket
 		done             chan struct{}
@@ -283,6 +285,7 @@ func NewExporter(deps Deps) Exporter {
 		fasTracker:            newFasTracker(deps.FraudFASThreshold),
 		messages:              make(chan *rawPacket, messagesChanSize),
 		done:                  make(chan struct{}),
+		rtpEndpointRefs:       make(map[rtpEndpointKey]uint),
 		registerTracker:       make(map[string]registerEntry),
 		registerExpiryTracker: make(map[string]registerExpiryEntry),
 		inviteTracker:         make(map[string]inviteEntry),
@@ -613,7 +616,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 			)
 			rtpResult, deleted := e.mediaTracker.Unregister(r.CallID)
 			for _, ep := range deleted {
-				e.rtpEndpointDelete(ep.IP, ep.Port)
+				e.releaseRTPEndpoint(ep.IP, ep.Port)
 			}
 			e.handleRTPDialogResult(rtpResult, r.Carrier, r.UAType, r.SourceCountry, r.Direction)
 		}
@@ -1678,7 +1681,7 @@ func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {
 
 	rtpResult, deleted := e.mediaTracker.Unregister(string(packet.CallID))
 	for _, ep := range deleted {
-		e.rtpEndpointDelete(ep.IP, ep.Port)
+		e.releaseRTPEndpoint(ep.IP, ep.Port)
 	}
 	e.handleRTPDialogResult(rtpResult, result.Carrier, result.UAType, result.SourceCountry, result.Direction)
 	if result.Duration > 0 {
@@ -2093,12 +2096,14 @@ func (e *exporter) registerMediaEndpoints(
 		ml := labels
 		ml.SDPCodecs = m.Codecs
 		ml.ClockRates = m.ClockRates
-		e.mediaTracker.Register(m.IP, m.Port, ml)
-		e.rtpEndpointInsert(m.IP, m.Port)
+		if e.mediaTracker.Register(m.IP, m.Port, ml) {
+			e.retainRTPEndpoint(m.IP, m.Port)
+		}
 		// Register a separate RTCP endpoint for non-mux capture.
 		if rtcpIP, rtcpPort, ok := resolveRTCEndpoint(m); ok {
-			e.mediaTracker.RegisterRTCP(rtcpIP, rtcpPort, m.IP, m.Port, labels.CallID)
-			e.rtpEndpointInsert(rtcpIP, rtcpPort)
+			if e.mediaTracker.RegisterRTCP(rtcpIP, rtcpPort, m.IP, m.Port, labels.CallID) {
+				e.retainRTPEndpoint(rtcpIP, rtcpPort)
+			}
 		}
 		zap.L().Debug("RTP media endpoint registered",
 			zap.String("ip", m.IP), zap.Uint16("port", m.Port),
@@ -2146,13 +2151,23 @@ func ipPortToKey(ipStr string, port uint16) (rtpEndpointKey, bool) {
 	}, true
 }
 
-// rtpEndpointInsert adds a media endpoint to every BPF rtp_endpoints map (one
-// per interface collection) so that RTP is captured regardless of NIC.
-func (e *exporter) rtpEndpointInsert(ipStr string, port uint16) {
+// retainRTPEndpoint registers an endpoint in every BPF rtp_endpoints map when
+// its reference count transitions from zero to one.
+func (e *exporter) retainRTPEndpoint(ipStr string, port uint16) {
 	key, ok := ipPortToKey(ipStr, port)
 	if !ok {
 		return
 	}
+	e.rtpEndpointMutex.Lock()
+	defer e.rtpEndpointMutex.Unlock()
+	if e.rtpEndpointRefs == nil {
+		e.rtpEndpointRefs = make(map[rtpEndpointKey]uint)
+	}
+	if e.rtpEndpointRefs[key] > 0 {
+		e.rtpEndpointRefs[key]++
+		return
+	}
+	e.rtpEndpointRefs[key] = 1
 	for _, m := range e.rtpEndpointsMaps {
 		if err := m.Update(key, uint8(1), ebpf.UpdateAny); err != nil {
 			zap.L().Debug("failed to update rtp_endpoints BPF map",
@@ -2161,12 +2176,24 @@ func (e *exporter) rtpEndpointInsert(ipStr string, port uint16) {
 	}
 }
 
-// rtpEndpointDelete removes a media endpoint from every BPF rtp_endpoints map.
-func (e *exporter) rtpEndpointDelete(ipStr string, port uint16) {
+// releaseRTPEndpoint removes an endpoint from every BPF rtp_endpoints map when
+// its reference count transitions from one to zero.
+func (e *exporter) releaseRTPEndpoint(ipStr string, port uint16) {
 	key, ok := ipPortToKey(ipStr, port)
 	if !ok {
 		return
 	}
+	e.rtpEndpointMutex.Lock()
+	defer e.rtpEndpointMutex.Unlock()
+	refs, ok := e.rtpEndpointRefs[key]
+	if !ok {
+		return
+	}
+	if refs > 1 {
+		e.rtpEndpointRefs[key] = refs - 1
+		return
+	}
+	delete(e.rtpEndpointRefs, key)
 	for _, m := range e.rtpEndpointsMaps {
 		if err := m.Delete(key); err != nil {
 			zap.L().Debug("failed to delete from rtp_endpoints BPF map",

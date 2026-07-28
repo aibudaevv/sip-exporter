@@ -104,14 +104,18 @@ type (
 	// Tracker keeps per-flow RTP statistics and correlates RTP flows to SIP
 	// dialogs via the media-endpoint map (IP:port → labels) populated from SDP.
 	Tracker struct {
-		mu        sync.Mutex
-		streams   map[streamKey]*streamEntry
-		media     map[endpointKey]MediaLabels
-		rtcpMedia map[endpointKey]rtcpMediaEntry      // RTCP endpoints for BPF cleanup and RTCP→RTP correlation
-		callRTP   map[string]map[endpointKey]struct{} // per-CallID endpoints that ever had RTP (TTL-independent)
-		ssrcIndex map[uint32][]streamKey              // SSRC → stream keys (multi-valued: an SSRC may be reused across endpoints)
-		ttl       time.Duration
-		now       func() time.Time
+		mu          sync.Mutex
+		streams     map[streamKey]*streamEntry
+		media       map[endpointKey]MediaLabels
+		mediaOwners map[endpointKey][]string
+		callMedia   map[string]map[endpointKey]MediaLabels
+		rtcpMedia   map[endpointKey]rtcpMediaEntry // RTCP endpoints for BPF cleanup and RTCP→RTP correlation
+		rtcpOwners  map[endpointKey][]string
+		callRTCP    map[string]map[endpointKey]rtcpMediaEntry
+		callRTP     map[string]map[endpointKey]struct{} // per-CallID endpoints that ever had RTP (TTL-independent)
+		ssrcIndex   map[uint32][]streamKey              // SSRC → stream keys (multi-valued: an SSRC may be reused across endpoints)
+		ttl         time.Duration
+		now         func() time.Time
 	}
 
 	// streamEntry bundles a stream state with its correlation labels.
@@ -136,13 +140,17 @@ type (
 // NewTracker creates a Tracker that expires idle streams after ttl.
 func NewTracker(ttl time.Duration) *Tracker {
 	return &Tracker{
-		streams:   make(map[streamKey]*streamEntry),
-		media:     make(map[endpointKey]MediaLabels),
-		rtcpMedia: make(map[endpointKey]rtcpMediaEntry),
-		callRTP:   make(map[string]map[endpointKey]struct{}),
-		ssrcIndex: make(map[uint32][]streamKey),
-		ttl:       ttl,
-		now:       time.Now,
+		streams:     make(map[streamKey]*streamEntry),
+		media:       make(map[endpointKey]MediaLabels),
+		mediaOwners: make(map[endpointKey][]string),
+		callMedia:   make(map[string]map[endpointKey]MediaLabels),
+		rtcpMedia:   make(map[endpointKey]rtcpMediaEntry),
+		rtcpOwners:  make(map[endpointKey][]string),
+		callRTCP:    make(map[string]map[endpointKey]rtcpMediaEntry),
+		callRTP:     make(map[string]map[endpointKey]struct{}),
+		ssrcIndex:   make(map[uint32][]streamKey),
+		ttl:         ttl,
+		now:         time.Now,
 	}
 }
 
@@ -161,11 +169,22 @@ func (t *Tracker) SetTTL(ttl time.Duration) {
 	t.ttl = ttl
 }
 
-// Register associates a media endpoint (IP:port) with SIP-dialog labels.
-func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) {
+// Register associates a media endpoint (IP:port) with SIP-dialog labels and
+// reports whether the dialog newly owns the endpoint.
+func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.media[endpointKey{ip: ip, port: port}] = labels
+	key := endpointKey{ip: ip, port: port}
+	if t.callMedia[labels.CallID] == nil {
+		t.callMedia[labels.CallID] = make(map[endpointKey]MediaLabels)
+	}
+	_, owned := t.callMedia[labels.CallID][key]
+	t.callMedia[labels.CallID][key] = labels
+	if !owned {
+		t.mediaOwners[key] = append(t.mediaOwners[key], labels.CallID)
+	}
+	t.media[key] = labels
+	return !owned
 }
 
 // RegisterRTCP records a separate RTCP endpoint (IP:port) for BPF-map cleanup
@@ -174,13 +193,24 @@ func (t *Tracker) RegisterRTCP(
 	ip string, port uint16,
 	rtpIP string, rtpPort uint16,
 	callID string,
-) {
+) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.rtcpMedia[endpointKey{ip: ip, port: port}] = rtcpMediaEntry{
+	key := endpointKey{ip: ip, port: port}
+	entry := rtcpMediaEntry{
 		callID:      callID,
 		rtpEndpoint: endpointKey{ip: rtpIP, port: rtpPort},
 	}
+	if t.callRTCP[callID] == nil {
+		t.callRTCP[callID] = make(map[endpointKey]rtcpMediaEntry)
+	}
+	_, owned := t.callRTCP[callID][key]
+	t.callRTCP[callID][key] = entry
+	if !owned {
+		t.rtcpOwners[key] = append(t.rtcpOwners[key], callID)
+	}
+	t.rtcpMedia[key] = entry
+	return !owned
 }
 
 // Unregister removes all media endpoints and RTP streams belonging to a SIP
@@ -192,21 +222,32 @@ func (t *Tracker) Unregister(callID string) (RTPDialogResult, []MediaEndpoint) {
 	defer t.mu.Unlock()
 
 	var deleted []MediaEndpoint
-	mediaCount := 0
-	for k, v := range t.media {
-		if v.CallID == callID {
-			mediaCount++
-			deleted = append(deleted, MediaEndpoint{IP: k.ip, Port: k.port})
+	mediaCount := len(t.callMedia[callID])
+	for k := range t.callMedia[callID] {
+		deleted = append(deleted, MediaEndpoint{IP: k.ip, Port: k.port})
+		t.mediaOwners[k] = removeOwner(t.mediaOwners[k], callID)
+		if len(t.mediaOwners[k]) == 0 {
+			delete(t.mediaOwners, k)
 			delete(t.media, k)
+			continue
 		}
+		owner := t.mediaOwners[k][len(t.mediaOwners[k])-1]
+		t.media[k] = t.callMedia[owner][k]
 	}
+	delete(t.callMedia, callID)
 
-	for k, entry := range t.rtcpMedia {
-		if entry.callID == callID {
-			deleted = append(deleted, MediaEndpoint{IP: k.ip, Port: k.port})
+	for k := range t.callRTCP[callID] {
+		deleted = append(deleted, MediaEndpoint{IP: k.ip, Port: k.port})
+		t.rtcpOwners[k] = removeOwner(t.rtcpOwners[k], callID)
+		if len(t.rtcpOwners[k]) == 0 {
+			delete(t.rtcpOwners, k)
 			delete(t.rtcpMedia, k)
+			continue
 		}
+		owner := t.rtcpOwners[k][len(t.rtcpOwners[k])-1]
+		t.rtcpMedia[k] = t.callRTCP[owner][k]
 	}
+	delete(t.callRTCP, callID)
 
 	rtpEndpointCount := 0
 	if eps, ok := t.callRTP[callID]; ok {
@@ -226,6 +267,15 @@ func (t *Tracker) Unregister(callID string) (RTPDialogResult, []MediaEndpoint) {
 		RTPObserved:   rtpEndpointCount > 0,
 		OneWay:        mediaCount >= 2 && rtpEndpointCount == 1,
 	}, deleted
+}
+
+func removeOwner(owners []string, callID string) []string {
+	for i, owner := range owners {
+		if owner == callID {
+			return append(owners[:i], owners[i+1:]...)
+		}
+	}
+	return owners
 }
 
 // Lookup resolves a media endpoint to its labels.

@@ -62,6 +62,46 @@ func TestTrackerUnregisterReturnsDeletedEndpoints(t *testing.T) {
 	require.True(t, ips["10.0.0.1"] && ips["10.0.0.2"], "must return call-1 endpoints only")
 }
 
+func TestTrackerUnregisterReturnsSharedEndpointForEachOwner(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-2"))
+
+	_, deletedFirst := tr.Unregister("call-1")
+	require.Equal(t, []MediaEndpoint{{IP: "10.0.0.1", Port: 5004}}, deletedFirst)
+
+	labels, ok := tr.Lookup("10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Equal(t, "call-2", labels.CallID)
+
+	_, deletedSecond := tr.Unregister("call-2")
+	require.Equal(t, []MediaEndpoint{{IP: "10.0.0.1", Port: 5004}}, deletedSecond)
+	_, ok = tr.Lookup("10.0.0.1", 5004)
+	require.False(t, ok)
+}
+
+func TestTrackerUnregisterRestoresPreviousSharedEndpointOwner(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-2"))
+
+	_, deleted := tr.Unregister("call-2")
+	require.Equal(t, []MediaEndpoint{{IP: "10.0.0.1", Port: 5004}}, deleted)
+
+	labels, ok := tr.Lookup("10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Equal(t, "call-1", labels.CallID)
+}
+
+func TestTrackerDuplicateEndpointRegistrationHasOneOwner(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+
+	_, deleted := tr.Unregister("call-1")
+	require.Equal(t, []MediaEndpoint{{IP: "10.0.0.1", Port: 5004}}, deleted)
+}
+
 func TestTrackerUnregisterReturnsRTCPEndpoints(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
@@ -80,6 +120,22 @@ func TestTrackerUnregisterReturnsRTCPEndpoints(t *testing.T) {
 
 	_, deleted2 := tr.Unregister("call-2")
 	require.Len(t, deleted2, 2, "call-2 must also return both endpoints")
+}
+
+func TestTrackerUnregisterReturnsSharedRTCPEndpointForEachOwner(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5006, sampleLabels("call-2"))
+	tr.RegisterRTCP("10.0.0.3", 5005, "10.0.0.1", 5004, "call-1")
+	tr.RegisterRTCP("10.0.0.3", 5005, "10.0.0.2", 5006, "call-2")
+
+	_, deletedFirst := tr.Unregister("call-1")
+	require.Len(t, deletedFirst, 2)
+	require.Contains(t, deletedFirst, MediaEndpoint{IP: "10.0.0.3", Port: 5005})
+
+	_, deletedSecond := tr.Unregister("call-2")
+	require.Len(t, deletedSecond, 2)
+	require.Contains(t, deletedSecond, MediaEndpoint{IP: "10.0.0.3", Port: 5005})
 }
 
 func TestTrackerUnregisterNoRTCPOnlyRTPReturned(t *testing.T) {

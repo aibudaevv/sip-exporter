@@ -289,3 +289,47 @@ func TestSDPFilterEntryLifecycle(t *testing.T) {
 		})
 	}
 }
+
+// TestSDPFilterSharedEntrySurvivesLatestOwnerBye verifies that a shared media
+// endpoint remains in the BPF map when the latest registered dialog ends while
+// an earlier dialog still owns it.
+func TestSDPFilterSharedEntrySurvivesLatestOwnerBye(t *testing.T) {
+	const pktCount = 20
+
+	ports := allocatePortsN(8)
+	httpPort := ports[0]
+	uasSIPA, uacSIPA := ports[1], ports[2]
+	uasSIPB, uacSIPB := ports[3], ports[4]
+	sharedMedia, uacMediaA, uacMediaB := ports[5], ports[6], ports[7]
+	sharedMediaPort, err := strconv.Atoi(sharedMedia)
+	require.NoError(t, err)
+
+	endpoint := startExporterWithCarrierUA(t.Context(), t,
+		httpPort, uasSIPA+","+uasSIPB,
+		integrationCarriersYAML, integrationUserAgentsYAML, "")
+
+	endFirstDialog := startControlledSIPDialog(t, uasSIPA, uacSIPA, sharedMedia, uacMediaA)
+	endSecondDialog := startControlledSIPDialog(t, uasSIPB, uacSIPB, sharedMedia, uacMediaB)
+
+	require.Eventually(t, func() bool {
+		return getMetricByLabel(t, endpoint, "sip_exporter_sessions",
+			labelCarrier, labelUAType) >= 2
+	}, 10*time.Second, 200*time.Millisecond, "both dialogs must be established")
+
+	endSecondDialog()
+	require.Eventually(t, func() bool {
+		return getMetricByLabel(t, endpoint, "sip_exporter_sessions",
+			labelCarrier, labelUAType) == 1
+	}, 10*time.Second, 200*time.Millisecond, "first dialog must remain after the latest owner BYE")
+
+	time.Sleep(1500 * time.Millisecond)
+	before := getSocketPacketsReceived(t, endpoint)
+	sendNonRTPUDP(t, sharedMediaPort, pktCount)
+	time.Sleep(2500 * time.Millisecond)
+	after := getSocketPacketsReceived(t, endpoint)
+
+	require.GreaterOrEqual(t, after-before, float64(pktCount)*0.5,
+		"shared media endpoint must remain in the BPF map while the first dialog is active")
+
+	endFirstDialog()
+}

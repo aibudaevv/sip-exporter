@@ -6459,6 +6459,51 @@ func TestIPPortToKey(t *testing.T) {
 	}
 }
 
+func TestRTPEndpointRetainRelease(t *testing.T) {
+	endpoint := rtpEndpointKey{IP: 0xC000020A, Port: 5004}
+	e := &exporter{
+		rtpEndpointRefs: make(map[rtpEndpointKey]uint),
+	}
+
+	e.retainRTPEndpoint("192.0.2.10", 5004)
+	e.retainRTPEndpoint("192.0.2.10", 5004)
+	require.Equal(t, uint(2), e.rtpEndpointRefs[endpoint])
+
+	e.releaseRTPEndpoint("192.0.2.10", 5004)
+	require.Equal(t, uint(1), e.rtpEndpointRefs[endpoint])
+
+	e.releaseRTPEndpoint("192.0.2.10", 5004)
+	_, ok := e.rtpEndpointRefs[endpoint]
+	require.False(t, ok)
+}
+
+func TestRTPEndpointRefcountIgnoresUnsupportedEndpoints(t *testing.T) {
+	e := &exporter{
+		rtpEndpointRefs: make(map[rtpEndpointKey]uint),
+	}
+
+	e.retainRTPEndpoint("2001:db8::1", 5004)
+	e.releaseRTPEndpoint("2001:db8::1", 5004)
+	e.releaseRTPEndpoint("192.0.2.10", 5004)
+
+	require.Empty(t, e.rtpEndpointRefs)
+}
+
+func TestRegisterMediaEndpointsRetainsDuplicateSDPEndpointOnce(t *testing.T) {
+	e := &exporter{
+		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
+		rtpEndpointRefs: make(map[rtpEndpointKey]uint),
+	}
+	body := []byte("v=0\r\nc=IN IP4 192.0.2.10\r\nm=audio 5004 RTP/AVP 8\r\na=rtpmap:8 PCMA/8000\r\n")
+	labels := mediatracker.MediaLabels{CallID: "call-1"}
+
+	e.registerMediaEndpoints(body, labels)
+	e.registerMediaEndpoints(body, labels)
+
+	require.Equal(t, uint(1), e.rtpEndpointRefs[rtpEndpointKey{IP: 0xC000020A, Port: 5004}])
+	require.Equal(t, uint(1), e.rtpEndpointRefs[rtpEndpointKey{IP: 0xC000020A, Port: 5005}])
+}
+
 // ==================== S10-R1: Exporter-layer wiring tests ====================
 
 func TestHandleRequestRetransmissionMetric(t *testing.T) {
