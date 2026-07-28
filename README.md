@@ -18,6 +18,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 
 - [Key Features](#key-features)
 - [Quick Start](#quick-start)
+- [Installation Verification](docs/INSTALLATION.md)
 - [Core Technology](#core-technology)
 - [Architecture](#architecture)
 - [Performance](#performance)
@@ -64,6 +65,9 @@ The example includes a pinned release image, restart policy, healthcheck, read-o
 every runtime setting listed below with its default value.
 
 Access metrics at `http://localhost:2112/metrics`. A `/health` endpoint is also exposed (returns `200 OK` when alive, `503` otherwise) — used by the Dockerfile `HEALTHCHECK` and suitable for orchestrator liveness/readiness probes.
+
+**First useful dashboard:** follow the [installation verification runbook](docs/INSTALLATION.md)
+to check health, scrape status, SIP, SDP/RTP visibility and drops before importing Grafana.
 
 ## Core Technology
 
