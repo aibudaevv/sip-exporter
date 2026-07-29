@@ -102,26 +102,26 @@ func TestSourceCountry(t *testing.T) {
 			require.True(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_total", wantLabel),
 				"sip_exporter_invite_total{%s} should exist", wantLabel)
 			inviteOK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", wantLabel)
-			inviteBad := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", notWantLabel)
-			t.Logf("invite_total{%s}=%.0f, invite_total{%s}=%.0f", wantLabel, inviteOK, notWantLabel, inviteBad)
+			require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_total", notWantLabel),
+				"sip_exporter_invite_total{%s} should be absent", notWantLabel)
+			t.Logf("invite_total{%s}=%.0f", wantLabel, inviteOK)
 			require.InDelta(t, float64(callCount), inviteOK, ratioDelta, "invite_total should carry %s", wantLabel)
-			require.LessOrEqual(t, inviteBad, 3.0, "invite_total should NOT carry %s", notWantLabel)
 
 			require.True(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_ser", wantLabel),
 				"sip_exporter_ser{%s} should exist", wantLabel)
 			serOK := getMetricWithLabel(t, env.endpoint, "sip_exporter_ser", wantLabel)
-			serBad := getMetricWithLabel(t, env.endpoint, "sip_exporter_ser", notWantLabel)
-			t.Logf("ser{%s}=%.2f, ser{%s}=%.2f", wantLabel, serOK, notWantLabel, serBad)
+			require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_ser", notWantLabel),
+				"sip_exporter_ser{%s} should be absent", notWantLabel)
+			t.Logf("ser{%s}=%.2f", wantLabel, serOK)
 			require.InDelta(t, float64(callCount), serOK, ratioDelta, "SER should carry %s", wantLabel)
-			require.LessOrEqual(t, serBad, 3.0, "SER should NOT carry %s", notWantLabel)
 
 			require.True(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_scr", wantLabel),
 				"sip_exporter_scr{%s} should exist", wantLabel)
 			scrOK := getMetricWithLabel(t, env.endpoint, "sip_exporter_scr", wantLabel)
-			scrBad := getMetricWithLabel(t, env.endpoint, "sip_exporter_scr", notWantLabel)
-			t.Logf("scr{%s}=%.2f, scr{%s}=%.2f", wantLabel, scrOK, notWantLabel, scrBad)
+			require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_scr", notWantLabel),
+				"sip_exporter_scr{%s} should be absent", notWantLabel)
+			t.Logf("scr{%s}=%.2f", wantLabel, scrOK)
 			require.InDelta(t, float64(callCount), scrOK, ratioDelta, "SCR should carry %s", wantLabel)
-			require.LessOrEqual(t, scrBad, 3.0, "SCR should NOT carry %s", notWantLabel)
 
 			assertSelfMonitoringHealthy(t, env.endpoint)
 		})

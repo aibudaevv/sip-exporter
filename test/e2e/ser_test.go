@@ -34,13 +34,13 @@ func TestSERAllScenarios(t *testing.T) {
 
 			if tt.wantExists {
 				require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"))
+				ser := getSER(t, env.endpoint)
+				t.Logf("SER = %.2f (want %.2f)", ser, tt.wantSER)
+				require.InDelta(t, tt.wantSER, ser, ratioDelta)
 			} else {
 				require.False(t, metricExists(t, env.endpoint, "sip_exporter_ser"),
 					"SER metric should be absent when no INVITEs")
 			}
-			ser := getSER(t, env.endpoint)
-			t.Logf("SER = %.2f (want %.2f)", ser, tt.wantSER)
-			require.InDelta(t, tt.wantSER, ser, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)
 		})

@@ -33,12 +33,11 @@ func TestSDCAllScenarios(t *testing.T) {
 			env := newTestEnv(ctx, t)
 			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
 
-			sdc := getSDC(t, env.endpoint)
-			t.Logf("SDC = %.0f (want %.0f)", sdc, tt.wantSDC)
-
 			if tt.wantSDC > 0 {
 				require.True(t, metricExists(t, env.endpoint, "sip_exporter_sdc_total"),
 					"SDC metric should exist when sessions complete")
+				sdc := getSDC(t, env.endpoint)
+				t.Logf("SDC = %.0f (want %.0f)", sdc, tt.wantSDC)
 				require.Equal(t, float64(tt.callCount), sdc)
 			} else {
 				require.False(t, metricExists(t, env.endpoint, "sip_exporter_sdc_total"),

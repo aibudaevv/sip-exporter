@@ -36,13 +36,13 @@ func TestSCRAllScenarios(t *testing.T) {
 
 			if tt.wantExists {
 				require.True(t, metricExists(t, env.endpoint, "sip_exporter_scr"))
+				scr := getSCR(t, env.endpoint)
+				t.Logf("SCR = %.2f (want %.2f)", scr, tt.wantSCR)
+				require.InDelta(t, tt.wantSCR, scr, ratioDelta)
 			} else {
 				require.False(t, metricExists(t, env.endpoint, "sip_exporter_scr"),
 					"SCR metric should be absent when no INVITEs")
 			}
-			scr := getSCR(t, env.endpoint)
-			t.Logf("SCR = %.2f (want %.2f)", scr, tt.wantSCR)
-			require.InDelta(t, tt.wantSCR, scr, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)
 		})

@@ -34,13 +34,13 @@ func TestASRAllScenarios(t *testing.T) {
 
 			if tt.wantExists {
 				require.True(t, metricExists(t, env.endpoint, "sip_exporter_asr"))
+				asr := getASR(t, env.endpoint)
+				t.Logf("ASR = %.2f (want %.2f)", asr, tt.wantASR)
+				require.InDelta(t, tt.wantASR, asr, ratioDelta)
 			} else {
 				require.False(t, metricExists(t, env.endpoint, "sip_exporter_asr"),
 					"ASR metric should be absent when no INVITEs")
 			}
-			asr := getASR(t, env.endpoint)
-			t.Logf("ASR = %.2f (want %.2f)", asr, tt.wantASR)
-			require.InDelta(t, tt.wantASR, asr, ratioDelta)
 
 			waitForSessionsZero(t, env.endpoint)
 		})
