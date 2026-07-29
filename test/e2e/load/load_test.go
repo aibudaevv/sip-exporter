@@ -79,11 +79,18 @@ type (
 	testWriter struct {
 		t *testing.T
 	}
+
+	metricSample struct {
+		name   string
+		labels map[string]string
+		value  float64
+	}
 )
 
 var (
-	portMu       sync.Mutex
-	nextBasePort = 30000
+	portMu             sync.Mutex
+	nextBasePort       = 30000
+	metricValuePattern = regexp.MustCompile(`^(?:NaN|[+-]?Inf|[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)$`)
 )
 
 func projectRoot() string {
@@ -337,43 +344,213 @@ func fetchMetricsBody(t *testing.T, endpoint string) []byte {
 
 func metricExists(t *testing.T, endpoint, metricName string) bool {
 	t.Helper()
-	return strings.Contains(string(fetchMetricsBody(t, endpoint)), metricName)
+	return len(readMetricSamples(t, endpoint, metricName)) > 0
 }
 
 func getMetric(t *testing.T, endpoint, metricName string) float64 {
 	t.Helper()
-
-	body := fetchMetricsBody(t, endpoint)
-
-	re := regexp.MustCompile(`^` + metricName + `(?:\{[^}]*\})?\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 2 {
-			val, parseErr := strconv.ParseFloat(matches[1], 64)
-			require.NoError(t, parseErr)
-			return val
-		}
-	}
-
-	return 0
+	return getMetricWithLabel(t, endpoint, metricName, "")
 }
 
 func getMetricWithLabel(t *testing.T, endpoint, metricName, labelFilter string) float64 {
 	t.Helper()
+	filterLabels, ok := parseMetricLabels(labelFilter)
+	require.True(t, ok, "invalid label filter %q", labelFilter)
+	if !ok {
+		return 0
+	}
+	matches := metricSamplesWithLabels(readMetricSamples(t, endpoint, metricName), filterLabels)
+	value, err := singleMetricValue(matches)
+	require.NoError(t, err, "read metric %s with labels %q", metricName, labelFilter)
+	return value
+}
 
-	body := fetchMetricsBody(t, endpoint)
+func getMetricSum(t *testing.T, endpoint, metricName string) float64 {
+	t.Helper()
+	samples := readMetricSamples(t, endpoint, metricName)
+	require.NotEmpty(t, samples, "metric %s must have at least one sample", metricName)
+	var sum float64
+	for _, sample := range samples {
+		sum += sample.value
+	}
+	return sum
+}
 
-	re := regexp.MustCompile(`^` + metricName + `\{[^}]*` + regexp.QuoteMeta(labelFilter) + `[^}]*\}\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 2 {
-			val, parseErr := strconv.ParseFloat(matches[1], 64)
-			require.NoError(t, parseErr)
-			return val
+func readMetricSamples(t *testing.T, endpoint, metricName string) []metricSample {
+	t.Helper()
+
+	var samples []metricSample
+	for _, line := range strings.Split(string(fetchMetricsBody(t, endpoint)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		separator := metricSeriesEnd(line)
+		if separator < 0 {
+			continue
+		}
+		series, fields := line[:separator], strings.Fields(line[separator:])
+		if len(fields) == 0 || len(fields) > 2 {
+			continue
+		}
+		if len(fields) == 2 {
+			if _, err := strconv.ParseInt(fields[1], 10, 64); err != nil {
+				continue
+			}
+		}
+		if !metricValuePattern.MatchString(fields[0]) {
+			continue
+		}
+		name := series
+		labels := map[string]string{}
+		if labelsStart := strings.IndexByte(series, '{'); labelsStart >= 0 {
+			name = series[:labelsStart]
+			if !strings.HasSuffix(series, "}") {
+				continue
+			}
+			var ok bool
+			labels, ok = parseMetricLabels(series[labelsStart+1 : len(series)-1])
+			if !ok {
+				continue
+			}
+		}
+		if name != metricName {
+			continue
+		}
+		value, err := strconv.ParseFloat(fields[0], 64)
+		if err != nil {
+			continue
+		}
+		samples = append(samples, metricSample{name: name, labels: labels, value: value})
+	}
+	return samples
+}
+
+func metricSeriesEnd(line string) int {
+	insideLabels := false
+	insideValue := false
+	escaped := false
+	for i := 0; i < len(line); i++ {
+		if insideValue {
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch line[i] {
+			case '\\':
+				escaped = true
+			case '"':
+				insideValue = false
+			}
+			continue
+		}
+		switch line[i] {
+		case '{':
+			insideLabels = true
+		case '}':
+			insideLabels = false
+		case '"':
+			if insideLabels {
+				insideValue = true
+			}
+		case ' ', '\t':
+			if !insideLabels {
+				return i
+			}
 		}
 	}
+	return -1
+}
 
-	return 0
+func parseMetricLabels(input string) (map[string]string, bool) {
+	labels := make(map[string]string)
+	for input != "" {
+		equals := strings.IndexByte(input, '=')
+		if equals <= 0 || equals+1 >= len(input) || input[equals+1] != '"' {
+			return nil, false
+		}
+		name := input[:equals]
+		if !validMetricLabelName(name) {
+			return nil, false
+		}
+		if _, duplicate := labels[name]; duplicate {
+			return nil, false
+		}
+		valueEnd := equals + 2
+		for valueEnd < len(input) {
+			if input[valueEnd] == '\\' {
+				if valueEnd+1 >= len(input) || !strings.ContainsRune(`\"n`, rune(input[valueEnd+1])) {
+					return nil, false
+				}
+				valueEnd += 2
+				continue
+			}
+			if input[valueEnd] == '"' {
+				break
+			}
+			valueEnd++
+		}
+		if valueEnd >= len(input) {
+			return nil, false
+		}
+		value, err := strconv.Unquote(input[equals+1 : valueEnd+1])
+		if err != nil {
+			return nil, false
+		}
+		labels[name] = value
+		input = input[valueEnd+1:]
+		if input == "" {
+			break
+		}
+		if input[0] != ',' {
+			return nil, false
+		}
+		input = input[1:]
+		if input == "" {
+			return nil, false
+		}
+	}
+	return labels, true
+}
+
+func validMetricLabelName(name string) bool {
+	for i := 0; i < len(name); i++ {
+		valid := name[i] == '_' || name[i] >= 'a' && name[i] <= 'z' || name[i] >= 'A' && name[i] <= 'Z'
+		if i > 0 {
+			valid = valid || name[i] >= '0' && name[i] <= '9'
+		}
+		if !valid {
+			return false
+		}
+	}
+	return name != ""
+}
+
+func matchMetricLabels(sampleLabels, filterLabels map[string]string) bool {
+	for name, value := range filterLabels {
+		sampleValue, exists := sampleLabels[name]
+		if !exists || sampleValue != value {
+			return false
+		}
+	}
+	return true
+}
+
+func metricSamplesWithLabels(samples []metricSample, filterLabels map[string]string) []metricSample {
+	var matches []metricSample
+	for _, sample := range samples {
+		if matchMetricLabels(sample.labels, filterLabels) {
+			matches = append(matches, sample)
+		}
+	}
+	return matches
+}
+
+func singleMetricValue(samples []metricSample) (float64, error) {
+	if len(samples) != 1 {
+		return 0, fmt.Errorf("expected exactly one metric sample, got %d", len(samples))
+	}
+	return samples[0].value, nil
 }
 
 func waitForMetricStable(t *testing.T, endpoint string) {
@@ -745,9 +922,11 @@ func runConcurrentLoad(
 
 	var peakSessions float64
 	require.Eventually(t, func() bool {
-		s := getMetric(t, env.endpoint, "sip_exporter_sessions")
-		if s > peakSessions {
-			peakSessions = s
+		if metricExists(t, env.endpoint, "sip_exporter_sessions") {
+			sessions := getMetric(t, env.endpoint, "sip_exporter_sessions")
+			if sessions > peakSessions {
+				peakSessions = sessions
+			}
 		}
 		state, stateErr := uacContainer.State(ctx)
 		if stateErr != nil {

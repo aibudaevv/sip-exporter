@@ -257,7 +257,9 @@ func TestLoadFullCallWithRTP(t *testing.T) {
 			require.GreaterOrEqual(t, ser, 99.0,
 				"SER SLO: >= 99%% with RTP capture enabled (got %.2f%%)", ser)
 
-			rtpPackets := getMetric(t, env.endpoint, "sip_exporter_rtp_packets_total")
+			require.True(t, metricExists(t, env.endpoint, "sip_exporter_rtp_packets_total"),
+				"rtp_packets_total must have at least one series")
+			rtpPackets := getMetricSum(t, env.endpoint, "sip_exporter_rtp_packets_total")
 			require.Greater(t, rtpPackets, 0.0,
 				"RTP packets must be captured")
 
@@ -345,7 +347,10 @@ func TestBenchmarkMemoryPerRTPStream(t *testing.T) {
 				// Each call = 2 RTP streams (both directions).
 				targetStreams := float64(limit) * 2 * 0.8
 				require.Eventually(t, func() bool {
-					streams = getMetric(t, env.endpoint, "sip_exporter_rtp_active_streams")
+					if !metricExists(t, env.endpoint, "sip_exporter_rtp_active_streams") {
+						return false
+					}
+					streams = getMetricSum(t, env.endpoint, "sip_exporter_rtp_active_streams")
 					return streams >= targetStreams
 				}, 120*time.Second, 500*time.Millisecond,
 					"RTP streams did not reach %.0f (got %.0f)", targetStreams, streams)

@@ -172,8 +172,10 @@ func TestSDPFilter(t *testing.T) {
 					uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
 
 				require.Eventually(t, func() bool {
-					return getMetricByLabel(t, endpoint, "sip_exporter_sessions",
-						labelCarrier, labelUAType) >= 1
+					return metricWithLabelsExists(t, endpoint, "sip_exporter_sessions",
+						labelCarrier, labelUAType) &&
+						getMetricByLabel(t, endpoint, "sip_exporter_sessions",
+							labelCarrier, labelUAType) >= 1
 				}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
 			} else {
 				targetPort, _ = strconv.Atoi(uacMedia)
@@ -199,7 +201,8 @@ func TestSDPFilter(t *testing.T) {
 			switch {
 			case tt.expectRTPMetric:
 				require.Eventually(t, func() bool {
-					return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
+					return rtpMetricExists(t, endpoint, "sip_exporter_rtp_packets_total") &&
+						getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
 				}, 10*time.Second, 500*time.Millisecond,
 					"valid RTP to SDP-registered port must be captured in rtp_packets_total")
 			case tt.expectDropped:
@@ -247,14 +250,16 @@ func TestSDPFilterEntryLifecycle(t *testing.T) {
 			wait := startControlledSIPDialog(t, uasSIP, uacSIP, uasMedia, uacMedia)
 
 			require.Eventually(t, func() bool {
-				return getMetricByLabel(t, endpoint, "sip_exporter_sessions",
-					labelCarrier, labelUAType) >= 1
+				return metricWithLabelsExists(t, endpoint, "sip_exporter_sessions",
+					labelCarrier, labelUAType) &&
+					getMetricByLabel(t, endpoint, "sip_exporter_sessions",
+						labelCarrier, labelUAType) >= 1
 			}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
 
 			if tt.afterBye {
 				wait()
 				require.Eventually(t, func() bool {
-					return metricLineExists(t, endpoint, "sip_exporter_sessions",
+					return metricWithLabelsExists(t, endpoint, "sip_exporter_sessions",
 						labelCarrier, labelUAType) &&
 						getMetricByLabel(t, endpoint, "sip_exporter_sessions",
 							labelCarrier, labelUAType) == 0

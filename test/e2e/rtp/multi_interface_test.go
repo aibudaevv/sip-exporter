@@ -101,16 +101,19 @@ func TestRTPMultiInterface(t *testing.T) {
 	// RTP packets counter must be > 0: SDP correlation registered the media
 	// endpoints (10.10.0.x) and RTP was observed.
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_packets_total") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
 	}, 10*time.Second, 500*time.Millisecond,
 		"rtp_packets_total must be observed from veth IP flow")
 
 	// Jitter and MOS histograms must have samples (1s snapshot cycle).
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_jitter_milliseconds_count") > 0
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_jitter_milliseconds_count") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_jitter_milliseconds_count") > 0
 	}, 10*time.Second, 500*time.Millisecond, "jitter histogram must have samples")
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_mos_score_count") > 0
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_mos_score_count") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_mos_score_count") > 0
 	}, 10*time.Second, 500*time.Millisecond, "MOS histogram must have samples")
 
 	// MOS in sane range for clean G.711 (E-model ~3.9-4.4).

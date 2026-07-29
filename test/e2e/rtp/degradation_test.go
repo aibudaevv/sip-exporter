@@ -149,19 +149,24 @@ func TestRTPNetemDegradation(t *testing.T) {
 
 	// RTP packets must be observed (pipeline functional despite degradation).
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_packets_total") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
 	}, 10*time.Second, 500*time.Millisecond,
 		"rtp_packets_total must be observed under netem")
 
 	// Jitter must be elevated (clean G.711 ≈ 0ms; degraded > 3ms).
 	require.Eventually(t, func() bool {
-		return avgHistogramValue(t, endpoint, "sip_exporter_rtp_jitter_milliseconds") > 3
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_jitter_milliseconds_count") &&
+			avgHistogramValue(t, endpoint, "sip_exporter_rtp_jitter_milliseconds") > 3
 	}, 15*time.Second, 500*time.Millisecond,
 		"avg jitter must be >3ms under netem degradation")
 
 	// MOS must be degraded (clean G.711 ≈ 4.4; degraded < 3.0).
 	var avgMOS float64
 	require.Eventually(t, func() bool {
+		if !rtpMetricExists(t, endpoint, "sip_exporter_rtp_mos_score_count") {
+			return false
+		}
 		avgMOS = avgHistogramValue(t, endpoint, "sip_exporter_rtp_mos_score")
 		return avgMOS > 0 && avgMOS < 3
 	}, 15*time.Second, 500*time.Millisecond,
@@ -169,7 +174,8 @@ func TestRTPNetemDegradation(t *testing.T) {
 
 	// Loss must be detected.
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_lost_total") > 0
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_packets_lost_total") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_lost_total") > 0
 	}, 10*time.Second, 500*time.Millisecond,
 		"rtp_packets_lost_total must be >0 under netem loss")
 
@@ -204,18 +210,24 @@ func TestRTPNetemPacketLoss(t *testing.T) {
 
 	// RTP packets must be observed.
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_packets_total") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
 	}, 10*time.Second, 500*time.Millisecond,
 		"rtp_packets_total must be observed under netem loss")
 
 	// Loss must be detected.
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_lost_total") > 0
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_packets_lost_total") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_lost_total") > 0
 	}, 10*time.Second, 500*time.Millisecond,
 		"rtp_packets_lost_total must be >0 under netem loss")
 
 	// Loss rate must be approximately 30% (margin [20%, 40%]).
 	require.Eventually(t, func() bool {
+		if !rtpMetricExists(t, endpoint, "sip_exporter_rtp_packets_lost_total") ||
+			!rtpMetricExists(t, endpoint, "sip_exporter_rtp_packets_total") {
+			return false
+		}
 		lost := getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_lost_total")
 		total := getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total")
 		if total == 0 {

@@ -32,6 +32,9 @@ func getSingleMemSample(t *testing.T, containerID string) float64 {
 func waitForSessions(t *testing.T, endpoint string, target float64) {
 	t.Helper()
 	require.Eventually(t, func() bool {
+		if !metricExists(t, endpoint, "sip_exporter_sessions") {
+			return false
+		}
 		sessions := getMetric(t, endpoint, "sip_exporter_sessions")
 		return sessions >= target*0.8
 	}, 120*time.Second, 500*time.Millisecond, "sessions did not reach %.0f", target)

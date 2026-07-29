@@ -30,7 +30,8 @@ func TestRTPOutOfOrderMetric(t *testing.T) {
 	// Wait for RTP stream to be active and media endpoint registered.
 	rtpLabels := []string{labelCarrier, labelUAType, labelCodec}
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_rtp_packets_total", rtpLabels...) > 0
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_rtp_packets_total", rtpLabels...) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_rtp_packets_total", rtpLabels...) > 0
 	}, 15*time.Second, 500*time.Millisecond, "rtp_packets_total must be > 0 — dialog active")
 
 	// Inject out-of-order RTP packets (seq 1, 5, 3) on the UAS media port.
@@ -41,7 +42,8 @@ func TestRTPOutOfOrderMetric(t *testing.T) {
 
 	// Assert reorder metric is present and > 0.
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_rtp_out_of_order_total", rtpLabels...) > 0
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_rtp_out_of_order_total", rtpLabels...) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_rtp_out_of_order_total", rtpLabels...) > 0
 	}, 10*time.Second, 500*time.Millisecond,
 		"rtp_out_of_order_total must be > 0 after injecting out-of-order RTP packets")
 }
