@@ -129,6 +129,22 @@ func TestTrackerLearnSourceAliasRejectsRepeatedAlias(t *testing.T) {
 	require.Equal(t, MediaEndpoint{}, got)
 }
 
+func TestTrackerUnregisterReturnsLearnedAlias(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 4000, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5000, sampleLabels("call-1"))
+
+	_, ok := tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4100)
+	require.True(t, ok)
+
+	_, deleted := tr.Unregister("call-1")
+	require.ElementsMatch(t, []MediaEndpoint{
+		{IP: "10.0.0.1", Port: 4000},
+		{IP: "10.0.0.2", Port: 5000},
+		{IP: "10.0.0.1", Port: 4100},
+	}, deleted)
+}
+
 func TestCorrelatorUnregisterByCallID(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))

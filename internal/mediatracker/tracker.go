@@ -68,6 +68,7 @@ type (
 		SourceCountry      string  // dialog source country (for metric labels)
 		Direction          string  // dialog direction (for metric labels)
 		CallID             string  // dialog Call-ID (used to clear FAS pending once media is established)
+		LearnedEndpoint    *MediaEndpoint
 	}
 
 	// RTPDialogResult is the per-dialog RTP summary returned at teardown.
@@ -226,8 +227,27 @@ func (t *Tracker) Unregister(callID string) (RTPDialogResult, []MediaEndpoint) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	var deleted []MediaEndpoint
 	mediaCount := len(t.callMedia[callID])
+	rtpEndpointCount := len(t.callRTP[callID])
+	deleted := t.removeCallMedia(callID)
+
+	return RTPDialogResult{
+		MediaExpected: mediaCount > 0,
+		RTPObserved:   rtpEndpointCount > 0,
+		OneWay:        mediaCount >= 2 && rtpEndpointCount == 1,
+	}, deleted
+}
+
+// Replace removes the current media revision of an active dialog and returns
+// its endpoints for BPF map cleanup before a re-INVITE revision is registered.
+func (t *Tracker) Replace(callID string) []MediaEndpoint {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.removeCallMedia(callID)
+}
+
+func (t *Tracker) removeCallMedia(callID string) []MediaEndpoint {
+	var deleted []MediaEndpoint
 	for k := range t.callMedia[callID] {
 		deleted = append(deleted, MediaEndpoint{IP: k.ip, Port: k.port})
 		t.mediaOwners[k] = removeOwner(t.mediaOwners[k], callID)
@@ -241,6 +261,9 @@ func (t *Tracker) Unregister(callID string) (RTPDialogResult, []MediaEndpoint) {
 	}
 	delete(t.callMedia, callID)
 	delete(t.callMediaOrder, callID)
+	for _, alias := range t.sourceAliases[callID] {
+		deleted = append(deleted, MediaEndpoint{IP: alias.ip, Port: alias.port})
+	}
 	delete(t.sourceAliases, callID)
 
 	for k := range t.callRTCP[callID] {
@@ -256,11 +279,7 @@ func (t *Tracker) Unregister(callID string) (RTPDialogResult, []MediaEndpoint) {
 	}
 	delete(t.callRTCP, callID)
 
-	rtpEndpointCount := 0
-	if eps, ok := t.callRTP[callID]; ok {
-		rtpEndpointCount = len(eps)
-		delete(t.callRTP, callID)
-	}
+	delete(t.callRTP, callID)
 
 	for k, e := range t.streams {
 		if e.labels.CallID == callID {
@@ -269,11 +288,7 @@ func (t *Tracker) Unregister(callID string) (RTPDialogResult, []MediaEndpoint) {
 		}
 	}
 
-	return RTPDialogResult{
-		MediaExpected: mediaCount > 0,
-		RTPObserved:   rtpEndpointCount > 0,
-		OneWay:        mediaCount >= 2 && rtpEndpointCount == 1,
-	}, deleted
+	return deleted
 }
 
 func removeOwner(owners []string, callID string) []string {
@@ -294,20 +309,27 @@ func (t *Tracker) LearnSourceAlias(
 ) (MediaEndpoint, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	return t.learnSourceAlias(
+		callID,
+		endpointKey{ip: matchedIP, port: matchedPort},
+		endpointKey{ip: sourceIP, port: sourcePort},
+	)
+}
+
+func (t *Tracker) learnSourceAlias(callID string, matched, source endpointKey) (MediaEndpoint, bool) {
 
 	endpoints := t.callMediaOrder[callID]
 	if len(endpoints) != 2 {
 		return MediaEndpoint{}, false
 	}
 
-	matched := endpointKey{ip: matchedIP, port: matchedPort}
 	peer := endpoints[0]
 	if peer == matched {
 		peer = endpoints[1]
 	} else if endpoints[1] != matched {
 		return MediaEndpoint{}, false
 	}
-	if peer.ip != sourceIP || peer.port == sourcePort {
+	if peer.ip != source.ip || peer.port == source.port {
 		return MediaEndpoint{}, false
 	}
 
@@ -317,9 +339,8 @@ func (t *Tracker) LearnSourceAlias(
 	if _, exists := t.sourceAliases[callID][peer]; exists {
 		return MediaEndpoint{}, false
 	}
-	alias := endpointKey{ip: sourceIP, port: sourcePort}
-	t.sourceAliases[callID][peer] = alias
-	return MediaEndpoint{IP: alias.ip, Port: alias.port}, true
+	t.sourceAliases[callID][peer] = source
+	return MediaEndpoint{IP: source.ip, Port: source.port}, true
 }
 
 // Lookup resolves a media endpoint to its labels.
@@ -397,6 +418,13 @@ func (t *Tracker) Observe(
 	} else {
 		entry.state.ObserveNonAudio(h, arrival)
 	}
+	counted := entry.state.packetsTotal > prevTotal
+	var learned *MediaEndpoint
+	if counted && matchedBy == matchedByDst {
+		if alias, learnedOK := t.learnSourceAlias(labels.CallID, ep, endpointKey{ip: srcIP, port: srcPort}); learnedOK {
+			learned = &alias
+		}
+	}
 
 	var lostDelta uint64
 	if entry.state.packetsLost >= prevLost {
@@ -404,7 +432,7 @@ func (t *Tracker) Observe(
 	}
 
 	return ObserveResult{
-		Counted:            entry.state.packetsTotal > prevTotal,
+		Counted:            counted,
 		Duplicate:          entry.state.packetsDuplicate > prevDup,
 		Reorder:            entry.state.packetsReorder > prevReorder,
 		Lost:               lostDelta,
@@ -419,6 +447,7 @@ func (t *Tracker) Observe(
 		SourceCountry:      labels.SourceCountry,
 		Direction:          labels.Direction,
 		CallID:             labels.CallID,
+		LearnedEndpoint:    learned,
 	}, true
 }
 

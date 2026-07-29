@@ -137,6 +137,121 @@ func TestRTPHandleRTPBranches(t *testing.T) {
 	require.Equal(t, 2, mm.rtpPacketsCalls, "duplicate must not be counted")
 }
 
+func TestRTPSourceAliasLearning(t *testing.T) {
+	tests := []struct {
+		name         string
+		sourceIP     net.IP
+		wantAlias    bool
+		wantRefCount uint
+	}{
+		{
+			name:         "destination match learns remapped peer port",
+			sourceIP:     net.IPv4(10, 0, 0, 1),
+			wantAlias:    true,
+			wantRefCount: 1,
+		},
+		{
+			name:         "source IP mismatch counts packet without alias",
+			sourceIP:     net.IPv4(10, 0, 0, 99),
+			wantAlias:    false,
+			wantRefCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mm := &mockMetricser{}
+			e := &exporter{
+				services:        services{metricser: mm, dialoger: &mockDialoger{}},
+				mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
+				rtpEndpointRefs: make(map[rtpEndpointKey]uint),
+			}
+			e.mediaTracker.Register("10.0.0.1", 4000, mediatracker.MediaLabels{
+				Carrier: "carrier", UAType: "ua", CallID: "call-1",
+				SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000},
+			})
+			e.mediaTracker.Register("10.0.0.2", 5000, mediatracker.MediaLabels{
+				Carrier: "carrier", UAType: "ua", CallID: "call-1",
+				SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000},
+			})
+
+			_, err := e.handleRTP(tt.sourceIP, 4100, net.IPv4(10, 0, 0, 2), 5000, makeRTPPayload(1))
+			require.NoError(t, err)
+			require.Equal(t, 1, mm.rtpPacketsCalls)
+			if tt.wantAlias {
+				_, err = e.handleRTP(
+					tt.sourceIP, 4100, net.IPv4(10, 0, 0, 2), 5000, makeRTPPayloadSeq(1, 2),
+				)
+				require.NoError(t, err)
+				require.Equal(t, 2, mm.rtpPacketsCalls)
+			}
+
+			alias := rtpEndpointKey{IP: 0x0A000001, Port: 4100}
+			_, gotAlias := e.rtpEndpointRefs[alias]
+			require.Equal(t, tt.wantAlias, gotAlias)
+			require.Equal(t, tt.wantRefCount, e.rtpEndpointRefs[alias])
+			require.Len(t, e.rtpEndpointRefs, int(tt.wantRefCount))
+		})
+	}
+}
+
+func TestReinviteHoldReleasesLearnedAlias(t *testing.T) {
+	e := &exporter{
+		services:        services{metricser: &mockMetricser{}, dialoger: &mockDialoger{}},
+		inviteSDP:       make(map[string]inviteSDPEntity),
+		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
+		rtpEndpointRefs: make(map[rtpEndpointKey]uint),
+	}
+	labels := mediatracker.MediaLabels{
+		Carrier: "carrier", UAType: "ua", CallID: "call-1",
+		SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000},
+	}
+	for _, endpoint := range []mediatracker.MediaEndpoint{
+		{IP: "10.0.0.1", Port: 4000},
+		{IP: "10.0.0.2", Port: 5000},
+	} {
+		e.mediaTracker.Register(endpoint.IP, endpoint.Port, labels)
+		e.retainRTPEndpoint(endpoint.IP, endpoint.Port)
+	}
+	_, err := e.handleRTP(
+		net.IPv4(10, 0, 0, 1), 4100, net.IPv4(10, 0, 0, 2), 5000, makeRTPPayload(1),
+	)
+	require.NoError(t, err)
+	require.Len(t, e.rtpEndpointRefs, 3)
+	e.storeInviteSDP("call-1", []byte(fasSdpHeld))
+
+	require.NoError(t, e.handleInvite200OK(
+		"carrier", "ua", "", "", fasInvite200OK("call-1", fasSdpHeld), true,
+	))
+	require.Empty(t, e.rtpEndpointRefs)
+	_, ok := e.mediaTracker.Lookup("10.0.0.1", 4000)
+	require.False(t, ok)
+}
+
+func TestInvite200OKRetransmitPreservesMediaRevision(t *testing.T) {
+	e := &exporter{
+		services:        services{metricser: &mockMetricser{}, dialoger: &mockDialoger{}},
+		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
+		rtpEndpointRefs: make(map[rtpEndpointKey]uint),
+	}
+	labels := mediatracker.MediaLabels{CallID: "call-1"}
+	for _, endpoint := range []mediatracker.MediaEndpoint{
+		{IP: "10.0.0.1", Port: 4000},
+		{IP: "10.0.0.2", Port: 5000},
+	} {
+		e.mediaTracker.Register(endpoint.IP, endpoint.Port, labels)
+		e.retainRTPEndpoint(endpoint.IP, endpoint.Port)
+	}
+
+	require.NoError(t, e.handleInvite200OK(
+		"carrier", "ua", "", "", fasInvite200OK("call-1", fasSdpNormal), true,
+	))
+	require.Equal(t, map[rtpEndpointKey]uint{
+		{IP: 0x0A000001, Port: 4000}: 1,
+		{IP: 0x0A000002, Port: 5000}: 1,
+	}, e.rtpEndpointRefs)
+}
+
 // TestParseRawPacketRTPDetection verifies that parseRawPacket routes
 // packets with RTP version-2 prefix byte to handleRTP (not SIP parsing).
 func TestParseRawPacketRTPDetection(t *testing.T) {

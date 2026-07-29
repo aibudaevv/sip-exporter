@@ -181,6 +181,7 @@ type (
 		rtpEndpointsMaps []*ebpf.Map
 		rtpEndpointRefs  map[rtpEndpointKey]uint
 		rtpEndpointMutex sync.Mutex
+		mediaLifecycleMu sync.Mutex
 		socks            []sockEntry
 		messages         chan *rawPacket
 		done             chan struct{}
@@ -614,10 +615,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 			e.services.metricser.UpdateBillableSeconds(
 				r.Carrier, r.DestinationCountry, r.Direction, r.Duration,
 			)
-			rtpResult, deleted := e.mediaTracker.Unregister(r.CallID)
-			for _, ep := range deleted {
-				e.releaseRTPEndpoint(ep.IP, ep.Port)
-			}
+			rtpResult := e.unregisterMedia(r.CallID)
 			e.handleRTPDialogResult(rtpResult, r.Carrier, r.UAType, r.SourceCountry, r.Direction)
 		}
 
@@ -1272,7 +1270,12 @@ func (e *exporter) handleRTP(
 		arrival = time.Now()
 		e.services.metricser.RTPKernelTimestampMissing()
 	}
+	e.mediaLifecycleMu.Lock()
 	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, dstIP.String(), dstPort, header, arrival)
+	if res.LearnedEndpoint != nil {
+		e.retainRTPEndpoint(res.LearnedEndpoint.IP, res.LearnedEndpoint.Port)
+	}
+	e.mediaLifecycleMu.Unlock()
 	if !ok {
 		// No correlated media endpoint for this flow → drop.
 		return "", nil
@@ -1639,9 +1642,21 @@ func (e *exporter) handleInvite200OK(
 	labels := mediatracker.MediaLabels{
 		Carrier: carrier, UAType: uaType, SourceCountry: sourceCountry, CallID: callID, Direction: direction,
 	}
+	offerSDP, hasOfferSDP := e.takeInviteSDP(callID)
+	hasAnswerSDP := isSDPContentType(packet.ContentType)
+	if isReinvite && !hasOfferSDP {
+		return nil
+	}
+	e.mediaLifecycleMu.Lock()
+	defer e.mediaLifecycleMu.Unlock()
+	if isReinvite && hasOfferSDP {
+		for _, ep := range e.mediaTracker.Replace(callID) {
+			e.releaseRTPEndpoint(ep.IP, ep.Port)
+		}
+	}
 	var offerEndpoints []fasEndpoint
 	mediaEndpoints := 0
-	if offerSDP, ok := e.takeInviteSDP(callID); ok {
+	if hasOfferSDP {
 		eps, _ := e.registerMediaEndpoints(offerSDP, labels)
 		mediaEndpoints += len(eps)
 		for _, ep := range eps {
@@ -1649,7 +1664,7 @@ func (e *exporter) handleInvite200OK(
 		}
 	}
 	answerSRTP := false
-	if isSDPContentType(packet.ContentType) {
+	if hasAnswerSDP {
 		eps, srtp := e.registerMediaEndpoints(packet.Body, labels)
 		mediaEndpoints += len(eps)
 		answerSRTP = srtp
@@ -1679,10 +1694,7 @@ func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {
 		e.services.metricser.UpdatePBD(byeCarrier, byeUAType, byeSC, result.Direction, delayMs)
 	}
 
-	rtpResult, deleted := e.mediaTracker.Unregister(string(packet.CallID))
-	for _, ep := range deleted {
-		e.releaseRTPEndpoint(ep.IP, ep.Port)
-	}
+	rtpResult := e.unregisterMedia(string(packet.CallID))
 	e.handleRTPDialogResult(rtpResult, result.Carrier, result.UAType, result.SourceCountry, result.Direction)
 	if result.Duration > 0 {
 		e.services.metricser.UpdateSPD(
@@ -2174,6 +2186,18 @@ func (e *exporter) retainRTPEndpoint(ipStr string, port uint16) {
 				zap.String("ip", ipStr), zap.Uint16("port", port), zap.Error(err))
 		}
 	}
+}
+
+// unregisterMedia removes a dialog's media endpoints and releases matching BPF
+// endpoint references as one lifecycle operation.
+func (e *exporter) unregisterMedia(callID string) mediatracker.RTPDialogResult {
+	e.mediaLifecycleMu.Lock()
+	defer e.mediaLifecycleMu.Unlock()
+	result, deleted := e.mediaTracker.Unregister(callID)
+	for _, ep := range deleted {
+		e.releaseRTPEndpoint(ep.IP, ep.Port)
+	}
+	return result
 }
 
 // releaseRTPEndpoint removes an endpoint from every BPF rtp_endpoints map when
