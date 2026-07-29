@@ -19,6 +19,10 @@ import (
 // AF_PACKET socket with PACKET_IGNORE_OUTGOING captures reliably.
 // SSRC is fixed so the media tracker creates a single stream entry.
 func sendControlledRTP(t *testing.T, port int, seqNums []uint16) {
+	sendControlledRTPWithPayloadType(t, port, seqNums, 8)
+}
+
+func sendControlledRTPWithPayloadType(t *testing.T, port int, seqNums []uint16, payloadType byte) {
 	t.Helper()
 
 	addr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port}
@@ -43,7 +47,7 @@ func sendControlledRTP(t *testing.T, port int, seqNums []uint16) {
 
 	pkt := make([]byte, 28)
 	pkt[0] = 0x80 // V=2, P=0, X=0, CC=0
-	pkt[1] = 0x08 // M=0, PT=8 (PCMA)
+	pkt[1] = payloadType
 	binary.BigEndian.PutUint32(pkt[4:8], 160)
 	binary.BigEndian.PutUint32(pkt[8:12], 0x53535243) // SSRC
 

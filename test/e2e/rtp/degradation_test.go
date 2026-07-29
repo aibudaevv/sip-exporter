@@ -5,6 +5,7 @@ package rtp
 import (
 	"context"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -176,54 +177,29 @@ func TestRTPNetemDegradation(t *testing.T) {
 	t.Logf("netem degradation: avg MOS=%.2f (target <3.0, clean≈4.4)", avgMOS)
 }
 
-// TestRTPNetemPacketLoss verifies that sequence-gap loss detection produces a
-// loss rate approximately matching the injected netem rate. Unlike
-// TestRTPNetemDegradation (combined jitter+loss, asserts only lost>0), this
-// test applies loss-only netem and asserts the detected rate is quantitatively
-// correct.
-//
-// Parameters: loss 30% (no delay variation — isolates loss detection, no
-// reordering risk).
-//
-// Expected: ~200 RTP packets per leg over 4s (G.711a, 20ms pacing). Netem
-// drops 30% → exporter receives ~140/leg, detects ~60 seq gaps/leg → lossRate
-// = lost/(lost+received) ≈ 30%. Margin [20%, 40%] covers netem randomness and
-// small-sample variance (at 400 packets, σ≈9.2).
-func TestRTPNetemPacketLoss(t *testing.T) {
+// TestRTPSequenceGapLoss verifies that a known RTP sequence gap is exported as
+// an exact packet-loss counter value through the full capture pipeline.
+func TestRTPSequenceGapLoss(t *testing.T) {
 	ports := allocatePortsN(6)
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := ports[0], ports[1], ports[2], ports[3], ports[4]
+	uasMediaNum, err := strconv.Atoi(uasMedia)
+	require.NoError(t, err)
 
-	endpoint := startExporter(t.Context(), t, httpPort, uasSIP, testInterface, "")
+	endpoint := startExporterWithCarrierUA(t.Context(), t, httpPort, uasSIP,
+		integrationCarriersYAML, integrationUserAgentsYAML, "")
 
-	applyNetem(t,
-		[]string{"loss", "30%"},
-		uasMedia, uacMedia,
-	)
-
-	runSippRTP(t.Context(), t, uasSIP, uacSIP, uasMedia, uacMedia)
-
-	// RTP packets must be observed.
+	wait := startControlledSIPDialog(t, uasSIP, uacSIP, uasMedia, uacMedia)
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
-	}, 10*time.Second, 500*time.Millisecond,
-		"rtp_packets_total must be observed under netem loss")
+		return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
+	}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
 
-	// Loss must be detected.
-	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_lost_total") > 0
-	}, 10*time.Second, 500*time.Millisecond,
-		"rtp_packets_lost_total must be >0 under netem loss")
+	time.Sleep(1500 * time.Millisecond)
+	sendControlledRTP(t, uasMediaNum, []uint16{1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20})
 
-	// Loss rate must be approximately 30% (margin [20%, 40%]).
 	require.Eventually(t, func() bool {
-		lost := getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_lost_total")
-		total := getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total")
-		if total == 0 {
-			return false
-		}
-		rate := lost / (lost + total)
-		t.Logf("netem loss: rate=%.1f%% (lost=%.0f total=%.0f)", rate*100, lost, total)
-		return rate >= 0.20 && rate <= 0.40
-	}, 15*time.Second, 500*time.Millisecond,
-		"packet loss rate must be approximately 30%% (20%%-40%%)")
+		return metricExists(t, endpoint, "sip_exporter_rtp_packets_lost_total") &&
+			getMetricByLabel(t, endpoint, "sip_exporter_rtp_packets_lost_total", labelCarrier, labelUAType, labelCodec) == 1
+	}, 10*time.Second, 200*time.Millisecond, "one RTP sequence gap must increment lost_total once")
+
+	wait()
 }

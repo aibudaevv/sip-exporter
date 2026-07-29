@@ -34,6 +34,117 @@ func TestCorrelatorRegisterAndLookup(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestTrackerLearnSourceAlias(t *testing.T) {
+	tests := []struct {
+		name       string
+		endpoints  []MediaEndpoint
+		matched    MediaEndpoint
+		sourceIP   string
+		sourcePort uint16
+		want       MediaEndpoint
+		wantOK     bool
+	}{
+		{
+			name: "two endpoints with same peer IP learns remapped port",
+			endpoints: []MediaEndpoint{
+				{IP: "10.0.0.1", Port: 4000},
+				{IP: "10.0.0.2", Port: 5000},
+			},
+			matched:    MediaEndpoint{IP: "10.0.0.2", Port: 5000},
+			sourceIP:   "10.0.0.1",
+			sourcePort: 4100,
+			want:       MediaEndpoint{IP: "10.0.0.1", Port: 4100},
+			wantOK:     true,
+		},
+		{
+			name:       "one endpoint is rejected",
+			endpoints:  []MediaEndpoint{{IP: "10.0.0.2", Port: 5000}},
+			matched:    MediaEndpoint{IP: "10.0.0.2", Port: 5000},
+			sourceIP:   "10.0.0.1",
+			sourcePort: 4100,
+		},
+		{
+			name: "three endpoints are rejected",
+			endpoints: []MediaEndpoint{
+				{IP: "10.0.0.1", Port: 4000},
+				{IP: "10.0.0.2", Port: 5000},
+				{IP: "10.0.0.3", Port: 6000},
+			},
+			matched:    MediaEndpoint{IP: "10.0.0.2", Port: 5000},
+			sourceIP:   "10.0.0.1",
+			sourcePort: 4100,
+		},
+		{
+			name: "changed source IP is rejected",
+			endpoints: []MediaEndpoint{
+				{IP: "10.0.0.1", Port: 4000},
+				{IP: "10.0.0.2", Port: 5000},
+			},
+			matched:    MediaEndpoint{IP: "10.0.0.2", Port: 5000},
+			sourceIP:   "10.0.0.99",
+			sourcePort: 4100,
+		},
+		{
+			name: "unchanged source port is rejected",
+			endpoints: []MediaEndpoint{
+				{IP: "10.0.0.1", Port: 4000},
+				{IP: "10.0.0.2", Port: 5000},
+			},
+			matched:    MediaEndpoint{IP: "10.0.0.2", Port: 5000},
+			sourceIP:   "10.0.0.1",
+			sourcePort: 4000,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := NewTracker(30 * time.Second)
+			for _, endpoint := range tt.endpoints {
+				tr.Register(endpoint.IP, endpoint.Port, sampleLabels("call-1"))
+			}
+
+			got, ok := tr.LearnSourceAlias(
+				"call-1", tt.matched.IP, tt.matched.Port, tt.sourceIP, tt.sourcePort,
+			)
+			require.Equal(t, tt.wantOK, ok)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestTrackerLearnSourceAliasRejectsRepeatedAlias(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 4000, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5000, sampleLabels("call-1"))
+
+	_, ok := tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4100)
+	require.True(t, ok)
+
+	got, ok := tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4100)
+	require.False(t, ok)
+	require.Equal(t, MediaEndpoint{}, got)
+
+	got, ok = tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4200)
+	require.False(t, ok)
+	require.Equal(t, MediaEndpoint{}, got)
+}
+
+func TestTrackerUnregisterReturnsLearnedAlias(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 4000, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5000, sampleLabels("call-1"))
+
+	_, ok := tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4100)
+	require.True(t, ok)
+
+	_, deleted := tr.Unregister("call-1")
+	require.ElementsMatch(t, []MediaEndpoint{
+		{IP: "10.0.0.1", Port: 4000},
+		{IP: "10.0.0.2", Port: 5000},
+		{IP: "10.0.0.1", Port: 4100},
+	}, deleted)
+}
+
 func TestCorrelatorUnregisterByCallID(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
@@ -62,6 +173,46 @@ func TestTrackerUnregisterReturnsDeletedEndpoints(t *testing.T) {
 	require.True(t, ips["10.0.0.1"] && ips["10.0.0.2"], "must return call-1 endpoints only")
 }
 
+func TestTrackerUnregisterReturnsSharedEndpointForEachOwner(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-2"))
+
+	_, deletedFirst := tr.Unregister("call-1")
+	require.Equal(t, []MediaEndpoint{{IP: "10.0.0.1", Port: 5004}}, deletedFirst)
+
+	labels, ok := tr.Lookup("10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Equal(t, "call-2", labels.CallID)
+
+	_, deletedSecond := tr.Unregister("call-2")
+	require.Equal(t, []MediaEndpoint{{IP: "10.0.0.1", Port: 5004}}, deletedSecond)
+	_, ok = tr.Lookup("10.0.0.1", 5004)
+	require.False(t, ok)
+}
+
+func TestTrackerUnregisterRestoresPreviousSharedEndpointOwner(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-2"))
+
+	_, deleted := tr.Unregister("call-2")
+	require.Equal(t, []MediaEndpoint{{IP: "10.0.0.1", Port: 5004}}, deleted)
+
+	labels, ok := tr.Lookup("10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Equal(t, "call-1", labels.CallID)
+}
+
+func TestTrackerDuplicateEndpointRegistrationHasOneOwner(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+
+	_, deleted := tr.Unregister("call-1")
+	require.Equal(t, []MediaEndpoint{{IP: "10.0.0.1", Port: 5004}}, deleted)
+}
+
 func TestTrackerUnregisterReturnsRTCPEndpoints(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
@@ -80,6 +231,22 @@ func TestTrackerUnregisterReturnsRTCPEndpoints(t *testing.T) {
 
 	_, deleted2 := tr.Unregister("call-2")
 	require.Len(t, deleted2, 2, "call-2 must also return both endpoints")
+}
+
+func TestTrackerUnregisterReturnsSharedRTCPEndpointForEachOwner(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5006, sampleLabels("call-2"))
+	tr.RegisterRTCP("10.0.0.3", 5005, "10.0.0.1", 5004, "call-1")
+	tr.RegisterRTCP("10.0.0.3", 5005, "10.0.0.2", 5006, "call-2")
+
+	_, deletedFirst := tr.Unregister("call-1")
+	require.Len(t, deletedFirst, 2)
+	require.Contains(t, deletedFirst, MediaEndpoint{IP: "10.0.0.3", Port: 5005})
+
+	_, deletedSecond := tr.Unregister("call-2")
+	require.Len(t, deletedSecond, 2)
+	require.Contains(t, deletedSecond, MediaEndpoint{IP: "10.0.0.3", Port: 5005})
 }
 
 func TestTrackerUnregisterNoRTCPOnlyRTPReturned(t *testing.T) {

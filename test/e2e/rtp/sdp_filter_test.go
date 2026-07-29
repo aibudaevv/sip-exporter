@@ -3,14 +3,21 @@
 package rtp
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
+	"io"
+	"log"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
 )
 
 // startControlledSIPDialog emits each signalling message three times while
@@ -119,6 +126,168 @@ func sendNonRTPToSippPort(t *testing.T, port int, count int) {
 		_, _ = sender.Write(pkt)
 		if i%10 == 0 {
 			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
+
+func allocateMediaPortsN(t *testing.T, n int, reserved ...string) []string {
+	t.Helper()
+
+	blocked := make(map[int]struct{}, len(reserved))
+	for _, value := range reserved {
+		port, err := strconv.Atoi(value)
+		require.NoError(t, err)
+		blocked[port] = struct{}{}
+	}
+
+	portMu.Lock()
+	defer portMu.Unlock()
+
+	ports := make([]string, 0, n)
+	for len(ports) < n {
+		rtp, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+		require.NoError(t, err)
+		port := rtp.LocalAddr().(*net.UDPAddr).Port
+		if port >= 65535 {
+			_ = rtp.Close()
+			continue
+		}
+		_, rtpUsed := usedPorts[port]
+		_, rtcpUsed := usedPorts[port+1]
+		_, rtpBlocked := blocked[port]
+		_, rtcpBlocked := blocked[port+1]
+		if rtpUsed || rtcpUsed || rtpBlocked || rtcpBlocked {
+			_ = rtp.Close()
+			continue
+		}
+
+		rtcp, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port + 1})
+		if err != nil {
+			_ = rtp.Close()
+			continue
+		}
+		_ = rtcp.Close()
+		_ = rtp.Close()
+		usedPorts[port] = struct{}{}
+		usedPorts[port+1] = struct{}{}
+		ports = append(ports, strconv.Itoa(port))
+	}
+	return ports
+}
+
+func releaseLateCSeqDialog(t *testing.T, uacSIP int) {
+	t.Helper()
+
+	listener, err := net.DialUDP("udp4", nil, &net.UDPAddr{
+		IP: net.IPv4(127, 0, 0, 1), Port: uacSIP,
+	})
+	require.NoError(t, err)
+	defer listener.Close()
+
+	localPort := listener.LocalAddr().(*net.UDPAddr).Port
+	request := fmt.Sprintf("INFO sip:sipp@127.0.0.1:%d SIP/2.0\r\n"+
+		"Via: SIP/2.0/UDP 127.0.0.1:%d;branch=z9hG4bK-test-release\r\n"+
+		"From: sut <sip:service@127.0.0.1>;tag=0\r\n"+
+		"To: sipp <sip:sipp@127.0.0.1>;tag=0\r\n"+
+		"Call-ID: late-cseq-call\r\n"+
+		"CSeq: 99 INFO\r\n"+
+		"Content-Length: 0\r\n\r\n", uacSIP, localPort)
+	_, err = listener.Write([]byte(request))
+	require.NoError(t, err)
+}
+
+func startLateCSeqSippContainers(
+	ctx context.Context, t *testing.T,
+	uasSIP, uacSIP, oldOffer, oldAnswer, newOffer, newAnswer string,
+) func() {
+	t.Helper()
+
+	scenarioDir := filepath.Join(projectRoot(), "test", "e2e", "sipp")
+	dumpLogs := func(ctx context.Context, name string, container testcontainers.Container) {
+		logs, err := container.Logs(ctx)
+		if err != nil {
+			t.Logf("SIPp %s logs unavailable: %v", name, err)
+			return
+		}
+		defer logs.Close()
+		output, _ := io.ReadAll(logs)
+		t.Logf("SIPp %s logs:\n%s", name, strings.TrimSpace(string(output)))
+	}
+	start := func(cmd []string) testcontainers.Container {
+		container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+			ContainerRequest: testcontainers.ContainerRequest{
+				Image:       sippImage,
+				NetworkMode: "host",
+				Cmd:         cmd,
+				Mounts: testcontainers.Mounts(
+					testcontainers.BindMount(scenarioDir, "/scenarios"),
+				),
+			},
+			Started: true,
+			Logger:  log.New(io.Discard, "", 0),
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if t.Failed() {
+				dumpLogs(cleanupCtx, "failure", container)
+			}
+			_ = container.Terminate(cleanupCtx)
+		})
+		return container
+	}
+
+	uas := start([]string{
+		"-sf", "/scenarios/uas_late_invite_200.xml",
+		"-i", "127.0.0.1", "-p", uasSIP, "-mp", oldAnswer,
+		"-set", "new_answer_port", newAnswer,
+		"-m", "1", "-nr", "-nostdin",
+	})
+	uasReady := false
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		address, err := net.ResolveUDPAddr("udp4", "127.0.0.1:"+uasSIP)
+		if err != nil {
+			break
+		}
+		listener, err := net.ListenUDP("udp4", address)
+		if err != nil {
+			uasReady = true
+			break
+		}
+		_ = listener.Close()
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !uasReady {
+		dumpLogs(t.Context(), "UAS startup", uas)
+		state, stateErr := uas.State(t.Context())
+		t.Logf("SIPp UAS startup state: %+v (error: %v)", state, stateErr)
+	}
+	require.True(t, uasReady, "SIPp UAS must listen on %s", uasSIP)
+
+	uac := start([]string{
+		"-sf", "/scenarios/uac_late_invite_200.xml",
+		"-i", "127.0.0.1", "-p", uacSIP, "-mp", oldOffer,
+		"-set", "new_offer_port", newOffer,
+		"-cid_str", "late-cseq-call",
+		"-m", "1", "-nr", "127.0.0.1:" + uasSIP,
+	})
+
+	return func() {
+		uacPort, err := strconv.Atoi(uacSIP)
+		require.NoError(t, err)
+		releaseLateCSeqDialog(t, uacPort)
+		for name, container := range map[string]testcontainers.Container{"UAC": uac, "UAS": uas} {
+			require.Eventually(t, func() bool {
+				state, err := container.State(t.Context())
+				return err == nil && !state.Running
+			}, 15*time.Second, 100*time.Millisecond, "SIPp %s did not exit", name)
+			state, err := container.State(t.Context())
+			require.NoError(t, err)
+			if state.ExitCode != 0 || os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
+				dumpLogs(t.Context(), name, container)
+			}
+			require.Zero(t, state.ExitCode, "SIPp %s exited with an error", name)
 		}
 	}
 }
@@ -288,4 +457,138 @@ func TestSDPFilterEntryLifecycle(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSDPFilterLateInvite200OKUsesMatchingCSeq verifies that a late response
+// from the initial INVITE cannot consume a newer re-INVITE offer. Only the
+// matching CSeq 2 media revision must remain in the BPF endpoint map.
+func TestSDPFilterLateInvite200OKUsesMatchingCSeq(t *testing.T) {
+	tests := []struct {
+		name                       string
+		obsoletePacketsPerEndpoint int
+		currentPacketsPerEndpoint  int
+		minCurrentPackets          float64
+		maxCurrentPackets          float64
+	}{
+		{
+			name:                       "late CSeq 1 response preserves CSeq 2 revision",
+			obsoletePacketsPerEndpoint: 400,
+			currentPacketsPerEndpoint:  20,
+			minCurrentPackets:          10,
+			maxCurrentPackets:          200,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ports := allocatePortsN(3)
+			httpPort, uasSIP, uacSIP := ports[0], ports[1], ports[2]
+			mediaPorts := allocateMediaPortsN(t, 4, ports...)
+			oldOffer, oldAnswer := mediaPorts[0], mediaPorts[1]
+			newOffer, newAnswer := mediaPorts[2], mediaPorts[3]
+			oldOfferPort, err := strconv.Atoi(oldOffer)
+			require.NoError(t, err)
+			oldAnswerPort, err := strconv.Atoi(oldAnswer)
+			require.NoError(t, err)
+			newOfferPort, err := strconv.Atoi(newOffer)
+			require.NoError(t, err)
+			newAnswerPort, err := strconv.Atoi(newAnswer)
+			require.NoError(t, err)
+
+			endpoint := startExporterWithCarrierUA(t.Context(), t,
+				httpPort, uasSIP, integrationCarriersYAML, integrationUserAgentsYAML, "")
+			finish := startLateCSeqSippContainers(t.Context(), t,
+				uasSIP, uacSIP, oldOffer, oldAnswer, newOffer, newAnswer)
+
+			require.Eventually(t, func() bool {
+				return metricExists(t, endpoint, "sip_exporter_options_total") &&
+					getMetricByLabel(t, endpoint, "sip_exporter_options_total") == 1
+			}, 5*time.Second, 200*time.Millisecond,
+				"SIPp must complete the CSeq 2 transaction before RTP verification")
+
+			obsoleteSeqs := make([]uint16, tt.obsoletePacketsPerEndpoint)
+			for i := range obsoleteSeqs {
+				obsoleteSeqs[i] = uint16(i + 1)
+			}
+			var pcmaPackets, pcmuPackets float64
+			var nextSequence uint16 = 1
+			t.Cleanup(func() {
+				t.Logf("observed current RTP totals: PCMA=%v PCMU=%v", pcmaPackets, pcmuPackets)
+			})
+			require.Eventually(t, func() bool {
+				currentSeqs := make([]uint16, tt.currentPacketsPerEndpoint)
+				for i := range currentSeqs {
+					currentSeqs[i] = nextSequence + uint16(i)
+				}
+				nextSequence += uint16(len(currentSeqs))
+				sendControlledRTP(t, newOfferPort, currentSeqs)
+				sendControlledRTPWithPayloadType(t, newAnswerPort, currentSeqs, 0)
+				if !metricExists(t, endpoint, "sip_exporter_rtp_packets_total") {
+					return false
+				}
+				pcmaPackets = getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total")
+				pcmuPackets = getMetricByLabel(t, endpoint,
+					"sip_exporter_rtp_packets_total", `codec="PCMU"`)
+				return pcmaPackets >= tt.minCurrentPackets && pcmaPackets <= tt.maxCurrentPackets &&
+					pcmuPackets >= tt.minCurrentPackets && pcmuPackets <= tt.maxCurrentPackets
+			}, 5*time.Second, 200*time.Millisecond,
+				"both matching CSeq 2 endpoints must accept RTP")
+
+			sendControlledRTP(t, oldOfferPort, obsoleteSeqs)
+			sendControlledRTPWithPayloadType(t, oldAnswerPort, obsoleteSeqs, 0)
+			pcmaPackets = getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total")
+			pcmuPackets = getMetricByLabel(t, endpoint,
+				"sip_exporter_rtp_packets_total", `codec="PCMU"`)
+			require.LessOrEqual(t, pcmaPackets, tt.maxCurrentPackets,
+				"obsolete CSeq 1 offer endpoint must not accept RTP")
+			require.LessOrEqual(t, pcmuPackets, tt.maxCurrentPackets,
+				"late CSeq 1 answer endpoint must not accept RTP")
+
+			finish()
+		})
+	}
+}
+
+// TestSDPFilterSharedEntrySurvivesLatestOwnerBye verifies that a shared media
+// endpoint remains in the BPF map when the latest registered dialog ends while
+// an earlier dialog still owns it.
+func TestSDPFilterSharedEntrySurvivesLatestOwnerBye(t *testing.T) {
+	const pktCount = 20
+
+	ports := allocatePortsN(8)
+	httpPort := ports[0]
+	uasSIPA, uacSIPA := ports[1], ports[2]
+	uasSIPB, uacSIPB := ports[3], ports[4]
+	sharedMedia, uacMediaA, uacMediaB := ports[5], ports[6], ports[7]
+	sharedMediaPort, err := strconv.Atoi(sharedMedia)
+	require.NoError(t, err)
+
+	endpoint := startExporterWithCarrierUA(t.Context(), t,
+		httpPort, uasSIPA+","+uasSIPB,
+		integrationCarriersYAML, integrationUserAgentsYAML, "")
+
+	endFirstDialog := startControlledSIPDialog(t, uasSIPA, uacSIPA, sharedMedia, uacMediaA)
+	endSecondDialog := startControlledSIPDialog(t, uasSIPB, uacSIPB, sharedMedia, uacMediaB)
+
+	require.Eventually(t, func() bool {
+		return getMetricByLabel(t, endpoint, "sip_exporter_sessions",
+			labelCarrier, labelUAType) >= 2
+	}, 10*time.Second, 200*time.Millisecond, "both dialogs must be established")
+
+	endSecondDialog()
+	require.Eventually(t, func() bool {
+		return getMetricByLabel(t, endpoint, "sip_exporter_sessions",
+			labelCarrier, labelUAType) == 1
+	}, 10*time.Second, 200*time.Millisecond, "first dialog must remain after the latest owner BYE")
+
+	time.Sleep(1500 * time.Millisecond)
+	before := getSocketPacketsReceived(t, endpoint)
+	sendNonRTPUDP(t, sharedMediaPort, pktCount)
+	time.Sleep(2500 * time.Millisecond)
+	after := getSocketPacketsReceived(t, endpoint)
+
+	require.GreaterOrEqual(t, after-before, float64(pktCount)*0.5,
+		"shared media endpoint must remain in the BPF map while the first dialog is active")
+
+	endFirstDialog()
 }

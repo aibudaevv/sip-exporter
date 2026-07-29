@@ -553,6 +553,55 @@ func TestExtractCSeqMultipleSpaces(t *testing.T) {
 	require.Equal(t, []byte("INVITE"), method)
 }
 
+func TestInviteSDPCSeqRetransmitReplacesSameTransaction(t *testing.T) {
+	e := &exporter{inviteSDP: make(map[inviteSDPKey]inviteSDPEntity)}
+
+	e.storeInviteSDP("call-1", "2", []byte("first offer"))
+	e.storeInviteSDP("call-1", "2", []byte("replacement offer"))
+
+	require.Len(t, e.inviteSDP, 1)
+	body, ok := e.takeInviteSDP("call-1", "2")
+	require.True(t, ok)
+	require.Equal(t, []byte("replacement offer"), body)
+}
+
+func TestInviteSDPCSeqResponseRemovesOnlyMatchingTransaction(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    string
+		wantCSeq2 bool
+		wantCSeq3 bool
+	}{
+		{
+			name:      "provisional response preserves both offers",
+			status:    "180 Ringing",
+			wantCSeq2: true,
+			wantCSeq3: true,
+		},
+		{
+			name:      "final rejection removes only matching offer",
+			status:    "488 Not Acceptable Here",
+			wantCSeq2: false,
+			wantCSeq3: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newSDPCSeqTestExporter()
+			e.storeInviteSDP("call-1", "2", []byte("offer 2"))
+			e.storeInviteSDP("call-1", "3", []byte("offer 3"))
+
+			require.NoError(t, e.handleMessage("carrier-x", "", inviteResponse(tt.status, "call-1", "2")))
+
+			_, gotCSeq2 := e.takeInviteSDP("call-1", "2")
+			_, gotCSeq3 := e.takeInviteSDP("call-1", "3")
+			require.Equal(t, tt.wantCSeq2, gotCSeq2)
+			require.Equal(t, tt.wantCSeq3, gotCSeq3)
+		})
+	}
+}
+
 // ==================== extractSessionExpires tests ====================
 
 func TestExtractSessionExpiresOnlyNumber(t *testing.T) {
@@ -611,7 +660,7 @@ func TestParseRawPacketTooShort(t *testing.T) {
 			dialoger:  &mockDialoger{},
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -628,7 +677,7 @@ func TestParseRawPacketNotIPv4(t *testing.T) {
 			dialoger:  &mockDialoger{},
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -649,7 +698,7 @@ func TestParseRawPacketNotUDP(t *testing.T) {
 			dialoger:  &mockDialoger{},
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -672,7 +721,7 @@ func TestParseRawPacketNoSIPPayload(t *testing.T) {
 			dialoger:  &mockDialoger{},
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -695,7 +744,7 @@ func TestParseRawPacketNotSIPMethod(t *testing.T) {
 			dialoger:  &mockDialoger{},
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -719,7 +768,7 @@ func TestParseRawPacketVLANTagged(t *testing.T) {
 			dialoger:  &mockDialoger{},
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -744,7 +793,7 @@ func TestParseRawPacketIPHeaderTooShort(t *testing.T) {
 			dialoger:  &mockDialoger{},
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -766,7 +815,7 @@ func TestParseRawPacketUDPHeaderTooShort(t *testing.T) {
 			dialoger:  &mockDialoger{},
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -790,7 +839,7 @@ func TestParseRawPacketSIPPayloadTooSmall(t *testing.T) {
 			dialoger:  &mockDialoger{},
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -814,7 +863,7 @@ func TestParseRawPacketErrorTypes(t *testing.T) {
 			dialoger:  &mockDialoger{},
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -929,7 +978,7 @@ func TestParseRawPacketSuccessReturnsEmptyType(t *testing.T) {
 			dialoger:  &mockDialoger{},
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -1271,7 +1320,7 @@ func TestHandleMessageRequest(t *testing.T) {
 			dialoger:  md,
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -1301,7 +1350,7 @@ func TestHandleMessageINVITERetransmissionDedup(t *testing.T) {
 			dialoger:  md,
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -1354,7 +1403,7 @@ func TestHandleMessageResponse200INVITE(t *testing.T) {
 			dialoger:  md,
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -1387,7 +1436,7 @@ func TestHandleMessageReINVITECountedAsReinvite(t *testing.T) {
 			dialoger:  md,
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -1427,7 +1476,7 @@ func TestHandleMessageInitialINVITECountedAsInvite(t *testing.T) {
 			dialoger:  md,
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -1458,7 +1507,7 @@ func TestHandleMessageReINVITE200OKDoesNotInflateMetrics(t *testing.T) {
 			dialoger:  md,
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -1500,7 +1549,7 @@ func TestHandleMessageResponse200BYE(t *testing.T) {
 			dialoger:  md,
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -1532,7 +1581,7 @@ func TestHandleMessageResponse200REGISTER(t *testing.T) {
 			dialoger:  md,
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -1564,7 +1613,7 @@ func TestHandleMessageRRDFullCycle(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -1604,7 +1653,7 @@ func TestHandleMessageRegister200OKCallsRegisterSuccess(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -1625,7 +1674,7 @@ func TestHandleMessageRegister403CallsRegisterFailure(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -1649,7 +1698,7 @@ func TestHandleMessageRegister401ChallengeCallsRegisterFailure(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -1671,7 +1720,7 @@ func TestHandleMessageRegister100TryingNotAFailure(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -1693,7 +1742,7 @@ func newExporterWithRegTracker() *exporter {
 		registerTracker:       make(map[string]registerEntry),
 		registerExpiryTracker: make(map[string]registerExpiryEntry),
 		inviteTracker:         make(map[string]inviteEntry),
-		inviteSDP:             make(map[string]inviteSDPEntity),
+		inviteSDP:             make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:          mediatracker.NewTracker(rtpStreamTTL),
 	}
 }
@@ -2200,7 +2249,7 @@ func newFasTestExporter(mm *mockMetricser, fasThreshold time.Duration) *exporter
 			dialoger:  service.NewDialoger(),
 		},
 		inviteTracker: make(map[string]inviteEntry),
-		inviteSDP:     make(map[string]inviteSDPEntity),
+		inviteSDP:     make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:  mediatracker.NewTracker(rtpStreamTTL),
 		fasTracker:    newFasTracker(fasThreshold),
 	}
@@ -2286,7 +2335,7 @@ func TestFASCallerRTPDoesNotClear(t *testing.T) {
 
 	// Cache the INVITE offer SDP (caller endpoint 10.0.0.2:5004) so the 200 OK
 	// registers BOTH sides and FAS can gate by originating side.
-	e.storeInviteSDP("call-1", []byte(fasSdpOffer))
+	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer))
 
 	require.NoError(
 		t,
@@ -2324,7 +2373,7 @@ func TestFASRetransmit200OKPreservesOfferSet(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, time.Hour)
 
-	e.storeInviteSDP("call-1", []byte(fasSdpOffer))
+	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer))
 	require.NoError(t,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
 	)
@@ -2354,7 +2403,7 @@ func TestFASLateOfferCallerRTPDoesNotClear(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, 60*time.Millisecond)
 
-	e.storeInviteSDP("call-late", []byte(fasSdpOffer))
+	e.storeInviteSDP("call-late", "", []byte(fasSdpOffer))
 
 	pkt := fasInvite200OK("call-late", "")
 	pkt.ContentType = nil
@@ -2379,7 +2428,7 @@ func TestFASLateOfferAnswerRTPClears(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, 60*time.Millisecond)
 
-	e.storeInviteSDP("call-late", []byte(fasSdpOffer))
+	e.storeInviteSDP("call-late", "", []byte(fasSdpOffer))
 
 	pkt := fasInvite200OK("call-late", "")
 	pkt.ContentType = nil
@@ -2478,7 +2527,7 @@ func TestFASByePathNoFireWhenMediaCleared(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, time.Hour)
 
-	e.storeInviteSDP("call-1", []byte(fasSdpOffer))
+	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer))
 	require.NoError(t,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
 	)
@@ -2589,7 +2638,7 @@ func TestFASReinviteUpdatesOfferEndpoints(t *testing.T) {
 	e := newFasTestExporter(mm, time.Hour)
 
 	// Initial call: INVITE offer 10.0.0.2:5004 → 200 OK answer 10.0.0.1:5004.
-	e.storeInviteSDP("call-1", []byte(fasSdpOffer))
+	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer))
 	require.NoError(t,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
 	)
@@ -2597,7 +2646,7 @@ func TestFASReinviteUpdatesOfferEndpoints(t *testing.T) {
 		"initial offer endpoint must be tracked")
 
 	// Re-INVITE: caller changes endpoint to 10.0.0.3:5004.
-	e.storeInviteSDP("call-1", []byte(fasSdpOffer2))
+	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer2))
 	require.NoError(t,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), true),
 	)
@@ -2623,14 +2672,14 @@ func TestFASReinviteSRTPExtendsDeadline(t *testing.T) {
 	e := newFasTestExporter(mm, 100*time.Millisecond)
 
 	// Initial call with plain RTP: deadline = now + 100ms (no grace).
-	e.storeInviteSDP("call-1", []byte(fasSdpOffer))
+	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer))
 	require.NoError(t,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
 	)
 	origDeadline := e.fasTracker.entries["call-1"].deadline
 
 	// Re-INVITE upgrades to SRTP: deadline must extend by fasSRTPGrace.
-	e.storeInviteSDP("call-1", []byte(fasSdpOffer))
+	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer))
 	require.NoError(t,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpSRTP), true),
 	)
@@ -2649,7 +2698,7 @@ func TestFASConcurrentSweepClearBye(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, time.Hour)
 
-	e.storeInviteSDP("call-1", []byte(fasSdpOffer))
+	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer))
 	require.NoError(t,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
 	)
@@ -2841,7 +2890,7 @@ func BenchmarkHandleRTP_FASHotPath(b *testing.B) {
 	for i := range 1000 {
 		e.fasTracker.store(fmt.Sprintf("filler-%d", i), fasEntry{}, nil, false)
 	}
-	e.storeInviteSDP("bench", []byte(fasSdpOffer))
+	e.storeInviteSDP("bench", "", []byte(fasSdpOffer))
 	require.NoError(b,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("bench", fasSdpNormal), false),
 	)
@@ -2869,7 +2918,7 @@ func TestHandleMessageReINVITEExcludedFromBurst(t *testing.T) {
 			dialoger:  md,
 		},
 		inviteTracker:      make(map[string]inviteEntry),
-		inviteSDP:          make(map[string]inviteSDPEntity),
+		inviteSDP:          make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker:     make(map[string]optionsEntry),
 		mediaTracker:       mediatracker.NewTracker(rtpStreamTTL),
 		inviteBurstTracker: newInviteBurstTracker(3, time.Minute),
@@ -2908,7 +2957,7 @@ func TestHandleMessageRegister200OKPopulatesExpiryTracker(t *testing.T) {
 		registerTracker:       make(map[string]registerEntry),
 		registerExpiryTracker: make(map[string]registerExpiryEntry),
 		inviteTracker:         make(map[string]inviteEntry),
-		inviteSDP:             make(map[string]inviteSDPEntity),
+		inviteSDP:             make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:          mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -2940,7 +2989,7 @@ func TestHandleMessageResponse401(t *testing.T) {
 			dialoger:  md,
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -2968,7 +3017,7 @@ func TestHandleMessageResponse302INVITE(t *testing.T) {
 			dialoger:  md,
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -2997,7 +3046,7 @@ func TestHandleMessageSERIntegration(t *testing.T) {
 			dialoger:  d,
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -3055,7 +3104,7 @@ func TestHandleMessageParseError(t *testing.T) {
 			dialoger:  md,
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -3077,7 +3126,7 @@ func TestHandleMessageResponse200InvalidDialogID(t *testing.T) {
 			dialoger:  md,
 		},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -3112,7 +3161,7 @@ func TestParseRawPacketAllSIPMethods(t *testing.T) {
 				},
 				registerTracker: make(map[string]registerEntry),
 				inviteTracker:   make(map[string]inviteEntry),
-				inviteSDP:       make(map[string]inviteSDPEntity),
+				inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 				optionsTracker:  make(map[string]optionsEntry),
 				byeTracker:      make(map[string]byeEntry),
 				mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
@@ -3157,7 +3206,7 @@ func TestParseRawPacketSIPResponse(t *testing.T) {
 					metricser: &mockMetricser{},
 					dialoger:  &mockDialoger{},
 				},
-				inviteSDP:    make(map[string]inviteSDPEntity),
+				inviteSDP:    make(map[inviteSDPKey]inviteSDPEntity),
 				mediaTracker: mediatracker.NewTracker(rtpStreamTTL),
 			}
 
@@ -3380,7 +3429,7 @@ func TestExporterRegisterTrackerStoreAndRemove(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -3412,7 +3461,7 @@ func TestExporterRegisterTracker401Removes(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -3458,7 +3507,7 @@ func TestExporterRegisterTracker403Removes(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -3497,7 +3546,7 @@ func TestExporterRegisterTracker500Removes(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -3533,7 +3582,7 @@ func TestExporterRegisterTrackerTTLExpired(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -3569,7 +3618,7 @@ func TestExporterRegisterTrackerTTLNotExpired(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -3596,7 +3645,7 @@ func TestExporterRegisterTrackerRetransmit200OK(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -3646,7 +3695,7 @@ func TestExporterRegisterTrackerRetransmit401(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -3690,7 +3739,7 @@ func TestExporterRegisterTrackerDifferentCallID(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -3787,7 +3836,7 @@ func TestExporterInviteTrackerStoreAndMeasure(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -3812,7 +3861,7 @@ func TestExporterInviteTrackerStoreAndRemove(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -3833,7 +3882,7 @@ func TestExporterInviteTrackerMeasureNonExistent(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -3851,7 +3900,7 @@ func TestExporterInviteTrackerRemoveNonExistent(_ *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -3866,7 +3915,7 @@ func TestExporterInviteTrackerTTLExpired(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -3897,7 +3946,7 @@ func TestExporterInviteTrackerTTLNotExpired(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -3918,7 +3967,7 @@ func TestExporterInviteTrackerDifferentCallIDs(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -3948,7 +3997,7 @@ func TestHandleMessageTTR100Trying(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -3990,7 +4039,7 @@ func TestHandleMessageTTR180Ringing(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -4029,7 +4078,7 @@ func TestHandleMessageTTR183SessionProgress(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -4068,7 +4117,7 @@ func TestHandleMessageTTRNoProvisionalResponse(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -4106,7 +4155,7 @@ func TestHandleMessageTTROnlyFirstProvisionalMeasured(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -4157,7 +4206,7 @@ func TestHandleMessageTTRRetransmitOverwrites(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -4200,7 +4249,7 @@ func TestHandleMessageTTRFinalResponseRemovesTracker(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -4240,7 +4289,7 @@ func TestHandleMessageTTRNonInviteResponseIgnored(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -4277,7 +4326,7 @@ func TestHandleMessageTTRFullCallFlow(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		byeTracker:      make(map[string]byeEntry),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -4350,7 +4399,7 @@ func TestHandleMessagePDD180Ringing(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -4391,7 +4440,7 @@ func TestHandleMessagePDD100TryingThen180Ringing(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -4442,7 +4491,7 @@ func TestHandleMessagePDD183NoPDD(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -4481,7 +4530,7 @@ func TestHandleMessagePDDNo180NoPDD(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -4520,7 +4569,7 @@ func TestHandleMessagePDDNonInviteResponseIgnored(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
 
@@ -4554,7 +4603,7 @@ func TestHandleMessageCarrierPropagationFullDialog(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker:  make(map[string]optionsEntry),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -4612,7 +4661,7 @@ func TestHandleMessageCarrierPropagationMultiCarrierDialogs(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker:  make(map[string]optionsEntry),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -4976,7 +5025,7 @@ func newTestExporter(mm *carrierTrackingMetricser, md *mockDialoger) *exporter {
 		vqHandler:       vq.NewHandler(mm),
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker:  make(map[string]optionsEntry),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -5419,7 +5468,7 @@ func TestHandleMessageCANCELRemovesInviteTracker(t *testing.T) {
 			dialoger:  md,
 		},
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker:  make(map[string]optionsEntry),
 		registerTracker: make(map[string]registerEntry),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
@@ -5461,7 +5510,7 @@ func TestHandleMessageCANCELNoEntryNoOp(t *testing.T) {
 			dialoger:  md,
 		},
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker:  make(map[string]optionsEntry),
 		registerTracker: make(map[string]registerEntry),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
@@ -5487,7 +5536,7 @@ func TestHandleMessageCANCELThenProvisionalNoTTR(t *testing.T) {
 			dialoger:  md,
 		},
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker:  make(map[string]optionsEntry),
 		registerTracker: make(map[string]registerEntry),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
@@ -5680,7 +5729,7 @@ func TestExporterGracefulShutdown(t *testing.T) {
 		sipPortSets:     [][]uint16{{5060, 5061}},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker:  make(map[string]optionsEntry),
 	}
 
@@ -5735,7 +5784,7 @@ func newRollbackExporter() *exporter {
 		mediaTracker:    mediatracker.NewTracker(30 * time.Second),
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker:  make(map[string]optionsEntry),
 	}
 }
@@ -6380,7 +6429,7 @@ func TestHandleMessageDirectionFromPkttype(t *testing.T) {
 					dialoger:  md,
 				},
 				inviteTracker:  make(map[string]inviteEntry),
-				inviteSDP:      make(map[string]inviteSDPEntity),
+				inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 				optionsTracker: make(map[string]optionsEntry),
 				mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 			}
@@ -6459,6 +6508,51 @@ func TestIPPortToKey(t *testing.T) {
 	}
 }
 
+func TestRTPEndpointRetainRelease(t *testing.T) {
+	endpoint := rtpEndpointKey{IP: 0xC000020A, Port: 5004}
+	e := &exporter{
+		rtpEndpointRefs: make(map[rtpEndpointKey]uint),
+	}
+
+	e.retainRTPEndpoint("192.0.2.10", 5004)
+	e.retainRTPEndpoint("192.0.2.10", 5004)
+	require.Equal(t, uint(2), e.rtpEndpointRefs[endpoint])
+
+	e.releaseRTPEndpoint("192.0.2.10", 5004)
+	require.Equal(t, uint(1), e.rtpEndpointRefs[endpoint])
+
+	e.releaseRTPEndpoint("192.0.2.10", 5004)
+	_, ok := e.rtpEndpointRefs[endpoint]
+	require.False(t, ok)
+}
+
+func TestRTPEndpointRefcountIgnoresUnsupportedEndpoints(t *testing.T) {
+	e := &exporter{
+		rtpEndpointRefs: make(map[rtpEndpointKey]uint),
+	}
+
+	e.retainRTPEndpoint("2001:db8::1", 5004)
+	e.releaseRTPEndpoint("2001:db8::1", 5004)
+	e.releaseRTPEndpoint("192.0.2.10", 5004)
+
+	require.Empty(t, e.rtpEndpointRefs)
+}
+
+func TestRegisterMediaEndpointsRetainsDuplicateSDPEndpointOnce(t *testing.T) {
+	e := &exporter{
+		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
+		rtpEndpointRefs: make(map[rtpEndpointKey]uint),
+	}
+	body := []byte("v=0\r\nc=IN IP4 192.0.2.10\r\nm=audio 5004 RTP/AVP 8\r\na=rtpmap:8 PCMA/8000\r\n")
+	labels := mediatracker.MediaLabels{CallID: "call-1"}
+
+	e.registerMediaEndpoints(body, labels)
+	e.registerMediaEndpoints(body, labels)
+
+	require.Equal(t, uint(1), e.rtpEndpointRefs[rtpEndpointKey{IP: 0xC000020A, Port: 5004}])
+	require.Equal(t, uint(1), e.rtpEndpointRefs[rtpEndpointKey{IP: 0xC000020A, Port: 5005}])
+}
+
 // ==================== S10-R1: Exporter-layer wiring tests ====================
 
 func TestHandleRequestRetransmissionMetric(t *testing.T) {
@@ -6470,7 +6564,7 @@ func TestHandleRequestRetransmissionMetric(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker:  make(map[string]optionsEntry),
 		byeTracker:      make(map[string]byeEntry),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
@@ -6496,7 +6590,7 @@ func TestRTPHandleRTPOutOfOrderMetric(t *testing.T) {
 	e := &exporter{
 		services:       services{metricser: mm, dialoger: &mockDialoger{}},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		byeTracker:     make(map[string]byeEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
@@ -6527,7 +6621,7 @@ func TestHandleBye200OKPBDMetric(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		byeTracker:      make(map[string]byeEntry),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -6578,7 +6672,7 @@ func TestHandleBye200OKShortCallsMetric(t *testing.T) {
 		},
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		byeTracker:      make(map[string]byeEntry),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 	}
