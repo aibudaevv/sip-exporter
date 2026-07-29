@@ -29,7 +29,7 @@ func getSingleMemSample(t *testing.T, containerID string) float64 {
 	return memMaxMB
 }
 
-func waitForSessions(t *testing.T, endpoint string, target float64) {
+func waitForSessions(ctx context.Context, t *testing.T, endpoint string, target float64) {
 	t.Helper()
 	require.Eventually(t, func() bool {
 		if !metricExists(t, endpoint, "sip_exporter_sessions") {
@@ -37,7 +37,7 @@ func waitForSessions(t *testing.T, endpoint string, target float64) {
 		}
 		sessions := getMetric(t, endpoint, "sip_exporter_sessions")
 		return sessions >= target*0.8
-	}, 120*time.Second, 500*time.Millisecond, "sessions did not reach %.0f", target)
+	}, contextTimeout(t, ctx), 500*time.Millisecond, "sessions did not reach %.0f", target)
 }
 
 func TestBenchmarkMemoryPerDialog(t *testing.T) {
@@ -84,7 +84,7 @@ func TestBenchmarkMemoryPerDialog(t *testing.T) {
 					sippVol, false,
 				)
 
-				waitForSessions(t, env.endpoint, float64(limit))
+				waitForSessions(ctx, t, env.endpoint, float64(limit))
 				sessions = getMetric(t, env.endpoint, "sip_exporter_sessions")
 				t.Logf("Sessions reached: %.0f (target: %d)", sessions, limit)
 

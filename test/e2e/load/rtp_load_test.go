@@ -16,7 +16,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 const (
@@ -47,37 +46,9 @@ func newRTPTestEnv(ctx context.Context, t *testing.T) *testEnv {
 
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := allocateRTPPorts()
 
-	startCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
+	req := exporterContainerRequest(ctx, t, testInterface, httpPort, uasSIP)
 
-	logLevel := "error"
-	if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
-		logLevel = "debug"
-	}
-
-	envVars := map[string]string{
-		"SIP_EXPORTER_INTERFACE":       testInterface,
-		"SIP_EXPORTER_HTTP_PORT":       httpPort,
-		"SIP_EXPORTER_SIP_PORTS":       uasSIP,
-		"SIP_EXPORTER_LOGGER_LEVEL":    logLevel,
-		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
-	}
-
-	if maxProcs := os.Getenv("SIP_EXPORTER_E2E_GOMAXPROCS"); maxProcs != "" {
-		envVars["GOMAXPROCS"] = maxProcs
-	}
-
-	req := testcontainers.ContainerRequest{
-		Image:       exporterImage(),
-		Privileged:  true,
-		NetworkMode: "host",
-		Env:         envVars,
-		WaitingFor: wait.ForHTTP("/metrics").
-			WithPort(httpPort + "/tcp").
-			WithStartupTimeout(120 * time.Second),
-	}
-
-	c, err := testcontainers.GenericContainer(startCtx, testcontainers.GenericContainerRequest{
+	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
 		Started:          true,
 		Logger:           log.New(io.Discard, "", 0),
@@ -126,9 +97,6 @@ func runSippRTPLoad(
 	env *testEnv,
 ) loadResult {
 	t.Helper()
-
-	ctx, cancel := context.WithTimeout(ctx, 600*time.Second)
-	defer cancel()
 
 	stats, statsErr := newStatsCollector(env.exporterContainer.GetContainerID())
 	require.NoError(t, statsErr)
@@ -183,7 +151,7 @@ func runSippRTPLoad(
 	sippEnd := time.Now()
 	sippDuration := sippEnd.Sub(start)
 
-	waitForMetricStable(t, env.endpoint)
+	waitForMetricStable(ctx, t, env.endpoint)
 
 	stableTime := time.Now()
 	drainTime := stableTime.Sub(sippEnd)
@@ -352,7 +320,7 @@ func TestBenchmarkMemoryPerRTPStream(t *testing.T) {
 					}
 					streams = getMetricSum(t, env.endpoint, "sip_exporter_rtp_active_streams")
 					return streams >= targetStreams
-				}, 120*time.Second, 500*time.Millisecond,
+				}, contextTimeout(t, ctx), 500*time.Millisecond,
 					"RTP streams did not reach %.0f (got %.0f)", targetStreams, streams)
 
 				memMB := getSingleMemSample(t, env.exporterContainer.GetContainerID())

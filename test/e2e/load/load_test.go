@@ -126,43 +126,60 @@ func allocatePortsN(n int) []string {
 	return result
 }
 
-func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
+func contextTimeout(t *testing.T, ctx context.Context) time.Duration {
 	t.Helper()
-	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
+	deadline, ok := ctx.Deadline()
+	if testDeadline, testHasDeadline := t.Deadline(); testHasDeadline &&
+		(!ok || testDeadline.Before(deadline)) {
+		deadline = testDeadline
+		ok = true
+	}
+	require.True(t, ok, "load test or operation context must have a deadline")
+	timeout := time.Until(deadline)
+	require.Greater(t, timeout, time.Duration(0), "load test context deadline already expired")
+	return timeout
+}
 
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
-
-	exporterLogLevel := "error"
+func exporterContainerRequest(
+	ctx context.Context,
+	t *testing.T,
+	iface, httpPort, sipPorts string,
+) testcontainers.ContainerRequest {
+	t.Helper()
+	logLevel := "error"
 	if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
-		exporterLogLevel = "debug"
+		logLevel = "debug"
 	}
-
 	envVars := map[string]string{
-		"SIP_EXPORTER_INTERFACE":       testInterface,
-		"SIP_EXPORTER_HTTP_PORT":       exporterHTTPPort,
-		"SIP_EXPORTER_SIP_PORTS":       sippPort,
-		"SIP_EXPORTER_LOGGER_LEVEL":    exporterLogLevel,
+		"SIP_EXPORTER_INTERFACE":       iface,
+		"SIP_EXPORTER_HTTP_PORT":       httpPort,
+		"SIP_EXPORTER_SIP_PORTS":       sipPorts,
+		"SIP_EXPORTER_LOGGER_LEVEL":    logLevel,
 		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
+		"SIP_EXPORTER_TELEMETRY":       "false",
 	}
-
 	if maxProcs := os.Getenv("SIP_EXPORTER_E2E_GOMAXPROCS"); maxProcs != "" {
 		envVars["GOMAXPROCS"] = maxProcs
 	}
-
 	if goDebug := os.Getenv("SIP_EXPORTER_E2E_GODEBUG"); goDebug != "" {
 		envVars["GODEBUG"] = goDebug
 	}
-
-	req := testcontainers.ContainerRequest{
+	return testcontainers.ContainerRequest{
 		Image:       exporterImage(),
 		Privileged:  true,
 		NetworkMode: "host",
 		Env:         envVars,
 		WaitingFor: wait.ForHTTP("/metrics").
-			WithPort(exporterHTTPPort + "/tcp").
-			WithStartupTimeout(120 * time.Second),
+			WithPort(httpPort + "/tcp").
+			WithStartupTimeout(contextTimeout(t, ctx)),
 	}
+}
+
+func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
+	t.Helper()
+	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
+
+	req := exporterContainerRequest(ctx, t, testInterface, exporterHTTPPort, sippPort)
 
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
@@ -219,29 +236,9 @@ func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML,
 	sippPort2 := ports[3]
 	sippClientPort2 := ports[4]
 
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
-
-	exporterLogLevel := "error"
-	if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
-		exporterLogLevel = "debug"
-	}
-
-	envVars := map[string]string{
-		"SIP_EXPORTER_INTERFACE":       testInterface,
-		"SIP_EXPORTER_HTTP_PORT":       exporterHTTPPort,
-		"SIP_EXPORTER_SIP_PORTS":       sippPort + "," + sippPort2,
-		"SIP_EXPORTER_LOGGER_LEVEL":    exporterLogLevel,
-		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
-	}
-
-	if maxProcs := os.Getenv("SIP_EXPORTER_E2E_GOMAXPROCS"); maxProcs != "" {
-		envVars["GOMAXPROCS"] = maxProcs
-	}
-
-	if goDebug := os.Getenv("SIP_EXPORTER_E2E_GODEBUG"); goDebug != "" {
-		envVars["GODEBUG"] = goDebug
-	}
+	req := exporterContainerRequest(
+		ctx, t, testInterface, exporterHTTPPort, sippPort+","+sippPort2,
+	)
 
 	var mounts testcontainers.ContainerMounts
 
@@ -254,7 +251,7 @@ func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML,
 		t.Cleanup(func() { os.Remove(tmpFile.Name()) })
 
 		mounts = append(mounts, testcontainers.BindMount(tmpFile.Name(), "/etc/sip-exporter/carriers.yaml"))
-		envVars["SIP_EXPORTER_CARRIERS_CONFIG"] = "/etc/sip-exporter/carriers.yaml"
+		req.Env["SIP_EXPORTER_CARRIERS_CONFIG"] = "/etc/sip-exporter/carriers.yaml"
 	}
 
 	if userAgentsYAML != "" {
@@ -266,19 +263,10 @@ func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML,
 		t.Cleanup(func() { os.Remove(tmpFile.Name()) })
 
 		mounts = append(mounts, testcontainers.BindMount(tmpFile.Name(), "/etc/sip-exporter/user_agents.yaml"))
-		envVars["SIP_EXPORTER_USER_AGENTS_CONFIG"] = "/etc/sip-exporter/user_agents.yaml"
+		req.Env["SIP_EXPORTER_USER_AGENTS_CONFIG"] = "/etc/sip-exporter/user_agents.yaml"
 	}
 
-	req := testcontainers.ContainerRequest{
-		Image:       exporterImage(),
-		Privileged:  true,
-		NetworkMode: "host",
-		Env:         envVars,
-		Mounts:      mounts,
-		WaitingFor: wait.ForHTTP("/metrics").
-			WithPort(exporterHTTPPort + "/tcp").
-			WithStartupTimeout(120 * time.Second),
-	}
+	req.Mounts = mounts
 
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
@@ -553,7 +541,7 @@ func singleMetricValue(samples []metricSample) (float64, error) {
 	return samples[0].value, nil
 }
 
-func waitForMetricStable(t *testing.T, endpoint string) {
+func waitForMetricStable(ctx context.Context, t *testing.T, endpoint string) {
 	t.Helper()
 	prev := -1.0
 	stableCount := 0
@@ -566,7 +554,7 @@ func waitForMetricStable(t *testing.T, endpoint string) {
 		prev = cur
 		stableCount = 0
 		return false
-	}, 60*time.Second, 300*time.Millisecond, "metrics did not stabilize after SIPp scenario")
+	}, contextTimeout(t, ctx), 300*time.Millisecond, "metrics did not stabilize after SIPp scenario")
 }
 
 func absScenarioPath(t *testing.T, filename string) string {
@@ -602,7 +590,7 @@ func startSippContainer(
 	}
 
 	if waitForExit {
-		req.WaitingFor = wait.ForExit().WithExitTimeout(300 * time.Second)
+		req.WaitingFor = wait.ForExit().WithExitTimeout(contextTimeout(t, ctx))
 	}
 
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
@@ -634,7 +622,7 @@ func waitForContainerExit(ctx context.Context, t *testing.T, c testcontainers.Co
 			return false
 		}
 		return !state.Running
-	}, 300*time.Second, 500*time.Millisecond, "SIPp container did not exit in time")
+	}, contextTimeout(t, ctx), 500*time.Millisecond, "SIPp container did not exit in time")
 }
 
 func newStatsCollector(containerID string) (*statsCollector, error) {
@@ -767,9 +755,6 @@ func runSippLoad(
 ) loadResult {
 	t.Helper()
 
-	ctx, cancel := context.WithTimeout(ctx, 600*time.Second)
-	defer cancel()
-
 	stats, statsErr := newStatsCollector(env.exporterContainer.GetContainerID())
 	require.NoError(t, statsErr)
 
@@ -824,7 +809,7 @@ func runSippLoad(
 	sippEnd := time.Now()
 	sippDuration := sippEnd.Sub(start)
 
-	waitForMetricStable(t, env.endpoint)
+	waitForMetricStable(ctx, t, env.endpoint)
 
 	stableTime := time.Now()
 	drainTime := stableTime.Sub(sippEnd)
@@ -882,9 +867,6 @@ func runConcurrentLoad(
 ) loadResult {
 	t.Helper()
 
-	ctx, cancel := context.WithTimeout(ctx, 600*time.Second)
-	defer cancel()
-
 	stats, statsErr := newStatsCollector(env.exporterContainer.GetContainerID())
 	require.NoError(t, statsErr)
 
@@ -933,14 +915,14 @@ func runConcurrentLoad(
 			return false
 		}
 		return !state.Running
-	}, 300*time.Second, 500*time.Millisecond, "UAC container did not exit in time")
+	}, contextTimeout(t, ctx), 500*time.Millisecond, "UAC container did not exit in time")
 
 	waitForContainerExit(ctx, t, uasContainer)
 
 	sippEnd := time.Now()
 	sippDuration := sippEnd.Sub(start)
 
-	waitForMetricStable(t, env.endpoint)
+	waitForMetricStable(ctx, t, env.endpoint)
 
 	stableTime := time.Now()
 	drainTime := stableTime.Sub(sippEnd)
