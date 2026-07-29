@@ -377,6 +377,13 @@ func (m *mockDialoger) Counts() []service.LabeledCount {
 	return result
 }
 
+func createActiveTestDialog(t *testing.T, dialoger service.Dialoger, callID string) {
+	t.Helper()
+	dialogID, err := normalizeDialogID([]byte(callID), []byte("from-tag"), []byte("to-tag"))
+	require.NoError(t, err)
+	dialoger.Create(service.DialogParams{DialogID: dialogID})
+}
+
 // ==================== normalizeDialogID tests ====================
 
 func TestNormalizeDialogID(t *testing.T) {
@@ -2622,6 +2629,7 @@ func TestFASSRTPExtendsThreshold(t *testing.T) {
 func TestFASReinviteDoesNotOpenPending(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, time.Second)
+	createActiveTestDialog(t, e.services.dialoger, "call-1")
 
 	require.NoError(
 		t,
