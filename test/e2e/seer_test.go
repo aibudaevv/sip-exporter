@@ -39,7 +39,7 @@ func TestSEERAllScenarios(t *testing.T) {
 			t.Logf("SEER = %.2f (want %.2f)", seer, tt.wantSEER)
 			require.InDelta(t, tt.wantSEER, seer, ratioDelta)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -80,7 +80,7 @@ func TestSEERMixed(t *testing.T) {
 			t.Logf("SEER = %.2f (want %.2f)", seer, wantSEER)
 			require.InDelta(t, wantSEER, seer, ratioDelta)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -99,5 +99,5 @@ func TestSEERWithCarrierConfig(t *testing.T) {
 	t.Logf("SEER{carrier=%q} = %.2f (want %.2f)", env.carrier, seer, 100.0)
 	require.InDelta(t, 100.0, seer, ratioDelta)
 
-	env.waitForSessionsZeroByCarrier(t)
+	env.assertDialogTeardownByCarrier(t)
 }

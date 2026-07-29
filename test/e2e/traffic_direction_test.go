@@ -46,7 +46,7 @@ func TestTrafficDirectionInbound(t *testing.T) {
 	t.Logf("sdc_total{direction=inbound} = %.0f", sdcInbound)
 	require.Greater(t, sdcInbound, 0.0, "completed sessions must inherit inbound direction from INVITE")
 
-	waitForSessionsZero(t, env.endpoint)
+	assertDialogTeardown(t, env.endpoint)
 }
 
 // TestTrafficDirectionOutbound verifies that on a veth pair bridging to an
@@ -151,5 +151,5 @@ func TestTrafficDirectionOutbound(t *testing.T) {
 		require.Equal(t, 0.0, inviteInbound, "no inbound INVITEs expected (UAC sends TX only)")
 	}
 
-	waitForSessionsZero(t, endpoint)
+	assertDialogTeardown(t, endpoint)
 }

@@ -14,12 +14,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -27,9 +29,10 @@ import (
 )
 
 const (
-	sippImage     = "pbertera/sipp:latest"
-	testInterface = "lo"
-	ratioDelta    = 2.0
+	sippImage                       = "pbertera/sipp:latest"
+	testInterface                   = "lo"
+	ratioDelta                      = 2.0
+	dialogMetricsSnapshotSettleTime = 1100 * time.Millisecond
 )
 
 // testEnv holds per-test network configuration.
@@ -465,31 +468,33 @@ func registerExporterCleanup(t *testing.T, container testcontainers.Container, e
 	})
 }
 
-// waitForSessionsZero polls sip_exporter_sessions until it reaches 0 (or ≤1 under
-// parallel packet-capture contention on lo, where a missed BYE/200 OK can leave
-// a dialog stuck for the 1800s default TTL).
+// waitForSessionsZero polls sip_exporter_sessions until every series reaches 0.
 func waitForSessionsZero(t *testing.T, endpoint string) {
 	t.Helper()
-	// No direct metricExists guard: sip_exporter_sessions is a GaugeVec that is
-	// only emitted for label sets created via WithLabelValues. In scenarios with
-	// no successful calls (e.g. 0_percent), sessions may never be instantiated.
-	// The indirect guard is assertSelfMonitoringHealthy (called below), which
-	// verifies packets_received_total > 0, proving the exporter is alive.
-	require.Eventually(t, func() bool {
-		for _, sample := range readMetricSamples(t, endpoint, "sip_exporter_sessions") {
-			if sample.value > 1 {
-				return false
-			}
-		}
-		return true
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		err := zeroMetricSamplesError("sip_exporter_sessions",
+			readMetricSamples(t, endpoint, "sip_exporter_sessions"))
+		assert.NoError(collect, err)
 	}, 15*time.Second, 300*time.Millisecond,
-		"sessions should reach ≤1 after all calls terminated (packet-capture contention tolerance)")
+		"sessions should reach 0 after all calls terminated")
 
+	assertSelfMonitoringHealthy(t, endpoint)
+}
+
+func assertDialogTeardown(t *testing.T, endpoint string) {
+	t.Helper()
+	// A completed call can start and end between snapshot ticks, so historical
+	// INVITE counters do not imply that this lazy GaugeVec has a series.
+	if metricExists(t, endpoint, "sip_exporter_sessions") {
+		waitForSessionsZero(t, endpoint)
+		return
+	}
 	assertSelfMonitoringHealthy(t, endpoint)
 }
 
 func assertSelfMonitoringHealthy(t *testing.T, endpoint string) {
 	t.Helper()
+	waitForDialogMetricsSnapshot(t)
 
 	require.True(t, metricExists(t, endpoint, "sip_exporter_socket_packets_received_total"),
 		"sip_exporter_socket_packets_received_total should exist in /metrics output")
@@ -505,8 +510,8 @@ func assertSelfMonitoringHealthy(t *testing.T, endpoint string) {
 	received := getMetricSum(t, endpoint, "sip_exporter_socket_packets_received_total")
 	require.Equal(t, true, received > 0, "socket_packets_received_total should be > 0 after traffic")
 
-	dropped := getMetricSum(t, endpoint, "sip_exporter_socket_packets_dropped_total")
-	require.Equal(t, 0.0, dropped, "socket_packets_dropped_total should be 0 (no drops)")
+	require.NoError(t, zeroMetricSamplesError("sip_exporter_socket_packets_dropped_total",
+		readMetricSamples(t, endpoint, "sip_exporter_socket_packets_dropped_total")))
 
 	require.Eventually(t, func() bool {
 		return getMetric(t, endpoint, "sip_exporter_channel_length") == 0.0
@@ -515,8 +520,27 @@ func assertSelfMonitoringHealthy(t *testing.T, endpoint string) {
 	capacity := getMetric(t, endpoint, "sip_exporter_channel_capacity")
 	require.Equal(t, 10000.0, capacity, "channel_capacity should be 10000")
 
-	dialogs := getMetric(t, endpoint, "sip_exporter_active_dialogs")
-	require.LessOrEqual(t, dialogs, 2.0, "active_dialogs should be ≤2 after all sessions completed (packet-capture contention tolerance)")
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		for _, metricName := range []string{
+			"sip_exporter_active_dialogs",
+			"sip_exporter_active_trackers",
+		} {
+			err := zeroMetricSamplesError(metricName, readMetricSamples(t, endpoint, metricName))
+			assert.NoError(collect, err)
+		}
+	}, 3*time.Second, 100*time.Millisecond,
+		"active dialogs and trackers should reach 0 after all sessions completed")
+}
+
+func waitForDialogMetricsSnapshot(t *testing.T) {
+	t.Helper()
+	timer := time.NewTimer(dialogMetricsSnapshotSettleTime)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-t.Context().Done():
+		require.NoError(t, t.Context().Err())
+	}
 }
 
 // waitForMetricStable polls sip_exporter_packets_total until the value stops
@@ -751,6 +775,41 @@ func singleMetricValue(samples []metricSample) (float64, error) {
 		return 0, fmt.Errorf("expected exactly one metric sample, got %d", len(samples))
 	}
 	return samples[0].value, nil
+}
+
+func zeroMetricSamplesError(metricName string, samples []metricSample) error {
+	if len(samples) == 0 {
+		return fmt.Errorf("%s has no samples", metricName)
+	}
+
+	var nonZero []string
+	for _, sample := range samples {
+		if sample.value != 0 {
+			nonZero = append(nonZero, formatMetricSample(sample))
+		}
+	}
+	if len(nonZero) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s has non-zero samples: %s", metricName, strings.Join(nonZero, ", "))
+}
+
+func formatMetricSample(sample metricSample) string {
+	labelNames := make([]string, 0, len(sample.labels))
+	for name := range sample.labels {
+		labelNames = append(labelNames, name)
+	}
+	sort.Strings(labelNames)
+
+	var labels []string
+	for _, name := range labelNames {
+		labels = append(labels, name+"="+strconv.Quote(sample.labels[name]))
+	}
+	series := sample.name
+	if len(labels) > 0 {
+		series += "{" + strings.Join(labels, ",") + "}"
+	}
+	return series + "=" + strconv.FormatFloat(sample.value, 'g', -1, 64)
 }
 
 // metricExists checks whether an exact metric sample appears in /metrics.
@@ -1258,21 +1317,24 @@ func (e *testEnv) getLRDByCarrier(t *testing.T) float64 {
 
 func (e *testEnv) waitForSessionsZeroByCarrier(t *testing.T) {
 	t.Helper()
-	// No direct metricWithLabelExists guard: sip_exporter_sessions is a GaugeVec
-	// that may not be instantiated for a carrier with no successful calls.
-	// Indirect guard: assertSelfMonitoringHealthy (called below) verifies
-	// packets_received_total > 0, proving the exporter is alive.
-	require.Eventually(t, func() bool {
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
 		samples := readMetricSamples(t, e.endpoint, "sip_exporter_sessions")
-		for _, sample := range metricSamplesWithLabels(samples, map[string]string{"carrier": e.carrier}) {
-			if sample.value > 1 {
-				return false
-			}
-		}
-		return true
+		matches := metricSamplesWithLabels(samples, map[string]string{"carrier": e.carrier})
+		assert.NoError(collect, zeroMetricSamplesError("sip_exporter_sessions", matches))
 	}, 10*time.Second, 300*time.Millisecond,
-		"sessions should reach ≤1 after all calls terminated (packet-capture contention tolerance)")
+		"sessions for carrier %q should reach 0 after all calls terminated", e.carrier)
 
+	assertSelfMonitoringHealthy(t, e.endpoint)
+}
+
+func (e *testEnv) assertDialogTeardownByCarrier(t *testing.T) {
+	t.Helper()
+	carrierLabel := `carrier="` + e.carrier + `"`
+	// Require sessions only when this carrier's snapshot series actually exists.
+	if metricWithLabelExists(t, e.endpoint, "sip_exporter_sessions", carrierLabel) {
+		e.waitForSessionsZeroByCarrier(t)
+		return
+	}
 	assertSelfMonitoringHealthy(t, e.endpoint)
 }
 

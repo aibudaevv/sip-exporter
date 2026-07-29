@@ -37,5 +37,5 @@ func TestMultiCodecEarlyMediaSuccess(t *testing.T) {
 	ser := getMetric(t, env.endpoint, "sip_exporter_ser")
 	require.InDelta(t, 100.0, ser, ratioDelta, "SER should be 100%%")
 
-	waitForSessionsZero(t, env.endpoint)
+	assertDialogTeardown(t, env.endpoint)
 }

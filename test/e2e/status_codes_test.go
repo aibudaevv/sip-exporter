@@ -130,7 +130,7 @@ func TestStatusCodesAllCodes(t *testing.T) {
 			t.Logf("%s = %.0f (want %.0f)", tt.metricName, value, want)
 			require.Equal(t, want, value, "metric %s should equal callCount", tt.metricName)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -187,7 +187,7 @@ func TestStatusCodesWithCarrierConfig(t *testing.T) {
 			t.Logf("%s{carrier=%q} = %.0f (want %.0f)", tt.metricName, env.carrier, value, want)
 			require.Equal(t, want, value)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }

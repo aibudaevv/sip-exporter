@@ -37,7 +37,7 @@ func TestISAAllScenarios(t *testing.T) {
 			t.Logf("ISA = %.2f (want %.2f)", isa, tt.wantISA)
 			require.InDelta(t, tt.wantISA, isa, ratioDelta)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -77,7 +77,7 @@ func TestISAMixed(t *testing.T) {
 			t.Logf("ISA = %.2f (want %.2f)", isa, wantISA)
 			require.InDelta(t, wantISA, isa, ratioDelta)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -95,7 +95,7 @@ func TestISAWithCarrierConfig(t *testing.T) {
 	t.Logf("ISA{carrier=%q} = %.2f (want %.2f)", env.carrier, isa, 100.0)
 	require.InDelta(t, 100.0, isa, ratioDelta)
 
-	env.waitForSessionsZeroByCarrier(t)
+	env.assertDialogTeardownByCarrier(t)
 }
 
 func TestISAMixedWithCarrierConfig(t *testing.T) {
@@ -113,5 +113,5 @@ func TestISAMixedWithCarrierConfig(t *testing.T) {
 	t.Logf("ISA{carrier=%q} = %.2f (want %.2f)", env.carrier, isa, wantISA)
 	require.InDelta(t, wantISA, isa, ratioDelta)
 
-	env.waitForSessionsZeroByCarrier(t)
+	env.assertDialogTeardownByCarrier(t)
 }

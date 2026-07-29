@@ -42,7 +42,7 @@ func TestSERAllScenarios(t *testing.T) {
 					"SER metric should be absent when no INVITEs")
 			}
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -98,7 +98,7 @@ func TestSERMixed(t *testing.T) {
 			t.Logf("SER = %.2f (want %.2f)", ser, wantSER)
 			require.InDelta(t, wantSER, ser, ratioDelta)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -129,7 +129,7 @@ func TestSERWithCarrierConfig(t *testing.T) {
 			t.Logf("SER{carrier=%q} = %.2f (want %.2f)", env.carrier, ser, tt.wantSER)
 			require.InDelta(t, tt.wantSER, ser, ratioDelta)
 
-			env.waitForSessionsZeroByCarrier(t)
+			env.assertDialogTeardownByCarrier(t)
 		})
 	}
 }
@@ -149,5 +149,5 @@ func TestSERMixedWithCarrierConfig(t *testing.T) {
 	t.Logf("SER{carrier=%q} = %.2f (want %.2f)", env.carrier, ser, wantSER)
 	require.InDelta(t, wantSER, ser, ratioDelta)
 
-	env.waitForSessionsZeroByCarrier(t)
+	env.assertDialogTeardownByCarrier(t)
 }

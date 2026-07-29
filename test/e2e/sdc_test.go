@@ -44,7 +44,7 @@ func TestSDCAllScenarios(t *testing.T) {
 					"SDC metric should be absent when no sessions complete")
 			}
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -83,7 +83,7 @@ func TestSDCMixed(t *testing.T) {
 			t.Logf("SDC = %.0f (want %.0f)", sdc, float64(tt.completedCount))
 			require.Equal(t, float64(tt.completedCount), sdc)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -121,7 +121,7 @@ func TestSDCWithCarrierConfig(t *testing.T) {
 	t.Logf("SDC{carrier=%q} = %.0f (want %.0f)", env.carrier, sdc, float64(callCount))
 	require.Equal(t, float64(callCount), sdc)
 
-	env.waitForSessionsZeroByCarrier(t)
+	env.assertDialogTeardownByCarrier(t)
 }
 
 func TestSDCMixedWithCarrierConfig(t *testing.T) {
@@ -138,5 +138,5 @@ func TestSDCMixedWithCarrierConfig(t *testing.T) {
 	t.Logf("SDC{carrier=%q} = %.0f (want %.0f)", env.carrier, sdc, float64(completedCount))
 	require.Equal(t, float64(completedCount), sdc)
 
-	env.waitForSessionsZeroByCarrier(t)
+	env.assertDialogTeardownByCarrier(t)
 }

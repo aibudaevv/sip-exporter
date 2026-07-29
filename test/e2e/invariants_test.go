@@ -45,5 +45,5 @@ func TestRFC6076Invariants(t *testing.T) {
 		require.LessOrEqual(t, v, 100.0, "ratio must be <= 100")
 	}
 
-	waitForSessionsZero(t, env.endpoint)
+	assertDialogTeardown(t, env.endpoint)
 }

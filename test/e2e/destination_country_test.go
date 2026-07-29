@@ -83,7 +83,7 @@ func TestDestinationCountry(t *testing.T) {
 			t.Logf("invite_200_total{%s}=%.0f", wantLabel, invite200OK)
 			require.InDelta(t, float64(callCount), invite200OK, ratioDelta, "invite_200_total should carry %s", wantLabel)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }

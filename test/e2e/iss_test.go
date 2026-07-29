@@ -43,7 +43,7 @@ func TestISSAllScenarios(t *testing.T) {
 					"ISS metric should be absent when no server errors")
 			}
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -66,7 +66,7 @@ func TestISSMixed(t *testing.T) {
 	t.Logf("ISS = %.0f (want %.0f)", iss, float64(errorCount))
 	require.Equal(t, float64(errorCount), iss)
 
-	waitForSessionsZero(t, env.endpoint)
+	assertDialogTeardown(t, env.endpoint)
 }
 
 func TestISSWithCarrierConfig(t *testing.T) {

@@ -264,7 +264,7 @@ func TestMultiInterfaceSER(t *testing.T) {
 			require.InDelta(t, tt.wantVeth200OK, gotVeth200OK, ratioDelta, "veth 200 OK: %s", tt.description)
 			require.InDelta(t, tt.wantSER, gotSER, ratioDelta, "SER: %s", tt.description)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -389,7 +389,7 @@ func TestMultiInterfaceASR(t *testing.T) {
 			require.InDelta(t, tt.wantVeth200OK, gotVeth200OK, ratioDelta, "veth 200 OK: %s", tt.description)
 			require.InDelta(t, tt.wantASR, gotASR, ratioDelta, "ASR: %s", tt.description)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -399,7 +399,7 @@ func TestMultiInterfaceASR(t *testing.T) {
 // runs flows on both interfaces, then verifies per-host metrics to prove multi-NIC
 // capture.
 //
-// SDC counts completed sessions (BYE→200 OK). waitForSessionsZero is called
+// SDC counts completed sessions (BYE→200 OK). assertDialogTeardown is called
 // before the SDC assertion because SDC only increments when a session completes
 // (BYE processed). The critical multi-NIC assertion: invite_200_total{called_host=
 // "10.10.0.1"} >= 10 proves veth0b captured the 200 OK, and SDC reflects sessions
@@ -501,7 +501,7 @@ func TestMultiInterfaceSDC(t *testing.T) {
 
 			// SDC only increments when sessions complete (BYE→200 OK processed).
 			// Wait for all sessions to finish before checking SDC.
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 
 			// When wantSDC == 0, the sdc_total CounterVec may be absent (no
 			// SessionCompleted calls → lazy-initialized metric never created).
@@ -668,7 +668,7 @@ func TestMultiInterfacePDD(t *testing.T) {
 				}
 			}
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -1005,5 +1005,5 @@ func TestMultiPortINVITEFlow(t *testing.T) {
 	require.GreaterOrEqual(t, invite200, 3.0*callCount,
 		"200 OK for INVITE captured on all 3 SIP ports")
 
-	waitForSessionsZero(t, env.endpoint)
+	assertDialogTeardown(t, env.endpoint)
 }

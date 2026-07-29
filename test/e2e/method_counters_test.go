@@ -36,7 +36,7 @@ func TestMethodCountersFullCallFlow(t *testing.T) {
 		})
 	}
 
-	waitForSessionsZero(t, env.endpoint)
+	assertDialogTeardown(t, env.endpoint)
 }
 
 // TestMethodCountersOptions verifies the OPTIONS request counter.

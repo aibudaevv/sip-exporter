@@ -82,7 +82,7 @@ func TestHostLabels(t *testing.T) {
 			}
 
 			assertHostLabels(t, env.endpoint, tt.wantCaller, tt.wantCalled, tt.notWantCaller, tt.notWantCalled, callCount)
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }

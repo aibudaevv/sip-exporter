@@ -66,14 +66,14 @@ func TestTTR(t *testing.T) {
 				ttr := env.getTTRByCarrier(t)
 				t.Logf("TTR{carrier=%q} = %.2f ms", env.carrier, ttr)
 				require.Greater(t, ttr, 0.0, "TTR should be > 0: %s", tt.name)
-				env.waitForSessionsZeroByCarrier(t)
+				env.assertDialogTeardownByCarrier(t)
 			} else if tt.wantTTR {
 				ttr := getTTR(t, env.endpoint)
 				t.Logf("TTR = %.2f ms", ttr)
 				require.Greater(t, ttr, 0.0, "TTR should be > 0: %s", tt.name)
 				require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_ttr_count"), 0.0,
 					"TTR histogram should have observations: %s", tt.name)
-				waitForSessionsZero(t, env.endpoint)
+				assertDialogTeardown(t, env.endpoint)
 			}
 		})
 	}

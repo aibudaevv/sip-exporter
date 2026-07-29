@@ -41,5 +41,5 @@ func TestCancelInviteTrackerCleanup(t *testing.T) {
 	t.Logf("sip_exporter_invite_total = %.0f (want %.0f)", inviteTotal, wantInvite)
 	require.Equal(t, wantInvite, inviteTotal, "INVITE counter should equal callCount")
 
-	waitForSessionsZero(t, env.endpoint)
+	assertDialogTeardown(t, env.endpoint)
 }

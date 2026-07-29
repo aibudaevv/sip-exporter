@@ -32,7 +32,7 @@ func TestReinviteCountedSeparately(t *testing.T) {
 	require.Equal(t, float64(callCount*2), ackTotal, "2 ACKs per call")
 	require.Equal(t, float64(callCount), byeTotal, "1 BYE per call")
 
-	waitForSessionsZero(t, env.endpoint)
+	assertDialogTeardown(t, env.endpoint)
 }
 
 func TestReinviteDoesNotContaminateSER(t *testing.T) {
@@ -52,5 +52,5 @@ func TestReinviteDoesNotContaminateSER(t *testing.T) {
 	require.InDelta(t, 100.0, scr, ratioDelta,
 		"SCR should be 100%% — re-INVITEs excluded from inviteTotal denominator")
 
-	waitForSessionsZero(t, env.endpoint)
+	assertDialogTeardown(t, env.endpoint)
 }

@@ -44,7 +44,7 @@ func TestSCRAllScenarios(t *testing.T) {
 					"SCR metric should be absent when no INVITEs")
 			}
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -84,7 +84,7 @@ func TestSCRMixed(t *testing.T) {
 			t.Logf("SCR = %.2f (want %.2f)", scr, wantSCR)
 			require.InDelta(t, wantSCR, scr, ratioDelta)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -127,7 +127,7 @@ func TestSCRWithCarrierConfig(t *testing.T) {
 	t.Logf("SCR{carrier=%q} = %.2f (want %.2f)", env.carrier, scr, 100.0)
 	require.InDelta(t, 100.0, scr, ratioDelta)
 
-	env.waitForSessionsZeroByCarrier(t)
+	env.assertDialogTeardownByCarrier(t)
 }
 
 func TestSCRMixedWithCarrierConfig(t *testing.T) {
@@ -145,5 +145,5 @@ func TestSCRMixedWithCarrierConfig(t *testing.T) {
 	t.Logf("SCR{carrier=%q} = %.2f (want %.2f)", env.carrier, scr, wantSCR)
 	require.InDelta(t, wantSCR, scr, ratioDelta)
 
-	env.waitForSessionsZeroByCarrier(t)
+	env.assertDialogTeardownByCarrier(t)
 }
