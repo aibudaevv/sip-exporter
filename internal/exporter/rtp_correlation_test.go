@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/aibudaevv/sip-exporter/internal/mediatracker"
+	"github.com/aibudaevv/sip-exporter/internal/rtp"
 	"github.com/aibudaevv/sip-exporter/internal/service"
 )
 
@@ -98,6 +99,29 @@ func TestRTPCorrelationViaSDP(t *testing.T) {
 		require.Equal(t, "rtp-corr-1", s.CallID)
 		require.Equal(t, "PCMU", s.Codec)
 	}
+}
+
+func TestRTPAcrossRevisionDoesNotEmitMissing(t *testing.T) {
+	mm := &mockMetricser{}
+	e := &exporter{
+		services:     services{metricser: mm},
+		mediaTracker: mediatracker.NewTracker(rtpStreamTTL),
+	}
+	labels := mediatracker.MediaLabels{CallID: "call-1"}
+	e.mediaTracker.Register("10.0.0.1", 5004, labels)
+	_, ok := e.mediaTracker.Observe(
+		"10.0.0.99", 9999, "10.0.0.1", 5004,
+		rtp.Header{Version: 2, SequenceNumber: 1, Timestamp: 160, SSRC: 1}, time.Unix(1000, 0),
+	)
+	require.True(t, ok)
+
+	e.mediaTracker.Replace("call-1")
+	e.mediaTracker.Register("10.0.1.1", 6004, labels)
+	result, _ := e.mediaTracker.Unregister("call-1")
+	e.handleRTPDialogResult(result, "carrier-a", "ua-a", "US", "ingress")
+
+	require.True(t, result.RTPObserved)
+	require.Zero(t, mm.missingRTPCalls)
 }
 
 func TestLateInvite200OKDoesNotConsumeNewerSDP(t *testing.T) {

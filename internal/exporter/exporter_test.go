@@ -80,6 +80,8 @@ type mockMetricser struct {
 	rtpDuplicateCalls              int
 	rtpOutOfOrderCalls             int
 	rtpDroppedCount                int
+	oneWayCalls                    int
+	missingRTPCalls                int
 	parseErrorCalls                int
 	parseErrorType                 string
 	rtcpJitterCalls                int
@@ -266,8 +268,8 @@ func (m *mockMetricser) UpdateRTPRFactor(string, string, string, string, string,
 func (m *mockMetricser) UpdateRTPLossDistribution(string, string, string, string, string, float64, float64) {
 }
 func (m *mockMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount) {}
-func (m *mockMetricser) OneWayCall(string, string, string, string)       {}
-func (m *mockMetricser) MissingRTP(string, string, string, string)       {}
+func (m *mockMetricser) OneWayCall(string, string, string, string)       { m.oneWayCalls++ }
+func (m *mockMetricser) MissingRTP(string, string, string, string)       { m.missingRTPCalls++ }
 
 func (m *mockMetricser) UpdateRTCPJitter(_, _, _, _, _ string, jitterMs float64) {
 	m.rtcpJitterCalls++
