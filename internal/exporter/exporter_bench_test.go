@@ -19,7 +19,7 @@ func newBenchExporter() *exporter {
 		},
 		inviteTracker:   make(map[string]inviteEntry),
 		registerTracker: make(map[string]registerEntry),
-		inviteSDP:       make(map[string]inviteSDPEntity),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker:  make(map[string]optionsEntry),
 	}
 }
