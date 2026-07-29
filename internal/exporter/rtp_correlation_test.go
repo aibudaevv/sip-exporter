@@ -5,11 +5,26 @@ import (
 	"fmt"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/aibudaevv/sip-exporter/internal/mediatracker"
+	"github.com/aibudaevv/sip-exporter/internal/service"
 )
+
+type blockingRefreshDialoger struct {
+	service.Dialoger
+
+	started         chan struct{}
+	continueRefresh chan struct{}
+}
+
+func (d *blockingRefreshDialoger) Refresh(dialogID string, expiresAt time.Time) bool {
+	close(d.started)
+	<-d.continueRefresh
+	return d.Dialoger.Refresh(dialogID, expiresAt)
+}
 
 func makeRTPPayload(ssrc uint32) []byte {
 	p := make([]byte, 12)
@@ -146,6 +161,83 @@ func TestSDPCSeqRejectedOfferIsNotUsedByOfferlessRefresh(t *testing.T) {
 	requireEndpoint(t, e, "10.0.1.2", 5000, true)
 	requireEndpoint(t, e, "10.0.1.3", 6000, false)
 	requireEndpoint(t, e, "10.0.1.4", 7000, false)
+}
+
+func TestReinviteAfterExpiryDoesNotReplaceMedia(t *testing.T) {
+	dialoger := &blockingRefreshDialoger{
+		Dialoger:        service.NewDialoger(),
+		started:         make(chan struct{}),
+		continueRefresh: make(chan struct{}),
+	}
+	e := &exporter{
+		services:        services{metricser: &mockMetricser{}, dialoger: dialoger},
+		inviteTracker:   make(map[string]inviteEntry),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
+		optionsTracker:  make(map[string]optionsEntry),
+		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
+		rtpEndpointRefs: make(map[rtpEndpointKey]uint),
+	}
+
+	require.NoError(t, e.handleMessage("carrier-x", "", inviteSDPMessage(
+		"expired-call", "1", "", mediaSDP("10.0.2.1", 4000),
+	)))
+	require.NoError(t, e.handleMessage("carrier-x", "", inviteSDPResponse(
+		"expired-call", "1", mediaSDP("10.0.2.2", 5000),
+	)))
+	require.NoError(t, e.handleMessage("carrier-x", "", inviteSDPMessage(
+		"expired-call", "2", "to-tag", mediaSDP("10.0.2.3", 6000),
+	)))
+
+	done := make(chan error, 1)
+	go func() {
+		done <- e.handleMessage("carrier-x", "", inviteSDPResponse(
+			"expired-call", "2", mediaSDP("10.0.2.4", 7000),
+		))
+	}()
+	<-dialoger.started
+	dialogID, err := normalizeDialogID([]byte("expired-call"), []byte("from-tag"), []byte("to-tag"))
+	require.NoError(t, err)
+	dialoger.Delete(dialogID)
+	e.unregisterMedia("expired-call")
+	close(dialoger.continueRefresh)
+	require.NoError(t, <-done)
+
+	require.Empty(t, e.rtpEndpointRefs)
+	requireEndpoint(t, e, "10.0.2.3", 6000, false)
+	requireEndpoint(t, e, "10.0.2.4", 7000, false)
+	offer, ok := e.takeInviteSDP("expired-call", "2")
+	require.True(t, ok, "failed refresh must preserve the matching offer")
+	require.Equal(t, mediaSDP("10.0.2.3", 6000), string(offer))
+}
+
+func TestReinviteRefreshAppliesMatchingRevisionOnce(t *testing.T) {
+	e := newSDPCSeqTestExporter()
+
+	require.NoError(t, e.handleMessage("carrier-x", "", inviteSDPMessage(
+		"refresh-call", "1", "", mediaSDP("10.0.3.1", 4000),
+	)))
+	require.NoError(t, e.handleMessage("carrier-x", "", inviteSDPResponse(
+		"refresh-call", "1", mediaSDP("10.0.3.2", 5000),
+	)))
+	require.NoError(t, e.handleMessage("carrier-x", "", inviteSDPMessage(
+		"refresh-call", "2", "to-tag", mediaSDP("10.0.3.3", 6000),
+	)))
+	response := inviteSDPResponse("refresh-call", "2", mediaSDP("10.0.3.4", 7000))
+	require.NoError(t, e.handleMessage("carrier-x", "", response))
+	require.NoError(t, e.handleMessage("carrier-x", "", response))
+
+	requireEndpoint(t, e, "10.0.3.1", 4000, false)
+	requireEndpoint(t, e, "10.0.3.2", 5000, false)
+	requireEndpoint(t, e, "10.0.3.3", 6000, true)
+	requireEndpoint(t, e, "10.0.3.4", 7000, true)
+	require.Equal(t, map[rtpEndpointKey]uint{
+		{IP: 0x0A000303, Port: 6000}: 1,
+		{IP: 0x0A000303, Port: 6001}: 1,
+		{IP: 0x0A000304, Port: 7000}: 1,
+		{IP: 0x0A000304, Port: 7001}: 1,
+	}, e.rtpEndpointRefs)
+	_, ok := e.takeInviteSDP("refresh-call", "2")
+	require.False(t, ok, "successful refresh must consume the matching offer once")
 }
 
 func newSDPCSeqTestExporter() *exporter {
@@ -308,13 +400,46 @@ func TestRTPSourceAliasLearning(t *testing.T) {
 	}
 }
 
-func TestReinviteHoldReleasesLearnedAlias(t *testing.T) {
+func TestRTPSourceAliasSharedDestinationCounted(t *testing.T) {
+	mm := &mockMetricser{}
 	e := &exporter{
-		services:        services{metricser: &mockMetricser{}, dialoger: &mockDialoger{}},
+		services:        services{metricser: mm, dialoger: &mockDialoger{}},
+		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
+		rtpEndpointRefs: make(map[rtpEndpointKey]uint),
+	}
+	for _, registration := range []struct {
+		ip     string
+		port   uint16
+		callID string
+	}{
+		{ip: "10.0.0.1", port: 4000, callID: "call-1"},
+		{ip: "10.0.0.2", port: 5000, callID: "call-1"},
+		{ip: "10.0.0.1", port: 4001, callID: "call-2"},
+		{ip: "10.0.0.2", port: 5000, callID: "call-2"},
+	} {
+		e.mediaTracker.Register(registration.ip, registration.port, mediatracker.MediaLabels{
+			Carrier: "carrier", UAType: "ua", CallID: registration.callID,
+			SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000},
+		})
+	}
+
+	_, err := e.handleRTP(
+		net.IPv4(10, 0, 0, 1), 4100, net.IPv4(10, 0, 0, 2), 5000, makeRTPPayload(1),
+	)
+	require.NoError(t, err)
+	require.Equal(t, 1, mm.rtpPacketsCalls)
+	require.NotContains(t, e.rtpEndpointRefs, rtpEndpointKey{IP: 0x0A000001, Port: 4100})
+}
+
+func TestReinviteHoldReleasesLearnedAlias(t *testing.T) {
+	dialoger := &mockDialoger{}
+	e := &exporter{
+		services:        services{metricser: &mockMetricser{}, dialoger: dialoger},
 		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 		rtpEndpointRefs: make(map[rtpEndpointKey]uint),
 	}
+	createActiveTestDialog(t, dialoger, "call-1")
 	labels := mediatracker.MediaLabels{
 		Carrier: "carrier", UAType: "ua", CallID: "call-1",
 		SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000},
@@ -342,11 +467,13 @@ func TestReinviteHoldReleasesLearnedAlias(t *testing.T) {
 }
 
 func TestInvite200OKRetransmitPreservesMediaRevision(t *testing.T) {
+	dialoger := &mockDialoger{}
 	e := &exporter{
-		services:        services{metricser: &mockMetricser{}, dialoger: &mockDialoger{}},
+		services:        services{metricser: &mockMetricser{}, dialoger: dialoger},
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 		rtpEndpointRefs: make(map[rtpEndpointKey]uint),
 	}
+	createActiveTestDialog(t, dialoger, "call-1")
 	labels := mediatracker.MediaLabels{CallID: "call-1"}
 	for _, endpoint := range []mediatracker.MediaEndpoint{
 		{IP: "10.0.0.1", Port: 4000},

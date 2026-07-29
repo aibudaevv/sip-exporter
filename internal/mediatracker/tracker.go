@@ -9,7 +9,10 @@ import (
 	"github.com/aibudaevv/sip-exporter/internal/rtp"
 )
 
-const defaultClockRate = 8000
+const (
+	defaultClockRate   = 8000
+	aliasEndpointCount = 2
+)
 
 const (
 	matchedByDst = "dst"
@@ -317,9 +320,8 @@ func (t *Tracker) LearnSourceAlias(
 }
 
 func (t *Tracker) learnSourceAlias(callID string, matched, source endpointKey) (MediaEndpoint, bool) {
-
 	endpoints := t.callMediaOrder[callID]
-	if len(endpoints) != 2 {
+	if len(endpoints) != aliasEndpointCount || !t.canLearnSourceAlias(callID, matched) {
 		return MediaEndpoint{}, false
 	}
 
@@ -341,6 +343,11 @@ func (t *Tracker) learnSourceAlias(callID string, matched, source endpointKey) (
 	}
 	t.sourceAliases[callID][peer] = source
 	return MediaEndpoint{IP: source.ip, Port: source.port}, true
+}
+
+func (t *Tracker) canLearnSourceAlias(callID string, matched endpointKey) bool {
+	owners := t.mediaOwners[matched]
+	return len(owners) == 1 && owners[0] == callID
 }
 
 // Lookup resolves a media endpoint to its labels.

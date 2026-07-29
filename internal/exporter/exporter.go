@@ -1625,7 +1625,9 @@ func (e *exporter) handleInvite200OK(
 		zap.L().Debug("refresh sip dialog (re-INVITE)",
 			zap.String("session", dialogID),
 			zap.Int("expires_sec", expires))
-		e.services.dialoger.Refresh(dialogID, expiresAt)
+		if !e.services.dialoger.Refresh(dialogID, expiresAt) {
+			return nil
+		}
 	} else {
 		zap.L().Debug("create sip dialog",
 			zap.String("session", dialogID),
