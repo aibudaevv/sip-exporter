@@ -308,6 +308,37 @@ func TestRTPSourceAliasLearning(t *testing.T) {
 	}
 }
 
+func TestRTPSourceAliasSharedDestinationCounted(t *testing.T) {
+	mm := &mockMetricser{}
+	e := &exporter{
+		services:        services{metricser: mm, dialoger: &mockDialoger{}},
+		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
+		rtpEndpointRefs: make(map[rtpEndpointKey]uint),
+	}
+	for _, registration := range []struct {
+		ip     string
+		port   uint16
+		callID string
+	}{
+		{ip: "10.0.0.1", port: 4000, callID: "call-1"},
+		{ip: "10.0.0.2", port: 5000, callID: "call-1"},
+		{ip: "10.0.0.1", port: 4001, callID: "call-2"},
+		{ip: "10.0.0.2", port: 5000, callID: "call-2"},
+	} {
+		e.mediaTracker.Register(registration.ip, registration.port, mediatracker.MediaLabels{
+			Carrier: "carrier", UAType: "ua", CallID: registration.callID,
+			SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000},
+		})
+	}
+
+	_, err := e.handleRTP(
+		net.IPv4(10, 0, 0, 1), 4100, net.IPv4(10, 0, 0, 2), 5000, makeRTPPayload(1),
+	)
+	require.NoError(t, err)
+	require.Equal(t, 1, mm.rtpPacketsCalls)
+	require.NotContains(t, e.rtpEndpointRefs, rtpEndpointKey{IP: 0x0A000001, Port: 4100})
+}
+
 func TestReinviteHoldReleasesLearnedAlias(t *testing.T) {
 	e := &exporter{
 		services:        services{metricser: &mockMetricser{}, dialoger: &mockDialoger{}},
