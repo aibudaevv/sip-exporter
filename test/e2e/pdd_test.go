@@ -50,6 +50,10 @@ func TestPDD(t *testing.T) {
 			for _, s := range tt.scenarios {
 				if s.uacOnly {
 					runSippUACOnly(ctx, t, s.uac, s.count, env)
+					require.True(t, metricExists(t, env.endpoint, "sip_exporter_invite_total"),
+						"timeout scenario must emit INVITE traffic")
+					require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_invite_total"), 0.0,
+						"timeout scenario must emit at least one INVITE")
 				} else {
 					runSippScenario(ctx, t, s.uas, s.uac, s.count, env)
 				}

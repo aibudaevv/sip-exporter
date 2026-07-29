@@ -4,6 +4,9 @@ package e2e
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -863,6 +866,40 @@ func getMetricWithCarrierAndUA(t *testing.T, endpoint string, metricName string,
 	return getMetricWithLabel(t, endpoint, metricName, `carrier="`+carrier+`",ua_type="`+uaType+`"`)
 }
 
+func runSippCommand(cmd *exec.Cmd, stdout, stderr io.Writer) (string, string, error) {
+	var capturedStdout, capturedStderr strings.Builder
+	cmd.Stdout = io.MultiWriter(stdout, &capturedStdout)
+	cmd.Stderr = io.MultiWriter(stderr, &capturedStderr)
+	err := cmd.Run()
+	return strings.TrimSpace(capturedStdout.String()), strings.TrimSpace(capturedStderr.String()), err
+}
+
+func isExpectedSippExit(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == 1
+}
+
+func removeSippContainer(name string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "docker", "rm", "-f", name).CombinedOutput()
+	if err != nil && !strings.Contains(string(output), "No such container") {
+		return fmt.Errorf("remove SIPp container %s: %w: %s", name, err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func nextSippContainerName() (string, error) {
+	var suffix [16]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return "", fmt.Errorf("generate SIPp container name: %w", err)
+	}
+	return "sip-exporter-e2e-uas-" + hex.EncodeToString(suffix[:]), nil
+}
+
 // runSippScenario starts SIPp server and client via docker CLI (host network mode),
 // waits for calls to complete and returns statistics.
 func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario string, callCount int, env *testEnv) sippResult {
@@ -880,8 +917,11 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 	sippVol := filepath.Dir(uasPath)
 	uasScenarioFile := filepath.Base(uasScenario)
 	uacScenarioFile := filepath.Base(uacScenario)
+	uasContainerName, err := nextSippContainerName()
+	require.NoError(t, err)
 
 	uasCmd := exec.CommandContext(ctx, "docker", "run", "--rm",
+		"--name", uasContainerName,
 		"--network", "host",
 		"-v", sippVol+":/scenarios:ro",
 		sippImage,
@@ -895,44 +935,36 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 	uasCmd.Stdout = stdout
 	uasCmd.Stderr = stderr
 	require.NoError(t, uasCmd.Start())
+	t.Cleanup(func() {
+		if err := removeSippContainer(uasContainerName); err != nil {
+			t.Logf("UAS cleanup: %v", err)
+		}
+	})
 
 	require.Eventually(t, func() bool {
 		return isUDPPortInUse(env.sippPort)
 	}, 10*time.Second, 50*time.Millisecond, "UAS should start listening on port %s", env.sippPort)
 
-	uacMaxAttempts := 3
-	for uacAttempt := 1; ; uacAttempt++ {
-		var uacStderr strings.Builder
-		uacCmd := exec.CommandContext(ctx, "docker", "run", "--rm",
-			"--network", "host",
-			"-v", sippVol+":/scenarios:ro",
-			sippImage,
-			"-sf", "/scenarios/"+uacScenarioFile,
-			"-i", "127.0.0.1",
-			"-p", env.sippClientPort,
-			"-m", strconv.Itoa(callCount),
-			"-nr",
-			"127.0.0.1:"+env.sippPort,
-		)
-		uacCmd.Stdout = stdout
-		if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
-			uacCmd.Stderr = io.MultiWriter(stderr, &uacStderr)
-		} else {
-			uacCmd.Stderr = &uacStderr
-		}
-		if err := uacCmd.Run(); err != nil {
-			if uacAttempt < uacMaxAttempts && ctx.Err() == nil && isUDPPortInUse(env.sippPort) {
-				t.Logf("UAC failed (attempt %d/%d), retrying: %v", uacAttempt, uacMaxAttempts, err)
-				if uacAttempt == 1 {
-					dumpUDPPort(t, env.sippClientPort)
-				}
-				time.Sleep(2 * time.Second)
-				continue
-			}
-			t.Logf("UAC stderr:\n%s", strings.TrimSpace(uacStderr.String()))
-			require.NoError(t, err)
-		}
-		break
+	uacCmd := exec.CommandContext(ctx, "docker", "run", "--rm",
+		"--network", "host",
+		"-v", sippVol+":/scenarios:ro",
+		sippImage,
+		"-sf", "/scenarios/"+uacScenarioFile,
+		"-i", "127.0.0.1",
+		"-p", env.sippClientPort,
+		"-m", strconv.Itoa(callCount),
+		"-nr",
+		"127.0.0.1:"+env.sippPort,
+	)
+	uacStdout, uacStderr, err := runSippCommand(uacCmd, stdout, stderr)
+	if err != nil {
+		stopErr := removeSippContainer(uasContainerName)
+		cancel()
+		_ = uasCmd.Wait()
+		t.Logf("UAC stdout:\n%s", uacStdout)
+		t.Logf("UAC stderr:\n%s", uacStderr)
+		require.NoError(t, stopErr, "stop UAS after failed UAC execution")
+		require.NoError(t, err)
 	}
 
 	_ = uasCmd.Wait()
@@ -1087,31 +1119,25 @@ func runSippUACOnly(ctx context.Context, t *testing.T, uacScenario string, callC
 	sippVol := filepath.Dir(uacPath)
 	uacScenarioFile := filepath.Base(uacScenario)
 
-	uacMaxAttempts := 3
-	for uacAttempt := 1; ; uacAttempt++ {
-		uacCmd := exec.Command("docker", "run", "--rm",
-			"--network", "host",
-			"-v", sippVol+":/scenarios:ro",
-			sippImage,
-			"-sf", "/scenarios/"+uacScenarioFile,
-			"-i", "127.0.0.1",
-			"-p", env.sippClientPort,
-			"-m", strconv.Itoa(callCount),
-			"-timeout", "5s",
-			"127.0.0.1:"+env.sippPort,
-		)
-		uacCmd.Stdout = stdout
-		uacCmd.Stderr = stderr
-		if err := uacCmd.Run(); err != nil {
-			if uacAttempt < uacMaxAttempts {
-				t.Logf("UAC-only failed (attempt %d/%d), retrying: %v", uacAttempt, uacMaxAttempts, err)
-				time.Sleep(time.Second)
-				continue
-			}
-			t.Logf("UAC-only failed after %d attempts: %v", uacMaxAttempts, err)
-		}
-		break
+	uacCmd := exec.CommandContext(ctx, "docker", "run", "--rm",
+		"--network", "host",
+		"-v", sippVol+":/scenarios:ro",
+		sippImage,
+		"-sf", "/scenarios/"+uacScenarioFile,
+		"-i", "127.0.0.1",
+		"-p", env.sippClientPort,
+		"-m", strconv.Itoa(callCount),
+		"-timeout", "5s",
+		"127.0.0.1:"+env.sippPort,
+	)
+	uacStdout, uacStderr, err := runSippCommand(uacCmd, stdout, stderr)
+	if err != nil {
+		t.Logf("UAC-only expected failure: %v", err)
+		t.Logf("UAC-only stdout:\n%s", uacStdout)
+		t.Logf("UAC-only stderr:\n%s", uacStderr)
 	}
+	require.True(t, isExpectedSippExit(ctx, err),
+		"UAC-only timeout scenario should exit with status 1 before its context deadline: %v", err)
 
 	waitForMetricStable(t, env.endpoint)
 }
