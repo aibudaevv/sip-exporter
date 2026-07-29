@@ -28,6 +28,33 @@ import (
 	"github.com/aibudaevv/sip-exporter/internal/vq"
 )
 
+type fakeRTPEndpointMap struct {
+	updates []rtpEndpointMapUpdate
+	deletes []rtpEndpointKey
+}
+
+type rtpEndpointMapUpdate struct {
+	key   rtpEndpointKey
+	value uint8
+	flags ebpf.MapUpdateFlags
+}
+
+var _ rtpEndpointMap = (*fakeRTPEndpointMap)(nil)
+
+func (m *fakeRTPEndpointMap) Update(key, value any, flags ebpf.MapUpdateFlags) error {
+	m.updates = append(m.updates, rtpEndpointMapUpdate{
+		key:   key.(rtpEndpointKey),
+		value: value.(uint8),
+		flags: flags,
+	})
+	return nil
+}
+
+func (m *fakeRTPEndpointMap) Delete(key any) error {
+	m.deletes = append(m.deletes, key.(rtpEndpointKey))
+	return nil
+}
+
 // Mock services for testing.
 type mockMetricser struct {
 	requestCalled                  []byte
@@ -6520,20 +6547,30 @@ func TestIPPortToKey(t *testing.T) {
 
 func TestRTPEndpointRetainRelease(t *testing.T) {
 	endpoint := rtpEndpointKey{IP: 0xC000020A, Port: 5004}
+	firstMap := &fakeRTPEndpointMap{}
+	secondMap := &fakeRTPEndpointMap{}
 	e := &exporter{
-		rtpEndpointRefs: make(map[rtpEndpointKey]uint),
+		rtpEndpointsMaps: []rtpEndpointMap{firstMap, secondMap},
+		rtpEndpointRefs:  make(map[rtpEndpointKey]uint),
 	}
 
 	e.retainRTPEndpoint("192.0.2.10", 5004)
 	e.retainRTPEndpoint("192.0.2.10", 5004)
 	require.Equal(t, uint(2), e.rtpEndpointRefs[endpoint])
+	wantUpdates := []rtpEndpointMapUpdate{{key: endpoint, value: 1, flags: ebpf.UpdateAny}}
+	require.Equal(t, wantUpdates, firstMap.updates)
+	require.Equal(t, wantUpdates, secondMap.updates)
 
 	e.releaseRTPEndpoint("192.0.2.10", 5004)
 	require.Equal(t, uint(1), e.rtpEndpointRefs[endpoint])
+	require.Empty(t, firstMap.deletes)
+	require.Empty(t, secondMap.deletes)
 
 	e.releaseRTPEndpoint("192.0.2.10", 5004)
 	_, ok := e.rtpEndpointRefs[endpoint]
 	require.False(t, ok)
+	require.Equal(t, []rtpEndpointKey{endpoint}, firstMap.deletes)
+	require.Equal(t, []rtpEndpointKey{endpoint}, secondMap.deletes)
 }
 
 func TestRTPEndpointRefcountIgnoresUnsupportedEndpoints(t *testing.T) {
