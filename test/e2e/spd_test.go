@@ -55,16 +55,14 @@ func TestSPD(t *testing.T) {
 				t.Logf("SPD{carrier=%q} = %.4f seconds", env.carrier, spd)
 				require.Greater(t, spd, 0.0, "SPD should be > 0 after successful calls")
 				env.waitForSessionsZeroByCarrier(t)
-			} else {
+			} else if !tt.wantZero {
 				spd := getSPD(t, env.endpoint)
 				t.Logf("SPD = %.4f seconds", spd)
-				if tt.wantZero {
-					require.Equal(t, 0.0, spd, "SPD should be 0 when no sessions completed")
-				} else {
-					require.Greater(t, spd, 0.0, "SPD should be > 0 after successful calls")
-					require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_spd_count"), 0.0,
-						"SPD histogram should have observations")
-				}
+				require.Greater(t, spd, 0.0, "SPD should be > 0 after successful calls")
+				require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_spd_count"), 0.0,
+					"SPD histogram should have observations")
+			}
+			if !tt.carrier {
 				waitForSessionsZero(t, env.endpoint)
 			}
 		})

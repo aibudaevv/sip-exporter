@@ -81,8 +81,6 @@ func TestRegisterFailureCodes(t *testing.T) {
 
 			require.False(t, metricExists(t, env.endpoint, "sip_exporter_register_success_total"),
 				"no successful registrations")
-			success := getMetric(t, env.endpoint, "sip_exporter_register_success_total")
-			require.Equal(t, 0.0, success, "no successful registrations")
 
 			labelFilter := `code="` + tt.failCode + `"`
 			require.True(t,

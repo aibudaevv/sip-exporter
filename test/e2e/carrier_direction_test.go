@@ -33,8 +33,6 @@ func TestCarrierDirection(t *testing.T) {
 
 				require.False(t, metricWithLabelExists(t, endpoint, "sip_exporter_ser", `carrier="carrier-B"`),
 					"SER for carrier-B should be absent")
-				serB := getMetricWithCarrier(t, endpoint, "sip_exporter_ser", "carrier-B")
-				require.Equal(t, 0.0, serB)
 
 				serA := getMetricWithCarrier(t, endpoint, "sip_exporter_ser", "carrier-A")
 				require.Greater(t, serA, 0.0, "SER for carrier-A should be > 0")
@@ -44,8 +42,6 @@ func TestCarrierDirection(t *testing.T) {
 
 				require.False(t, metricWithLabelExists(t, endpoint, "sip_exporter_sdc_total", `carrier="carrier-B"`),
 					"SDC for carrier-B should be absent")
-				sdcB := getMetricWithCarrier(t, endpoint, "sip_exporter_sdc_total", "carrier-B")
-				require.Equal(t, 0.0, sdcB, "carrier-B should have 0 completed sessions")
 			},
 		},
 		{
@@ -80,10 +76,6 @@ func TestCarrierDirection(t *testing.T) {
 					"carrier-A should have no INVITEs")
 				require.False(t, metricWithLabelExists(t, endpoint, "sip_exporter_invite_total", `carrier="carrier-B"`),
 					"carrier-B should have no INVITEs")
-				inviteA := getMetricWithCarrier(t, endpoint, "sip_exporter_invite_total", "carrier-A")
-				inviteB := getMetricWithCarrier(t, endpoint, "sip_exporter_invite_total", "carrier-B")
-				require.Equal(t, 0.0, inviteA)
-				require.Equal(t, 0.0, inviteB)
 			},
 		},
 		{
@@ -95,8 +87,6 @@ func TestCarrierDirection(t *testing.T) {
 
 				require.False(t, metricWithLabelExists(t, endpoint, "sip_exporter_invite_total", `carrier="carrier-broad"`),
 					"carrier-broad should not match when carrier-specific is listed first")
-				inviteBroad := getMetricWithCarrier(t, endpoint, "sip_exporter_invite_total", "carrier-broad")
-				require.Equal(t, 0.0, inviteBroad)
 			},
 		},
 	}

@@ -18,7 +18,7 @@ func TestSelfMonitoringSocketPacketsReceived(t *testing.T) {
 		env := newTestEnv(ctx, t)
 		runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", 10, env)
 
-		val := getMetric(t, env.endpoint, "sip_exporter_socket_packets_received_total")
+		val := getMetricSum(t, env.endpoint, "sip_exporter_socket_packets_received_total")
 		require.Greater(t, val, 0.0, "socket_packets_received_total should be > 0 after traffic")
 
 		waitForSessionsZero(t, env.endpoint)
@@ -36,7 +36,7 @@ func TestSelfMonitoringSocketPacketsDropped(t *testing.T) {
 
 		require.True(t, metricExists(t, env.endpoint, "sip_exporter_socket_packets_dropped_total"),
 			"socket_packets_dropped_total metric should exist")
-		val := getMetric(t, env.endpoint, "sip_exporter_socket_packets_dropped_total")
+		val := getMetricSum(t, env.endpoint, "sip_exporter_socket_packets_dropped_total")
 		require.Equal(t, 0.0, val, "socket_packets_dropped_total should be 0 (no drops expected)")
 
 		waitForSessionsZero(t, env.endpoint)

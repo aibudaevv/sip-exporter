@@ -32,15 +32,14 @@ func TestISSAllScenarios(t *testing.T) {
 			env := newTestEnv(ctx, t)
 			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, tt.callCount, env)
 
-			iss := getISS(t, env.endpoint)
-			t.Logf("ISS = %.0f (want %.0f)", iss, tt.wantISS)
-
 			if tt.wantISS > 0 {
-				require.True(t, metricExists(t, env.endpoint, "sip_exporter_iss"),
+				require.True(t, metricExists(t, env.endpoint, "sip_exporter_iss_total"),
 					"ISS metric should exist when server errors occur")
+				iss := getISS(t, env.endpoint)
+				t.Logf("ISS = %.0f (want %.0f)", iss, tt.wantISS)
 				require.Equal(t, float64(tt.callCount), iss)
 			} else {
-				require.False(t, metricExists(t, env.endpoint, "sip_exporter_iss"),
+				require.False(t, metricExists(t, env.endpoint, "sip_exporter_iss_total"),
 					"ISS metric should be absent when no server errors")
 			}
 
@@ -61,7 +60,7 @@ func TestISSMixed(t *testing.T) {
 	runSippScenario(ctx, t, "uas_busy.xml", "uac_busy.xml", busyCount, env)
 	runSippScenario(ctx, t, "uas_server_error.xml", "uac_server_error.xml", errorCount, env)
 
-	require.True(t, metricExists(t, env.endpoint, "sip_exporter_iss"),
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_iss_total"),
 		"ISS metric should exist")
 	iss := getISS(t, env.endpoint)
 	t.Logf("ISS = %.0f (want %.0f)", iss, float64(errorCount))

@@ -223,11 +223,23 @@ func TestMultiInterfaceSER(t *testing.T) {
 
 			loLabel := `called_host="127.0.0.1"`
 			gotLoInvite := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", loLabel)
-			gotLo200OK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", loLabel)
 
 			vethLabel := `called_host="10.10.0.1"`
 			gotVethInvite := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", vethLabel)
-			gotVeth200OK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel)
+
+			var gotLo200OK, gotVeth200OK float64
+			if tt.wantLo200OK == 0 {
+				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", loLabel),
+					"lo 200 OK series should be absent: %s", tt.description)
+			} else {
+				gotLo200OK = getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", loLabel)
+			}
+			if tt.wantVeth200OK == 0 {
+				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel),
+					"veth 200 OK series should be absent: %s", tt.description)
+			} else {
+				gotVeth200OK = getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel)
+			}
 
 			require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"), "SER metric must exist")
 			gotSER := getSER(t, env.endpoint)
@@ -245,15 +257,6 @@ func TestMultiInterfaceSER(t *testing.T) {
 				gotSER,
 				tt.wantSER,
 			)
-
-			if tt.wantLo200OK == 0 {
-				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", loLabel),
-					"lo 200 OK series should be absent: %s", tt.description)
-			}
-			if tt.wantVeth200OK == 0 {
-				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel),
-					"veth 200 OK series should be absent: %s", tt.description)
-			}
 
 			require.InDelta(t, tt.wantLoInvite, gotLoInvite, ratioDelta, "lo INVITE: %s", tt.description)
 			require.InDelta(t, tt.wantLo200OK, gotLo200OK, ratioDelta, "lo 200 OK: %s", tt.description)
@@ -345,11 +348,23 @@ func TestMultiInterfaceASR(t *testing.T) {
 
 			loLabel := `called_host="127.0.0.1"`
 			gotLoInvite := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", loLabel)
-			gotLo200OK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", loLabel)
 
 			vethLabel := `called_host="10.10.0.1"`
 			gotVethInvite := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", vethLabel)
-			gotVeth200OK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel)
+
+			var gotLo200OK, gotVeth200OK float64
+			if tt.wantLo200OK == 0 {
+				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", loLabel),
+					"lo 200 OK series should be absent: %s", tt.description)
+			} else {
+				gotLo200OK = getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", loLabel)
+			}
+			if tt.wantVeth200OK == 0 {
+				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel),
+					"veth 200 OK series should be absent: %s", tt.description)
+			} else {
+				gotVeth200OK = getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel)
+			}
 
 			require.True(t, metricExists(t, env.endpoint, "sip_exporter_asr"), "ASR metric must exist")
 			gotASR := getASR(t, env.endpoint)
@@ -367,15 +382,6 @@ func TestMultiInterfaceASR(t *testing.T) {
 				gotASR,
 				tt.wantASR,
 			)
-
-			if tt.wantLo200OK == 0 {
-				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", loLabel),
-					"lo 200 OK series should be absent: %s", tt.description)
-			}
-			if tt.wantVeth200OK == 0 {
-				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel),
-					"veth 200 OK series should be absent: %s", tt.description)
-			}
 
 			require.InDelta(t, tt.wantLoInvite, gotLoInvite, ratioDelta, "lo INVITE: %s", tt.description)
 			require.InDelta(t, tt.wantLo200OK, gotLo200OK, ratioDelta, "lo 200 OK: %s", tt.description)
@@ -469,19 +475,23 @@ func TestMultiInterfaceSDC(t *testing.T) {
 
 			loLabel := `called_host="127.0.0.1"`
 			gotLoInvite := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", loLabel)
-			gotLo200OK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", loLabel)
 
 			vethLabel := `called_host="10.10.0.1"`
 			gotVethInvite := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", vethLabel)
-			gotVeth200OK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel)
+
+			var gotLo200OK, gotVeth200OK float64
 
 			if tt.wantLo200OK == 0 {
 				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", loLabel),
 					"lo 200 OK series should be absent: %s", tt.description)
+			} else {
+				gotLo200OK = getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", loLabel)
 			}
 			if tt.wantVeth200OK == 0 {
 				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel),
 					"veth 200 OK series should be absent: %s", tt.description)
+			} else {
+				gotVeth200OK = getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel)
 			}
 
 			require.InDelta(t, tt.wantLoInvite, gotLoInvite, ratioDelta, "lo INVITE: %s", tt.description)
@@ -595,19 +605,23 @@ func TestMultiInterfacePDD(t *testing.T) {
 
 			loLabel := `called_host="127.0.0.1"`
 			gotLoInvite := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", loLabel)
-			gotLo200OK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", loLabel)
 
 			vethLabel := `called_host="10.10.0.1"`
 			gotVethInvite := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", vethLabel)
-			gotVeth200OK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel)
+
+			var gotLo200OK, gotVeth200OK float64
 
 			if tt.wantLo200OK == 0 {
 				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", loLabel),
 					"lo 200 OK series should be absent: %s", tt.description)
+			} else {
+				gotLo200OK = getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", loLabel)
 			}
 			if tt.wantVeth200OK == 0 {
 				require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel),
 					"veth 200 OK series should be absent: %s", tt.description)
+			} else {
+				gotVeth200OK = getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel)
 			}
 
 			require.InDelta(t, tt.wantLoInvite, gotLoInvite, ratioDelta, "lo INVITE: %s", tt.description)

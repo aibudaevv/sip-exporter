@@ -53,15 +53,15 @@ func TestORD(t *testing.T) {
 					"ORD histogram should exist for carrier %q", env.carrier)
 			}
 
-			var ordCount float64
 			if tt.carrier {
-				ordCount = env.getORDByCarrier(t)
+				ordCount := env.getORDByCarrier(t)
 				t.Logf("ORD{carrier=%q} count = %.0f", env.carrier, ordCount)
-			} else {
-				ordCount = getORD(t, env.endpoint)
+				require.Equal(t, float64(tt.wantCount), ordCount)
+			} else if tt.wantCount > 0 {
+				ordCount := getORD(t, env.endpoint)
 				t.Logf("ORD count = %.0f", ordCount)
+				require.Equal(t, float64(tt.wantCount), ordCount)
 			}
-			require.Equal(t, float64(tt.wantCount), ordCount)
 
 			if !tt.carrier {
 				waitForSessionsZero(t, env.endpoint)

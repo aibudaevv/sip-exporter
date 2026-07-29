@@ -41,8 +41,15 @@ type testEnv struct {
 	carrier        string
 }
 
+type metricSample struct {
+	name   string
+	labels map[string]string
+	value  float64
+}
+
 var (
-	portMu sync.Mutex
+	portMu             sync.Mutex
+	metricValuePattern = regexp.MustCompile(`^(?:NaN|[+-]?Inf|[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)$`)
 )
 
 // allocatePorts returns 3 port numbers for exporter, SIPp server, and SIPp client.
@@ -469,7 +476,12 @@ func waitForSessionsZero(t *testing.T, endpoint string) {
 	// The indirect guard is assertSelfMonitoringHealthy (called below), which
 	// verifies packets_received_total > 0, proving the exporter is alive.
 	require.Eventually(t, func() bool {
-		return getMetric(t, endpoint, "sip_exporter_sessions") <= 1
+		for _, sample := range readMetricSamples(t, endpoint, "sip_exporter_sessions") {
+			if sample.value > 1 {
+				return false
+			}
+		}
+		return true
 	}, 15*time.Second, 300*time.Millisecond,
 		"sessions should reach ≤1 after all calls terminated (packet-capture contention tolerance)")
 
@@ -490,10 +502,10 @@ func assertSelfMonitoringHealthy(t *testing.T, endpoint string) {
 	require.True(t, metricExists(t, endpoint, "sip_exporter_active_dialogs"),
 		"sip_exporter_active_dialogs should exist in /metrics output")
 
-	received := getMetric(t, endpoint, "sip_exporter_socket_packets_received_total")
+	received := getMetricSum(t, endpoint, "sip_exporter_socket_packets_received_total")
 	require.Equal(t, true, received > 0, "socket_packets_received_total should be > 0 after traffic")
 
-	dropped := getMetric(t, endpoint, "sip_exporter_socket_packets_dropped_total")
+	dropped := getMetricSum(t, endpoint, "sip_exporter_socket_packets_dropped_total")
 	require.Equal(t, 0.0, dropped, "socket_packets_dropped_total should be 0 (no drops)")
 
 	require.Eventually(t, func() bool {
@@ -534,6 +546,18 @@ func getMetric(t *testing.T, endpoint string, metricName string) float64 {
 	return getMetricWithLabel(t, endpoint, metricName, "")
 }
 
+func getMetricSum(t *testing.T, endpoint string, metricName string) float64 {
+	t.Helper()
+
+	samples := readMetricSamples(t, endpoint, metricName)
+	require.NotEmpty(t, samples, "metric %s must have at least one sample", metricName)
+	var sum float64
+	for _, sample := range samples {
+		sum += sample.value
+	}
+	return sum
+}
+
 // fetchMetricsBody scrapes the raw /metrics body from the exporter endpoint using
 // a request-scoped context. All metric-reading helpers route through it so there is
 // a single HTTP call site (and no http.Get-without-context).
@@ -551,70 +575,217 @@ func fetchMetricsBody(t *testing.T, endpoint string) []byte {
 	return body
 }
 
-// metricExists checks whether a metric name appears in the exporter /metrics output.
-// Use before assertions that check a metric == 0 to prevent vacuum-pass when the
-// metric name is misspelled or missing entirely (getMetric returns 0.0 for unknown metrics).
-func metricExists(t *testing.T, endpoint string, metricName string) bool {
+// readMetricSamples reads samples whose metric name matches metricName exactly.
+func readMetricSamples(t *testing.T, endpoint string, metricName string) []metricSample {
 	t.Helper()
-	return strings.Contains(string(fetchMetricsBody(t, endpoint)), metricName)
+
+	var samples []metricSample
+	for _, line := range strings.Split(string(fetchMetricsBody(t, endpoint)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		separator := metricSeriesEnd(line)
+		if separator < 0 {
+			continue
+		}
+		series, fields := line[:separator], strings.Fields(line[separator:])
+		if len(fields) == 0 || len(fields) > 2 {
+			continue
+		}
+		if len(fields) == 2 {
+			if _, err := strconv.ParseInt(fields[1], 10, 64); err != nil {
+				continue
+			}
+		}
+		if !metricValuePattern.MatchString(fields[0]) {
+			continue
+		}
+		name := series
+		labels := map[string]string{}
+		if labelsStart := strings.IndexByte(series, '{'); labelsStart >= 0 {
+			name = series[:labelsStart]
+			if !strings.HasSuffix(series, "}") {
+				continue
+			}
+			var ok bool
+			labels, ok = parseMetricLabels(series[labelsStart+1 : len(series)-1])
+			if !ok {
+				continue
+			}
+		}
+		if name != metricName {
+			continue
+		}
+		value, err := strconv.ParseFloat(fields[0], 64)
+		if err != nil {
+			continue
+		}
+		samples = append(samples, metricSample{name: name, labels: labels, value: value})
+	}
+	return samples
 }
 
-// buildMetricRegex compiles a regex matching a Prometheus metric line,
-// optionally filtered by labels. If labelFilter is empty, matches any label
-// set; otherwise matches only lines containing all comma-separated filters.
-func buildMetricRegex(metricName string, labelFilter string) *regexp.Regexp {
-	if labelFilter != "" {
-		filters := strings.Split(labelFilter, ",")
-		quotedParts := make([]string, len(filters))
-		for i, f := range filters {
-			quotedParts[i] = regexp.QuoteMeta(f)
+func metricSeriesEnd(line string) int {
+	insideLabels := false
+	insideValue := false
+	escaped := false
+	for i := 0; i < len(line); i++ {
+		if insideValue {
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch line[i] {
+			case '\\':
+				escaped = true
+			case '"':
+				insideValue = false
+			}
+			continue
 		}
-		return regexp.MustCompile(`^` + metricName + `\{[^}]*` + strings.Join(quotedParts, `[^}]*`) + `[^}]*\}\s+([0-9.]+)`)
+		switch line[i] {
+		case '{':
+			insideLabels = true
+		case '}':
+			insideLabels = false
+		case '"':
+			if insideLabels {
+				insideValue = true
+			}
+		case ' ', '\t':
+			if !insideLabels {
+				return i
+			}
+		}
 	}
-	return regexp.MustCompile(`^` + metricName + `(?:\{[^}]*\})?\s+([0-9.]+)`)
+	return -1
+}
+
+func parseMetricLabels(input string) (map[string]string, bool) {
+	labels := make(map[string]string)
+	for input != "" {
+		equals := strings.IndexByte(input, '=')
+		if equals <= 0 || equals+1 >= len(input) || input[equals+1] != '"' {
+			return nil, false
+		}
+		name := input[:equals]
+		if !validMetricLabelName(name) {
+			return nil, false
+		}
+		if _, duplicate := labels[name]; duplicate {
+			return nil, false
+		}
+		valueEnd := equals + 2
+		for valueEnd < len(input) {
+			if input[valueEnd] == '\\' {
+				if valueEnd+1 >= len(input) || !strings.ContainsRune(`\"n`, rune(input[valueEnd+1])) {
+					return nil, false
+				}
+				valueEnd += 2
+				continue
+			}
+			if input[valueEnd] == '"' {
+				break
+			}
+			valueEnd++
+		}
+		if valueEnd >= len(input) {
+			return nil, false
+		}
+		value, err := strconv.Unquote(input[equals+1 : valueEnd+1])
+		if err != nil {
+			return nil, false
+		}
+		labels[name] = value
+		input = input[valueEnd+1:]
+		if input == "" {
+			break
+		}
+		if input[0] != ',' {
+			return nil, false
+		}
+		input = input[1:]
+		if input == "" {
+			return nil, false
+		}
+	}
+	return labels, true
+}
+
+func validMetricLabelName(name string) bool {
+	for i := 0; i < len(name); i++ {
+		valid := name[i] == '_' || name[i] >= 'a' && name[i] <= 'z' || name[i] >= 'A' && name[i] <= 'Z'
+		if i > 0 {
+			valid = valid || name[i] >= '0' && name[i] <= '9'
+		}
+		if !valid {
+			return false
+		}
+	}
+	return name != ""
+}
+
+func matchMetricLabels(sampleLabels, filterLabels map[string]string) bool {
+	for name, value := range filterLabels {
+		sampleValue, exists := sampleLabels[name]
+		if !exists || sampleValue != value {
+			return false
+		}
+	}
+	return true
+}
+
+func metricSamplesWithLabels(samples []metricSample, filterLabels map[string]string) []metricSample {
+	var matches []metricSample
+	for _, sample := range samples {
+		if matchMetricLabels(sample.labels, filterLabels) {
+			matches = append(matches, sample)
+		}
+	}
+	return matches
+}
+
+func singleMetricValue(samples []metricSample) (float64, error) {
+	if len(samples) != 1 {
+		return 0, fmt.Errorf("expected exactly one metric sample, got %d", len(samples))
+	}
+	return samples[0].value, nil
+}
+
+// metricExists checks whether an exact metric sample appears in /metrics.
+func metricExists(t *testing.T, endpoint string, metricName string) bool {
+	t.Helper()
+	return len(readMetricSamples(t, endpoint, metricName)) > 0
 }
 
 // getMetricWithLabel reads a metric with an optional label filter.
-// If labelFilter is empty, matches any label set (first match).
-// If labelFilter is set (e.g. `carrier="loopback-carrier"`), matches that exact label.
+// The filter may contain a subset of labels, but it must identify exactly one sample.
 func getMetricWithLabel(t *testing.T, endpoint string, metricName string, labelFilter string) float64 {
 	t.Helper()
 
-	body := fetchMetricsBody(t, endpoint)
-
-	re := buildMetricRegex(metricName, labelFilter)
-	for _, line := range strings.Split(string(body), "\n") {
-		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 2 {
-			val, err := strconv.ParseFloat(matches[1], 64)
-			require.NoError(t, err)
-			return val
-		}
+	filterLabels, ok := parseMetricLabels(labelFilter)
+	require.True(t, ok, "invalid label filter %q", labelFilter)
+	if !ok {
+		return 0
 	}
-
-	return 0
+	matches := metricSamplesWithLabels(readMetricSamples(t, endpoint, metricName), filterLabels)
+	value, err := singleMetricValue(matches)
+	require.NoError(t, err, "read metric %s with labels %q", metricName, labelFilter)
+	return value
 }
 
-// metricWithLabelExists checks whether a metric matching the name AND label
-// filter appears in the exporter /metrics output. Use before assertions that
-// check a label-filtered metric == 0 to prevent vacuum-pass when the label
-// combination is misspelled or missing entirely.
-//
-// Unlike metricExists (which checks name only via strings.Contains), this uses
-// the same regex as getMetricWithLabel, ensuring the guard is label-aware.
+// metricWithLabelExists checks whether an exact metric sample contains every
+// requested label with the exact value.
 func metricWithLabelExists(t *testing.T, endpoint string, metricName string, labelFilter string) bool {
 	t.Helper()
 
-	body := fetchMetricsBody(t, endpoint)
-
-	re := buildMetricRegex(metricName, labelFilter)
-	for _, line := range strings.Split(string(body), "\n") {
-		if re.MatchString(strings.TrimSpace(line)) {
-			return true
-		}
+	filterLabels, ok := parseMetricLabels(labelFilter)
+	require.True(t, ok, "invalid label filter %q", labelFilter)
+	if !ok {
+		return false
 	}
-
-	return false
+	return len(metricSamplesWithLabels(readMetricSamples(t, endpoint, metricName), filterLabels)) > 0
 }
 
 // getMetricWithCarrier reads a metric filtered by carrier label.
@@ -822,7 +993,7 @@ func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacS
 
 	waitForMetricStable(t, env.endpoint)
 
-	if dropped := getMetric(t, env.endpoint, "sip_exporter_socket_packets_dropped_total"); dropped > 0 {
+	if dropped := getMetricSum(t, env.endpoint, "sip_exporter_socket_packets_dropped_total"); dropped > 0 {
 		t.Logf("WARNING: %v packets dropped during test — threshold-based assertions may be unreliable under -parallel", dropped)
 	}
 
@@ -1092,7 +1263,13 @@ func (e *testEnv) waitForSessionsZeroByCarrier(t *testing.T) {
 	// Indirect guard: assertSelfMonitoringHealthy (called below) verifies
 	// packets_received_total > 0, proving the exporter is alive.
 	require.Eventually(t, func() bool {
-		return getMetricWithCarrier(t, e.endpoint, "sip_exporter_sessions", e.carrier) <= 1
+		samples := readMetricSamples(t, e.endpoint, "sip_exporter_sessions")
+		for _, sample := range metricSamplesWithLabels(samples, map[string]string{"carrier": e.carrier}) {
+			if sample.value > 1 {
+				return false
+			}
+		}
+		return true
 	}, 10*time.Second, 300*time.Millisecond,
 		"sessions should reach ≤1 after all calls terminated (packet-capture contention tolerance)")
 
