@@ -1659,9 +1659,14 @@ func (e *exporter) handleInvite200OK(
 	e.mediaLifecycleMu.Lock()
 	defer e.mediaLifecycleMu.Unlock()
 	if isReinvite && hasOfferSDP {
-		for _, ep := range e.mediaTracker.Replace(callID) {
-			e.releaseRTPEndpoint(ep.IP, ep.Port)
-		}
+		e.replaceMediaRevision(callID, func() {
+			// Registration is ownership-idempotent; the main flow repeats it to
+			// collect FAS metadata without changing the primary INVITE path.
+			e.registerMediaEndpoints(offerSDP, labels)
+			if hasAnswerSDP {
+				e.registerMediaEndpoints(packet.Body, labels)
+			}
+		})
 	}
 	var offerEndpoints []fasEndpoint
 	mediaEndpoints := 0
@@ -2213,6 +2218,20 @@ func (e *exporter) unregisterMedia(callID string) mediatracker.RTPDialogResult {
 		e.releaseRTPEndpoint(ep.IP, ep.Port)
 	}
 	return result
+}
+
+func (e *exporter) replaceMediaRevision(callID string, registerNext func()) {
+	owned := e.mediaTracker.OwnedEndpoints(callID)
+	for _, ep := range owned {
+		e.retainRTPEndpoint(ep.IP, ep.Port)
+	}
+	for _, ep := range e.mediaTracker.Replace(callID) {
+		e.releaseRTPEndpoint(ep.IP, ep.Port)
+	}
+	registerNext()
+	for _, ep := range owned {
+		e.releaseRTPEndpoint(ep.IP, ep.Port)
+	}
 }
 
 // releaseRTPEndpoint removes an endpoint from every BPF rtp_endpoints map when

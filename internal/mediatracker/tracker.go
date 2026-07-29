@@ -249,6 +249,24 @@ func (t *Tracker) Replace(callID string) []MediaEndpoint {
 	return t.removeCallMedia(callID)
 }
 
+// OwnedEndpoints returns the current media revision's BPF endpoint owners.
+func (t *Tracker) OwnedEndpoints(callID string) []MediaEndpoint {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	var owned []MediaEndpoint
+	for k := range t.callMedia[callID] {
+		owned = append(owned, MediaEndpoint{IP: k.ip, Port: k.port})
+	}
+	for _, alias := range t.sourceAliases[callID] {
+		owned = append(owned, MediaEndpoint{IP: alias.ip, Port: alias.port})
+	}
+	for k := range t.callRTCP[callID] {
+		owned = append(owned, MediaEndpoint{IP: k.ip, Port: k.port})
+	}
+	return owned
+}
+
 func (t *Tracker) removeCallMedia(callID string) []MediaEndpoint {
 	var deleted []MediaEndpoint
 	for k := range t.callMedia[callID] {
