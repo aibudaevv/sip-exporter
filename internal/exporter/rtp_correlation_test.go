@@ -2,6 +2,7 @@ package exporter
 
 import (
 	"encoding/binary"
+	"fmt"
 	"net"
 	"testing"
 
@@ -29,7 +30,7 @@ func TestRTPCorrelationViaSDP(t *testing.T) {
 	e := &exporter{
 		services:       services{metricser: mm, dialoger: md},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -84,6 +85,118 @@ func TestRTPCorrelationViaSDP(t *testing.T) {
 	}
 }
 
+func TestLateInvite200OKDoesNotConsumeNewerSDP(t *testing.T) {
+	e := newSDPCSeqTestExporter()
+
+	require.NoError(t, e.handleMessage("carrier-x", "", inviteSDPMessage(
+		"cseq-call", "1", "", mediaSDP("10.0.0.1", 4000),
+	)))
+	require.NoError(t, e.handleMessage("carrier-x", "", inviteSDPResponse(
+		"cseq-call", "1", mediaSDP("10.0.0.2", 5000),
+	)))
+	requireEndpoint(t, e, "10.0.0.1", 4000, true)
+	requireEndpoint(t, e, "10.0.0.2", 5000, true)
+
+	require.NoError(t, e.handleMessage("carrier-x", "", inviteSDPMessage(
+		"cseq-call", "2", "to-tag", mediaSDP("10.0.0.3", 6000),
+	)))
+	require.NoError(t, e.handleMessage("carrier-x", "", inviteSDPResponse(
+		"cseq-call", "1", mediaSDP("10.0.0.2", 5000),
+	)))
+	requireEndpoint(t, e, "10.0.0.3", 6000, false)
+
+	require.NoError(t, e.handleMessage("carrier-x", "", inviteSDPResponse(
+		"cseq-call", "2", mediaSDP("10.0.0.4", 7000),
+	)))
+	requireEndpoint(t, e, "10.0.0.1", 4000, false)
+	requireEndpoint(t, e, "10.0.0.2", 5000, false)
+	requireEndpoint(t, e, "10.0.0.3", 6000, true)
+	requireEndpoint(t, e, "10.0.0.4", 7000, true)
+	require.Equal(t, map[rtpEndpointKey]uint{
+		{IP: 0x0A000003, Port: 6000}: 1,
+		{IP: 0x0A000003, Port: 6001}: 1,
+		{IP: 0x0A000004, Port: 7000}: 1,
+		{IP: 0x0A000004, Port: 7001}: 1,
+	}, e.rtpEndpointRefs)
+}
+
+func TestSDPCSeqRejectedOfferIsNotUsedByOfferlessRefresh(t *testing.T) {
+	e := newSDPCSeqTestExporter()
+
+	require.NoError(t, e.handleMessage("carrier-x", "", inviteSDPMessage(
+		"rejected-call", "1", "", mediaSDP("10.0.1.1", 4000),
+	)))
+	require.NoError(t, e.handleMessage("carrier-x", "", inviteSDPResponse(
+		"rejected-call", "1", mediaSDP("10.0.1.2", 5000),
+	)))
+	require.NoError(t, e.handleMessage("carrier-x", "", inviteSDPMessage(
+		"rejected-call", "2", "to-tag", mediaSDP("10.0.1.3", 6000),
+	)))
+	require.NoError(t, e.handleMessage("carrier-x", "", inviteResponse(
+		"488 Not Acceptable Here", "rejected-call", "2",
+	)))
+	require.NoError(t, e.handleMessage("carrier-x", "", inviteMessage(
+		"rejected-call", "3", "to-tag",
+	)))
+	require.NoError(t, e.handleMessage("carrier-x", "", inviteSDPResponse(
+		"rejected-call", "3", mediaSDP("10.0.1.4", 7000),
+	)))
+
+	requireEndpoint(t, e, "10.0.1.1", 4000, true)
+	requireEndpoint(t, e, "10.0.1.2", 5000, true)
+	requireEndpoint(t, e, "10.0.1.3", 6000, false)
+	requireEndpoint(t, e, "10.0.1.4", 7000, false)
+}
+
+func newSDPCSeqTestExporter() *exporter {
+	return &exporter{
+		services:       services{metricser: &mockMetricser{}, dialoger: &mockDialoger{}},
+		inviteTracker:  make(map[string]inviteEntry),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
+		optionsTracker: make(map[string]optionsEntry),
+		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
+	}
+}
+
+func inviteSDPMessage(callID, cseq, toTag, body string) []byte {
+	return append(inviteMessage(callID, cseq, toTag), []byte(
+		"Content-Type: application/sdp\r\n\r\n"+body,
+	)...)
+}
+
+func inviteMessage(callID, cseq, toTag string) []byte {
+	to := "To: <sip:b@example.com>"
+	if toTag != "" {
+		to += ";tag=" + toTag
+	}
+	return []byte(fmt.Sprintf("INVITE sip:b@example.com SIP/2.0\r\n"+
+		"From: <sip:a@example.com>;tag=from-tag\r\n"+
+		"%s\r\nCall-ID: %s\r\nCSeq: %s INVITE\r\n", to, callID, cseq))
+}
+
+func inviteSDPResponse(callID, cseq, body string) []byte {
+	return append(inviteResponse("200 OK", callID, cseq), []byte(
+		"Content-Type: application/sdp\r\n\r\n"+body,
+	)...)
+}
+
+func inviteResponse(status, callID, cseq string) []byte {
+	return []byte(fmt.Sprintf("SIP/2.0 %s\r\n"+
+		"From: <sip:a@example.com>;tag=from-tag\r\n"+
+		"To: <sip:b@example.com>;tag=to-tag\r\n"+
+		"Call-ID: %s\r\nCSeq: %s INVITE\r\n", status, callID, cseq))
+}
+
+func mediaSDP(ip string, port uint16) string {
+	return fmt.Sprintf("v=0\r\nc=IN IP4 %s\r\nm=audio %d RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n", ip, port)
+}
+
+func requireEndpoint(t *testing.T, e *exporter, ip string, port uint16, want bool) {
+	t.Helper()
+	_, got := e.mediaTracker.Lookup(ip, port)
+	require.Equal(t, want, got, "%s:%d lookup", ip, port)
+}
+
 func makeRTPPayloadSeq(ssrc uint32, seq uint16) []byte {
 	p := make([]byte, 12)
 	p[0] = 0x80
@@ -103,7 +216,7 @@ func TestRTPHandleRTPBranches(t *testing.T) {
 	e := &exporter{
 		services:       services{metricser: mm, dialoger: md},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}
@@ -144,7 +257,7 @@ func TestParseRawPacketRTPDetection(t *testing.T) {
 	e := &exporter{
 		services:       services{metricser: mm, dialoger: &mockDialoger{}},
 		inviteTracker:  make(map[string]inviteEntry),
-		inviteSDP:      make(map[string]inviteSDPEntity),
+		inviteSDP:      make(map[inviteSDPKey]inviteSDPEntity),
 		optionsTracker: make(map[string]optionsEntry),
 		mediaTracker:   mediatracker.NewTracker(rtpStreamTTL),
 	}

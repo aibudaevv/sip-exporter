@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<scenario name="UAC late old INVITE 200 response">
+    <Global variables="new_offer_port" />
+    <send retrans="500" start_txn="invite1">
+        <![CDATA[
+        INVITE sip:service@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+        To: sut <sip:service@[remote_ip]:[remote_port]>
+        Call-ID: [call_id]
+        CSeq: 1 INVITE
+        Contact: sip:sipp@[local_ip]:[local_port]
+        User-Agent: sipp-rtp-uac
+        Content-Type: application/sdp
+        Content-Length: [len]
+
+        v=0
+        c=IN IP4 [local_ip]
+        m=audio [media_port] RTP/AVP 8 0
+        a=rtpmap:8 PCMA/8000
+        a=rtpmap:0 PCMU/8000
+        ]]>
+    </send>
+    <recv response="200" response_txn="invite1" crlf="true"/>
+    <send ack_txn="invite1">
+        <![CDATA[
+        ACK sip:service@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+        To: sut <sip:service@[remote_ip]:[remote_port]>[peer_tag_param]
+        Call-ID: [call_id]
+        CSeq: 1 ACK
+        Content-Length: 0
+        ]]>
+    </send>
+    <send retrans="500" start_txn="invite2">
+        <![CDATA[
+        INVITE sip:service@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+        To: sut <sip:service@[remote_ip]:[remote_port]>[peer_tag_param]
+        Call-ID: [call_id]
+        CSeq: 2 INVITE
+        Contact: sip:sipp@[local_ip]:[local_port]
+        User-Agent: sipp-rtp-uac
+        Content-Type: application/sdp
+        Content-Length: [len]
+
+        v=0
+        c=IN IP4 [local_ip]
+        m=audio [$new_offer_port] RTP/AVP 8 0
+        a=rtpmap:8 PCMA/8000
+        a=rtpmap:0 PCMU/8000
+        ]]>
+    </send>
+    <recv response="200" response_txn="invite1" crlf="true"/>
+    <send ack_txn="invite1">
+        <![CDATA[
+        ACK sip:service@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+        To: sut <sip:service@[remote_ip]:[remote_port]>[peer_tag_param]
+        Call-ID: [call_id]
+        CSeq: 1 ACK
+        Content-Length: 0
+        ]]>
+    </send>
+    <recv response="200" response_txn="invite2" crlf="true"/>
+    <send ack_txn="invite2">
+        <![CDATA[
+        ACK sip:service@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+        To: sut <sip:service@[remote_ip]:[remote_port]>[peer_tag_param]
+        Call-ID: [call_id]
+        CSeq: 2 ACK
+        Content-Length: 0
+        ]]>
+    </send>
+    <send retrans="500">
+        <![CDATA[
+        OPTIONS sip:service@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+        To: sut <sip:service@[remote_ip]:[remote_port]>[peer_tag_param]
+        Call-ID: [call_id]
+        CSeq: 3 OPTIONS
+        Content-Length: 0
+        ]]>
+    </send>
+    <recv response="200" crlf="true"/>
+    <recv request="INFO" crlf="true"/>
+    <send retrans="500">
+        <![CDATA[
+        BYE sip:service@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+        To: sut <sip:service@[remote_ip]:[remote_port]>[peer_tag_param]
+        Call-ID: [call_id]
+        CSeq: 4 BYE
+        Content-Length: 0
+        ]]>
+    </send>
+    <recv response="200" crlf="true"/>
+</scenario>
