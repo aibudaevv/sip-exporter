@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/aibudaevv/sip-exporter/internal/mediatracker"
+	"github.com/aibudaevv/sip-exporter/internal/rtp"
 	"github.com/aibudaevv/sip-exporter/internal/service"
 )
 
@@ -98,6 +99,29 @@ func TestRTPCorrelationViaSDP(t *testing.T) {
 		require.Equal(t, "rtp-corr-1", s.CallID)
 		require.Equal(t, "PCMU", s.Codec)
 	}
+}
+
+func TestRTPAcrossRevisionDoesNotEmitMissing(t *testing.T) {
+	mm := &mockMetricser{}
+	e := &exporter{
+		services:     services{metricser: mm},
+		mediaTracker: mediatracker.NewTracker(rtpStreamTTL),
+	}
+	labels := mediatracker.MediaLabels{CallID: "call-1"}
+	e.mediaTracker.Register("10.0.0.1", 5004, labels)
+	_, ok := e.mediaTracker.Observe(
+		"10.0.0.99", 9999, "10.0.0.1", 5004,
+		rtp.Header{Version: 2, SequenceNumber: 1, Timestamp: 160, SSRC: 1}, time.Unix(1000, 0),
+	)
+	require.True(t, ok)
+
+	e.mediaTracker.Replace("call-1")
+	e.mediaTracker.Register("10.0.1.1", 6004, labels)
+	result, _ := e.mediaTracker.Unregister("call-1")
+	e.handleRTPDialogResult(result, "carrier-a", "ua-a", "US", "ingress")
+
+	require.True(t, result.RTPObserved)
+	require.Zero(t, mm.missingRTPCalls)
 }
 
 func TestLateInvite200OKDoesNotConsumeNewerSDP(t *testing.T) {
@@ -238,6 +262,85 @@ func TestReinviteRefreshAppliesMatchingRevisionOnce(t *testing.T) {
 	}, e.rtpEndpointRefs)
 	_, ok := e.takeInviteSDP("refresh-call", "2")
 	require.False(t, ok, "successful refresh must consume the matching offer once")
+}
+
+func TestReplaceMediaRevisionRefCounts(t *testing.T) {
+	oldEndpoint := mediatracker.MediaEndpoint{IP: "10.0.4.1", Port: 4000}
+	newEndpoint := mediatracker.MediaEndpoint{IP: "10.0.4.2", Port: 5000}
+	oldKey, ok := ipPortToKey(oldEndpoint.IP, oldEndpoint.Port)
+	require.True(t, ok)
+	newKey, ok := ipPortToKey(newEndpoint.IP, newEndpoint.Port)
+	require.True(t, ok)
+
+	tests := []struct {
+		name          string
+		next          []mediatracker.MediaEndpoint
+		shared        bool
+		wantAtNext    map[rtpEndpointKey]uint
+		wantAfterward map[rtpEndpointKey]uint
+	}{
+		{
+			name:       "unchanged revision retains old endpoint during registration",
+			next:       []mediatracker.MediaEndpoint{oldEndpoint},
+			wantAtNext: map[rtpEndpointKey]uint{oldKey: 1},
+			wantAfterward: map[rtpEndpointKey]uint{
+				oldKey: 1,
+			},
+		},
+		{
+			name:       "changed revision releases old endpoint",
+			next:       []mediatracker.MediaEndpoint{newEndpoint},
+			wantAtNext: map[rtpEndpointKey]uint{oldKey: 1},
+			wantAfterward: map[rtpEndpointKey]uint{
+				newKey: 1,
+			},
+		},
+		{
+			name:          "held revision releases old endpoint",
+			wantAtNext:    map[rtpEndpointKey]uint{oldKey: 1},
+			wantAfterward: map[rtpEndpointKey]uint{},
+		},
+		{
+			name:       "shared endpoint retains the other dialog ownership",
+			shared:     true,
+			wantAtNext: map[rtpEndpointKey]uint{oldKey: 2},
+			wantAfterward: map[rtpEndpointKey]uint{
+				oldKey: 1,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := &exporter{
+				mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
+				rtpEndpointRefs: make(map[rtpEndpointKey]uint),
+			}
+			labels := mediatracker.MediaLabels{CallID: "call-1"}
+			require.True(t, e.mediaTracker.Register(oldEndpoint.IP, oldEndpoint.Port, labels))
+			e.retainRTPEndpoint(oldEndpoint.IP, oldEndpoint.Port)
+			if tt.shared {
+				require.True(t, e.mediaTracker.Register(oldEndpoint.IP, oldEndpoint.Port, mediatracker.MediaLabels{CallID: "call-2"}))
+				e.retainRTPEndpoint(oldEndpoint.IP, oldEndpoint.Port)
+			}
+
+			e.replaceMediaRevision("call-1", func() {
+				require.Equal(t, tt.wantAtNext, e.rtpEndpointRefs)
+				if tt.shared {
+					labels, found := e.mediaTracker.Lookup(oldEndpoint.IP, oldEndpoint.Port)
+					require.True(t, found)
+					require.Equal(t, "call-2", labels.CallID)
+				}
+				for _, endpoint := range tt.next {
+					if e.mediaTracker.Register(endpoint.IP, endpoint.Port, labels) {
+						e.retainRTPEndpoint(endpoint.IP, endpoint.Port)
+					}
+				}
+			})
+
+			require.Equal(t, tt.wantAfterward, e.rtpEndpointRefs)
+		})
+	}
 }
 
 func newSDPCSeqTestExporter() *exporter {

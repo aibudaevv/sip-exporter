@@ -763,6 +763,111 @@ func TestTrackerUnregisterResultSurvivesTTL(t *testing.T) {
 	require.False(t, r.OneWay, "two-way RTP was observed")
 }
 
+func TestTrackerRTPAcrossRevision(t *testing.T) {
+	tests := []struct {
+		name            string
+		observePrevious bool
+		observeCurrent  bool
+		want            RTPDialogResult
+	}{
+		{
+			name:            "previous revision RTP remains dialog evidence",
+			observePrevious: true,
+			want:            RTPDialogResult{MediaExpected: true, RTPObserved: true},
+		},
+		{
+			name:            "one-way uses only current revision RTP",
+			observePrevious: true,
+			observeCurrent:  true,
+			want: RTPDialogResult{
+				MediaExpected: true,
+				RTPObserved:   true,
+				OneWay:        true,
+			},
+		},
+		{
+			name: "dialog without RTP remains missing",
+			want: RTPDialogResult{MediaExpected: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := NewTracker(30 * time.Second)
+			tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+			tr.Register("10.0.0.2", 5006, sampleLabels("call-1"))
+			if tt.observePrevious {
+				_, ok := tr.Observe(
+					"10.0.0.99", 9999, "10.0.0.1", 5004,
+					newHeader(1, 160), time.Unix(1000, 0),
+				)
+				require.True(t, ok)
+			}
+
+			tr.Replace("call-1")
+			require.Empty(t, tr.Snapshot(), "previous revision streams must be removed")
+			tr.Register("10.0.1.1", 6004, sampleLabels("call-1"))
+			tr.Register("10.0.1.2", 6006, sampleLabels("call-1"))
+			if tt.observeCurrent {
+				_, ok := tr.Observe(
+					"10.0.1.99", 9999, "10.0.1.1", 6004,
+					newHeader(1, 160), time.Unix(1001, 0),
+				)
+				require.True(t, ok)
+			}
+
+			got, _ := tr.Unregister("call-1")
+			require.Equal(t, tt.want, got)
+			got, _ = tr.Unregister("call-1")
+			require.Equal(t, RTPDialogResult{}, got)
+		})
+	}
+}
+
+func TestMediaRevisionOwnedEndpoints(t *testing.T) {
+	t.Run("snapshot includes RTP RTCP and learned aliases", func(t *testing.T) {
+		tr := NewTracker(30 * time.Second)
+		tr.Register("10.0.0.1", 4000, sampleLabels("call-1"))
+		tr.Register("10.0.0.2", 5000, sampleLabels("call-1"))
+		tr.RegisterRTCP("10.0.0.2", 5007, "10.0.0.2", 5000, "call-1")
+		_, ok := tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4100)
+		require.True(t, ok)
+
+		require.ElementsMatch(t, []MediaEndpoint{
+			{IP: "10.0.0.1", Port: 4000},
+			{IP: "10.0.0.2", Port: 5000},
+			{IP: "10.0.0.2", Port: 5007},
+			{IP: "10.0.0.1", Port: 4100},
+		}, tr.OwnedEndpoints("call-1"))
+	})
+
+	t.Run("snapshot preserves coincident RTP and RTCP ownership", func(t *testing.T) {
+		tr := NewTracker(30 * time.Second)
+		tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+		tr.RegisterRTCP("10.0.0.1", 5004, "10.0.0.1", 5004, "call-1")
+
+		require.Equal(t, []MediaEndpoint{
+			{IP: "10.0.0.1", Port: 5004},
+			{IP: "10.0.0.1", Port: 5004},
+		}, tr.OwnedEndpoints("call-1"))
+	})
+
+	t.Run("snapshot stays empty after replacement and unregister", func(t *testing.T) {
+		tr := NewTracker(30 * time.Second)
+		tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+		tr.Replace("call-1")
+		require.Empty(t, tr.OwnedEndpoints("call-1"))
+		tr.Replace("call-1")
+		require.Empty(t, tr.OwnedEndpoints("call-1"))
+
+		tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+		tr.Unregister("call-1")
+		require.Empty(t, tr.OwnedEndpoints("call-1"))
+		tr.Unregister("call-1")
+		require.Empty(t, tr.OwnedEndpoints("call-1"))
+	})
+}
+
 // TestTrackerLookupBySSRC verifies RTCP correlation: an SSRC from an RTCP report
 // block resolves to the labels of the tracked RTP stream sending with that SSRC.
 func TestTrackerLookupBySSRC(t *testing.T) {

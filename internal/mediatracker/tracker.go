@@ -119,9 +119,12 @@ type (
 		rtcpOwners     map[endpointKey][]string
 		callRTCP       map[string]map[endpointKey]rtcpMediaEntry
 		callRTP        map[string]map[endpointKey]struct{} // per-CallID endpoints that ever had RTP (TTL-independent)
-		ssrcIndex      map[uint32][]streamKey              // SSRC → stream keys (multi-valued: an SSRC may be reused across endpoints)
-		ttl            time.Duration
-		now            func() time.Time
+
+		dialogRTPObserved map[string]bool
+
+		ssrcIndex map[uint32][]streamKey // SSRC → stream keys (multi-valued: an SSRC may be reused across endpoints)
+		ttl       time.Duration
+		now       func() time.Time
 	}
 
 	// streamEntry bundles a stream state with its correlation labels.
@@ -156,9 +159,12 @@ func NewTracker(ttl time.Duration) *Tracker {
 		rtcpOwners:     make(map[endpointKey][]string),
 		callRTCP:       make(map[string]map[endpointKey]rtcpMediaEntry),
 		callRTP:        make(map[string]map[endpointKey]struct{}),
-		ssrcIndex:      make(map[uint32][]streamKey),
-		ttl:            ttl,
-		now:            time.Now,
+
+		dialogRTPObserved: make(map[string]bool),
+
+		ssrcIndex: make(map[uint32][]streamKey),
+		ttl:       ttl,
+		now:       time.Now,
 	}
 }
 
@@ -232,11 +238,13 @@ func (t *Tracker) Unregister(callID string) (RTPDialogResult, []MediaEndpoint) {
 
 	mediaCount := len(t.callMedia[callID])
 	rtpEndpointCount := len(t.callRTP[callID])
+	rtpObserved := t.dialogRTPObserved[callID]
 	deleted := t.removeCallMedia(callID)
+	delete(t.dialogRTPObserved, callID)
 
 	return RTPDialogResult{
 		MediaExpected: mediaCount > 0,
-		RTPObserved:   rtpEndpointCount > 0,
+		RTPObserved:   rtpObserved,
 		OneWay:        mediaCount >= 2 && rtpEndpointCount == 1,
 	}, deleted
 }
@@ -247,6 +255,24 @@ func (t *Tracker) Replace(callID string) []MediaEndpoint {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.removeCallMedia(callID)
+}
+
+// OwnedEndpoints returns the current media revision's BPF endpoint owners.
+func (t *Tracker) OwnedEndpoints(callID string) []MediaEndpoint {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	var owned []MediaEndpoint
+	for k := range t.callMedia[callID] {
+		owned = append(owned, MediaEndpoint{IP: k.ip, Port: k.port})
+	}
+	for _, alias := range t.sourceAliases[callID] {
+		owned = append(owned, MediaEndpoint{IP: alias.ip, Port: alias.port})
+	}
+	for k := range t.callRTCP[callID] {
+		owned = append(owned, MediaEndpoint{IP: k.ip, Port: k.port})
+	}
+	return owned
 }
 
 func (t *Tracker) removeCallMedia(callID string) []MediaEndpoint {
@@ -414,6 +440,7 @@ func (t *Tracker) Observe(
 			t.callRTP[labels.CallID] = make(map[endpointKey]struct{})
 		}
 		t.callRTP[labels.CallID][ep] = struct{}{}
+		t.dialogRTPObserved[labels.CallID] = true
 	}
 
 	prevLost := entry.state.packetsLost
