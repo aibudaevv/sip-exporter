@@ -134,7 +134,7 @@ docker pull frzq/sip-exporter:latest
 |----------|--------|---------------------------------------------|
 | SIP и RTP/RTCP по IPv4/UDP | Поддерживается | Сенсор должен видеть сигналинг и оба направления медиа на одном пути вызова. |
 | `rtcp-mux`, SDP `a=rtcp` или legacy RTP/RTCP port+1 | Поддерживается | Финальные IPv4 endpoint и port должны присутствовать в видимом экспортёру SDP. |
-| NAT/SBC со стабильными media-endpoint'ами из SDP | Условно | RTP-корреляция использует объявленные source IP:port; source-port remapping (symmetric RTP) не коррелируется. |
+| NAT/SBC со стабильными media-endpoint'ами из SDP | Поддерживается | Symmetric RTP с remapping source-port обучается после RTP, скоррелированного по destination, если source IP совпадает с SDP peer. Смена source IP и неоднозначные shared endpoint'ы не обучаются. |
 | SIP по TCP/TLS, IPv6 SIP/SDP/media или фрагментированный UDP | Не поддерживается | Путь захвата и SDP работает только с IPv4/UDP и не собирает IP-фрагменты. |
 | RTP без видимого SDP или смена endpoint'ов ICE/TURN после SDP | Не поддерживается | У kernel filter нет endpoint'а для регистрации, поэтому медиа отбрасывается. |
 | SPAN/TAP или иной зеркалированный трафик | Не поддерживается для QoE/direction | Пакеты могут быть захвачены, но `direction` недостоверен, поскольку сенсор не владеет IP трафика. Разворачивайте на forwarding host. |

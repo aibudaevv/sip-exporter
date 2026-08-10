@@ -48,6 +48,7 @@ type (
 	target struct {
 		Expr         string `json:"expr"`
 		LegendFormat string `json:"legendFormat"`
+		RefID        string `json:"refId"`
 	}
 	fieldConfig struct {
 		Defaults fieldDefaults `json:"defaults"`
@@ -278,6 +279,39 @@ func TestGrafanaDashboardOptionalDataDescriptions(t *testing.T) {
 	}
 	if !strings.Contains(panelByID(t, d, 334).Description, "Optional endpoint-published") {
 		t.Fatal("VQ report panel does not explain optional source")
+	}
+}
+
+func TestGrafanaDashboardSymmetricRTPAliasContract(t *testing.T) {
+	d := readDashboard(t)
+	p := panelByID(t, d, 336)
+	if p.Title != "Symmetric RTP Aliases" || p.Type != "timeseries" ||
+		p.FieldConfig.Defaults.Unit != "short" {
+		t.Fatalf("panel 336 = %q/%q/%q, want Symmetric RTP Aliases/timeseries/short",
+			p.Title, p.Type, p.FieldConfig.Defaults.Unit)
+	}
+	if p.GridPos != (gridPos{X: 12, Y: 132, W: 12, H: 8}) {
+		t.Fatalf("panel 336 grid position = %+v", p.GridPos)
+	}
+	if len(p.Targets) != 2 {
+		t.Fatalf("panel 336 target count = %d, want 2", len(p.Targets))
+	}
+	if p.Targets[0] != (target{
+		RefID:        "A",
+		Expr:         `sum by (carrier, direction, type) (rate(sip_exporter_rtp_endpoint_mismatch_total{instance=~"$instance",carrier=~"$carrier",direction=~"$direction",type="source_port"}[$__rate_interval]))`,
+		LegendFormat: "new {{carrier}} / {{direction}} / {{type}} remaps/s",
+	}) {
+		t.Fatalf("remap target = %+v", p.Targets[0])
+	}
+	if p.Targets[1] != (target{
+		RefID:        "B",
+		Expr:         `sum by (carrier, direction) (sip_exporter_rtp_alias_active{instance=~"$instance",carrier=~"$carrier",direction=~"$direction"})`,
+		LegendFormat: "active {{carrier}} / {{direction}} aliases",
+	}) {
+		t.Fatalf("active-alias target = %+v", p.Targets[1])
+	}
+	if !strings.Contains(p.Description, "source-port") || !strings.Contains(p.Description, "IP") {
+		t.Fatalf("panel 336 description lacks operational scope: %s", p.Description)
 	}
 }
 

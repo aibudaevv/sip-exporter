@@ -795,7 +795,8 @@ sum by (carrier) (increase(sip_exporter_billable_seconds_total[1h])) / 3600
 
 RTP media metrics are derived from RTP packets captured by the eBPF filter and
 correlated with SIP dialogs via SDP (media IP:port → carrier/ua_type/call-id).
-All RTP metrics carry the `carrier`, `ua_type`, `codec`, and `source_country` labels. Only RTP that
+RTP stream metrics carry the `carrier`, `ua_type`, `codec`, `source_country`, and `direction` labels.
+Only RTP that
 belongs to an established SIP dialog (after a 200 OK to INVITE with SDP) is
 counted; RTP without a correlated dialog is dropped.
 
@@ -847,17 +848,26 @@ counted; RTP without a correlated dialog is dropped.
 
 `sip_exporter_rtp_active_streams{carrier,ua_type,codec,source_country,direction}` *(gauge)*: number of active RTP streams. Sampled once per second; idle streams expire after 30 s.
 
+`sip_exporter_rtp_endpoint_mismatch_total{carrier,direction,type}` *(counter)*: source-port aliases
+learned for symmetric RTP. `type` is currently always `source_port`; the counter increments once for
+each successfully learned alias and never exposes an observed IP address or port as a label.
+
+`sip_exporter_rtp_alias_active{carrier,direction}` *(gauge)*: active learned source-port aliases.
+It increases when an alias is learned and decreases when its dialog media revision is replaced,
+the call ends, or the dialog expires.
+
 > MOS and R-factor are sampled per stream once per second; the E-model uses G.113 codec Ie/Bpl
 > factors. Unknown codecs get a conservative default (Ie=10). Burst/gap density uses a simplified
 > heuristic inspired by RFC 3611: consecutive loss runs of ≥ 3 packets are classified as burst,
 > shorter runs as gap.
 
-> **Correlation limitation:** RTP streams are correlated to SIP dialogs by matching
-> the packet's source IP:port against the media endpoints advertised in SDP
-> (`c=` IP + `m=` port). This requires symmetric RTP (source port equals the
-> advertised port). With NAT/port remapping (asymmetric RTP) the flow is not
-> matched and is dropped from RTP metrics; SIP signaling metrics are unaffected.
-> Future work: port-learning per RFC 4961.
+> **Correlation limitation:** RTP first matches an SDP-advertised endpoint by destination,
+> then by source fallback. A destination-correlated packet may learn one source-port alias for
+> its SDP peer only when its source IP matches that peer and ownership is unambiguous. This supports
+> symmetric RTP/NAT source-port remapping, but never learns a source-IP change, ICE/TURN endpoint
+> changes, or arbitrary UDP traffic. Learned aliases are scoped to the dialog media revision and are
+> removed on re-INVITE replacement, BYE, or expiry; SIP signaling metrics are unaffected by a
+> rejected alias.
 
 ### RTP Dialog Quality Metrics
 

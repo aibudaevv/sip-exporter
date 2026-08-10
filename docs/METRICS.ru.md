@@ -793,7 +793,7 @@ sum by (carrier) (increase(sip_exporter_billable_seconds_total[1h])) / 3600
 
 Метрики RTP-медиа извлекаются из RTP-пакетов, захваченных eBPF-фильтром, и
 коррелируются с SIP-диалогами через SDP (медиа IP:port → carrier/ua_type/call-id).
-Все RTP-метрики несут лейблы `carrier`, `ua_type`, `codec` и `source_country`. Учитывается только RTP,
+RTP stream-метрики несут лейблы `carrier`, `ua_type`, `codec`, `source_country` и `direction`. Учитывается только RTP,
 принадлежащий установленному SIP-диалогу (после 200 OK на INVITE с SDP);
 RTP без коррелированного диалога отбрасывается.
 
@@ -835,18 +835,27 @@ RTP без коррелированного диалога отбрасывае�
 
 `sip_exporter_rtp_active_streams{carrier,ua_type,codec,source_country,direction}` *(gauge)*: количество активных RTP-потоков. Сэмплируется раз в секунду; простаивающие потоки истекают через 30 с.
 
+`sip_exporter_rtp_endpoint_mismatch_total{carrier,direction,type}` *(counter)*: source-port alias,
+обученные для symmetric RTP. `type` пока всегда равен `source_port`; счётчик увеличивается один раз
+для каждого успешно обученного alias и никогда не добавляет наблюдаемые IP-адрес или port в labels.
+
+`sip_exporter_rtp_alias_active{carrier,direction}` *(gauge)*: число активных обученных source-port alias.
+Значение увеличивается при обучении alias и уменьшается при замене media revision, завершении
+вызова или истечении диалога.
+
 > MOS и R-factor сэмплируются по каждому потоку раз в секунду; E-model использует
 > кодековые Ie/Bpl факторы из G.113. Неизвестные кодеки получают консервативное
 > значение по умолчанию (Ie=10). Burst/gap density использует упрощённую
 > эвристику по мотивам RFC 3611: серии из ≥ 3 последовательных потерь
 > классифицируются как burst, более короткие — как gap.
 
-> **Ограничение корреляции:** RTP-потоки коррелируются с SIP-диалогами по
-> совпадению source IP:port пакета с медиа-эндпоинтами из SDP
-> (`c=` IP + `m=` порт). Это требует симметричного RTP (source port равен
-> объявленному). При NAT/port remapping (асимметричный RTP) поток не
-> сопоставляется и исключается из RTP-метрик; метрики SIP-сигнализации не затрагиваются.
-> Будущая работа: port-learning по RFC 4961.
+> **Ограничение корреляции:** Сначала RTP сопоставляется с SDP endpoint по destination,
+> затем используется source fallback. Пакет, скоррелированный по destination, может обучить один
+> source-port alias для своего SDP peer, только если source IP совпадает с этим peer и ownership
+> однозначен. Это поддерживает symmetric RTP/NAT source-port remapping, но никогда не обучает смену
+> source IP, ICE/TURN endpoint change или произвольный UDP-трафик. Learned alias ограничены media
+> revision диалога и удаляются при re-INVITE replacement, BYE или expiry; отклонённый alias не влияет
+> на SIP-метрики.
 
 ### Метрики качества RTP-диалога
 
