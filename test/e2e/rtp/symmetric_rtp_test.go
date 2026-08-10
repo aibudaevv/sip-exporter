@@ -12,21 +12,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func openRTPPeer(t *testing.T, port string) *net.UDPConn {
+func openRTPPeer(t *testing.T, ip, port string) *net.UDPConn {
 	t.Helper()
 	portNumber, err := strconv.Atoi(port)
 	require.NoError(t, err)
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: portNumber})
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP(ip), Port: portNumber})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 	return conn
 }
 
-func sendRTPFrom(t *testing.T, conn *net.UDPConn, destination string, firstSequence uint16, count int) {
+func sendRTPFrom(
+	t *testing.T, conn *net.UDPConn, destinationIP, destinationPort string, firstSequence uint16, count int,
+) {
 	t.Helper()
-	port, err := strconv.Atoi(destination)
+	port, err := strconv.Atoi(destinationPort)
 	require.NoError(t, err)
-	address := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port}
+	address := &net.UDPAddr{IP: net.ParseIP(destinationIP), Port: port}
 	packet := make([]byte, 28)
 	packet[0] = 0x80
 	packet[1] = 8
@@ -46,17 +48,21 @@ func requireRTPPacketCount(t *testing.T, endpoint string, want float64) {
 		require.False(t, metricExists(t, endpoint, metric), "RTP metric must not exist before first packet")
 		return
 	}
-	require.Equal(t, want, getRTPMetric(t, endpoint, metric), "exact PCMA total")
 	labels := []string{`carrier="loopback"`, pcmaFilter, `source_country="unknown"`, `ua_type="sipp"`}
+	exactLabels := append(labels, `direction="inbound"`)
+	require.True(t, metricExists(t, endpoint, metric))
+	require.True(t, metricLineExists(t, endpoint, metric, exactLabels...))
+	require.Equal(t, want, getRTPMetric(t, endpoint, metric), "exact PCMA total")
 	require.Equal(t, want, getMetricByLabel(t, endpoint, metric,
-		append(labels, `direction="inbound"`)...), "exact inbound PCMA series")
+		exactLabels...), "exact inbound PCMA series")
 }
 
 func assertRTPPacketCount(t *testing.T, endpoint string, want float64, send func()) {
 	t.Helper()
 	send()
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") >= want
+		return metricExists(t, endpoint, "sip_exporter_rtp_packets_total") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") >= want
 	}, 5*time.Second, 100*time.Millisecond, "PCMA total must become %v", want)
 	requireRTPPacketCount(t, endpoint, want)
 }
@@ -64,39 +70,107 @@ func assertRTPPacketCount(t *testing.T, endpoint string, want float64, send func
 func TestSymmetricRTPAlias(t *testing.T) {
 	const packetCount = 12
 
-	ports := allocatePortsN(3)
-	httpPort, uasSIP, uacSIP := ports[0], ports[1], ports[2]
-	media := allocateMediaPortsN(t, 4, ports...)
-	advertisedA, advertisedB, remappedA, probeSource := media[0], media[1], media[2], media[3]
+	tests := []struct {
+		name            string
+		sourceIP        string
+		wantAfterProbe  float64
+		wantPackets     float64
+		wantMismatch    float64
+		wantOneWay      float64
+		wantDiagnostics bool
+	}{
+		{
+			name:            "source_port_remap",
+			sourceIP:        "127.0.0.1",
+			wantAfterProbe:  packetCount + 1,
+			wantPackets:     2*packetCount + 1,
+			wantMismatch:    1,
+			wantDiagnostics: true,
+		},
+		{
+			name:           "source_ip_mismatch",
+			sourceIP:       "127.0.0.2",
+			wantAfterProbe: packetCount,
+			wantPackets:    2 * packetCount,
+			wantOneWay:     1,
+		},
+	}
 
-	endpoint := startExporterWithCarrierUA(t.Context(), t, httpPort, uasSIP,
-		integrationCarriersYAML, integrationUserAgentsYAML, "")
-	endDialog := startControlledSIPDialog(t, uasSIP, uacSIP, advertisedB, advertisedA)
-	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) == 1
-	}, 5*time.Second, 100*time.Millisecond, "dialog must be established")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sipLabels := []string{labelCarrier, labelUAType,
+				`source_country="unknown"`, `direction="inbound"`}
+			ports := allocatePortsN(3)
+			httpPort, uasSIP, uacSIP := ports[0], ports[1], ports[2]
+			media := allocateMediaPortsN(t, 4, ports...)
+			advertisedA, advertisedB, remappedA, probeSource := media[0], media[1], media[2], media[3]
 
-	peerA := openRTPPeer(t, remappedA)
-	peerB := openRTPPeer(t, advertisedB)
-	probePeer := openRTPPeer(t, probeSource)
-	requireRTPPacketCount(t, endpoint, 0)
-	assertRTPPacketCount(t, endpoint, packetCount, func() {
-		sendRTPFrom(t, peerA, advertisedB, 1, packetCount)
-	})
+			endpoint := startExporterWithCarrierUA(t.Context(), t, httpPort, uasSIP,
+				integrationCarriersYAML, integrationUserAgentsYAML, "")
+			endDialog := startControlledSIPDialog(t, uasSIP, uacSIP, advertisedB, advertisedA)
+			require.Eventually(t, func() bool {
+				return metricLineExists(t, endpoint, "sip_exporter_sessions", sipLabels...) &&
+					getMetricByLabel(t, endpoint, "sip_exporter_sessions", sipLabels...) == 1
+			}, 5*time.Second, 100*time.Millisecond, "dialog must be established")
 
-	assertRTPPacketCount(t, endpoint, packetCount+1, func() {
-		sendRTPFrom(t, probePeer, remappedA, packetCount+1, 1)
-	})
-	assertRTPPacketCount(t, endpoint, 2*packetCount+1, func() {
-		sendRTPFrom(t, peerB, remappedA, packetCount+2, packetCount)
-	})
+			peerA := openRTPPeer(t, tt.sourceIP, remappedA)
+			peerB := openRTPPeer(t, "127.0.0.1", advertisedB)
+			probePeer := openRTPPeer(t, "127.0.0.1", probeSource)
+			requireRTPPacketCount(t, endpoint, 0)
+			assertRTPPacketCount(t, endpoint, packetCount, func() {
+				sendRTPFrom(t, peerA, "127.0.0.1", advertisedB, 1, packetCount)
+			})
 
-	endDialog()
-	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) == 0
-	}, 5*time.Second, 100*time.Millisecond, "dialog must be torn down")
-	require.False(t, metricLineExists(t, endpoint, "sip_exporter_rtp_oneway_calls_total"),
-		"both observed legs must not be classified as one-way RTP")
+			if tt.wantDiagnostics {
+				assertRTPPacketCount(t, endpoint, tt.wantAfterProbe, func() {
+					sendRTPFrom(t, probePeer, tt.sourceIP, remappedA, packetCount+1, 1)
+				})
+			} else {
+				sendRTPFrom(t, probePeer, tt.sourceIP, remappedA, packetCount+1, 1)
+				newParseErrorProbe(t, endpoint, uasSIP).mark(0)
+				requireRTPPacketCount(t, endpoint, tt.wantAfterProbe)
+			}
+			assertRTPPacketCount(t, endpoint, tt.wantPackets, func() {
+				sendRTPFrom(t, peerB, tt.sourceIP, remappedA, packetCount+2, packetCount)
+			})
+
+			const mismatchMetric = "sip_exporter_rtp_endpoint_mismatch_total"
+			const aliasMetric = "sip_exporter_rtp_alias_active"
+			if tt.wantDiagnostics {
+				require.True(t, metricLineExists(t, endpoint, mismatchMetric,
+					labelCarrier, `direction="inbound"`, `type="source_port"`))
+				require.Equal(t, tt.wantMismatch, getMetricByLabel(t, endpoint, mismatchMetric,
+					labelCarrier, `direction="inbound"`, `type="source_port"`))
+				require.True(t, metricLineExists(t, endpoint, aliasMetric,
+					labelCarrier, `direction="inbound"`))
+				require.Equal(t, 1.0, getMetricByLabel(t, endpoint, aliasMetric,
+					labelCarrier, `direction="inbound"`))
+			} else {
+				require.False(t, metricExists(t, endpoint, mismatchMetric))
+				require.False(t, metricExists(t, endpoint, aliasMetric))
+			}
+
+			endDialog()
+			require.Eventually(t, func() bool {
+				return metricLineExists(t, endpoint, "sip_exporter_sessions", sipLabels...) &&
+					getMetricByLabel(t, endpoint, "sip_exporter_sessions", sipLabels...) == 0
+			}, 5*time.Second, 100*time.Millisecond, "dialog must be torn down")
+			if tt.wantDiagnostics {
+				require.True(t, metricLineExists(t, endpoint, aliasMetric,
+					labelCarrier, `direction="inbound"`))
+				require.Equal(t, 0.0, getMetricByLabel(t, endpoint, aliasMetric,
+					labelCarrier, `direction="inbound"`))
+			}
+			if tt.wantOneWay == 0 {
+				require.False(t, metricLineExists(t, endpoint, "sip_exporter_rtp_oneway_calls_total"))
+			} else {
+				require.True(t, metricLineExists(t, endpoint, "sip_exporter_rtp_oneway_calls_total",
+					sipLabels...))
+				require.Equal(t, tt.wantOneWay, getMetricByLabel(t, endpoint,
+					"sip_exporter_rtp_oneway_calls_total", sipLabels...))
+			}
+		})
+	}
 }
 
 func TestSymmetricRTPSharedDestinationRejectsAlias(t *testing.T) {
@@ -112,22 +186,24 @@ func TestSymmetricRTPSharedDestinationRejectsAlias(t *testing.T) {
 		integrationCarriersYAML, integrationUserAgentsYAML, "")
 	endDialogA := startControlledSIPDialog(t, uasSIPA, uacSIPA, sharedB, advertisedA)
 	endDialogB := startControlledSIPDialog(t, uasSIPB, uacSIPB, sharedB, advertisedC)
+	sipLabels := []string{labelCarrier, labelUAType, `source_country="unknown"`, `direction="inbound"`}
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) == 2
+		return metricLineExists(t, endpoint, "sip_exporter_sessions", sipLabels...) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_sessions", sipLabels...) == 2
 	}, 5*time.Second, 100*time.Millisecond, "both dialogs must be established")
 
-	aliasPeer := openRTPPeer(t, candidateAlias)
-	_ = openRTPPeer(t, sharedB)
-	probePeer := openRTPPeer(t, probeSource)
+	aliasPeer := openRTPPeer(t, "127.0.0.1", candidateAlias)
+	_ = openRTPPeer(t, "127.0.0.1", sharedB)
+	probePeer := openRTPPeer(t, "127.0.0.1", probeSource)
 	requireRTPPacketCount(t, endpoint, 0)
 	assertRTPPacketCount(t, endpoint, packetCount, func() {
-		sendRTPFrom(t, aliasPeer, sharedB, 1, packetCount)
+		sendRTPFrom(t, aliasPeer, "127.0.0.1", sharedB, 1, packetCount)
 	})
 
 	barrier := newParseErrorProbe(t, endpoint, uasSIPA)
 	assertRTPPacketCount(t, endpoint, packetCount+1, func() {
-		sendRTPFrom(t, probePeer, candidateAlias, packetCount+1, packetCount)
-		sendRTPFrom(t, aliasPeer, sharedB, 2*packetCount+1, 1)
+		sendRTPFrom(t, probePeer, "127.0.0.1", candidateAlias, packetCount+1, packetCount)
+		sendRTPFrom(t, aliasPeer, "127.0.0.1", sharedB, 2*packetCount+1, 1)
 		barrier.mark(0)
 	})
 
