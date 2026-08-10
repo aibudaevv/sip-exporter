@@ -23,8 +23,8 @@ import (
 // pcmaFilter matches the PCMA codec label (SIPp streams G.711a, PT=8).
 const pcmaFilter = `codec="PCMA"`
 
-// getRTPMetric scrapes an RTP metric value for the PCMA codec label.
-// Returns 0 if not found.
+// getRTPMetric sums every RTP metric series for the PCMA codec label.
+// It returns zero if no matching series exists.
 func getRTPMetric(t *testing.T, endpoint, name string) float64 {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
@@ -39,15 +39,16 @@ func getRTPMetric(t *testing.T, endpoint, name string) float64 {
 
 	pattern := `^` + name + `\{[^}]*` + regexp.QuoteMeta(pcmaFilter) + `[^}]*\}\s+(\S+)`
 	re := regexp.MustCompile(pattern)
+	var total float64
 	for _, line := range strings.Split(string(body), "\n") {
 		m := re.FindStringSubmatch(strings.TrimSpace(line))
 		if len(m) == 2 {
 			v, parseErr := strconv.ParseFloat(m[1], 64)
 			require.NoError(t, parseErr)
-			return v
+			total += v
 		}
 	}
-	return 0
+	return total
 }
 
 // metricExists checks whether a metric family is present in the /metrics body.

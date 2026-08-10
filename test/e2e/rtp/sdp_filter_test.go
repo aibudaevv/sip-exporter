@@ -65,20 +65,184 @@ func startControlledSIPDialog(t *testing.T, uasSIP, uacSIP, uasMedia, uacMedia s
 	}
 }
 
-// sendNonRTPUDP sends count UDP packets with a non-RTP header (byte[0]=0x00,
-// V=0 instead of V=2) to 127.0.0.1:port. A local listener is bound to complete
-// the loopback receive cycle (PACKET_IGNORE_OUTGOING sees the RX copy).
+type reinviteDialog struct {
+	t                      *testing.T
+	uasConn, uacConn       *net.UDPConn
+	uasAddr, uacAddr       *net.UDPAddr
+	uasSIP, uacSIP, callID string
+}
+
+func startReinviteDialog(
+	t *testing.T, uasSIP, uacSIP, uasMedia, uacMedia string, sessionExpires int,
+) *reinviteDialog {
+	t.Helper()
+	uasPort, err := strconv.Atoi(uasSIP)
+	require.NoError(t, err)
+	uacPort, err := strconv.Atoi(uacSIP)
+	require.NoError(t, err)
+	dialog := &reinviteDialog{
+		t:       t,
+		uasSIP:  uasSIP,
+		uacSIP:  uacSIP,
+		callID:  fmt.Sprintf("reinvite-%s-%s@127.0.0.1", uasSIP, uacSIP),
+		uasAddr: &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: uasPort},
+		uacAddr: &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: uacPort},
+	}
+	dialog.uasConn, err = net.ListenUDP("udp4", dialog.uasAddr)
+	require.NoError(t, err)
+	dialog.uacConn, err = net.ListenUDP("udp4", dialog.uacAddr)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = dialog.uasConn.Close()
+		_ = dialog.uacConn.Close()
+	})
+	dialog.exchangeInvite(1, uacMedia, uasMedia, sessionExpires)
+	return dialog
+}
+
+func (d *reinviteDialog) exchangeInvite(cseq int, offerMedia, answerMedia string, sessionExpires int) {
+	d.t.Helper()
+	offer := mediaSDP(offerMedia)
+	answer := mediaSDP(answerMedia)
+	toTag := ""
+	if cseq > 1 {
+		toTag = ";tag=uas"
+	}
+	invite := fmt.Sprintf("INVITE sip:service@127.0.0.1:%s SIP/2.0\r\nFrom: sipp <sip:sipp@127.0.0.1:%s>;tag=uac\r\nTo: sut <sip:service@127.0.0.1:%s>%s\r\nCall-ID: %s\r\nCSeq: %d INVITE\r\nUser-Agent: SIPp\r\nContent-Type: application/sdp\r\nContent-Length: %d\r\n\r\n%s", d.uasSIP, d.uacSIP, d.uasSIP, toTag, d.callID, cseq, len(offer), offer)
+	expiresHeader := ""
+	if sessionExpires > 0 {
+		expiresHeader = fmt.Sprintf("Session-Expires: %d\r\n", sessionExpires)
+	}
+	ok := fmt.Sprintf("SIP/2.0 200 OK\r\nFrom: sipp <sip:sipp@127.0.0.1:%s>;tag=uac\r\nTo: sut <sip:service@127.0.0.1:%s>;tag=uas\r\nCall-ID: %s\r\nCSeq: %d INVITE\r\nUser-Agent: SIPp\r\n%sContent-Type: application/sdp\r\nContent-Length: %d\r\n\r\n%s", d.uacSIP, d.uasSIP, d.callID, cseq, expiresHeader, len(answer), answer)
+	for range 3 {
+		_, err := d.uacConn.WriteToUDP([]byte(invite), d.uasAddr)
+		require.NoError(d.t, err)
+		_, err = d.uasConn.WriteToUDP([]byte(ok), d.uacAddr)
+		require.NoError(d.t, err)
+	}
+}
+
+func (d *reinviteDialog) sendOptionsMarker(cseq int) {
+	d.t.Helper()
+	options := fmt.Sprintf("OPTIONS sip:service@127.0.0.1:%s SIP/2.0\r\nFrom: sipp <sip:sipp@127.0.0.1:%s>;tag=uac\r\nTo: sut <sip:service@127.0.0.1:%s>;tag=uas\r\nCall-ID: %s\r\nCSeq: %d OPTIONS\r\nUser-Agent: SIPp\r\nContent-Length: 0\r\n\r\n", d.uasSIP, d.uacSIP, d.uasSIP, d.callID, cseq)
+	_, err := d.uacConn.WriteToUDP([]byte(options), d.uasAddr)
+	require.NoError(d.t, err)
+}
+
+func waitForOptionsProcessing(t *testing.T, endpoint string, send func()) {
+	t.Helper()
+	var before float64
+	if metricLineExists(t, endpoint, "sip_exporter_options_total", labelCarrier, labelUAType) {
+		before = getMetricByLabel(t, endpoint, "sip_exporter_options_total", labelCarrier, labelUAType)
+	}
+	send()
+	require.Eventually(t, func() bool {
+		return metricLineExists(t, endpoint, "sip_exporter_options_total", labelCarrier, labelUAType) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_options_total", labelCarrier, labelUAType) == before+1
+	}, 5*time.Second, 100*time.Millisecond, "OPTIONS marker must be processed")
+}
+
+func newOptionsMarker(t *testing.T, endpoint string, send func(int)) func() {
+	cseq := 100
+	return func() {
+		waitForOptionsProcessing(t, endpoint, func() { send(cseq) })
+		cseq++
+	}
+}
+
+func (d *reinviteDialog) end() {
+	d.t.Helper()
+	bye := fmt.Sprintf("BYE sip:service@127.0.0.1:%s SIP/2.0\r\nFrom: sipp <sip:sipp@127.0.0.1:%s>;tag=uac\r\nTo: sut <sip:service@127.0.0.1:%s>;tag=uas\r\nCall-ID: %s\r\nCSeq: 9 BYE\r\nContent-Length: 0\r\n\r\n", d.uasSIP, d.uacSIP, d.uasSIP, d.callID)
+	ok := fmt.Sprintf("SIP/2.0 200 OK\r\nFrom: sipp <sip:sipp@127.0.0.1:%s>;tag=uac\r\nTo: sut <sip:service@127.0.0.1:%s>;tag=uas\r\nCall-ID: %s\r\nCSeq: 9 BYE\r\nContent-Length: 0\r\n\r\n", d.uacSIP, d.uasSIP, d.callID)
+	for range 3 {
+		_, err := d.uacConn.WriteToUDP([]byte(bye), d.uasAddr)
+		require.NoError(d.t, err)
+		_, err = d.uasConn.WriteToUDP([]byte(ok), d.uacAddr)
+		require.NoError(d.t, err)
+	}
+}
+
+func mediaSDP(port string) string {
+	return fmt.Sprintf("v=0\r\nc=IN IP4 127.0.0.1\r\nm=audio %s RTP/AVP 8\r\na=rtpmap:8 PCMA/8000\r\n", port)
+}
+
+type parseErrorProbe struct {
+	t                  *testing.T
+	endpoint, syncPort string
+	current            float64
+}
+
+func newParseErrorProbe(t *testing.T, endpoint, syncPort string) *parseErrorProbe {
+	t.Helper()
+	probe := &parseErrorProbe{t: t, endpoint: endpoint, syncPort: syncPort}
+	if metricLineExists(t, endpoint, "sip_exporter_parse_errors_total", `type="sip"`) {
+		probe.current = getMetricByLabel(t, endpoint, "sip_exporter_parse_errors_total", `type="sip"`)
+	}
+	probe.mark(0)
+	return probe
+}
+
+func (p *parseErrorProbe) assertEndpointDelta(
+	port string, packets, want int, send func(*testing.T, int, int), marker func(),
+) {
+	p.t.Helper()
+	portNumber, err := strconv.Atoi(port)
+	require.NoError(p.t, err)
+	send(p.t, portNumber, packets)
+	marker()
+	wantTotal := p.current + float64(want)
+	got := getMetricByLabel(p.t, p.endpoint, "sip_exporter_parse_errors_total", `type="sip"`)
+	require.Equal(p.t, wantTotal, got, "exact malformed-packet delta after OPTIONS marker")
+	p.current = got
+}
+
+func (p *parseErrorProbe) mark(wantBeforeMarker int) {
+	p.t.Helper()
+	sendUDPProbe(p.t, p.syncPort)
+	want := p.current + float64(wantBeforeMarker+1)
+	require.Eventually(p.t, func() bool {
+		return metricLineExists(p.t, p.endpoint, "sip_exporter_parse_errors_total", `type="sip"`) &&
+			getMetricByLabel(p.t, p.endpoint, "sip_exporter_parse_errors_total", `type="sip"`) >= want
+	}, 5*time.Second, 100*time.Millisecond, "parse-error marker must be processed")
+	got := getMetricByLabel(p.t, p.endpoint, "sip_exporter_parse_errors_total", `type="sip"`)
+	require.Equal(p.t, want, got, "exact malformed-packet delta through the processing marker")
+	p.current = got
+}
+
+func sendUDPProbe(t *testing.T, port string) {
+	t.Helper()
+	sendUDPBytes(t, port, make([]byte, 28))
+}
+
+func sendUDPBytes(t *testing.T, port string, payload []byte) {
+	t.Helper()
+	portNumber, err := strconv.Atoi(port)
+	require.NoError(t, err)
+	conn, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: portNumber})
+	require.NoError(t, err)
+	defer conn.Close()
+	_, err = conn.Write(payload)
+	require.NoError(t, err)
+}
+
+func sendOptionsProbe(t *testing.T, port string, cseq int) {
+	t.Helper()
+	message := fmt.Sprintf("OPTIONS sip:service@127.0.0.1:%s SIP/2.0\r\nFrom: marker <sip:marker@127.0.0.1>;tag=marker\r\nTo: service <sip:service@127.0.0.1:%s>\r\nCall-ID: processing-marker-%d\r\nCSeq: %d OPTIONS\r\nUser-Agent: SIPp\r\nContent-Length: 0\r\n\r\n", port, port, cseq, cseq)
+	sendUDPBytes(t, port, []byte(message))
+}
+
+// sendNonRTPUDP binds a local listener so PACKET_IGNORE_OUTGOING sees the RX copy.
 func sendNonRTPUDP(t *testing.T, port int, count int) {
 	t.Helper()
 
 	listenAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port}
 	listener, err := net.ListenUDP("udp4", listenAddr)
 	require.NoError(t, err)
-	defer listener.Close()
 
 	done := make(chan struct{})
-	t.Cleanup(func() { close(done) })
+	readerDone := make(chan struct{})
 	go func() {
+		defer close(readerDone)
 		buf := make([]byte, 1500)
 		for {
 			select {
@@ -92,6 +256,11 @@ func sendNonRTPUDP(t *testing.T, port int, count int) {
 			}
 		}
 	}()
+	defer func() {
+		close(done)
+		require.NoError(t, listener.Close())
+		<-readerDone
+	}()
 
 	sender, err := net.DialUDP("udp4", nil, listenAddr)
 	require.NoError(t, err)
@@ -101,16 +270,15 @@ func sendNonRTPUDP(t *testing.T, port int, count int) {
 	pkt[0] = 0x00 // V=0, not RTP V2
 
 	for i := range count {
-		_, _ = sender.Write(pkt)
+		_, err = sender.Write(pkt)
+		require.NoError(t, err)
 		if i%10 == 0 {
 			time.Sleep(5 * time.Millisecond)
 		}
 	}
 }
 
-// sendNonRTPToSippPort sends non-RTP UDP to a SIPp-bound port via DialUDP.
-// SIPp is listening on the port via -mp, so the loopback RX cycle completes
-// without binding a local listener.
+// sendNonRTPToSippPort relies on SIPp's -mp listener for the loopback RX copy.
 func sendNonRTPToSippPort(t *testing.T, port int, count int) {
 	t.Helper()
 
@@ -123,7 +291,8 @@ func sendNonRTPToSippPort(t *testing.T, port int, count int) {
 	pkt[0] = 0x00 // V=0 — non-RTP, SDP-driven lookup passes
 	for i := range count {
 		binary.BigEndian.PutUint16(pkt[2:4], uint16(i+1))
-		_, _ = sender.Write(pkt)
+		_, err = sender.Write(pkt)
+		require.NoError(t, err)
 		if i%10 == 0 {
 			time.Sleep(5 * time.Millisecond)
 		}
@@ -463,19 +632,65 @@ func TestSDPFilterEntryLifecycle(t *testing.T) {
 // from the initial INVITE cannot consume a newer re-INVITE offer. Only the
 // matching CSeq 2 media revision must remain in the BPF endpoint map.
 func TestSDPFilterLateInvite200OKUsesMatchingCSeq(t *testing.T) {
+	const packetsPerEndpoint = 20
+
+	t.Run("late CSeq 1 response preserves CSeq 2 revision", func(t *testing.T) {
+		ports := allocatePortsN(3)
+		httpPort, uasSIP, uacSIP := ports[0], ports[1], ports[2]
+		mediaPorts := allocateMediaPortsN(t, 4, ports...)
+		oldOffer, oldAnswer := mediaPorts[0], mediaPorts[1]
+		newOffer, newAnswer := mediaPorts[2], mediaPorts[3]
+
+		endpoint := startExporterWithCarrierUA(t.Context(), t,
+			httpPort, uasSIP, integrationCarriersYAML, integrationUserAgentsYAML, "")
+		finish := startLateCSeqSippContainers(t.Context(), t,
+			uasSIP, uacSIP, oldOffer, oldAnswer, newOffer, newAnswer)
+
+		require.Eventually(t, func() bool {
+			return metricExists(t, endpoint, "sip_exporter_options_total") &&
+				getMetricByLabel(t, endpoint, "sip_exporter_options_total") == 1
+		}, 5*time.Second, 200*time.Millisecond,
+			"SIPp must complete the CSeq 2 transaction before RTP verification")
+
+		probe := newParseErrorProbe(t, endpoint, uasSIP)
+		marker := newOptionsMarker(t, endpoint, func(cseq int) { sendOptionsProbe(t, uasSIP, cseq) })
+		probe.assertEndpointDelta(newOffer, packetsPerEndpoint, packetsPerEndpoint, sendNonRTPUDP, marker)
+		probe.assertEndpointDelta(newAnswer, packetsPerEndpoint, packetsPerEndpoint, sendNonRTPUDP, marker)
+		probe.assertEndpointDelta(oldOffer, packetsPerEndpoint, 0, sendNonRTPToSippPort, marker)
+		probe.assertEndpointDelta(oldAnswer, packetsPerEndpoint, 0, sendNonRTPToSippPort, marker)
+
+		finish()
+	})
+}
+
+func TestSDPFilterReinviteLifecycle(t *testing.T) {
+	const probePackets = 20
+
 	tests := []struct {
-		name                       string
-		obsoletePacketsPerEndpoint int
-		currentPacketsPerEndpoint  int
-		minCurrentPackets          float64
-		maxCurrentPackets          float64
+		name                  string
+		nextOffer, nextAnswer int
+		active, stale         []int
+		probeBefore           bool
 	}{
 		{
-			name:                       "late CSeq 1 response preserves CSeq 2 revision",
-			obsoletePacketsPerEndpoint: 400,
-			currentPacketsPerEndpoint:  20,
-			minCurrentPackets:          10,
-			maxCurrentPackets:          200,
+			name:        "unchanged revision remains active before and after processing",
+			nextOffer:   0,
+			nextAnswer:  1,
+			active:      []int{0, 1},
+			probeBefore: true,
+		},
+		{
+			name:       "changed revision replaces both endpoints",
+			nextOffer:  2,
+			nextAnswer: 3,
+			active:     []int{2, 3},
+			stale:      []int{0, 1},
+		},
+		{
+			name:       "hold revision removes both old endpoints",
+			nextOffer:  -1,
+			nextAnswer: -1,
+			stale:      []int{0, 1},
 		},
 	}
 
@@ -483,70 +698,68 @@ func TestSDPFilterLateInvite200OKUsesMatchingCSeq(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ports := allocatePortsN(3)
 			httpPort, uasSIP, uacSIP := ports[0], ports[1], ports[2]
-			mediaPorts := allocateMediaPortsN(t, 4, ports...)
-			oldOffer, oldAnswer := mediaPorts[0], mediaPorts[1]
-			newOffer, newAnswer := mediaPorts[2], mediaPorts[3]
-			oldOfferPort, err := strconv.Atoi(oldOffer)
-			require.NoError(t, err)
-			oldAnswerPort, err := strconv.Atoi(oldAnswer)
-			require.NoError(t, err)
-			newOfferPort, err := strconv.Atoi(newOffer)
-			require.NoError(t, err)
-			newAnswerPort, err := strconv.Atoi(newAnswer)
-			require.NoError(t, err)
-
-			endpoint := startExporterWithCarrierUA(t.Context(), t,
-				httpPort, uasSIP, integrationCarriersYAML, integrationUserAgentsYAML, "")
-			finish := startLateCSeqSippContainers(t.Context(), t,
-				uasSIP, uacSIP, oldOffer, oldAnswer, newOffer, newAnswer)
-
+			media := allocateMediaPortsN(t, 4, ports...)
+			endpoint := startExporterWithCarrierUA(t.Context(), t, httpPort, uasSIP,
+				integrationCarriersYAML, integrationUserAgentsYAML, "")
+			dialog := startReinviteDialog(t, uasSIP, uacSIP, media[1], media[0], 0)
+			marker := newOptionsMarker(t, endpoint, dialog.sendOptionsMarker)
 			require.Eventually(t, func() bool {
-				return metricExists(t, endpoint, "sip_exporter_options_total") &&
-					getMetricByLabel(t, endpoint, "sip_exporter_options_total") == 1
-			}, 5*time.Second, 200*time.Millisecond,
-				"SIPp must complete the CSeq 2 transaction before RTP verification")
+				return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) == 1
+			}, 5*time.Second, 100*time.Millisecond, "initial dialog must be established")
 
-			obsoleteSeqs := make([]uint16, tt.obsoletePacketsPerEndpoint)
-			for i := range obsoleteSeqs {
-				obsoleteSeqs[i] = uint16(i + 1)
+			waitForOptionsProcessing(t, endpoint, func() { dialog.sendOptionsMarker(90) })
+			if tt.probeBefore {
+				probe := newParseErrorProbe(t, endpoint, uasSIP)
+				for _, index := range tt.active {
+					probe.assertEndpointDelta(media[index], probePackets, probePackets, sendNonRTPUDP, marker)
+				}
 			}
-			var pcmaPackets, pcmuPackets float64
-			var nextSequence uint16 = 1
-			t.Cleanup(func() {
-				t.Logf("observed current RTP totals: PCMA=%v PCMU=%v", pcmaPackets, pcmuPackets)
-			})
+			nextOffer, nextAnswer := "0", "0"
+			if tt.nextOffer >= 0 {
+				nextOffer, nextAnswer = media[tt.nextOffer], media[tt.nextAnswer]
+			}
+			dialog.exchangeInvite(2, nextOffer, nextAnswer, 0)
+			waitForOptionsProcessing(t, endpoint, func() { dialog.sendOptionsMarker(91) })
+			probe := newParseErrorProbe(t, endpoint, uasSIP)
+			for _, index := range tt.active {
+				probe.assertEndpointDelta(media[index], probePackets, probePackets, sendNonRTPUDP, marker)
+			}
+			for _, index := range tt.stale {
+				probe.assertEndpointDelta(media[index], probePackets, 0, sendNonRTPUDP, marker)
+			}
+
+			dialog.end()
 			require.Eventually(t, func() bool {
-				currentSeqs := make([]uint16, tt.currentPacketsPerEndpoint)
-				for i := range currentSeqs {
-					currentSeqs[i] = nextSequence + uint16(i)
+				return metricLineExists(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) &&
+					getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) == 0
+			}, 5*time.Second, 100*time.Millisecond, "BYE must remove the active revision")
+			if len(tt.active) > 0 {
+				probe = newParseErrorProbe(t, endpoint, uasSIP)
+				for _, index := range tt.active {
+					probe.assertEndpointDelta(media[index], probePackets, 0, sendNonRTPUDP, marker)
 				}
-				nextSequence += uint16(len(currentSeqs))
-				sendControlledRTP(t, newOfferPort, currentSeqs)
-				sendControlledRTPWithPayloadType(t, newAnswerPort, currentSeqs, 0)
-				if !metricExists(t, endpoint, "sip_exporter_rtp_packets_total") {
-					return false
-				}
-				pcmaPackets = getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total")
-				pcmuPackets = getMetricByLabel(t, endpoint,
-					"sip_exporter_rtp_packets_total", `codec="PCMU"`)
-				return pcmaPackets >= tt.minCurrentPackets && pcmaPackets <= tt.maxCurrentPackets &&
-					pcmuPackets >= tt.minCurrentPackets && pcmuPackets <= tt.maxCurrentPackets
-			}, 5*time.Second, 200*time.Millisecond,
-				"both matching CSeq 2 endpoints must accept RTP")
-
-			sendControlledRTP(t, oldOfferPort, obsoleteSeqs)
-			sendControlledRTPWithPayloadType(t, oldAnswerPort, obsoleteSeqs, 0)
-			pcmaPackets = getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total")
-			pcmuPackets = getMetricByLabel(t, endpoint,
-				"sip_exporter_rtp_packets_total", `codec="PCMU"`)
-			require.LessOrEqual(t, pcmaPackets, tt.maxCurrentPackets,
-				"obsolete CSeq 1 offer endpoint must not accept RTP")
-			require.LessOrEqual(t, pcmuPackets, tt.maxCurrentPackets,
-				"late CSeq 1 answer endpoint must not accept RTP")
-
-			finish()
+			}
 		})
 	}
+}
+
+func TestSDPFilterExpiryRemovesMediaRevision(t *testing.T) {
+	ports := allocatePortsN(3)
+	httpPort, uasSIP, uacSIP := ports[0], ports[1], ports[2]
+	media := allocateMediaPortsN(t, 2, ports...)
+	uasMedia, uacMedia := media[0], media[1]
+	endpoint := startExporterWithCarrierUA(t.Context(), t, httpPort, uasSIP,
+		integrationCarriersYAML, integrationUserAgentsYAML, "")
+	dialog := startReinviteDialog(t, uasSIP, uacSIP, uasMedia, uacMedia, 1)
+
+	require.Eventually(t, func() bool {
+		return metricLineExists(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) == 0
+	}, 5*time.Second, 100*time.Millisecond, "expired dialog must be removed")
+	probe := newParseErrorProbe(t, endpoint, uasSIP)
+	marker := newOptionsMarker(t, endpoint, dialog.sendOptionsMarker)
+	probe.assertEndpointDelta(uasMedia, 20, 0, sendNonRTPUDP, marker)
+	probe.assertEndpointDelta(uacMedia, 20, 0, sendNonRTPUDP, marker)
 }
 
 // TestSDPFilterSharedEntrySurvivesLatestOwnerBye verifies that a shared media
