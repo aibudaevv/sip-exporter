@@ -3,6 +3,7 @@ package exporter
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -29,8 +30,11 @@ import (
 )
 
 type fakeRTPEndpointMap struct {
-	updates []rtpEndpointMapUpdate
-	deletes []rtpEndpointKey
+	updates     []rtpEndpointMapUpdate
+	deletes     []rtpEndpointKey
+	present     map[rtpEndpointKey]bool
+	updateError error
+	deleteError error
 }
 
 type rtpEndpointMapUpdate struct {
@@ -42,16 +46,30 @@ type rtpEndpointMapUpdate struct {
 var _ rtpEndpointMap = (*fakeRTPEndpointMap)(nil)
 
 func (m *fakeRTPEndpointMap) Update(key, value any, flags ebpf.MapUpdateFlags) error {
+	if m.updateError != nil {
+		return m.updateError
+	}
 	m.updates = append(m.updates, rtpEndpointMapUpdate{
 		key:   key.(rtpEndpointKey),
 		value: value.(uint8),
 		flags: flags,
 	})
+	if m.present == nil {
+		m.present = make(map[rtpEndpointKey]bool)
+	}
+	m.present[key.(rtpEndpointKey)] = true
 	return nil
 }
 
 func (m *fakeRTPEndpointMap) Delete(key any) error {
+	if m.deleteError != nil {
+		return m.deleteError
+	}
 	m.deletes = append(m.deletes, key.(rtpEndpointKey))
+	if !m.present[key.(rtpEndpointKey)] {
+		return ebpf.ErrKeyNotExist
+	}
+	delete(m.present, key.(rtpEndpointKey))
 	return nil
 }
 
@@ -6583,6 +6601,59 @@ func TestRTPEndpointRefcountIgnoresUnsupportedEndpoints(t *testing.T) {
 	e.releaseRTPEndpoint("192.0.2.10", 5004)
 
 	require.Empty(t, e.rtpEndpointRefs)
+}
+
+func TestRTPEndpointUpdateFailureReconcilesDesiredPresence(t *testing.T) {
+	endpoint := rtpEndpointKey{IP: 0xC000020A, Port: 5004}
+	firstMap := &fakeRTPEndpointMap{updateError: errors.New("update failed")}
+	secondMap := &fakeRTPEndpointMap{}
+	e := &exporter{
+		rtpEndpointsMaps: []rtpEndpointMap{firstMap, secondMap},
+		rtpEndpointRefs:  make(map[rtpEndpointKey]uint),
+	}
+
+	e.retainRTPEndpoint("192.0.2.10", 5004)
+
+	require.Equal(t, uint(1), e.rtpEndpointRefs[endpoint])
+	require.Equal(t, map[rtpEndpointKey]bool{endpoint: true}, e.dirtyRTPEndpoints)
+	require.False(t, firstMap.present[endpoint])
+	require.True(t, secondMap.present[endpoint])
+
+	firstMap.updateError = nil
+	e.reconcileRTPEndpoints()
+
+	require.True(t, firstMap.present[endpoint])
+	require.True(t, secondMap.present[endpoint])
+	require.Empty(t, e.dirtyRTPEndpoints)
+	firstUpdates, secondUpdates := len(firstMap.updates), len(secondMap.updates)
+	e.reconcileRTPEndpoints()
+	require.Len(t, firstMap.updates, firstUpdates)
+	require.Len(t, secondMap.updates, secondUpdates)
+}
+
+func TestRTPEndpointDeleteFailureReconcilesDesiredAbsence(t *testing.T) {
+	endpoint := rtpEndpointKey{IP: 0xC000020A, Port: 5004}
+	firstMap := &fakeRTPEndpointMap{}
+	secondMap := &fakeRTPEndpointMap{}
+	e := &exporter{
+		rtpEndpointsMaps: []rtpEndpointMap{firstMap, secondMap},
+		rtpEndpointRefs:  make(map[rtpEndpointKey]uint),
+	}
+	e.retainRTPEndpoint("192.0.2.10", 5004)
+	firstMap.deleteError = errors.New("delete failed")
+	delete(secondMap.present, endpoint)
+
+	e.releaseRTPEndpoint("192.0.2.10", 5004)
+
+	require.NotContains(t, e.rtpEndpointRefs, endpoint)
+	require.Equal(t, map[rtpEndpointKey]bool{endpoint: false}, e.dirtyRTPEndpoints)
+	require.True(t, firstMap.present[endpoint])
+
+	firstMap.deleteError = nil
+	e.reconcileRTPEndpoints()
+
+	require.False(t, firstMap.present[endpoint])
+	require.Empty(t, e.dirtyRTPEndpoints)
 }
 
 func TestRegisterMediaEndpointsRetainsDuplicateSDPEndpointOnce(t *testing.T) {

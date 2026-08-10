@@ -188,6 +188,9 @@ type (
 		collections      []*ebpf.Collection
 		rtpEndpointsMaps []rtpEndpointMap
 		rtpEndpointRefs  map[rtpEndpointKey]uint
+
+		dirtyRTPEndpoints map[rtpEndpointKey]bool
+
 		rtpEndpointMutex sync.Mutex
 		mediaLifecycleMu sync.Mutex
 		socks            []sockEntry
@@ -297,6 +300,7 @@ func NewExporter(deps Deps) Exporter {
 		messages:              make(chan *rawPacket, messagesChanSize),
 		done:                  make(chan struct{}),
 		rtpEndpointRefs:       make(map[rtpEndpointKey]uint),
+		dirtyRTPEndpoints:     make(map[rtpEndpointKey]bool),
 		registerTracker:       make(map[string]registerEntry),
 		registerExpiryTracker: make(map[string]registerExpiryEntry),
 		inviteTracker:         make(map[string]inviteEntry),
@@ -610,6 +614,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		e.cleanupOptionsTracker()
 		e.cleanupByeTracker()
 		e.mediaTracker.Cleanup()
+		e.reconcileRTPEndpoints()
 		e.fasTracker.sweep(e.services.metricser)
 		s := e.services.dialoger.Size()
 
@@ -2206,12 +2211,7 @@ func (e *exporter) retainRTPEndpoint(ipStr string, port uint16) {
 		return
 	}
 	e.rtpEndpointRefs[key] = 1
-	for _, m := range e.rtpEndpointsMaps {
-		if err := m.Update(key, uint8(1), ebpf.UpdateAny); err != nil {
-			zap.L().Debug("failed to update rtp_endpoints BPF map",
-				zap.String("ip", ipStr), zap.Uint16("port", port), zap.Error(err))
-		}
-	}
+	e.setRTPEndpointPresence(key, true)
 }
 
 // unregisterMedia removes a dialog's media endpoints and releases matching BPF
@@ -2258,11 +2258,38 @@ func (e *exporter) releaseRTPEndpoint(ipStr string, port uint16) {
 		return
 	}
 	delete(e.rtpEndpointRefs, key)
+	e.setRTPEndpointPresence(key, false)
+}
+
+func (e *exporter) setRTPEndpointPresence(key rtpEndpointKey, present bool) {
+	converged := true
 	for _, m := range e.rtpEndpointsMaps {
-		if err := m.Delete(key); err != nil {
-			zap.L().Debug("failed to delete from rtp_endpoints BPF map",
-				zap.String("ip", ipStr), zap.Uint16("port", port), zap.Error(err))
+		var err error
+		if present {
+			err = m.Update(key, uint8(1), ebpf.UpdateAny)
+		} else {
+			err = m.Delete(key)
 		}
+		if err != nil && (present || !errors.Is(err, ebpf.ErrKeyNotExist)) {
+			converged = false
+			zap.L().Debug("failed to reconcile rtp_endpoints BPF map", zap.Error(err))
+		}
+	}
+	if e.dirtyRTPEndpoints == nil {
+		e.dirtyRTPEndpoints = make(map[rtpEndpointKey]bool)
+	}
+	if converged {
+		delete(e.dirtyRTPEndpoints, key)
+		return
+	}
+	e.dirtyRTPEndpoints[key] = present
+}
+
+func (e *exporter) reconcileRTPEndpoints() {
+	e.rtpEndpointMutex.Lock()
+	defer e.rtpEndpointMutex.Unlock()
+	for key, present := range e.dirtyRTPEndpoints {
+		e.setRTPEndpointPresence(key, present)
 	}
 }
 
