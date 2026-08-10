@@ -115,6 +115,7 @@ type (
 		callMedia      map[string]map[endpointKey]MediaLabels
 		callMediaOrder map[string][]endpointKey
 		sourceAliases  map[string]map[endpointKey]endpointKey
+		mediaAliases   map[endpointKey]MediaLabels
 		rtcpMedia      map[endpointKey]rtcpMediaEntry // RTCP endpoints for BPF cleanup and RTCP→RTP correlation
 		rtcpOwners     map[endpointKey][]string
 		callRTCP       map[string]map[endpointKey]rtcpMediaEntry
@@ -155,6 +156,7 @@ func NewTracker(ttl time.Duration) *Tracker {
 		callMedia:      make(map[string]map[endpointKey]MediaLabels),
 		callMediaOrder: make(map[string][]endpointKey),
 		sourceAliases:  make(map[string]map[endpointKey]endpointKey),
+		mediaAliases:   make(map[endpointKey]MediaLabels),
 		rtcpMedia:      make(map[endpointKey]rtcpMediaEntry),
 		rtcpOwners:     make(map[endpointKey][]string),
 		callRTCP:       make(map[string]map[endpointKey]rtcpMediaEntry),
@@ -189,6 +191,9 @@ func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	key := endpointKey{ip: ip, port: port}
+	if _, occupied := t.mediaAliases[key]; occupied {
+		return false
+	}
 	if t.callMedia[labels.CallID] == nil {
 		t.callMedia[labels.CallID] = make(map[endpointKey]MediaLabels)
 	}
@@ -292,6 +297,7 @@ func (t *Tracker) removeCallMedia(callID string) []MediaEndpoint {
 	delete(t.callMediaOrder, callID)
 	for _, alias := range t.sourceAliases[callID] {
 		deleted = append(deleted, MediaEndpoint{IP: alias.ip, Port: alias.port})
+		delete(t.mediaAliases, alias)
 	}
 	delete(t.sourceAliases, callID)
 
@@ -360,7 +366,12 @@ func (t *Tracker) learnSourceAlias(callID string, matched, source endpointKey) (
 	if peer.ip != source.ip || peer.port == source.port {
 		return MediaEndpoint{}, false
 	}
-
+	if _, exists := t.media[source]; exists {
+		return MediaEndpoint{}, false
+	}
+	if _, exists := t.mediaAliases[source]; exists {
+		return MediaEndpoint{}, false
+	}
 	if t.sourceAliases[callID] == nil {
 		t.sourceAliases[callID] = make(map[endpointKey]endpointKey)
 	}
@@ -368,6 +379,7 @@ func (t *Tracker) learnSourceAlias(callID string, matched, source endpointKey) (
 		return MediaEndpoint{}, false
 	}
 	t.sourceAliases[callID][peer] = source
+	t.mediaAliases[source] = t.callMedia[callID][peer]
 	return MediaEndpoint{IP: source.ip, Port: source.port}, true
 }
 
@@ -380,7 +392,11 @@ func (t *Tracker) canLearnSourceAlias(callID string, matched endpointKey) bool {
 func (t *Tracker) Lookup(ip string, port uint16) (MediaLabels, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	l, ok := t.media[endpointKey{ip: ip, port: port}]
+	key := endpointKey{ip: ip, port: port}
+	l, ok := t.media[key]
+	if !ok {
+		l, ok = t.mediaAliases[key]
+	}
 	return l, ok
 }
 
@@ -396,8 +412,14 @@ func (t *Tracker) lookupLabels(
 	if l, ok := t.media[dst]; ok {
 		return l, dst, matchedByDst, true
 	}
+	if l, ok := t.mediaAliases[dst]; ok {
+		return l, dst, matchedByDst, true
+	}
 	src := endpointKey{ip: srcIP, port: srcPort}
 	if l, ok := t.media[src]; ok {
+		return l, src, matchedBySrc, true
+	}
+	if l, ok := t.mediaAliases[src]; ok {
 		return l, src, matchedBySrc, true
 	}
 	return MediaLabels{}, endpointKey{}, "", false

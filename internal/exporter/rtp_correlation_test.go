@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/aibudaevv/sip-exporter/internal/dto"
 	"github.com/aibudaevv/sip-exporter/internal/mediatracker"
 	"github.com/aibudaevv/sip-exporter/internal/rtp"
 	"github.com/aibudaevv/sip-exporter/internal/service"
@@ -320,16 +321,17 @@ func TestReplaceMediaRevisionRefCounts(t *testing.T) {
 			require.True(t, e.mediaTracker.Register(oldEndpoint.IP, oldEndpoint.Port, labels))
 			e.retainRTPEndpoint(oldEndpoint.IP, oldEndpoint.Port)
 			if tt.shared {
-				require.True(t, e.mediaTracker.Register(oldEndpoint.IP, oldEndpoint.Port, mediatracker.MediaLabels{CallID: "call-2"}))
+				sharedLabels := mediatracker.MediaLabels{CallID: "call-2"}
+				require.True(t, e.mediaTracker.Register(oldEndpoint.IP, oldEndpoint.Port, sharedLabels))
 				e.retainRTPEndpoint(oldEndpoint.IP, oldEndpoint.Port)
 			}
 
 			e.replaceMediaRevision("call-1", func() {
 				require.Equal(t, tt.wantAtNext, e.rtpEndpointRefs)
 				if tt.shared {
-					labels, found := e.mediaTracker.Lookup(oldEndpoint.IP, oldEndpoint.Port)
+					gotLabels, found := e.mediaTracker.Lookup(oldEndpoint.IP, oldEndpoint.Port)
 					require.True(t, found)
-					require.Equal(t, "call-2", labels.CallID)
+					require.Equal(t, "call-2", gotLabels.CallID)
 				}
 				for _, endpoint := range tt.next {
 					if e.mediaTracker.Register(endpoint.IP, endpoint.Port, labels) {
@@ -503,6 +505,136 @@ func TestRTPSourceAliasLearning(t *testing.T) {
 	}
 }
 
+func TestRTPSourceAliasReverseFlowCounted(t *testing.T) {
+	e, mm := newLearnedAliasTestExporter(t)
+
+	_, ok := e.mediaTracker.Lookup("10.0.0.1", 4100)
+	require.True(t, ok, "learned alias must resolve in the tracker")
+	_, err := e.handleRTP(
+		net.IPv4(10, 0, 0, 2), 5000, net.IPv4(10, 0, 0, 1), 4100, makeRTPPayload(2),
+	)
+	require.NoError(t, err)
+	require.Equal(t, 2, mm.rtpPacketsCalls, "reverse flow through learned alias must be counted")
+	require.Equal(t, uint(1), e.rtpEndpointRefs[rtpEndpointKey{IP: 0x0A000001, Port: 4100}])
+	result := e.unregisterMedia("call-1")
+	require.False(t, result.OneWay)
+}
+
+func TestRTPLearnedAliasLifecycle(t *testing.T) {
+	tests := []struct {
+		name     string
+		apply    func(*testing.T, *exporter)
+		wantRefs map[rtpEndpointKey]uint
+	}{
+		{name: "BYE releases alias", apply: func(t *testing.T, e *exporter) {
+			require.NoError(t, e.handleBye200OK(dto.Packet{
+				CallID: []byte("call-1"), From: dto.From{Tag: []byte("from-tag")}, To: dto.To{Tag: []byte("to-tag")},
+			}, ""))
+			require.NoError(t, e.handleBye200OK(dto.Packet{
+				CallID: []byte("call-1"), From: dto.From{Tag: []byte("from-tag")}, To: dto.To{Tag: []byte("to-tag")},
+			}, ""))
+		}, wantRefs: map[rtpEndpointKey]uint{}},
+		{name: "hold re-INVITE releases alias", apply: func(t *testing.T, e *exporter) {
+			e.storeInviteSDP("call-1", "2", []byte(fasSdpHeld))
+			response := fasInvite200OK("call-1", fasSdpHeld)
+			response.CSeq.ID = []byte("2")
+			require.NoError(t, e.handleInvite200OK("carrier", "ua", "", "", response, true))
+		}, wantRefs: map[rtpEndpointKey]uint{}},
+		{name: "changed re-INVITE releases alias", apply: func(t *testing.T, e *exporter) {
+			e.storeInviteSDP("call-1", "2", []byte(mediaSDP("10.0.1.1", 6000)))
+			response := fasInvite200OK("call-1", mediaSDP("10.0.1.2", 7000))
+			response.CSeq.ID = []byte("2")
+			require.NoError(t, e.handleInvite200OK("carrier", "ua", "", "", response, true))
+		}, wantRefs: map[rtpEndpointKey]uint{
+			{IP: 0x0A000101, Port: 6000}: 1, {IP: 0x0A000101, Port: 6001}: 1,
+			{IP: 0x0A000102, Port: 7000}: 1, {IP: 0x0A000102, Port: 7001}: 1,
+		}},
+		{name: "unchanged re-INVITE replaces alias", apply: func(t *testing.T, e *exporter) {
+			e.storeInviteSDP("call-1", "2", []byte(mediaSDP("10.0.0.1", 4000)))
+			response := fasInvite200OK("call-1", mediaSDP("10.0.0.2", 5000))
+			response.CSeq.ID = []byte("2")
+			require.NoError(t, e.handleInvite200OK("carrier", "ua", "", "", response, true))
+		}, wantRefs: map[rtpEndpointKey]uint{
+			{IP: 0x0A000001, Port: 4000}: 1, {IP: 0x0A000001, Port: 4001}: 1,
+			{IP: 0x0A000002, Port: 5000}: 1, {IP: 0x0A000002, Port: 5001}: 1,
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e, _ := newLearnedAliasTestExporter(t)
+			tt.apply(t, e)
+
+			require.NotContains(t, e.rtpEndpointRefs, rtpEndpointKey{IP: 0x0A000001, Port: 4100})
+			_, ok := e.mediaTracker.Lookup("10.0.0.1", 4100)
+			require.False(t, ok)
+			require.Equal(t, tt.wantRefs, e.rtpEndpointRefs)
+		})
+	}
+}
+
+func TestRTPLearnedAliasSessionExpiry(t *testing.T) {
+	mm := &mockMetricser{}
+	dialoger := service.NewDialoger()
+	e := NewExporter(Deps{Metricser: mm, Dialoger: dialoger}).(*exporter)
+	learnAliasOnExporter(t, e)
+	dialogID, err := normalizeDialogID([]byte("call-1"), []byte("from-tag"), []byte("to-tag"))
+	require.NoError(t, err)
+	dialoger.Create(service.DialogParams{
+		DialogID: dialogID, ExpiresAt: time.Now().Add(-time.Second), CreatedAt: time.Now(), CallID: "call-1",
+	})
+	e.wg.Add(1)
+	go e.sipDialogMetricsUpdate()
+	t.Cleanup(func() {
+		close(e.done)
+		e.wg.Wait()
+	})
+
+	require.Eventually(t, func() bool {
+		e.rtpEndpointMutex.Lock()
+		defer e.rtpEndpointMutex.Unlock()
+		return len(e.rtpEndpointRefs) == 0
+	}, 2*time.Second, 10*time.Millisecond)
+	_, ok := e.mediaTracker.Lookup("10.0.0.1", 4100)
+	require.False(t, ok)
+}
+
+func newLearnedAliasTestExporter(t *testing.T) (*exporter, *mockMetricser) {
+	t.Helper()
+	mm := &mockMetricser{}
+	e := &exporter{
+		services:        services{metricser: mm, dialoger: &mockDialoger{}},
+		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
+		rtpEndpointRefs: make(map[rtpEndpointKey]uint),
+		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
+	}
+	createActiveTestDialog(t, e.services.dialoger)
+	learnAliasOnExporter(t, e)
+	return e, mm
+}
+
+func learnAliasOnExporter(t *testing.T, e *exporter) {
+	t.Helper()
+	for _, endpoint := range []mediatracker.MediaEndpoint{
+		{IP: "10.0.0.1", Port: 4000}, {IP: "10.0.0.2", Port: 5000},
+	} {
+		require.True(t, e.mediaTracker.Register(endpoint.IP, endpoint.Port, sampleMediaLabels("call-1")))
+		e.retainRTPEndpoint(endpoint.IP, endpoint.Port)
+	}
+	_, err := e.handleRTP(
+		net.IPv4(10, 0, 0, 1), 4100, net.IPv4(10, 0, 0, 2), 5000, makeRTPPayload(1),
+	)
+	require.NoError(t, err)
+	require.Equal(t, uint(1), e.rtpEndpointRefs[rtpEndpointKey{IP: 0x0A000001, Port: 4100}])
+}
+
+func sampleMediaLabels(callID string) mediatracker.MediaLabels {
+	return mediatracker.MediaLabels{
+		Carrier: "carrier", UAType: "ua", CallID: callID,
+		SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000},
+	}
+}
+
 func TestRTPSourceAliasSharedDestinationCounted(t *testing.T) {
 	mm := &mockMetricser{}
 	e := &exporter{
@@ -542,7 +674,7 @@ func TestReinviteHoldReleasesLearnedAlias(t *testing.T) {
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 		rtpEndpointRefs: make(map[rtpEndpointKey]uint),
 	}
-	createActiveTestDialog(t, dialoger, "call-1")
+	createActiveTestDialog(t, dialoger)
 	labels := mediatracker.MediaLabels{
 		Carrier: "carrier", UAType: "ua", CallID: "call-1",
 		SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000},
@@ -576,7 +708,7 @@ func TestInvite200OKRetransmitPreservesMediaRevision(t *testing.T) {
 		mediaTracker:    mediatracker.NewTracker(rtpStreamTTL),
 		rtpEndpointRefs: make(map[rtpEndpointKey]uint),
 	}
-	createActiveTestDialog(t, dialoger, "call-1")
+	createActiveTestDialog(t, dialoger)
 	labels := mediatracker.MediaLabels{CallID: "call-1"}
 	for _, endpoint := range []mediatracker.MediaEndpoint{
 		{IP: "10.0.0.1", Port: 4000},
@@ -593,6 +725,21 @@ func TestInvite200OKRetransmitPreservesMediaRevision(t *testing.T) {
 		{IP: 0x0A000001, Port: 4000}: 1,
 		{IP: 0x0A000002, Port: 5000}: 1,
 	}, e.rtpEndpointRefs)
+	for _, endpoint := range []mediatracker.MediaEndpoint{
+		{IP: "10.0.0.1", Port: 4000}, {IP: "10.0.0.2", Port: 5000},
+	} {
+		_, ok := e.mediaTracker.Lookup(endpoint.IP, endpoint.Port)
+		require.True(t, ok)
+	}
+	_, err := e.handleRTP(
+		net.IPv4(192, 0, 2, 1), 9000, net.IPv4(10, 0, 0, 1), 4000, makeRTPPayload(1),
+	)
+	require.NoError(t, err)
+	_, err = e.handleRTP(
+		net.IPv4(192, 0, 2, 2), 9002, net.IPv4(10, 0, 0, 2), 5000, makeRTPPayload(2),
+	)
+	require.NoError(t, err)
+	require.Equal(t, 2, e.services.metricser.(*mockMetricser).rtpPacketsCalls)
 }
 
 // TestParseRawPacketRTPDetection verifies that parseRawPacket routes
