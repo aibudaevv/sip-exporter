@@ -187,3 +187,40 @@ func TestRTPActiveStreams(t *testing.T) {
 	require.InDelta(t, 0.0, m.rtpGauge(m.rtpActiveStreams, "carrier-a", "yealink", "PCMA"),
 		0.01, "stale combo must reset")
 }
+
+func TestRTPEndpointMismatchDiagnostics(t *testing.T) {
+	metricser, reg := newTestMetricserWithRegistry()
+	m := metricser.(*metrics)
+	m.RTPAliasLearned("carrier-a", "ingress", "source_port")
+	m.RTPAliasLearned("carrier-a", "ingress", "source_port")
+	m.RTPAliasReleased("carrier-a", "ingress")
+
+	var metric dto.Metric
+	require.NoError(t, m.rtpEndpointMismatch.WithLabelValues(
+		"carrier-a", "ingress", "source_port",
+	).Write(&metric))
+	require.InDelta(t, 2.0, metric.GetCounter().GetValue(), 0)
+
+	require.NoError(t, m.rtpAliasActive.WithLabelValues("carrier-a", "ingress").Write(&metric))
+	require.InDelta(t, 1.0, metric.GetGauge().GetValue(), 0)
+
+	wantLabels := map[string]map[string]bool{
+		"sip_exporter_rtp_endpoint_mismatch_total": {"carrier": true, "direction": true, "type": true},
+		"sip_exporter_rtp_alias_active":            {"carrier": true, "direction": true},
+	}
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		labels, ok := wantLabels[family.GetName()]
+		if !ok {
+			continue
+		}
+		require.Len(t, family.GetMetric(), 1)
+		require.Len(t, family.GetMetric()[0].GetLabel(), len(labels))
+		for _, label := range family.GetMetric()[0].GetLabel() {
+			require.True(t, labels[label.GetName()], "unexpected label %q", label.GetName())
+		}
+		delete(wantLabels, family.GetName())
+	}
+	require.Empty(t, wantLabels, "diagnostic metric families missing")
+}

@@ -152,6 +152,9 @@ type (
 		sessionsMissingRTP *prometheus.CounterVec
 		rtpActiveStreams   *prometheus.GaugeVec
 
+		rtpEndpointMismatch *prometheus.CounterVec
+		rtpAliasActive      *prometheus.GaugeVec
+
 		rtcpJitter         *prometheus.HistogramVec
 		rtcpLossFraction   *prometheus.HistogramVec
 		rtcpCumulativeLoss *prometheus.CounterVec
@@ -219,6 +222,8 @@ type (
 		UpdateRTPLossDistribution(carrier, uaType, codec, sourceCountry, direction string,
 			burstDensity, gapDensity float64)
 		UpdateRTPActiveStreams(counts []LabeledCount)
+		RTPAliasLearned(carrier, direction, mismatchType string)
+		RTPAliasReleased(carrier, direction string)
 		OneWayCall(carrier, uaType, sourceCountry, direction string)
 		MissingRTP(carrier, uaType, sourceCountry, direction string)
 		UpdateRTCPJitter(carrier, uaType, codec, sourceCountry, direction string, jitterMs float64)
@@ -694,6 +699,12 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 	m.rtpActiveStreams = newGaugeVecWithRegistry(
 		"sip_exporter_rtp_active_streams",
 		"Number of active RTP streams correlated with SIP dialogs", rl, reg)
+	m.rtpEndpointMismatch = newCounterVecWithRegistry(
+		"sip_exporter_rtp_endpoint_mismatch_total",
+		"Total number of learned RTP endpoint mismatches", []string{"carrier", "direction", "type"}, reg)
+	m.rtpAliasActive = newGaugeVecWithRegistry(
+		"sip_exporter_rtp_alias_active",
+		"Number of active learned RTP endpoint aliases", []string{"carrier", "direction"}, reg)
 	m.rtpKernelTimestampMissing = newCounterWithRegistry(
 		"sip_exporter_rtp_kernel_timestamp_missing_total",
 		"RTP packets missing kernel SO_TIMESTAMPNS (PDV fell back to processing time; growing rate means unreliable PDV)",
@@ -1297,6 +1308,15 @@ func (m *metrics) UpdateRTPLossDistribution(
 func (m *metrics) UpdateRTPActiveStreams(counts []LabeledCount) {
 	setGaugeFromCounts(m.rtpActiveStreams, &m.prevRTPKeys, counts,
 		[]string{"carrier", "ua_type", "codec", "source_country", "direction"})
+}
+
+func (m *metrics) RTPAliasLearned(carrier, direction, mismatchType string) {
+	m.rtpEndpointMismatch.WithLabelValues(carrier, direction, mismatchType).Inc()
+	m.rtpAliasActive.WithLabelValues(carrier, direction).Inc()
+}
+
+func (m *metrics) RTPAliasReleased(carrier, direction string) {
+	m.rtpAliasActive.WithLabelValues(carrier, direction).Dec()
 }
 
 func (m *metrics) OneWayCall(carrier, uaType, sourceCountry, direction string) {

@@ -143,6 +143,11 @@ type mockMetricser struct {
 	rtcpReportDirection            string
 	rtcpOrphanCalls                int
 	rtpKernelTimestampMissingCalls int
+	rtpAliasLearnedCalls           int
+	rtpAliasReleasedCalls          int
+	rtpAliasCarrier                string
+	rtpAliasDirection              string
+	rtpAliasMismatchType           string
 }
 
 func (m *mockMetricser) UpdateSessions(_ []service.LabeledCount) {}
@@ -313,8 +318,19 @@ func (m *mockMetricser) UpdateRTPRFactor(string, string, string, string, string,
 func (m *mockMetricser) UpdateRTPLossDistribution(string, string, string, string, string, float64, float64) {
 }
 func (m *mockMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount) {}
-func (m *mockMetricser) OneWayCall(string, string, string, string)       { m.oneWayCalls++ }
-func (m *mockMetricser) MissingRTP(string, string, string, string)       { m.missingRTPCalls++ }
+func (m *mockMetricser) RTPAliasLearned(carrier, direction, mismatchType string) {
+	m.rtpAliasLearnedCalls++
+	m.rtpAliasCarrier = carrier
+	m.rtpAliasDirection = direction
+	m.rtpAliasMismatchType = mismatchType
+}
+func (m *mockMetricser) RTPAliasReleased(carrier, direction string) {
+	m.rtpAliasReleasedCalls++
+	m.rtpAliasCarrier = carrier
+	m.rtpAliasDirection = direction
+}
+func (m *mockMetricser) OneWayCall(string, string, string, string) { m.oneWayCalls++ }
+func (m *mockMetricser) MissingRTP(string, string, string, string) { m.missingRTPCalls++ }
 
 func (m *mockMetricser) UpdateRTCPJitter(_, _, _, _, _ string, jitterMs float64) {
 	m.rtcpJitterCalls++
@@ -4973,6 +4989,8 @@ func (m *carrierTrackingMetricser) UpdateRTPRFactor(string, string, string, stri
 func (m *carrierTrackingMetricser) UpdateRTPLossDistribution(string, string, string, string, string, float64, float64) {
 }
 func (m *carrierTrackingMetricser) UpdateRTPActiveStreams(_ []service.LabeledCount) {}
+func (m *carrierTrackingMetricser) RTPAliasLearned(string, string, string)          {}
+func (m *carrierTrackingMetricser) RTPAliasReleased(string, string)                 {}
 func (m *carrierTrackingMetricser) OneWayCall(string, string, string, string)       {}
 func (m *carrierTrackingMetricser) MissingRTP(string, string, string, string)       {}
 

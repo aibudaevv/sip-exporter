@@ -453,12 +453,14 @@ func TestRTPSourceAliasLearning(t *testing.T) {
 		sourceIP     net.IP
 		wantAlias    bool
 		wantRefCount uint
+		wantLearned  int
 	}{
 		{
 			name:         "destination match learns remapped peer port",
 			sourceIP:     net.IPv4(10, 0, 0, 1),
 			wantAlias:    true,
 			wantRefCount: 1,
+			wantLearned:  1,
 		},
 		{
 			name:         "source IP mismatch counts packet without alias",
@@ -501,6 +503,12 @@ func TestRTPSourceAliasLearning(t *testing.T) {
 			require.Equal(t, tt.wantAlias, gotAlias)
 			require.Equal(t, tt.wantRefCount, e.rtpEndpointRefs[alias])
 			require.Len(t, e.rtpEndpointRefs, int(tt.wantRefCount))
+			require.Equal(t, tt.wantLearned, mm.rtpAliasLearnedCalls)
+			if tt.wantLearned > 0 {
+				require.Equal(t, "carrier", mm.rtpAliasCarrier)
+				require.Empty(t, mm.rtpAliasDirection)
+				require.Equal(t, "source_port", mm.rtpAliasMismatchType)
+			}
 		})
 	}
 }
@@ -518,6 +526,20 @@ func TestRTPSourceAliasReverseFlowCounted(t *testing.T) {
 	require.Equal(t, uint(1), e.rtpEndpointRefs[rtpEndpointKey{IP: 0x0A000001, Port: 4100}])
 	result := e.unregisterMedia("call-1")
 	require.False(t, result.OneWay)
+	require.Equal(t, 1, mm.rtpAliasLearnedCalls)
+	require.Equal(t, 1, mm.rtpAliasReleasedCalls)
+}
+
+func TestRTPAliasMetricOwnershipIgnoresForeignRTCP(t *testing.T) {
+	e, mm := newLearnedAliasTestExporter(t)
+	require.True(t, e.mediaTracker.RegisterRTCP("10.0.0.1", 4100, "10.0.0.9", 9000, "call-2"))
+	e.retainRTPEndpoint("10.0.0.1", 4100)
+
+	e.unregisterMedia("call-2")
+	require.Zero(t, mm.rtpAliasReleasedCalls)
+
+	e.unregisterMedia("call-1")
+	require.Equal(t, 1, mm.rtpAliasReleasedCalls)
 }
 
 func TestRTPLearnedAliasLifecycle(t *testing.T) {
@@ -562,13 +584,15 @@ func TestRTPLearnedAliasLifecycle(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e, _ := newLearnedAliasTestExporter(t)
+			e, mm := newLearnedAliasTestExporter(t)
 			tt.apply(t, e)
 
 			require.NotContains(t, e.rtpEndpointRefs, rtpEndpointKey{IP: 0x0A000001, Port: 4100})
 			_, ok := e.mediaTracker.Lookup("10.0.0.1", 4100)
 			require.False(t, ok)
 			require.Equal(t, tt.wantRefs, e.rtpEndpointRefs)
+			require.Equal(t, 1, mm.rtpAliasLearnedCalls)
+			require.Equal(t, 1, mm.rtpAliasReleasedCalls)
 		})
 	}
 }
@@ -597,6 +621,10 @@ func TestRTPLearnedAliasSessionExpiry(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond)
 	_, ok := e.mediaTracker.Lookup("10.0.0.1", 4100)
 	require.False(t, ok)
+	require.Equal(t, 1, mm.rtpAliasLearnedCalls)
+	e.mediaLifecycleMu.Lock()
+	defer e.mediaLifecycleMu.Unlock()
+	require.Equal(t, 1, mm.rtpAliasReleasedCalls)
 }
 
 func newLearnedAliasTestExporter(t *testing.T) (*exporter, *mockMetricser) {

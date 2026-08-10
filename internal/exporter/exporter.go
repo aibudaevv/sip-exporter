@@ -180,6 +180,10 @@ type (
 		Port uint16
 		_    [2]byte // explicit padding — cilium/ebpf uses binary.Size, not unsafe.Sizeof
 	}
+	rtpAliasKey struct {
+		endpoint rtpEndpointKey
+		callID   string
+	}
 	rtpEndpointMap interface {
 		Update(key, value any, flags ebpf.MapUpdateFlags) error
 		Delete(key any) error
@@ -190,6 +194,7 @@ type (
 		rtpEndpointRefs  map[rtpEndpointKey]uint
 
 		dirtyRTPEndpoints map[rtpEndpointKey]bool
+		rtpAliasLabels    map[rtpAliasKey][2]string
 
 		rtpEndpointMutex sync.Mutex
 		mediaLifecycleMu sync.Mutex
@@ -1289,6 +1294,12 @@ func (e *exporter) handleRTP(
 	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, dstIP.String(), dstPort, header, arrival)
 	if res.LearnedEndpoint != nil {
 		e.retainRTPEndpoint(res.LearnedEndpoint.IP, res.LearnedEndpoint.Port)
+		key, _ := ipPortToKey(res.LearnedEndpoint.IP, res.LearnedEndpoint.Port)
+		if e.rtpAliasLabels == nil {
+			e.rtpAliasLabels = make(map[rtpAliasKey][2]string)
+		}
+		e.rtpAliasLabels[rtpAliasKey{endpoint: key, callID: res.CallID}] = [2]string{res.Carrier, res.Direction}
+		e.services.metricser.RTPAliasLearned(res.Carrier, res.Direction, "source_port")
 	}
 	e.mediaLifecycleMu.Unlock()
 	if !ok {
@@ -2223,6 +2234,7 @@ func (e *exporter) unregisterMedia(callID string) mediatracker.RTPDialogResult {
 	for _, ep := range deleted {
 		e.releaseRTPEndpoint(ep.IP, ep.Port)
 	}
+	e.releaseRTPAliases(callID, deleted)
 	return result
 }
 
@@ -2231,12 +2243,25 @@ func (e *exporter) replaceMediaRevision(callID string, registerNext func()) {
 	for _, ep := range owned {
 		e.retainRTPEndpoint(ep.IP, ep.Port)
 	}
-	for _, ep := range e.mediaTracker.Replace(callID) {
+	deleted := e.mediaTracker.Replace(callID)
+	for _, ep := range deleted {
 		e.releaseRTPEndpoint(ep.IP, ep.Port)
 	}
+	e.releaseRTPAliases(callID, deleted)
 	registerNext()
 	for _, ep := range owned {
 		e.releaseRTPEndpoint(ep.IP, ep.Port)
+	}
+}
+
+func (e *exporter) releaseRTPAliases(callID string, endpoints []mediatracker.MediaEndpoint) {
+	for _, ep := range endpoints {
+		endpoint, _ := ipPortToKey(ep.IP, ep.Port)
+		key := rtpAliasKey{endpoint: endpoint, callID: callID}
+		if labels, learned := e.rtpAliasLabels[key]; learned {
+			e.services.metricser.RTPAliasReleased(labels[0], labels[1])
+			delete(e.rtpAliasLabels, key)
+		}
 	}
 }
 
