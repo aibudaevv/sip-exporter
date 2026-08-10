@@ -129,6 +129,56 @@ func TestTrackerLearnSourceAliasRejectsRepeatedAlias(t *testing.T) {
 	require.Equal(t, MediaEndpoint{}, got)
 }
 
+func TestTrackerLearnSourceAliasRejectsOccupiedEndpoint(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*Tracker)
+	}{
+		{
+			name: "advertised endpoint",
+			setup: func(tr *Tracker) {
+				tr.Register("10.0.0.1", 4100, sampleLabels("call-2"))
+			},
+		},
+		{
+			name: "learned endpoint",
+			setup: func(tr *Tracker) {
+				tr.Register("10.0.0.1", 4001, sampleLabels("call-2"))
+				tr.Register("10.0.0.3", 6000, sampleLabels("call-2"))
+				_, ok := tr.LearnSourceAlias("call-2", "10.0.0.3", 6000, "10.0.0.1", 4100)
+				require.True(t, ok)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := NewTracker(30 * time.Second)
+			tr.Register("10.0.0.1", 4000, sampleLabels("call-1"))
+			tr.Register("10.0.0.2", 5000, sampleLabels("call-1"))
+			tt.setup(tr)
+
+			got, ok := tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4100)
+
+			require.False(t, ok)
+			require.Equal(t, MediaEndpoint{}, got)
+		})
+	}
+}
+
+func TestTrackerRegisterRejectsLearnedAliasEndpoint(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 4000, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5000, sampleLabels("call-1"))
+	_, ok := tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4100)
+	require.True(t, ok)
+
+	require.False(t, tr.Register("10.0.0.1", 4100, sampleLabels("call-2")))
+	labels, ok := tr.Lookup("10.0.0.1", 4100)
+	require.True(t, ok)
+	require.Equal(t, "call-1", labels.CallID)
+}
+
 func TestTrackerCanLearnSourceAliasOwner(t *testing.T) {
 	matched := endpointKey{ip: "10.0.0.2", port: 5000}
 	tests := []struct {
