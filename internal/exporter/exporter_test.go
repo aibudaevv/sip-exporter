@@ -661,6 +661,95 @@ func TestCleanupInviteTransactionsRemovesExpiredFinal(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestClosedInviteTransactionRejectsRetransmittedRequest(t *testing.T) {
+	e := &exporter{services: services{dialoger: &mockDialoger{}}}
+	response := dto.Packet{
+		CallID:         []byte("call-1"),
+		From:           dto.From{Tag: []byte("from-tag")},
+		CSeq:           dto.CSeq{ID: []byte("1"), Method: []byte("INVITE")},
+		ResponseStatus: []byte("200"),
+	}
+
+	e.observeInviteTransaction("call-1", "1", false, "from-tag")
+	_, _, process := e.classifyInviteResponse(response)
+	require.True(t, process)
+	e.closeInviteTransactions("call-1")
+
+	e.observeInviteTransaction("call-1", "1", false, "from-tag")
+	isInvite, isReinvite, process := e.classifyInviteResponse(response)
+	require.False(t, isInvite)
+	require.False(t, isReinvite)
+	require.False(t, process)
+}
+
+func TestClosedInviteReplayDoesNotCreateSecondDialog(t *testing.T) {
+	metricser := &mockMetricser{}
+	dialoger := &mockDialoger{}
+	e := &exporter{
+		services:           services{metricser: metricser, dialoger: dialoger},
+		inviteTracker:      make(map[string]inviteEntry),
+		inviteSDP:          make(map[inviteSDPKey]inviteSDPEntity),
+		mediaTracker:       mediatracker.NewTracker(rtpStreamTTL),
+		inviteBurstTracker: newInviteBurstTracker(3, time.Minute),
+	}
+
+	require.NoError(t, e.handleMessage("carrier", "", makeInvite("call-1", "from-tag")))
+	require.NoError(t, e.handleMessage("carrier", "", makeInvite200OK("call-1", "from-tag", "to-tag")))
+	require.Len(t, dialoger.created, 1)
+	require.NoError(t, e.handleMessage("carrier", "", makeBye200OK("call-1", "from-tag", "to-tag")))
+	require.Empty(t, dialoger.created)
+
+	require.NoError(t, e.handleMessage("carrier", "", makeInvite("call-1", "from-tag")))
+	require.NoError(t, e.handleMessage("carrier", "", makeInvite200OK("call-1", "from-tag", "to-tag")))
+	require.Empty(t, dialoger.created)
+}
+
+func TestClosedInviteTransactionGenerations(t *testing.T) {
+	newResponse := func(cseqID, fromTag string) dto.Packet {
+		return dto.Packet{CallID: []byte("call-1"), From: dto.From{Tag: []byte(fromTag)},
+			CSeq: dto.CSeq{ID: []byte(cseqID), Method: []byte("INVITE")}, ResponseStatus: []byte("200")}
+	}
+	tests := []struct {
+		name   string
+		setup  func(*exporter)
+		packet dto.Packet
+		want   bool
+	}{
+		{name: "new from tag", setup: func(e *exporter) {
+			e.closeInviteTransactions("call-1")
+			e.observeInviteTransaction("call-1", "1", false, "new")
+		}, packet: newResponse("1", "new"), want: true},
+		{name: "new cseq", setup: func(e *exporter) {
+			e.closeInviteTransactions("call-1")
+			e.observeInviteTransaction("call-1", "2", false, "old")
+		}, packet: newResponse("2", "old"), want: true},
+		{name: "unknown closed transaction", setup: func(e *exporter) { e.closeInviteTransactions("call-1") }, packet: newResponse("1", "old")},
+		{name: "startup mid call", setup: func(*exporter) {}, packet: newResponse("1", "old"), want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := &exporter{services: services{dialoger: &mockDialoger{}}}
+			tt.setup(e)
+			_, _, process := e.classifyInviteResponse(tt.packet)
+			require.Equal(t, tt.want, process)
+		})
+	}
+}
+
+func TestInviteSDPCSeqSeparatesFromTags(t *testing.T) {
+	e := &exporter{inviteSDP: make(map[inviteSDPKey]inviteSDPEntity)}
+
+	e.storeInviteSDP("call-1", "2", []byte("first offer"), "from-a")
+	e.storeInviteSDP("call-1", "2", []byte("second offer"), "from-b")
+
+	first, ok := e.takeInviteSDP("call-1", "2", "from-a")
+	require.True(t, ok)
+	require.Equal(t, []byte("first offer"), first)
+	second, ok := e.takeInviteSDP("call-1", "2", "from-b")
+	require.True(t, ok)
+	require.Equal(t, []byte("second offer"), second)
+}
+
 func TestInviteSDPCSeqResponseRemovesOnlyMatchingTransaction(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -685,13 +774,13 @@ func TestInviteSDPCSeqResponseRemovesOnlyMatchingTransaction(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := newSDPCSeqTestExporter()
-			e.storeInviteSDP("call-1", "2", []byte("offer 2"))
-			e.storeInviteSDP("call-1", "3", []byte("offer 3"))
+			e.storeInviteSDP("call-1", "2", []byte("offer 2"), "from-tag")
+			e.storeInviteSDP("call-1", "3", []byte("offer 3"), "from-tag")
 
 			require.NoError(t, e.handleMessage("carrier-x", "", inviteResponse(tt.status, "call-1", "2")))
 
-			_, gotCSeq2 := e.takeInviteSDP("call-1", "2")
-			_, gotCSeq3 := e.takeInviteSDP("call-1", "3")
+			_, gotCSeq2 := e.takeInviteSDP("call-1", "2", "from-tag")
+			_, gotCSeq3 := e.takeInviteSDP("call-1", "3", "from-tag")
 			require.Equal(t, tt.wantCSeq2, gotCSeq2)
 			require.Equal(t, tt.wantCSeq3, gotCSeq3)
 		})
@@ -2431,7 +2520,7 @@ func TestFASCallerRTPDoesNotClear(t *testing.T) {
 
 	// Cache the INVITE offer SDP (caller endpoint 10.0.0.2:5004) so the 200 OK
 	// registers BOTH sides and FAS can gate by originating side.
-	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer))
+	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer), "from-tag")
 
 	require.NoError(
 		t,
@@ -2469,7 +2558,7 @@ func TestFASRetransmit200OKPreservesOfferSet(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, time.Hour)
 
-	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer))
+	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer), "from-tag")
 	require.NoError(t,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
 	)
@@ -2499,7 +2588,7 @@ func TestFASLateOfferCallerRTPDoesNotClear(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, 60*time.Millisecond)
 
-	e.storeInviteSDP("call-late", "", []byte(fasSdpOffer))
+	e.storeInviteSDP("call-late", "", []byte(fasSdpOffer), "from-tag")
 
 	pkt := fasInvite200OK("call-late", "")
 	pkt.ContentType = nil
@@ -2524,7 +2613,7 @@ func TestFASLateOfferAnswerRTPClears(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, 60*time.Millisecond)
 
-	e.storeInviteSDP("call-late", "", []byte(fasSdpOffer))
+	e.storeInviteSDP("call-late", "", []byte(fasSdpOffer), "from-tag")
 
 	pkt := fasInvite200OK("call-late", "")
 	pkt.ContentType = nil
@@ -2623,7 +2712,7 @@ func TestFASByePathNoFireWhenMediaCleared(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, time.Hour)
 
-	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer))
+	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer), "from-tag")
 	require.NoError(t,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
 	)
@@ -2735,7 +2824,7 @@ func TestFASReinviteUpdatesOfferEndpoints(t *testing.T) {
 	e := newFasTestExporter(mm, time.Hour)
 
 	// Initial call: INVITE offer 10.0.0.2:5004 → 200 OK answer 10.0.0.1:5004.
-	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer))
+	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer), "from-tag")
 	require.NoError(t,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
 	)
@@ -2743,7 +2832,7 @@ func TestFASReinviteUpdatesOfferEndpoints(t *testing.T) {
 		"initial offer endpoint must be tracked")
 
 	// Re-INVITE: caller changes endpoint to 10.0.0.3:5004.
-	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer2))
+	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer2), "from-tag")
 	require.NoError(t,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), true),
 	)
@@ -2769,14 +2858,14 @@ func TestFASReinviteSRTPExtendsDeadline(t *testing.T) {
 	e := newFasTestExporter(mm, 100*time.Millisecond)
 
 	// Initial call with plain RTP: deadline = now + 100ms (no grace).
-	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer))
+	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer), "from-tag")
 	require.NoError(t,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
 	)
 	origDeadline := e.fasTracker.entries["call-1"].deadline
 
 	// Re-INVITE upgrades to SRTP: deadline must extend by fasSRTPGrace.
-	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer))
+	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer), "from-tag")
 	require.NoError(t,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpSRTP), true),
 	)
@@ -2795,7 +2884,7 @@ func TestFASConcurrentSweepClearBye(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, time.Hour)
 
-	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer))
+	e.storeInviteSDP("call-1", "", []byte(fasSdpOffer), "from-tag")
 	require.NoError(t,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
 	)
@@ -2987,7 +3076,7 @@ func BenchmarkHandleRTP_FASHotPath(b *testing.B) {
 	for i := range 1000 {
 		e.fasTracker.store(fmt.Sprintf("filler-%d", i), fasEntry{}, nil, false)
 	}
-	e.storeInviteSDP("bench", "", []byte(fasSdpOffer))
+	e.storeInviteSDP("bench", "", []byte(fasSdpOffer), "from-tag")
 	require.NoError(b,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("bench", fasSdpNormal), false),
 	)

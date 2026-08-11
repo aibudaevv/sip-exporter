@@ -166,8 +166,7 @@ type (
 		timestamp time.Time
 	}
 	inviteSDPKey struct {
-		callID string
-		cseqID string
+		callID, cseqID, fromTag string
 	}
 
 	sockEntry struct {
@@ -1435,13 +1434,13 @@ func (e *exporter) handleRequest(carrier, uaType, sourceCountry, direction strin
 	case bytes.Equal(packet.Method, []byte("REGISTER")):
 		e.storeRegisterTime(string(packet.CallID), carrier, uaType, sourceCountry, packet.SourceIP)
 	case bytes.Equal(packet.Method, []byte("INVITE")):
-		e.observeInviteTransaction(string(packet.CallID), string(packet.CSeq.ID), isReinvite)
+		e.observeInviteTransaction(string(packet.CallID), string(packet.CSeq.ID), isReinvite, string(packet.From.Tag))
 		if !isReinvite && !isRetransmission {
 			e.storeInviteTime(string(packet.CallID), carrier, uaType, sourceCountry, direction)
 			e.inviteBurstTracker.record(packet.SourceIP, carrier, sourceCountry, direction, e.services.metricser)
 		}
 		if isSDPContentType(packet.ContentType) {
-			e.storeInviteSDP(string(packet.CallID), string(packet.CSeq.ID), packet.Body)
+			e.storeInviteSDP(string(packet.CallID), string(packet.CSeq.ID), packet.Body, string(packet.From.Tag))
 		}
 	case bytes.Equal(packet.Method, []byte("CANCEL")):
 		e.removeInviteTime(string(packet.CallID))
@@ -1475,7 +1474,7 @@ func (e *exporter) handleResponse(
 		carrier, uaType, sourceCountry, direction = e.handleInviteResponse(
 			carrier, uaType, sourceCountry, direction, packet)
 		if len(packet.ResponseStatus) > 0 && packet.ResponseStatus[0] >= '3' {
-			e.deleteInviteSDP(string(packet.CallID), string(packet.CSeq.ID))
+			e.deleteInviteSDP(string(packet.CallID), string(packet.CSeq.ID), string(packet.From.Tag))
 		}
 	}
 
@@ -1675,7 +1674,7 @@ func (e *exporter) handleInvite200OK(
 	labels := mediatracker.MediaLabels{
 		Carrier: carrier, UAType: uaType, SourceCountry: sourceCountry, CallID: callID, Direction: direction,
 	}
-	offerSDP, hasOfferSDP := e.takeInviteSDP(callID, string(packet.CSeq.ID))
+	offerSDP, hasOfferSDP := e.takeInviteSDP(callID, string(packet.CSeq.ID), string(packet.From.Tag))
 	hasAnswerSDP := isSDPContentType(packet.ContentType)
 	if isReinvite && !hasOfferSDP {
 		return nil
@@ -2108,31 +2107,21 @@ func (e *exporter) getInviteCarrier(callID string) (string, string, string, stri
 }
 
 // storeInviteSDP caches an INVITE SDP offer until its matching response arrives.
-func (e *exporter) storeInviteSDP(callID, cseqID string, body []byte) {
+func (e *exporter) storeInviteSDP(callID, cseqID string, body []byte, fromTags ...string) {
 	e.inviteSDPMutex.Lock()
 	defer e.inviteSDPMutex.Unlock()
-	e.inviteSDP[inviteSDPKey{callID: callID, cseqID: cseqID}] = inviteSDPEntity{
+	e.inviteSDP[inviteSDPKey{callID: callID, cseqID: cseqID, fromTag: inviteFromTag(fromTags)}] = inviteSDPEntity{
 		body: bytes.Clone(body), timestamp: time.Now(),
 	}
 }
 
-func (e *exporter) observeInviteTransaction(callID, cseqID string, reinvite bool) {
+func (e *exporter) observeInviteTransaction(callID, cseqID string, reinvite bool, fromTags ...string) {
 	e.inviteTransactionMu.Lock()
 	defer e.inviteTransactionMu.Unlock()
 	if e.inviteTransactions == nil {
 		e.inviteTransactions = make(map[inviteSDPKey]inviteTransaction)
 	}
-	if e.closedInviteCalls != nil {
-		if _, closed := e.closedInviteCalls[callID]; closed {
-			delete(e.closedInviteCalls, callID)
-			for key := range e.inviteTransactions {
-				if key.callID == callID {
-					delete(e.inviteTransactions, key)
-				}
-			}
-		}
-	}
-	key := inviteSDPKey{callID: callID, cseqID: cseqID}
+	key := inviteSDPKey{callID: callID, cseqID: cseqID, fromTag: inviteFromTag(fromTags)}
 	if transaction, ok := e.inviteTransactions[key]; ok && transaction.final {
 		return
 	}
@@ -2143,14 +2132,14 @@ func (e *exporter) classifyInviteResponse(packet dto.Packet) (bool, bool, bool) 
 	callID, cseqID := string(packet.CallID), string(packet.CSeq.ID)
 	e.inviteTransactionMu.Lock()
 	defer e.inviteTransactionMu.Unlock()
-	if _, closed := e.closedInviteCalls[callID]; closed {
-		return false, false, false
-	}
 	if e.inviteTransactions == nil {
 		e.inviteTransactions = make(map[inviteSDPKey]inviteTransaction)
 	}
-	key := inviteSDPKey{callID: callID, cseqID: cseqID}
+	key := inviteSDPKey{callID: callID, cseqID: cseqID, fromTag: string(packet.From.Tag)}
 	transaction, ok := e.inviteTransactions[key]
+	if _, closed := e.closedInviteCalls[callID]; closed && (!ok || transaction.final) {
+		return false, false, false
+	}
 	if !ok {
 		if dialogID, err := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag); err == nil &&
 			e.services.dialoger.HasActiveDialog(dialogID) {
@@ -2197,10 +2186,10 @@ func (e *exporter) cleanupInviteTransactions() {
 }
 
 // takeInviteSDP returns and removes the cached offer for one INVITE transaction.
-func (e *exporter) takeInviteSDP(callID, cseqID string) ([]byte, bool) {
+func (e *exporter) takeInviteSDP(callID, cseqID string, fromTags ...string) ([]byte, bool) {
 	e.inviteSDPMutex.Lock()
 	defer e.inviteSDPMutex.Unlock()
-	key := inviteSDPKey{callID: callID, cseqID: cseqID}
+	key := inviteSDPKey{callID: callID, cseqID: cseqID, fromTag: inviteFromTag(fromTags)}
 	entry, ok := e.inviteSDP[key]
 	if !ok {
 		return nil, false
@@ -2209,10 +2198,17 @@ func (e *exporter) takeInviteSDP(callID, cseqID string) ([]byte, bool) {
 	return entry.body, true
 }
 
-func (e *exporter) deleteInviteSDP(callID, cseqID string) {
+func (e *exporter) deleteInviteSDP(callID, cseqID string, fromTags ...string) {
 	e.inviteSDPMutex.Lock()
 	defer e.inviteSDPMutex.Unlock()
-	delete(e.inviteSDP, inviteSDPKey{callID: callID, cseqID: cseqID})
+	delete(e.inviteSDP, inviteSDPKey{callID: callID, cseqID: cseqID, fromTag: inviteFromTag(fromTags)})
+}
+
+func inviteFromTag(fromTags []string) string {
+	if len(fromTags) > 0 {
+		return fromTags[0]
+	}
+	return ""
 }
 
 func (e *exporter) cleanupInviteSDP() {

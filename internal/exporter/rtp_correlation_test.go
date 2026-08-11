@@ -230,7 +230,7 @@ func TestReinviteAfterExpiryDoesNotReplaceMedia(t *testing.T) {
 	require.Empty(t, e.rtpEndpointRefs)
 	requireEndpoint(t, e, "10.0.2.3", 6000, false)
 	requireEndpoint(t, e, "10.0.2.4", 7000, false)
-	offer, ok := e.takeInviteSDP("expired-call", "2")
+	offer, ok := e.takeInviteSDP("expired-call", "2", "from-tag")
 	require.True(t, ok, "failed refresh must preserve the matching offer")
 	require.Equal(t, mediaSDP("10.0.2.3", 6000), string(offer))
 }
@@ -261,7 +261,7 @@ func TestReinviteRefreshAppliesMatchingRevisionOnce(t *testing.T) {
 		{IP: 0x0A000304, Port: 7000}: 1,
 		{IP: 0x0A000304, Port: 7001}: 1,
 	}, e.rtpEndpointRefs)
-	_, ok := e.takeInviteSDP("refresh-call", "2")
+	_, ok := e.takeInviteSDP("refresh-call", "2", "from-tag")
 	require.False(t, ok, "successful refresh must consume the matching offer once")
 }
 
@@ -557,13 +557,13 @@ func TestRTPLearnedAliasLifecycle(t *testing.T) {
 			}, ""))
 		}, wantRefs: map[rtpEndpointKey]uint{}},
 		{name: "hold re-INVITE releases alias", apply: func(t *testing.T, e *exporter) {
-			e.storeInviteSDP("call-1", "2", []byte(fasSdpHeld))
+			e.storeInviteSDP("call-1", "2", []byte(fasSdpHeld), "from-tag")
 			response := fasInvite200OK("call-1", fasSdpHeld)
 			response.CSeq.ID = []byte("2")
 			require.NoError(t, e.handleInvite200OK("carrier", "ua", "", "", response, true))
 		}, wantRefs: map[rtpEndpointKey]uint{}},
 		{name: "changed re-INVITE releases alias", apply: func(t *testing.T, e *exporter) {
-			e.storeInviteSDP("call-1", "2", []byte(mediaSDP("10.0.1.1", 6000)))
+			e.storeInviteSDP("call-1", "2", []byte(mediaSDP("10.0.1.1", 6000)), "from-tag")
 			response := fasInvite200OK("call-1", mediaSDP("10.0.1.2", 7000))
 			response.CSeq.ID = []byte("2")
 			require.NoError(t, e.handleInvite200OK("carrier", "ua", "", "", response, true))
@@ -572,7 +572,7 @@ func TestRTPLearnedAliasLifecycle(t *testing.T) {
 			{IP: 0x0A000102, Port: 7000}: 1, {IP: 0x0A000102, Port: 7001}: 1,
 		}},
 		{name: "unchanged re-INVITE replaces alias", apply: func(t *testing.T, e *exporter) {
-			e.storeInviteSDP("call-1", "2", []byte(mediaSDP("10.0.0.1", 4000)))
+			e.storeInviteSDP("call-1", "2", []byte(mediaSDP("10.0.0.1", 4000)), "from-tag")
 			response := fasInvite200OK("call-1", mediaSDP("10.0.0.2", 5000))
 			response.CSeq.ID = []byte("2")
 			require.NoError(t, e.handleInvite200OK("carrier", "ua", "", "", response, true))
@@ -719,7 +719,7 @@ func TestReinviteHoldReleasesLearnedAlias(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.Len(t, e.rtpEndpointRefs, 3)
-	e.storeInviteSDP("call-1", "", []byte(fasSdpHeld))
+	e.storeInviteSDP("call-1", "", []byte(fasSdpHeld), "from-tag")
 
 	require.NoError(t, e.handleInvite200OK(
 		"carrier", "ua", "", "", fasInvite200OK("call-1", fasSdpHeld), true,
