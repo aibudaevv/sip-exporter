@@ -160,6 +160,11 @@ type (
 		body      []byte
 		timestamp time.Time
 	}
+	inviteTransaction struct {
+		reinvite  bool
+		final     bool
+		timestamp time.Time
+	}
 	inviteSDPKey struct {
 		callID string
 		cseqID string
@@ -232,6 +237,9 @@ type (
 		inviteMutex           sync.RWMutex
 		inviteSDP             map[inviteSDPKey]inviteSDPEntity
 		inviteSDPMutex        sync.Mutex
+		inviteTransactions    map[inviteSDPKey]inviteTransaction
+		inviteTransactionMu   sync.Mutex
+		closedInviteCalls     map[string]time.Time
 		optionsTracker        map[string]optionsEntry
 		optionsMutex          sync.RWMutex
 		byeTracker            map[string]byeEntry
@@ -310,6 +318,8 @@ func NewExporter(deps Deps) Exporter {
 		registerExpiryTracker: make(map[string]registerExpiryEntry),
 		inviteTracker:         make(map[string]inviteEntry),
 		inviteSDP:             make(map[inviteSDPKey]inviteSDPEntity),
+		inviteTransactions:    make(map[inviteSDPKey]inviteTransaction),
+		closedInviteCalls:     make(map[string]time.Time),
 		optionsTracker:        make(map[string]optionsEntry),
 		byeTracker:            make(map[string]byeEntry),
 		packetPool: sync.Pool{
@@ -616,6 +626,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		e.inviteBurstTracker.cleanup()
 		e.cleanupInviteTracker()
 		e.cleanupInviteSDP()
+		e.cleanupInviteTransactions()
 		e.cleanupOptionsTracker()
 		e.cleanupByeTracker()
 		e.mediaTracker.Cleanup()
@@ -624,6 +635,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		s := e.services.dialoger.Size()
 
 		for _, r := range results {
+			e.closeInviteTransactions(r.CallID)
 			e.fasTracker.clear(r.CallID)
 			e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry, r.Direction)
 			e.services.metricser.UpdateSPD(
@@ -1423,6 +1435,7 @@ func (e *exporter) handleRequest(carrier, uaType, sourceCountry, direction strin
 	case bytes.Equal(packet.Method, []byte("REGISTER")):
 		e.storeRegisterTime(string(packet.CallID), carrier, uaType, sourceCountry, packet.SourceIP)
 	case bytes.Equal(packet.Method, []byte("INVITE")):
+		e.observeInviteTransaction(string(packet.CallID), string(packet.CSeq.ID), isReinvite)
 		if !isReinvite && !isRetransmission {
 			e.storeInviteTime(string(packet.CallID), carrier, uaType, sourceCountry, direction)
 			e.inviteBurstTracker.record(packet.SourceIP, carrier, sourceCountry, direction, e.services.metricser)
@@ -1450,12 +1463,15 @@ func (e *exporter) handleResponse(
 	isInviteResponse := bytes.Equal(packet.CSeq.Method, []byte("INVITE"))
 	isRegisterResponse := bytes.Equal(packet.CSeq.Method, []byte("REGISTER"))
 	is200OK := bytes.Equal(packet.ResponseStatus, []byte("200"))
+	isReinviteResponse := false
+	processInvite200OK := true
 
 	carrier := packetCarrier
 	uaType := packetUAType
 	sourceCountry := packetSourceCountry
 
 	if isInviteResponse {
+		isInviteResponse, isReinviteResponse, processInvite200OK = e.classifyInviteResponse(packet)
 		carrier, uaType, sourceCountry, direction = e.handleInviteResponse(
 			carrier, uaType, sourceCountry, direction, packet)
 		if len(packet.ResponseStatus) > 0 && packet.ResponseStatus[0] >= '3' {
@@ -1479,20 +1495,6 @@ func (e *exporter) handleResponse(
 		}
 	}
 
-	// Detect re-INVITE response: dialog already exists for this INVITE.
-	// re-INVITE responses must not contaminate SER/SEER/ISA/SCR/ASR/NER
-	// atomic counters, since the INVITE itself was not counted in inviteTotal.
-	// This also deduplicates 200 OK retransmissions (Timer G on UDP): after
-	// the dialog is created by the first 200 OK, subsequent retransmissions
-	// hit the same HasActiveDialog check and are excluded from ratio counters.
-	isReinviteResponse := false
-	if isInviteResponse {
-		if dialogID, err := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag); err == nil &&
-			e.services.dialoger.HasActiveDialog(dialogID) {
-			isReinviteResponse = true
-		}
-	}
-
 	e.services.metricser.ResponseWithMetrics(
 		carrier,
 		uaType,
@@ -1503,7 +1505,7 @@ func (e *exporter) handleResponse(
 		is200OK,
 	)
 
-	if is200OK {
+	if is200OK && (!bytes.Equal(packet.CSeq.Method, []byte("INVITE")) || processInvite200OK) {
 		e.handle200OKResponse(carrier, uaType, sourceCountry, direction, packet, isRegisterResponse, isReinviteResponse)
 	} else if isRegisterResponse {
 		e.handleRegisterNon200Response(carrier, uaType, sourceCountry, direction, packet)
@@ -1724,6 +1726,7 @@ func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {
 
 	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
 	result := e.services.dialoger.Delete(dialogID)
+	e.closeInviteTransactions(string(packet.CallID))
 	e.fasTracker.finalizeOnBye(string(packet.CallID), e.services.metricser)
 
 	if delayMs, byeCarrier, byeUAType, byeSC, ok := e.measureByeTime(string(packet.CallID)); ok {
@@ -2108,7 +2111,89 @@ func (e *exporter) getInviteCarrier(callID string) (string, string, string, stri
 func (e *exporter) storeInviteSDP(callID, cseqID string, body []byte) {
 	e.inviteSDPMutex.Lock()
 	defer e.inviteSDPMutex.Unlock()
-	e.inviteSDP[inviteSDPKey{callID: callID, cseqID: cseqID}] = inviteSDPEntity{body: body, timestamp: time.Now()}
+	e.inviteSDP[inviteSDPKey{callID: callID, cseqID: cseqID}] = inviteSDPEntity{
+		body: bytes.Clone(body), timestamp: time.Now(),
+	}
+}
+
+func (e *exporter) observeInviteTransaction(callID, cseqID string, reinvite bool) {
+	e.inviteTransactionMu.Lock()
+	defer e.inviteTransactionMu.Unlock()
+	if e.inviteTransactions == nil {
+		e.inviteTransactions = make(map[inviteSDPKey]inviteTransaction)
+	}
+	if e.closedInviteCalls != nil {
+		if _, closed := e.closedInviteCalls[callID]; closed {
+			delete(e.closedInviteCalls, callID)
+			for key := range e.inviteTransactions {
+				if key.callID == callID {
+					delete(e.inviteTransactions, key)
+				}
+			}
+		}
+	}
+	key := inviteSDPKey{callID: callID, cseqID: cseqID}
+	if transaction, ok := e.inviteTransactions[key]; ok && transaction.final {
+		return
+	}
+	e.inviteTransactions[key] = inviteTransaction{reinvite: reinvite, timestamp: time.Now()}
+}
+
+func (e *exporter) classifyInviteResponse(packet dto.Packet) (bool, bool, bool) {
+	callID, cseqID := string(packet.CallID), string(packet.CSeq.ID)
+	e.inviteTransactionMu.Lock()
+	defer e.inviteTransactionMu.Unlock()
+	if _, closed := e.closedInviteCalls[callID]; closed {
+		return false, false, false
+	}
+	if e.inviteTransactions == nil {
+		e.inviteTransactions = make(map[inviteSDPKey]inviteTransaction)
+	}
+	key := inviteSDPKey{callID: callID, cseqID: cseqID}
+	transaction, ok := e.inviteTransactions[key]
+	if !ok {
+		if dialogID, err := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag); err == nil &&
+			e.services.dialoger.HasActiveDialog(dialogID) {
+			transaction.reinvite = true
+		}
+	}
+	if len(packet.ResponseStatus) > 0 && packet.ResponseStatus[0] == '1' {
+		return !ok || !transaction.reinvite, ok && transaction.reinvite, false
+	}
+	if ok && transaction.final {
+		// Media ownership is Call-ID scoped, so the first final response wins for
+		// one CSeq; later forked branches must not replace the active revision.
+		return false, transaction.reinvite, false
+	}
+	transaction.final = true
+	transaction.timestamp = time.Now()
+	e.inviteTransactions[key] = transaction
+	return !transaction.reinvite, transaction.reinvite, bytes.Equal(packet.ResponseStatus, []byte("200"))
+}
+
+func (e *exporter) closeInviteTransactions(callID string) {
+	e.inviteTransactionMu.Lock()
+	defer e.inviteTransactionMu.Unlock()
+	if e.closedInviteCalls == nil {
+		e.closedInviteCalls = make(map[string]time.Time)
+	}
+	e.closedInviteCalls[callID] = time.Now()
+}
+
+func (e *exporter) cleanupInviteTransactions() {
+	e.inviteTransactionMu.Lock()
+	defer e.inviteTransactionMu.Unlock()
+	now := time.Now()
+	for key, transaction := range e.inviteTransactions {
+		if now.Sub(transaction.timestamp) > defaultInviteTTL {
+			delete(e.inviteTransactions, key)
+		}
+	}
+	for callID, closedAt := range e.closedInviteCalls {
+		if now.Sub(closedAt) > defaultInviteTTL {
+			delete(e.closedInviteCalls, callID)
+		}
+	}
 }
 
 // takeInviteSDP returns and removes the cached offer for one INVITE transaction.

@@ -636,6 +636,31 @@ func TestInviteSDPCSeqRetransmitReplacesSameTransaction(t *testing.T) {
 	require.Equal(t, []byte("replacement offer"), body)
 }
 
+func TestStoreInviteSDPOwnsPacketBuffer(t *testing.T) {
+	e := &exporter{inviteSDP: make(map[inviteSDPKey]inviteSDPEntity)}
+	raw := rawPacket{data: []byte("SIP body: v=0\r\nm=audio 4000 RTP/AVP 8\r\n")}
+	body := raw.data[len("SIP body: "):]
+
+	e.storeInviteSDP("call-1", "2", body)
+	copy(raw.data[len("SIP body: "):], []byte("x=0\r\nm=audio 9999 RTP/AVP 8\r\n"))
+
+	got, ok := e.takeInviteSDP("call-1", "2")
+	require.True(t, ok)
+	require.Equal(t, []byte("v=0\r\nm=audio 4000 RTP/AVP 8\r\n"), got)
+}
+
+func TestCleanupInviteTransactionsRemovesExpiredFinal(t *testing.T) {
+	key := inviteSDPKey{callID: "call-1", cseqID: "2"}
+	e := &exporter{inviteTransactions: map[inviteSDPKey]inviteTransaction{
+		key: {final: true, timestamp: time.Now().Add(-defaultInviteTTL - time.Second)},
+	}}
+
+	e.cleanupInviteTransactions()
+
+	_, ok := e.inviteTransactions[key]
+	require.False(t, ok)
+}
+
 func TestInviteSDPCSeqResponseRemovesOnlyMatchingTransaction(t *testing.T) {
 	tests := []struct {
 		name      string

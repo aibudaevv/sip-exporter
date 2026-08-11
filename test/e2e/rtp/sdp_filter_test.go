@@ -16,9 +16,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 )
+
+const sipPacketOverwriteBytes = 8192
 
 // startControlledSIPDialog emits each signalling message three times while
 // retaining both SIP ports as UDP listeners. This makes the BPF-map lifecycle
@@ -76,6 +79,13 @@ func startReinviteDialog(
 	t *testing.T, uasSIP, uacSIP, uasMedia, uacMedia string, sessionExpires int,
 ) *reinviteDialog {
 	t.Helper()
+	dialog := newReinviteDialog(t, uasSIP, uacSIP)
+	dialog.exchangeInvite(1, uacMedia, uasMedia, sessionExpires)
+	return dialog
+}
+
+func newReinviteDialog(t *testing.T, uasSIP, uacSIP string) *reinviteDialog {
+	t.Helper()
 	uasPort, err := strconv.Atoi(uasSIP)
 	require.NoError(t, err)
 	uacPort, err := strconv.Atoi(uacSIP)
@@ -96,35 +106,52 @@ func startReinviteDialog(
 		_ = dialog.uasConn.Close()
 		_ = dialog.uacConn.Close()
 	})
-	dialog.exchangeInvite(1, uacMedia, uasMedia, sessionExpires)
 	return dialog
 }
 
 func (d *reinviteDialog) exchangeInvite(cseq int, offerMedia, answerMedia string, sessionExpires int) {
 	d.t.Helper()
+	for range 3 {
+		d.sendInvite(cseq, offerMedia)
+		d.sendInviteOK(cseq, answerMedia, sessionExpires)
+	}
+}
+
+func (d *reinviteDialog) sendInvite(cseq int, offerMedia string) {
+	d.t.Helper()
 	offer := mediaSDP(offerMedia)
-	answer := mediaSDP(answerMedia)
 	toTag := ""
 	if cseq > 1 {
 		toTag = ";tag=uas"
 	}
 	invite := fmt.Sprintf("INVITE sip:service@127.0.0.1:%s SIP/2.0\r\nFrom: sipp <sip:sipp@127.0.0.1:%s>;tag=uac\r\nTo: sut <sip:service@127.0.0.1:%s>%s\r\nCall-ID: %s\r\nCSeq: %d INVITE\r\nUser-Agent: SIPp\r\nContent-Type: application/sdp\r\nContent-Length: %d\r\n\r\n%s", d.uasSIP, d.uacSIP, d.uasSIP, toTag, d.callID, cseq, len(offer), offer)
+	_, err := d.uacConn.WriteToUDP([]byte(invite), d.uasAddr)
+	require.NoError(d.t, err)
+}
+
+func (d *reinviteDialog) sendInviteOK(cseq int, answerMedia string, sessionExpires int) {
+	d.t.Helper()
+	answer := mediaSDP(answerMedia)
 	expiresHeader := ""
 	if sessionExpires > 0 {
 		expiresHeader = fmt.Sprintf("Session-Expires: %d\r\n", sessionExpires)
 	}
 	ok := fmt.Sprintf("SIP/2.0 200 OK\r\nFrom: sipp <sip:sipp@127.0.0.1:%s>;tag=uac\r\nTo: sut <sip:service@127.0.0.1:%s>;tag=uas\r\nCall-ID: %s\r\nCSeq: %d INVITE\r\nUser-Agent: SIPp\r\n%sContent-Type: application/sdp\r\nContent-Length: %d\r\n\r\n%s", d.uacSIP, d.uasSIP, d.callID, cseq, expiresHeader, len(answer), answer)
-	for range 3 {
-		_, err := d.uacConn.WriteToUDP([]byte(invite), d.uasAddr)
-		require.NoError(d.t, err)
-		_, err = d.uasConn.WriteToUDP([]byte(ok), d.uacAddr)
-		require.NoError(d.t, err)
-	}
+	_, err := d.uasConn.WriteToUDP([]byte(ok), d.uacAddr)
+	require.NoError(d.t, err)
 }
 
 func (d *reinviteDialog) sendOptionsMarker(cseq int) {
 	d.t.Helper()
 	options := fmt.Sprintf("OPTIONS sip:service@127.0.0.1:%s SIP/2.0\r\nFrom: sipp <sip:sipp@127.0.0.1:%s>;tag=uac\r\nTo: sut <sip:service@127.0.0.1:%s>;tag=uas\r\nCall-ID: %s\r\nCSeq: %d OPTIONS\r\nUser-Agent: SIPp\r\nContent-Length: 0\r\n\r\n", d.uasSIP, d.uacSIP, d.uasSIP, d.callID, cseq)
+	_, err := d.uacConn.WriteToUDP([]byte(options), d.uasAddr)
+	require.NoError(d.t, err)
+}
+
+func (d *reinviteDialog) sendOverwriteOptionsMarker(cseq int) {
+	d.t.Helper()
+	overwrite := strings.Repeat("x", sipPacketOverwriteBytes)
+	options := fmt.Sprintf("OPTIONS sip:service@127.0.0.1:%s SIP/2.0\r\nFrom: sipp <sip:sipp@127.0.0.1:%s>;tag=uac\r\nTo: sut <sip:service@127.0.0.1:%s>;tag=uas\r\nCall-ID: %s\r\nCSeq: %d OPTIONS\r\nUser-Agent: SIPp\r\nX-Overwrite: %s\r\nContent-Length: 0\r\n\r\n", d.uasSIP, d.uacSIP, d.uasSIP, d.callID, cseq, overwrite)
 	_, err := d.uacConn.WriteToUDP([]byte(options), d.uasAddr)
 	require.NoError(d.t, err)
 }
@@ -139,6 +166,19 @@ func waitForOptionsProcessing(t *testing.T, endpoint string, send func()) {
 	require.Eventually(t, func() bool {
 		return metricLineExists(t, endpoint, "sip_exporter_options_total", labelCarrier, labelUAType) &&
 			getMetricByLabel(t, endpoint, "sip_exporter_options_total", labelCarrier, labelUAType) == before+1
+	}, 5*time.Second, 100*time.Millisecond, "OPTIONS marker must be processed")
+}
+
+func waitForAnyOptionsProcessing(t *testing.T, endpoint string, send func()) {
+	t.Helper()
+	var before float64
+	if metricLineExists(t, endpoint, "sip_exporter_options_total") {
+		before = getMetricByLabel(t, endpoint, "sip_exporter_options_total")
+	}
+	send()
+	require.Eventually(t, func() bool {
+		return metricLineExists(t, endpoint, "sip_exporter_options_total") &&
+			getMetricByLabel(t, endpoint, "sip_exporter_options_total") == before+1
 	}, 5*time.Second, 100*time.Millisecond, "OPTIONS marker must be processed")
 }
 
@@ -661,6 +701,66 @@ func TestSDPFilterLateInvite200OKUsesMatchingCSeq(t *testing.T) {
 
 		finish()
 	})
+}
+
+// TestSDPFilterInviteSDPSurvivesReceiveBufferReuse smoke-tests the INVITE SDP
+// lifecycle with an intervening oversized SIP packet. The deterministic buffer
+// ownership regression is covered by TestStoreInviteSDPOwnsPacketBuffer.
+func TestSDPFilterInviteSDPSurvivesReceiveBufferReuse(t *testing.T) {
+	ports := allocatePortsN(3)
+	httpPort, uasSIP, uacSIP := ports[0], ports[1], ports[2]
+	media := allocateMediaPortsN(t, 2, ports...)
+	uasMedia, uacMedia := media[0], media[1]
+	endpoint := startExporterWithExtraEnv(t.Context(), t, httpPort, uasSIP, testInterface, "", map[string]string{
+		"GOMAXPROCS": "1",
+	})
+	dialog := newReinviteDialog(t, uasSIP, uacSIP)
+
+	dialog.sendInvite(1, uacMedia)
+	waitForAnyOptionsProcessing(t, endpoint, func() { dialog.sendOverwriteOptionsMarker(100) })
+	dialog.sendInviteOK(1, uasMedia, 0)
+	waitForAnyOptionsProcessing(t, endpoint, func() { dialog.sendOptionsMarker(101) })
+
+	probe := newParseErrorProbe(t, endpoint, uasSIP)
+	marker := func() { waitForAnyOptionsProcessing(t, endpoint, func() { dialog.sendOptionsMarker(102) }) }
+	probe.assertEndpointDelta(uacMedia, 20, 20, sendNonRTPUDP, marker)
+	probe.assertEndpointDelta(uasMedia, 20, 20, sendNonRTPUDP, marker)
+}
+
+// TestSDPFilterLateInvite200OKAfterByeDoesNotRestoreDialog verifies that a
+// retransmitted final response cannot resurrect a torn-down dialog or media.
+func TestSDPFilterLateInvite200OKAfterByeDoesNotRestoreDialog(t *testing.T) {
+	ports := allocatePortsN(3)
+	httpPort, uasSIP, uacSIP := ports[0], ports[1], ports[2]
+	media := allocateMediaPortsN(t, 2, ports...)
+	uasMedia, uacMedia := media[0], media[1]
+	endpoint := startExporterWithCarrierUA(t.Context(), t, httpPort, uasSIP,
+		integrationCarriersYAML, integrationUserAgentsYAML, "")
+	dialog := startReinviteDialog(t, uasSIP, uacSIP, uacMedia, uasMedia, 0)
+	marker := newOptionsMarker(t, endpoint, dialog.sendOptionsMarker)
+
+	require.Eventually(t, func() bool {
+		return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) == 1
+	}, 5*time.Second, 100*time.Millisecond, "initial dialog must be established")
+	dialog.end()
+	require.Eventually(t, func() bool {
+		return metricLineExists(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) == 0
+	}, 5*time.Second, 100*time.Millisecond, "BYE must remove the dialog")
+	require.Eventually(t, func() bool {
+		return metricLineExists(t, endpoint, "sip_exporter_active_dialogs") &&
+			getMetricByLabel(t, endpoint, "sip_exporter_active_dialogs") == 0
+	}, 5*time.Second, 100*time.Millisecond, "BYE must remove the active dialog")
+
+	probe := newParseErrorProbe(t, endpoint, uasSIP)
+	probe.assertEndpointDelta(uacMedia, 20, 0, sendNonRTPUDP, marker)
+	dialog.sendInviteOK(1, uacMedia, 0)
+	waitForOptionsProcessing(t, endpoint, func() { dialog.sendOptionsMarker(90) })
+
+	assert.Never(t, func() bool {
+		return getMetricByLabel(t, endpoint, "sip_exporter_active_dialogs") != 0
+	}, 2*time.Second, 100*time.Millisecond, "late INVITE 200 OK must not restore the active dialog")
+	probe.assertEndpointDelta(uacMedia, 20, 0, sendNonRTPUDP, marker)
 }
 
 func TestSDPFilterReinviteLifecycle(t *testing.T) {
