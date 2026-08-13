@@ -23,6 +23,8 @@ test/remote_test/
 # Session notes
 session*.md
 docs/superpowers/
-docs/internalwiki/posts/habr-article.md
 docs/internalwiki/
 logs/
+.e2e-logs
+.codex
+.agents
