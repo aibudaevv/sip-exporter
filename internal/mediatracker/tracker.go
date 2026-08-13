@@ -87,6 +87,18 @@ type (
 		Port uint16
 	}
 
+	// RegisterResult describes explicit SDP endpoint registration.
+	RegisterResult struct {
+		Added          bool
+		DisplacedAlias *AliasOwnership
+	}
+
+	// AliasOwnership identifies a learned endpoint displaced by explicit SDP.
+	AliasOwnership struct {
+		Endpoint MediaEndpoint
+		CallID   string
+	}
+
 	endpointKey struct {
 		ip   string
 		port uint16
@@ -186,13 +198,33 @@ func (t *Tracker) SetTTL(ttl time.Duration) {
 }
 
 // Register associates a media endpoint (IP:port) with SIP-dialog labels and
-// reports whether the dialog newly owns the endpoint.
-func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) bool {
+// reports whether the dialog newly owns the endpoint or displaced a learned alias.
+func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) RegisterResult {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	key := endpointKey{ip: ip, port: port}
-	if _, occupied := t.mediaAliases[key]; occupied {
-		return false
+	result := RegisterResult{}
+	if aliasLabels, occupied := t.mediaAliases[key]; occupied {
+		for peer, alias := range t.sourceAliases[aliasLabels.CallID] {
+			if alias == key {
+				delete(t.sourceAliases[aliasLabels.CallID], peer)
+				break
+			}
+		}
+		if len(t.sourceAliases[aliasLabels.CallID]) == 0 {
+			delete(t.sourceAliases, aliasLabels.CallID)
+		}
+		delete(t.mediaAliases, key)
+		for stream, entry := range t.streams {
+			if stream.endpoint == key && entry.labels.CallID == aliasLabels.CallID {
+				t.removeSSRCIndex(stream)
+				delete(t.streams, stream)
+			}
+		}
+		result.DisplacedAlias = &AliasOwnership{
+			Endpoint: MediaEndpoint{IP: ip, Port: port},
+			CallID:   aliasLabels.CallID,
+		}
 	}
 	if t.callMedia[labels.CallID] == nil {
 		t.callMedia[labels.CallID] = make(map[endpointKey]MediaLabels)
@@ -204,7 +236,8 @@ func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) bool {
 		t.callMediaOrder[labels.CallID] = append(t.callMediaOrder[labels.CallID], key)
 	}
 	t.media[key] = labels
-	return !owned
+	result.Added = !owned
+	return result
 }
 
 // RegisterRTCP records a separate RTCP endpoint (IP:port) for BPF-map cleanup

@@ -166,17 +166,36 @@ func TestTrackerLearnSourceAliasRejectsOccupiedEndpoint(t *testing.T) {
 	}
 }
 
-func TestTrackerRegisterRejectsLearnedAliasEndpoint(t *testing.T) {
+func TestTrackerRegisterTransfersLearnedAliasToExplicitEndpoint(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	tr.Register("10.0.0.1", 4000, sampleLabels("call-1"))
 	tr.Register("10.0.0.2", 5000, sampleLabels("call-1"))
 	_, ok := tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4100)
 	require.True(t, ok)
 
-	require.False(t, tr.Register("10.0.0.1", 4100, sampleLabels("call-2")))
+	_, ok = tr.Observe("10.0.0.9", 9000, "10.0.0.1", 4100, newHeaderSSRC(1, 42), time.Unix(1000, 0))
+	require.True(t, ok)
+
+	result := tr.Register("10.0.0.1", 4100, sampleLabels("call-2"))
+	require.True(t, result.Added)
+	require.Equal(t, &AliasOwnership{
+		Endpoint: MediaEndpoint{IP: "10.0.0.1", Port: 4100},
+		CallID:   "call-1",
+	}, result.DisplacedAlias)
 	labels, ok := tr.Lookup("10.0.0.1", 4100)
 	require.True(t, ok)
-	require.Equal(t, "call-1", labels.CallID)
+	require.Equal(t, "call-2", labels.CallID)
+	_, ok = tr.Observe("10.0.0.9", 9000, "10.0.0.1", 4100, newHeaderSSRC(2, 42), time.Unix(1001, 0))
+	require.True(t, ok)
+	stats := tr.Snapshot()
+	require.Len(t, stats, 1)
+	require.Equal(t, "call-2", stats[0].CallID)
+
+	dialogResult, _ := tr.Unregister("call-1")
+	require.True(t, dialogResult.OneWay, "transfer must preserve the old dialog RTP history")
+	labels, ok = tr.Lookup("10.0.0.1", 4100)
+	require.True(t, ok)
+	require.Equal(t, "call-2", labels.CallID)
 }
 
 func TestTrackerCanLearnSourceAliasOwner(t *testing.T) {

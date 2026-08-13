@@ -2256,8 +2256,16 @@ func (e *exporter) registerMediaEndpoints(
 		ml := labels
 		ml.SDPCodecs = m.Codecs
 		ml.ClockRates = m.ClockRates
-		if e.mediaTracker.Register(m.IP, m.Port, ml) {
+		result := e.mediaTracker.Register(m.IP, m.Port, ml)
+		if result.Added {
 			e.retainRTPEndpoint(m.IP, m.Port)
+		}
+		if displaced := result.DisplacedAlias; displaced != nil {
+			aliases := e.releaseRTPAliases(
+				displaced.CallID, []mediatracker.MediaEndpoint{displaced.Endpoint},
+			)
+			e.emitRTPAliasReleased(aliases)
+			e.releaseRTPEndpoint(displaced.Endpoint.IP, displaced.Endpoint.Port)
 		}
 		// Register a separate RTCP endpoint for non-mux capture.
 		if rtcpIP, rtcpPort, ok := resolveRTCEndpoint(m); ok {

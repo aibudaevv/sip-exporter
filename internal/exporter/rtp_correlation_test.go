@@ -458,11 +458,11 @@ func TestReplaceMediaRevisionRefCounts(t *testing.T) {
 				rtpEndpointRefs: make(map[rtpEndpointKey]uint),
 			}
 			labels := mediatracker.MediaLabels{CallID: "call-1"}
-			require.True(t, e.mediaTracker.Register(oldEndpoint.IP, oldEndpoint.Port, labels))
+			require.True(t, e.mediaTracker.Register(oldEndpoint.IP, oldEndpoint.Port, labels).Added)
 			e.retainRTPEndpoint(oldEndpoint.IP, oldEndpoint.Port)
 			if tt.shared {
 				sharedLabels := mediatracker.MediaLabels{CallID: "call-2"}
-				require.True(t, e.mediaTracker.Register(oldEndpoint.IP, oldEndpoint.Port, sharedLabels))
+				require.True(t, e.mediaTracker.Register(oldEndpoint.IP, oldEndpoint.Port, sharedLabels).Added)
 				e.retainRTPEndpoint(oldEndpoint.IP, oldEndpoint.Port)
 			}
 
@@ -474,7 +474,7 @@ func TestReplaceMediaRevisionRefCounts(t *testing.T) {
 					require.Equal(t, "call-2", gotLabels.CallID)
 				}
 				for _, endpoint := range tt.next {
-					if e.mediaTracker.Register(endpoint.IP, endpoint.Port, labels) {
+					if e.mediaTracker.Register(endpoint.IP, endpoint.Port, labels).Added {
 						e.retainRTPEndpoint(endpoint.IP, endpoint.Port)
 					}
 				}
@@ -682,6 +682,54 @@ func TestRTPAliasMetricOwnershipIgnoresForeignRTCP(t *testing.T) {
 	require.Equal(t, 1, mm.rtpAliasReleasedCalls)
 }
 
+func TestExplicitMediaEndpointTransfersLearnedAliasOwnership(t *testing.T) {
+	e, mm := newLearnedAliasTestExporter(t)
+	alias := rtpEndpointKey{IP: 0x0A000001, Port: 4100}
+	endpointMap := &fakeRTPEndpointMap{present: map[rtpEndpointKey]bool{alias: true}}
+	e.rtpEndpointsMaps = []rtpEndpointMap{endpointMap}
+	_, err := e.handleRTP(
+		net.IPv4(10, 0, 0, 2), 5000, net.IPv4(10, 0, 0, 1), 4100, makeRTPPayload(1),
+	)
+	require.NoError(t, err)
+
+	e.mediaLifecycleMu.Lock()
+	e.registerMediaEndpoints([]byte(mediaSDP("10.0.0.1", 4100)), sampleMediaLabels("call-2"))
+	e.mediaLifecycleMu.Unlock()
+
+	labels, ok := e.mediaTracker.Lookup("10.0.0.1", 4100)
+	require.True(t, ok)
+	require.Equal(t, "call-2", labels.CallID)
+	require.Equal(t, uint(1), e.rtpEndpointRefs[alias])
+	require.Equal(t, 1, mm.rtpAliasReleasedCalls)
+	require.NotContains(t, e.rtpAliasLabels, rtpAliasKey{endpoint: alias, callID: "call-1"})
+	require.True(t, endpointMap.present[alias], "transfer must not remove the BPF key")
+	require.Empty(t, endpointMap.deletes, "transfer must not create a zero-ref gap")
+	_, err = e.handleRTP(
+		net.IPv4(10, 0, 0, 9), 9000, net.IPv4(10, 0, 0, 1), 4100, makeRTPPayload(1),
+	)
+	require.NoError(t, err)
+	stats := e.mediaTracker.Snapshot()
+	require.Len(t, stats, 2)
+	callIDs := []string{stats[0].CallID, stats[1].CallID}
+	require.ElementsMatch(t, []string{"call-1", "call-2"}, callIDs)
+
+	e.unregisterMedia("call-1", true)
+	require.Equal(t, uint(1), e.rtpEndpointRefs[alias])
+	require.True(t, endpointMap.present[alias])
+	require.NotContains(t, endpointMap.deletes, alias)
+
+	e.unregisterMedia("call-2", true)
+	require.NotContains(t, e.rtpEndpointRefs, alias)
+	aliasDeletes := 0
+	for _, key := range endpointMap.deletes {
+		if key == alias {
+			aliasDeletes++
+		}
+	}
+	require.Equal(t, 1, aliasDeletes)
+	require.False(t, endpointMap.present[alias])
+}
+
 func TestRTPLearnedAliasLifecycle(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -786,7 +834,7 @@ func learnAliasOnExporter(t *testing.T, e *exporter) {
 	for _, endpoint := range []mediatracker.MediaEndpoint{
 		{IP: "10.0.0.1", Port: 4000}, {IP: "10.0.0.2", Port: 5000},
 	} {
-		require.True(t, e.mediaTracker.Register(endpoint.IP, endpoint.Port, sampleMediaLabels("call-1")))
+		require.True(t, e.mediaTracker.Register(endpoint.IP, endpoint.Port, sampleMediaLabels("call-1")).Added)
 		e.retainRTPEndpoint(endpoint.IP, endpoint.Port)
 	}
 	_, err := e.handleRTP(
