@@ -1860,16 +1860,64 @@ func TestMetricserResponseWithMetrics401(t *testing.T) {
 }
 
 func TestMetricserResponseWithMetrics3xx(t *testing.T) {
-	m := NewTestMetricser().(*metrics)
-	counters := m.getOrCreateCarrierCounters("", "", "", "")
+	tests := []struct {
+		name             string
+		status           string
+		isInviteResponse bool
+		wantSeries       bool
+		want             float64
+	}{
+		{name: "initial_invite_unlisted_3xx", status: "301", isInviteResponse: true, wantSeries: true, want: 1},
+		{name: "non_invite_3xx", status: "302", isInviteResponse: false, wantSeries: false, want: 0},
+		{name: "invite_non_3xx", status: "487", isInviteResponse: true, wantSeries: false, want: 0},
+	}
 
-	invite3xxBefore := counters.invite3xxTotal.Load()
-	invite200OKBefore := counters.invite200OKTotal.Load()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := prometheus.NewRegistry()
+			m := newMetricserWithRegistry(reg).(*metrics)
+			counters := m.getOrCreateCarrierCounters("carrier-a", "sip", "US", "inbound")
 
-	m.ResponseWithMetrics("", "", "", "", []byte("302"), true, false)
+			m.ResponseWithMetrics(
+				"carrier-a", "sip", "US", "inbound", []byte(tt.status), tt.isInviteResponse, false)
 
-	require.Equal(t, invite3xxBefore+1, counters.invite3xxTotal.Load())
-	require.Equal(t, invite200OKBefore, counters.invite200OKTotal.Load())
+			gathered, err := reg.Gather()
+			require.NoError(t, err)
+			var family *dto.MetricFamily
+			for _, candidate := range gathered {
+				if candidate.GetName() == "sip_exporter_invite_3xx_total" {
+					family = candidate
+					break
+				}
+			}
+			if !tt.wantSeries {
+				require.Nil(t, family)
+			} else {
+				require.NotNil(t, family)
+				require.Len(t, family.GetMetric(), 1)
+				require.InDelta(t, tt.want, family.GetMetric()[0].GetCounter().GetValue(), 0.01)
+			}
+			require.Equal(t, int64(tt.want), counters.invite3xxTotal.Load())
+		})
+	}
+}
+
+func TestMetricserInitialInviteCreatesZero3xxSeries(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newMetricserWithRegistry(reg).(*metrics)
+
+	m.Request("carrier-a", "sip", "US", "", "", "", "", "inbound", []byte("INVITE"))
+
+	gathered, err := reg.Gather()
+	require.NoError(t, err)
+	for _, family := range gathered {
+		if family.GetName() == "sip_exporter_invite_3xx_total" {
+			require.Len(t, family.GetMetric(), 1)
+			require.InDelta(t, 0.0, family.GetMetric()[0].GetCounter().GetValue(), 0.01)
+			return
+		}
+	}
+	t.Fatal("sip_exporter_invite_3xx_total metric not found")
 }
 
 func TestMetricserResponseWithMetricsSEEREffectiveCodes(t *testing.T) {

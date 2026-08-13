@@ -270,6 +270,32 @@ func TestGrafanaDashboardWindowedRatios(t *testing.T) {
 	}
 }
 
+func TestGrafanaDashboardWindowedSERUsesAllInviteRedirects(t *testing.T) {
+	d := readDashboard(t)
+	for _, id := range []int{11, 17} {
+		p := panelByID(t, d, id)
+		serTarget := slices.IndexFunc(p.Targets, func(target target) bool {
+			return target.LegendFormat == "SER"
+		})
+		if serTarget < 0 {
+			t.Fatalf("panel %q lacks SER target", p.Title)
+		}
+		expr := p.Targets[serTarget].Expr
+		if !strings.Contains(expr, "sip_exporter_invite_3xx_total") {
+			t.Fatalf("panel %q SER excludes only selected redirects: %s", p.Title, expr)
+		}
+		for _, fallbackPart := range []string{
+			"sum(sum by (instance, carrier, direction, ua_type, source_country)",
+			" or ", "sip_exporter_300_total", "sip_exporter_302_total",
+		} {
+			if !strings.Contains(expr, fallbackPart) {
+				t.Fatalf("panel %q SER lacks rolling-upgrade fallback %q: %s",
+					p.Title, fallbackPart, expr)
+			}
+		}
+	}
+}
+
 func TestGrafanaDashboardOptionalDataDescriptions(t *testing.T) {
 	d := readDashboard(t)
 	for _, p := range childPanels(d) {

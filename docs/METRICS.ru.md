@@ -63,6 +63,7 @@ SIP-метрики используют многоуровневую модел�
 > | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_out_of_order_total`, `rtp_jitter_milliseconds`, `rtp_pdv_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country, direction` |
 > | **RTP dialog** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country, direction` |
 > | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, direction, destination_country, caller_host, called_host, iface` |
+> | **INVITE redirects** | `invite_3xx_total` | `carrier, ua_type, source_country, direction` |
 > | **Фрод** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country, direction` |
 > | **Фрод (call-level)** | `fas_calls_total` | `carrier, ua_type, source_country, direction` |
 > | **Короткие вызовы** | `short_calls_total` | `carrier, ua_type, source_country, direction, threshold` |
@@ -521,7 +522,7 @@ sum by (destination_country) (rate(sip_exporter_invite_total[5m]))
 topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 ```
 
-> **Почему без исключения 3xx?** Строгий SER (по формуле в [Session Establishment Ratio (SER)](#session-establishment-ratio-ser)) вычитает 3xx-ответы из знаменателя. Но `300_total` — это счётчик ответов, и он **не** несёт `destination_country`, поэтому 3xx нельзя разделить по направлению в PromQL. Используется аппроксимация (200 OK / общие INVITE); для большинства развёртываний доля 3xx невелика и разница пренебрежимо мала.
+> **Почему без исключения 3xx?** Строгий SER (по формуле в [Session Establishment Ratio (SER)](#session-establishment-ratio-ser)) вычитает 3xx-ответы из знаменателя. Но `invite_3xx_total` **не** несёт `destination_country`, поэтому редиректы нельзя разделить по направлению в PromQL. Используется аппроксимация (200 OK / общие INVITE); для большинства развёртываний доля 3xx невелика и разница пренебрежимо мала.
 
 ---
 
@@ -564,6 +565,8 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 `sip_exporter_sip_retransmission_total{carrier="...",ua_type="...",direction="...",method="INVITE"}` *(counter)*: общее количество ретранслированных SIP-запросов, обнаруженных через Timer A (RFC 3261 §17.1.1.2). Ретрансляция идентифицируется, когда дубликат INVITE с тем же Call-ID приходит в пределах окна TTL invite-трекера (60с) без активного диалога. Сейчас только для INVITE; лейбл `method` зарезервирован для будущего обобщения на REGISTER/OPTIONS.
 
 `sip_exporter_invite_200_total{carrier,ua_type,source_country,destination_country,caller_host,called_host,iface}`: общее количество ответов `200 OK` на INVITE-запросы (успешные установления вызовов). Это числитель для [SER по направлению](#ser-по-направлению-promql) в PromQL. Несёт полный набор из 8 лейблов — как `invite_total`, включая `iface`.
+
+`sip_exporter_invite_3xx_total{carrier,ua_type,source_country,direction}`: общее количество принятых первых финальных ответов `3xx` на исходные INVITE-транзакции. Повторные и forked финальные ответы, re-INVITE и ответы на другие SIP-методы исключаются. Используйте этот счётчик вместе с `invite_total` и `invite_200_total`, чтобы рассчитывать оконный SER с той же семантикой редиректов, что и `sip_exporter_ser`.
 
 ## Метрики SIP-ответов (по кодам статуса)
 

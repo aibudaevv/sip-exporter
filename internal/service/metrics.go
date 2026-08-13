@@ -63,6 +63,7 @@ type (
 		sipPacketsTotal  prometheus.Counter
 
 		requestInviteTotal      *prometheus.CounterVec
+		requestInvite3xxTotal   *prometheus.CounterVec
 		requestReinviteTotal    *prometheus.CounterVec
 		requestInvite200OKTotal *prometheus.CounterVec
 		requestACKTotal         *prometheus.CounterVec
@@ -322,6 +323,9 @@ func (m *metrics) initRequestCounters(reg *prometheus.Registry) {
 	m.requestInviteTotal = newCounterVecWithRegistry(
 		"sip_exporter_invite_total",
 		"Total number of INVITE requests", clInvite, reg)
+	m.requestInvite3xxTotal = newCounterVecWithRegistry(
+		"sip_exporter_invite_3xx_total",
+		"Total number of 3xx responses to initial INVITE requests", cl, reg)
 	m.requestReinviteTotal = newCounterVecWithRegistry(
 		"sip_exporter_reinvite_total",
 		"Total number of re-INVITE requests (INVITE within an existing dialog)", cl, reg)
@@ -946,6 +950,7 @@ func (m *metrics) Request(
 			carrier, uaType, sourceCountry, direction,
 			destinationCountry, callerHost, calledHost, iface,
 		).Inc()
+		m.requestInvite3xxTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Add(0)
 		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry, direction).inviteTotal.Add(1)
 	case bytes.Equal(in, []byte("MESSAGE")):
 		m.requestMessageTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
@@ -966,6 +971,7 @@ func (m *metrics) Response(carrier, uaType, sourceCountry, direction string, in 
 
 	if isInviteResponse && len(in) == 3 && in[0] == '3' {
 		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry, direction).invite3xxTotal.Add(1)
+		m.requestInvite3xxTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 	}
 
 	if isInviteResponse && isEffectiveResponse(in) {
