@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +32,24 @@ const (
 	sippImage     = "pbertera/sipp:latest"
 	testInterface = "lo"
 )
+
+var sippRunID atomic.Uint64
+
+func nextSippCallIDFormat() string {
+	return fmt.Sprintf("load-%d-%%u-%%p@%%s", sippRunID.Add(1))
+}
+
+func TestSippCallIDFormat(t *testing.T) {
+	first := nextSippCallIDFormat()
+	second := nextSippCallIDFormat()
+
+	require.NotEqual(t, first, second)
+	for _, format := range []string{first, second} {
+		require.Contains(t, format, "%u")
+		require.Contains(t, format, "%p")
+		require.Contains(t, format, "%s")
+	}
+}
 
 type (
 	testEnv struct {
