@@ -5,6 +5,7 @@ package rtp
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,6 +24,12 @@ import (
 
 // pcmaFilter matches the PCMA codec label (SIPp streams G.711a, PT=8).
 const pcmaFilter = `codec="PCMA"`
+
+var sippRunID atomic.Uint64
+
+func nextSippCallIDFormat() string {
+	return fmt.Sprintf("e2e-%d-%%u-%%p@%%s", sippRunID.Add(1))
+}
 
 // getRTPMetric sums every RTP metric series for the PCMA codec label.
 // It returns zero if no matching series exists.
@@ -122,6 +130,7 @@ func startSippContainers(
 	uasXML, uacXML, uasSIP, uacSIP, uasMedia, uacMedia, uasIP, uacIP string,
 ) func() {
 	t.Helper()
+	callIDFormat := nextSippCallIDFormat()
 
 	scenarioDir := filepath.Join(projectRoot(), "test", "e2e", "sipp")
 
@@ -180,6 +189,7 @@ func startSippContainers(
 		"-p", uacSIP,
 		"-mp", uacMedia,
 		"-m", "1",
+		"-cid_str", callIDFormat,
 		"-nr",
 		uasIP+":"+uasSIP,
 	)

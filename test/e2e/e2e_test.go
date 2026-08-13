@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -49,8 +50,29 @@ type metricSample struct {
 
 var (
 	portMu             sync.Mutex
+	sippRunID          atomic.Uint64
 	metricValuePattern = regexp.MustCompile(`^(?:NaN|[+-]?Inf|[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)$`)
 )
+
+func nextSippCallIDFormat() string {
+	return fmt.Sprintf("e2e-%d-%%u-%%p@%%s", sippRunID.Add(1))
+}
+
+func TestSippCallIDFormat(t *testing.T) {
+	first := nextSippCallIDFormat()
+	second := nextSippCallIDFormat()
+
+	require.NotEqual(t, first, second)
+	for _, format := range []string{first, second} {
+		require.Contains(t, format, "%u")
+		require.Contains(t, format, "%p")
+		require.Contains(t, format, "%s")
+	}
+	require.NotEqual(t,
+		strings.ReplaceAll(first, "%u", "1"),
+		strings.ReplaceAll(first, "%u", "2"),
+	)
+}
 
 // allocatePorts returns 3 port numbers for exporter, SIPp server, and SIPp client.
 // Uses the kernel's ephemeral port allocator (net.Listen ":0") for each port,
@@ -808,6 +830,7 @@ func getMetricWithCarrierAndUA(t *testing.T, endpoint string, metricName string,
 // waits for calls to complete and returns statistics.
 func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario string, callCount int, env *testEnv) sippResult {
 	t.Helper()
+	callIDFormat := nextSippCallIDFormat()
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -852,6 +875,7 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 			"-i", "127.0.0.1",
 			"-p", env.sippClientPort,
 			"-m", strconv.Itoa(callCount),
+			"-cid_str", callIDFormat,
 			"-nr",
 			"127.0.0.1:"+env.sippPort,
 		)
@@ -896,6 +920,7 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 // have the specified source address. The target address for UAC is uasIP:env.sippPort.
 func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacScenario string, callCount int, env *testEnv, uasIP, uacIP string) sippResult {
 	t.Helper()
+	callIDFormat := nextSippCallIDFormat()
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -954,6 +979,7 @@ func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacS
 			"-i", uacIP,
 			"-p", env.sippClientPort,
 			"-m", strconv.Itoa(callCount),
+			"-cid_str", callIDFormat,
 			"-nr",
 			uasIP + ":" + env.sippPort,
 		},
