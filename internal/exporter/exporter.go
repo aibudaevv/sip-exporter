@@ -168,6 +168,11 @@ type (
 	inviteSDPKey struct {
 		callID, cseqID, fromTag string
 	}
+	expiredDialog struct {
+		cleanup service.CleanupResult
+		rtp     mediatracker.RTPDialogResult
+		aliases [][2]string
+	}
 
 	sockEntry struct {
 		fd    int
@@ -200,23 +205,24 @@ type (
 		dirtyRTPEndpoints map[rtpEndpointKey]bool
 		rtpAliasLabels    map[rtpAliasKey][2]string
 
-		rtpEndpointMutex sync.Mutex
-		mediaLifecycleMu sync.Mutex
-		socks            []sockEntry
-		messages         chan *rawPacket
-		done             chan struct{}
-		wg               sync.WaitGroup
-		closeOnce        sync.Once
-		packetPool       sync.Pool
-		sipPortSets      [][]uint16
-		services         services
-		carrierResolver  *carriers.Resolver
-		uaClassifier     *ua.Classifier
-		geoip            *geoip.Reader
-		localCountryCode string
-		hostLabels       bool
-		vqHandler        *vq.Handler
-		mediaTracker     *mediatracker.Tracker
+		rtpEndpointMutex  sync.Mutex
+		mediaLifecycleMu  sync.Mutex
+		dialogLifecycleMu sync.Mutex
+		socks             []sockEntry
+		messages          chan *rawPacket
+		done              chan struct{}
+		wg                sync.WaitGroup
+		closeOnce         sync.Once
+		packetPool        sync.Pool
+		sipPortSets       [][]uint16
+		services          services
+		carrierResolver   *carriers.Resolver
+		uaClassifier      *ua.Classifier
+		geoip             *geoip.Reader
+		localCountryCode  string
+		hostLabels        bool
+		vqHandler         *vq.Handler
+		mediaTracker      *mediatracker.Tracker
 		// pktSrcIP is written in parseRawPacket and read in handleMessage.
 		// Both run synchronously in the readPackets goroutine — no mutex needed.
 		// If packet parsing becomes parallel (worker pool), thread srcIP as a
@@ -618,7 +624,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 			return
 		case <-ticker.C:
 		}
-		results := e.services.dialoger.Cleanup()
+		expired := e.cleanupExpiredDialogs()
 		e.cleanupRegisterTracker()
 		e.cleanupExpiredRegistrations()
 		e.registerScanTracker.cleanup()
@@ -633,24 +639,23 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		e.fasTracker.sweep(e.services.metricser)
 		s := e.services.dialoger.Size()
 
-		for _, r := range results {
-			e.closeInviteTransactions(r.CallID)
-			e.fasTracker.clear(r.CallID)
-			e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry, r.Direction)
+		for _, r := range expired {
+			result := r.cleanup
+			e.emitRTPAliasReleased(r.aliases)
+			e.services.metricser.SessionCompleted(result.Carrier, result.UAType, result.SourceCountry, result.Direction)
 			e.services.metricser.UpdateSPD(
-				r.Carrier, r.UAType, r.SourceCountry, r.Direction, r.Duration,
+				result.Carrier, result.UAType, result.SourceCountry, result.Direction, result.Duration,
 			)
 			e.services.metricser.UpdateShortCalls(
-				r.Carrier, r.UAType, r.SourceCountry, r.Direction, r.Duration,
+				result.Carrier, result.UAType, result.SourceCountry, result.Direction, result.Duration,
 			)
 			e.services.metricser.UpdateBillableSeconds(
-				r.Carrier, r.DestinationCountry, r.Direction, r.Duration,
+				result.Carrier, result.DestinationCountry, result.Direction, result.Duration,
 			)
-			rtpResult := e.unregisterMedia(r.CallID)
-			e.handleRTPDialogResult(rtpResult, r.Carrier, r.UAType, r.SourceCountry, r.Direction)
+			e.handleRTPDialogResult(r.rtp, result.Carrier, result.UAType, result.SourceCountry, result.Direction)
 		}
 
-		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", len(results)))
+		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", len(expired)))
 
 		e.services.metricser.UpdateSessions(e.services.dialoger.Counts())
 		e.services.metricser.UpdateActiveRegistrations(e.registrationCounts())
@@ -661,6 +666,21 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		e.updateRTPMetrics()
 		e.services.metricser.UpdateActiveDialogs(s)
 	}
+}
+
+func (e *exporter) cleanupExpiredDialogs() []expiredDialog {
+	e.dialogLifecycleMu.Lock()
+	defer e.dialogLifecycleMu.Unlock()
+
+	results := e.services.dialoger.Cleanup()
+	expired := make([]expiredDialog, 0, len(results))
+	for _, r := range results {
+		e.closeInviteTransactions(r.CallID)
+		e.fasTracker.clear(r.CallID)
+		rtpResult, aliases := e.unregisterMedia(r.CallID, false)
+		expired = append(expired, expiredDialog{cleanup: r, rtp: rtpResult, aliases: aliases})
+	}
+	return expired
 }
 
 func (e *exporter) updateTrackerSizes() {
@@ -1460,6 +1480,11 @@ func (e *exporter) handleResponse(
 	packet dto.Packet,
 ) {
 	isInviteResponse := bytes.Equal(packet.CSeq.Method, []byte("INVITE"))
+	isByeResponse := bytes.Equal(packet.CSeq.Method, []byte("BYE"))
+	if isInviteResponse || isByeResponse {
+		e.dialogLifecycleMu.Lock()
+		defer e.dialogLifecycleMu.Unlock()
+	}
 	isRegisterResponse := bytes.Equal(packet.CSeq.Method, []byte("REGISTER"))
 	is200OK := bytes.Equal(packet.ResponseStatus, []byte("200"))
 	isReinviteResponse := false
@@ -1732,7 +1757,7 @@ func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {
 		e.services.metricser.UpdatePBD(byeCarrier, byeUAType, byeSC, result.Direction, delayMs)
 	}
 
-	rtpResult := e.unregisterMedia(string(packet.CallID))
+	rtpResult, _ := e.unregisterMedia(string(packet.CallID), true)
 	e.handleRTPDialogResult(rtpResult, result.Carrier, result.UAType, result.SourceCountry, result.Direction)
 	if result.Duration > 0 {
 		e.services.metricser.UpdateSPD(
@@ -2308,15 +2333,18 @@ func (e *exporter) retainRTPEndpoint(ipStr string, port uint16) {
 
 // unregisterMedia removes a dialog's media endpoints and releases matching BPF
 // endpoint references as one lifecycle operation.
-func (e *exporter) unregisterMedia(callID string) mediatracker.RTPDialogResult {
+func (e *exporter) unregisterMedia(callID string, emitAliases bool) (mediatracker.RTPDialogResult, [][2]string) {
 	e.mediaLifecycleMu.Lock()
 	defer e.mediaLifecycleMu.Unlock()
 	result, deleted := e.mediaTracker.Unregister(callID)
 	for _, ep := range deleted {
 		e.releaseRTPEndpoint(ep.IP, ep.Port)
 	}
-	e.releaseRTPAliases(callID, deleted)
-	return result
+	aliases := e.releaseRTPAliases(callID, deleted)
+	if emitAliases {
+		e.emitRTPAliasReleased(aliases)
+	}
+	return result, aliases
 }
 
 func (e *exporter) replaceMediaRevision(callID string, registerNext func()) {
@@ -2328,21 +2356,29 @@ func (e *exporter) replaceMediaRevision(callID string, registerNext func()) {
 	for _, ep := range deleted {
 		e.releaseRTPEndpoint(ep.IP, ep.Port)
 	}
-	e.releaseRTPAliases(callID, deleted)
+	e.emitRTPAliasReleased(e.releaseRTPAliases(callID, deleted))
 	registerNext()
 	for _, ep := range owned {
 		e.releaseRTPEndpoint(ep.IP, ep.Port)
 	}
 }
 
-func (e *exporter) releaseRTPAliases(callID string, endpoints []mediatracker.MediaEndpoint) {
+func (e *exporter) releaseRTPAliases(callID string, endpoints []mediatracker.MediaEndpoint) [][2]string {
+	var aliases [][2]string
 	for _, ep := range endpoints {
 		endpoint, _ := ipPortToKey(ep.IP, ep.Port)
 		key := rtpAliasKey{endpoint: endpoint, callID: callID}
 		if labels, learned := e.rtpAliasLabels[key]; learned {
-			e.services.metricser.RTPAliasReleased(labels[0], labels[1])
+			aliases = append(aliases, labels)
 			delete(e.rtpAliasLabels, key)
 		}
+	}
+	return aliases
+}
+
+func (e *exporter) emitRTPAliasReleased(aliases [][2]string) {
+	for _, labels := range aliases {
+		e.services.metricser.RTPAliasReleased(labels[0], labels[1])
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +21,34 @@ type blockingRefreshDialoger struct {
 
 	started         chan struct{}
 	continueRefresh chan struct{}
+}
+
+type blockingCleanupDialoger struct {
+	service.Dialoger
+
+	started chan struct{}
+	release chan struct{}
+}
+
+type blockingCreateDialoger struct {
+	service.Dialoger
+
+	started chan struct{}
+	release chan struct{}
+}
+
+func (d *blockingCreateDialoger) Create(p service.DialogParams) {
+	close(d.started)
+	<-d.release
+	p.ExpiresAt = time.Now().Add(-time.Second)
+	d.Dialoger.Create(p)
+}
+
+func (d *blockingCleanupDialoger) Cleanup() []service.CleanupResult {
+	results := d.Dialoger.Cleanup()
+	close(d.started)
+	<-d.release
+	return results
 }
 
 func (d *blockingRefreshDialoger) Refresh(dialogID string, expiresAt time.Time) bool {
@@ -223,7 +252,7 @@ func TestReinviteAfterExpiryDoesNotReplaceMedia(t *testing.T) {
 	dialogID, err := normalizeDialogID([]byte("expired-call"), []byte("from-tag"), []byte("to-tag"))
 	require.NoError(t, err)
 	dialoger.Delete(dialogID)
-	e.unregisterMedia("expired-call")
+	e.unregisterMedia("expired-call", true)
 	close(dialoger.continueRefresh)
 	require.NoError(t, <-done)
 
@@ -233,6 +262,117 @@ func TestReinviteAfterExpiryDoesNotReplaceMedia(t *testing.T) {
 	offer, ok := e.takeInviteSDP("expired-call", "2", "from-tag")
 	require.True(t, ok, "failed refresh must preserve the matching offer")
 	require.Equal(t, mediaSDP("10.0.2.3", 6000), string(offer))
+}
+
+func TestDialogExpiryBlocksLateInvite200OKUntilTombstone(t *testing.T) {
+	dialoger := &blockingCleanupDialoger{
+		Dialoger: service.NewDialoger(),
+		started:  make(chan struct{}),
+		release:  make(chan struct{}),
+	}
+	e := NewExporter(Deps{Metricser: &mockMetricser{}, Dialoger: dialoger}).(*exporter)
+	dialogID, err := normalizeDialogID([]byte("expired-call"), []byte("from-tag"), []byte("to-tag"))
+	require.NoError(t, err)
+	dialoger.Create(service.DialogParams{
+		DialogID: dialogID, ExpiresAt: time.Now().Add(-time.Second), CreatedAt: time.Now(), CallID: "expired-call",
+	})
+
+	releaseCleanup := sync.OnceFunc(func() { close(dialoger.release) })
+	e.wg.Add(1)
+	go e.sipDialogMetricsUpdate()
+	t.Cleanup(func() {
+		close(e.done)
+		e.wg.Wait()
+	})
+	t.Cleanup(releaseCleanup)
+
+	require.Eventually(t, func() bool {
+		select {
+		case <-dialoger.started:
+			return true
+		default:
+			return false
+		}
+	}, 2*time.Second, 10*time.Millisecond)
+
+	responseStarted := make(chan struct{})
+	responseDone := make(chan error, 1)
+	go func() {
+		close(responseStarted)
+		responseDone <- e.handleMessage("carrier", "", inviteSDPResponse(
+			"expired-call", "1", mediaSDP("10.0.9.1", 9000),
+		))
+	}()
+	<-responseStarted
+
+	select {
+	case responseErr := <-responseDone:
+		require.NoError(t, responseErr)
+		t.Fatal("late INVITE 200 OK completed before expiry installed its tombstone")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	releaseCleanup()
+	require.NoError(t, <-responseDone)
+	require.False(t, dialoger.HasActiveDialog(dialogID))
+	_, registered := e.mediaTracker.Lookup("10.0.9.1", 9000)
+	require.False(t, registered)
+}
+
+func TestInvite200OKCompletesBeforeConcurrentDialogExpiry(t *testing.T) {
+	dialoger := &blockingCreateDialoger{
+		Dialoger: service.NewDialoger(),
+		started:  make(chan struct{}),
+		release:  make(chan struct{}),
+	}
+	e := NewExporter(Deps{Metricser: &mockMetricser{}, Dialoger: dialoger}).(*exporter)
+
+	responseDone := make(chan error, 1)
+	go func() {
+		responseDone <- e.handleMessage("carrier", "", inviteSDPResponse(
+			"response-first", "1", mediaSDP("10.0.9.2", 9002),
+		))
+	}()
+	<-dialoger.started
+
+	cleanupDone := make(chan []expiredDialog, 1)
+	go func() { cleanupDone <- e.cleanupExpiredDialogs() }()
+	select {
+	case <-cleanupDone:
+		t.Fatal("expiry completed while INVITE 200 OK lifecycle was still in progress")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(dialoger.release)
+	require.NoError(t, <-responseDone)
+	<-cleanupDone
+
+	dialogID, err := normalizeDialogID([]byte("response-first"), []byte("from-tag"), []byte("to-tag"))
+	require.NoError(t, err)
+	require.False(t, dialoger.HasActiveDialog(dialogID))
+	_, registered := e.mediaTracker.Lookup("10.0.9.2", 9002)
+	require.False(t, registered)
+}
+
+func TestDialogExpiryTombstoneDoesNotRejectUnrelatedInvite200OK(t *testing.T) {
+	dialoger := service.NewDialoger()
+	e := NewExporter(Deps{Metricser: &mockMetricser{}, Dialoger: dialoger}).(*exporter)
+	expiredID, err := normalizeDialogID([]byte("expired-call"), []byte("from-tag"), []byte("to-tag"))
+	require.NoError(t, err)
+	dialoger.Create(service.DialogParams{
+		DialogID: expiredID, ExpiresAt: time.Now().Add(-time.Second), CreatedAt: time.Now(), CallID: "expired-call",
+	})
+
+	e.cleanupExpiredDialogs()
+	require.NoError(t, e.handleMessage("carrier", "", inviteSDPResponse(
+		"unrelated-call", "1", mediaSDP("10.0.9.3", 9003),
+	)))
+
+	unrelatedID, err := normalizeDialogID([]byte("unrelated-call"), []byte("from-tag"), []byte("to-tag"))
+	require.NoError(t, err)
+	require.True(t, dialoger.HasActiveDialog(unrelatedID))
+	_, registered := e.mediaTracker.Lookup("10.0.9.3", 9003)
+	require.True(t, registered)
 }
 
 func TestReinviteRefreshAppliesMatchingRevisionOnce(t *testing.T) {
@@ -524,7 +664,7 @@ func TestRTPSourceAliasReverseFlowCounted(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 2, mm.rtpPacketsCalls, "reverse flow through learned alias must be counted")
 	require.Equal(t, uint(1), e.rtpEndpointRefs[rtpEndpointKey{IP: 0x0A000001, Port: 4100}])
-	result := e.unregisterMedia("call-1")
+	result, _ := e.unregisterMedia("call-1", true)
 	require.False(t, result.OneWay)
 	require.Equal(t, 1, mm.rtpAliasLearnedCalls)
 	require.Equal(t, 1, mm.rtpAliasReleasedCalls)
@@ -535,10 +675,10 @@ func TestRTPAliasMetricOwnershipIgnoresForeignRTCP(t *testing.T) {
 	require.True(t, e.mediaTracker.RegisterRTCP("10.0.0.1", 4100, "10.0.0.9", 9000, "call-2"))
 	e.retainRTPEndpoint("10.0.0.1", 4100)
 
-	e.unregisterMedia("call-2")
+	e.unregisterMedia("call-2", true)
 	require.Zero(t, mm.rtpAliasReleasedCalls)
 
-	e.unregisterMedia("call-1")
+	e.unregisterMedia("call-1", true)
 	require.Equal(t, 1, mm.rtpAliasReleasedCalls)
 }
 

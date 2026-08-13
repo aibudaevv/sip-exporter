@@ -723,7 +723,11 @@ func TestClosedInviteTransactionGenerations(t *testing.T) {
 			e.closeInviteTransactions("call-1")
 			e.observeInviteTransaction("call-1", "2", false, "old")
 		}, packet: newResponse("2", "old"), want: true},
-		{name: "unknown closed transaction", setup: func(e *exporter) { e.closeInviteTransactions("call-1") }, packet: newResponse("1", "old")},
+		{
+			name:   "unknown closed transaction",
+			setup:  func(e *exporter) { e.closeInviteTransactions("call-1") },
+			packet: newResponse("1", "old"),
+		},
 		{name: "startup mid call", setup: func(*exporter) {}, packet: newResponse("1", "old"), want: true},
 	}
 	for _, tt := range tests {
