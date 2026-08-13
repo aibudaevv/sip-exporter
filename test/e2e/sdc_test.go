@@ -93,20 +93,23 @@ func TestSDCSessionExpires(t *testing.T) {
 	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
-	sdcBefore := getSDC(t, env.endpoint)
-	t.Logf("Before: SDC = %.0f", sdcBefore)
+	require.False(t, metricExists(t, env.endpoint, "sip_exporter_sdc_total"),
+		"SDC metric should be absent before sessions complete")
 
 	const callCount = 10
 	runSippScenario(ctx, t, "uas_short_expires.xml", "uac_short_expires.xml", callCount, env)
 
 	require.Eventually(t, func() bool {
-		return getMetric(t, env.endpoint, "sip_exporter_sessions") == 0
+		return metricExists(t, env.endpoint, "sip_exporter_sessions") &&
+			getMetric(t, env.endpoint, "sip_exporter_sessions") == 0
 	}, 15*time.Second, 500*time.Millisecond, "sessions did not expire within timeout")
 
-	sdcAfter := getSDC(t, env.endpoint)
-	t.Logf("After: SDC = %.0f", sdcAfter)
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_sdc_total"),
+		"SDC metric should exist after Session-Expires timeout")
+	sdc := getSDC(t, env.endpoint)
+	t.Logf("After: SDC = %.0f", sdc)
 
-	require.Equal(t, sdcBefore+float64(callCount), sdcAfter, "SDC should increase by %d after Session-Expires timeout", callCount)
+	require.Equal(t, float64(callCount), sdc, "SDC should equal %d after Session-Expires timeout", callCount)
 }
 
 func TestSDCWithCarrierConfig(t *testing.T) {

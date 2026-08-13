@@ -503,13 +503,14 @@ func TestMultiInterfaceSDC(t *testing.T) {
 			// Wait for all sessions to finish before checking SDC.
 			waitForSessionsZero(t, env.endpoint)
 
-			// When wantSDC == 0, the sdc_total CounterVec may be absent (no
-			// SessionCompleted calls → lazy-initialized metric never created).
-			// getSDC returns 0.0 for absent metrics, matching wantSDC.
-			if tt.wantSDC > 0 {
+			var gotSDC float64
+			if tt.wantSDC == 0 {
+				require.False(t, metricExists(t, env.endpoint, "sip_exporter_sdc_total"),
+					"SDC metric must be absent: %s", tt.description)
+			} else {
 				require.True(t, metricExists(t, env.endpoint, "sip_exporter_sdc_total"), "SDC metric must exist")
+				gotSDC = getSDC(t, env.endpoint)
 			}
-			gotSDC := getSDC(t, env.endpoint)
 
 			t.Logf("lo: invite %.0f/%.0f, 200 OK %.0f/%.0f | veth: invite %.0f/%.0f, 200 OK %.0f/%.0f | SDC %.0f/%.0f",
 				gotLoInvite, tt.wantLoInvite, gotLo200OK, tt.wantLo200OK,
