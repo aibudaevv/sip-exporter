@@ -74,6 +74,22 @@ func TestRecordingRules(t *testing.T) {
 			assertRecordingRule(t, got, tt)
 		})
 	}
+	if !strings.Contains(got["sip_exporter:ser_percent:5m"], "sip_exporter_invite_3xx_total") {
+		t.Fatalf("SER recording rule excludes only selected redirects: %s",
+			got["sip_exporter:ser_percent:5m"])
+	}
+	for _, fallbackPart := range []string{
+		" or ", "sip_exporter_300_total", "sip_exporter_302_total",
+	} {
+		if !strings.Contains(got["sip_exporter:ser_percent:5m"], fallbackPart) {
+			t.Fatalf("SER recording rule lacks rolling-upgrade fallback %q: %s",
+				fallbackPart, got["sip_exporter:ser_percent:5m"])
+		}
+	}
+	if strings.Contains(got["sip_exporter:ser_percent:5m"], "clamp_min") {
+		t.Fatalf("SER recording rule clamps a rate denominator and distorts low traffic: %s",
+			got["sip_exporter:ser_percent:5m"])
+	}
 }
 
 func TestAlertRules(t *testing.T) {

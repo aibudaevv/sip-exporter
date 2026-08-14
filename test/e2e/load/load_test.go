@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +32,24 @@ const (
 	sippImage     = "pbertera/sipp:latest"
 	testInterface = "lo"
 )
+
+var sippRunID atomic.Uint64
+
+func nextSippCallIDFormat() string {
+	return fmt.Sprintf("load-%d-%%u-%%p@%%s", sippRunID.Add(1))
+}
+
+func TestSippCallIDFormat(t *testing.T) {
+	first := nextSippCallIDFormat()
+	second := nextSippCallIDFormat()
+
+	require.NotEqual(t, first, second)
+	for _, format := range []string{first, second} {
+		require.Contains(t, format, "%u")
+		require.Contains(t, format, "%p")
+		require.Contains(t, format, "%s")
+	}
+}
 
 type (
 	testEnv struct {
@@ -79,11 +98,18 @@ type (
 	testWriter struct {
 		t *testing.T
 	}
+
+	metricSample struct {
+		name   string
+		labels map[string]string
+		value  float64
+	}
 )
 
 var (
-	portMu       sync.Mutex
-	nextBasePort = 30000
+	portMu             sync.Mutex
+	nextBasePort       = 30000
+	metricValuePattern = regexp.MustCompile(`^(?:NaN|[+-]?Inf|[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)$`)
 )
 
 func projectRoot() string {
@@ -119,43 +145,60 @@ func allocatePortsN(n int) []string {
 	return result
 }
 
-func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
+func contextTimeout(t *testing.T, ctx context.Context) time.Duration {
 	t.Helper()
-	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
+	deadline, ok := ctx.Deadline()
+	if testDeadline, testHasDeadline := t.Deadline(); testHasDeadline &&
+		(!ok || testDeadline.Before(deadline)) {
+		deadline = testDeadline
+		ok = true
+	}
+	require.True(t, ok, "load test or operation context must have a deadline")
+	timeout := time.Until(deadline)
+	require.Greater(t, timeout, time.Duration(0), "load test context deadline already expired")
+	return timeout
+}
 
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
-
-	exporterLogLevel := "error"
+func exporterContainerRequest(
+	ctx context.Context,
+	t *testing.T,
+	iface, httpPort, sipPorts string,
+) testcontainers.ContainerRequest {
+	t.Helper()
+	logLevel := "error"
 	if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
-		exporterLogLevel = "debug"
+		logLevel = "debug"
 	}
-
 	envVars := map[string]string{
-		"SIP_EXPORTER_INTERFACE":       testInterface,
-		"SIP_EXPORTER_HTTP_PORT":       exporterHTTPPort,
-		"SIP_EXPORTER_SIP_PORTS":       sippPort,
-		"SIP_EXPORTER_LOGGER_LEVEL":    exporterLogLevel,
+		"SIP_EXPORTER_INTERFACE":       iface,
+		"SIP_EXPORTER_HTTP_PORT":       httpPort,
+		"SIP_EXPORTER_SIP_PORTS":       sipPorts,
+		"SIP_EXPORTER_LOGGER_LEVEL":    logLevel,
 		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
+		"SIP_EXPORTER_TELEMETRY":       "false",
 	}
-
 	if maxProcs := os.Getenv("SIP_EXPORTER_E2E_GOMAXPROCS"); maxProcs != "" {
 		envVars["GOMAXPROCS"] = maxProcs
 	}
-
 	if goDebug := os.Getenv("SIP_EXPORTER_E2E_GODEBUG"); goDebug != "" {
 		envVars["GODEBUG"] = goDebug
 	}
-
-	req := testcontainers.ContainerRequest{
+	return testcontainers.ContainerRequest{
 		Image:       exporterImage(),
 		Privileged:  true,
 		NetworkMode: "host",
 		Env:         envVars,
 		WaitingFor: wait.ForHTTP("/metrics").
-			WithPort(exporterHTTPPort + "/tcp").
-			WithStartupTimeout(120 * time.Second),
+			WithPort(httpPort + "/tcp").
+			WithStartupTimeout(contextTimeout(t, ctx)),
 	}
+}
+
+func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
+	t.Helper()
+	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
+
+	req := exporterContainerRequest(ctx, t, testInterface, exporterHTTPPort, sippPort)
 
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
@@ -212,29 +255,9 @@ func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML,
 	sippPort2 := ports[3]
 	sippClientPort2 := ports[4]
 
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
-
-	exporterLogLevel := "error"
-	if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
-		exporterLogLevel = "debug"
-	}
-
-	envVars := map[string]string{
-		"SIP_EXPORTER_INTERFACE":       testInterface,
-		"SIP_EXPORTER_HTTP_PORT":       exporterHTTPPort,
-		"SIP_EXPORTER_SIP_PORTS":       sippPort + "," + sippPort2,
-		"SIP_EXPORTER_LOGGER_LEVEL":    exporterLogLevel,
-		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
-	}
-
-	if maxProcs := os.Getenv("SIP_EXPORTER_E2E_GOMAXPROCS"); maxProcs != "" {
-		envVars["GOMAXPROCS"] = maxProcs
-	}
-
-	if goDebug := os.Getenv("SIP_EXPORTER_E2E_GODEBUG"); goDebug != "" {
-		envVars["GODEBUG"] = goDebug
-	}
+	req := exporterContainerRequest(
+		ctx, t, testInterface, exporterHTTPPort, sippPort+","+sippPort2,
+	)
 
 	var mounts testcontainers.ContainerMounts
 
@@ -247,7 +270,7 @@ func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML,
 		t.Cleanup(func() { os.Remove(tmpFile.Name()) })
 
 		mounts = append(mounts, testcontainers.BindMount(tmpFile.Name(), "/etc/sip-exporter/carriers.yaml"))
-		envVars["SIP_EXPORTER_CARRIERS_CONFIG"] = "/etc/sip-exporter/carriers.yaml"
+		req.Env["SIP_EXPORTER_CARRIERS_CONFIG"] = "/etc/sip-exporter/carriers.yaml"
 	}
 
 	if userAgentsYAML != "" {
@@ -259,19 +282,10 @@ func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML,
 		t.Cleanup(func() { os.Remove(tmpFile.Name()) })
 
 		mounts = append(mounts, testcontainers.BindMount(tmpFile.Name(), "/etc/sip-exporter/user_agents.yaml"))
-		envVars["SIP_EXPORTER_USER_AGENTS_CONFIG"] = "/etc/sip-exporter/user_agents.yaml"
+		req.Env["SIP_EXPORTER_USER_AGENTS_CONFIG"] = "/etc/sip-exporter/user_agents.yaml"
 	}
 
-	req := testcontainers.ContainerRequest{
-		Image:       exporterImage(),
-		Privileged:  true,
-		NetworkMode: "host",
-		Env:         envVars,
-		Mounts:      mounts,
-		WaitingFor: wait.ForHTTP("/metrics").
-			WithPort(exporterHTTPPort + "/tcp").
-			WithStartupTimeout(120 * time.Second),
-	}
+	req.Mounts = mounts
 
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
@@ -337,46 +351,216 @@ func fetchMetricsBody(t *testing.T, endpoint string) []byte {
 
 func metricExists(t *testing.T, endpoint, metricName string) bool {
 	t.Helper()
-	return strings.Contains(string(fetchMetricsBody(t, endpoint)), metricName)
+	return len(readMetricSamples(t, endpoint, metricName)) > 0
 }
 
 func getMetric(t *testing.T, endpoint, metricName string) float64 {
 	t.Helper()
-
-	body := fetchMetricsBody(t, endpoint)
-
-	re := regexp.MustCompile(`^` + metricName + `(?:\{[^}]*\})?\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 2 {
-			val, parseErr := strconv.ParseFloat(matches[1], 64)
-			require.NoError(t, parseErr)
-			return val
-		}
-	}
-
-	return 0
+	return getMetricWithLabel(t, endpoint, metricName, "")
 }
 
 func getMetricWithLabel(t *testing.T, endpoint, metricName, labelFilter string) float64 {
 	t.Helper()
-
-	body := fetchMetricsBody(t, endpoint)
-
-	re := regexp.MustCompile(`^` + metricName + `\{[^}]*` + regexp.QuoteMeta(labelFilter) + `[^}]*\}\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 2 {
-			val, parseErr := strconv.ParseFloat(matches[1], 64)
-			require.NoError(t, parseErr)
-			return val
-		}
+	filterLabels, ok := parseMetricLabels(labelFilter)
+	require.True(t, ok, "invalid label filter %q", labelFilter)
+	if !ok {
+		return 0
 	}
-
-	return 0
+	matches := metricSamplesWithLabels(readMetricSamples(t, endpoint, metricName), filterLabels)
+	value, err := singleMetricValue(matches)
+	require.NoError(t, err, "read metric %s with labels %q", metricName, labelFilter)
+	return value
 }
 
-func waitForMetricStable(t *testing.T, endpoint string) {
+func getMetricSum(t *testing.T, endpoint, metricName string) float64 {
+	t.Helper()
+	samples := readMetricSamples(t, endpoint, metricName)
+	require.NotEmpty(t, samples, "metric %s must have at least one sample", metricName)
+	var sum float64
+	for _, sample := range samples {
+		sum += sample.value
+	}
+	return sum
+}
+
+func readMetricSamples(t *testing.T, endpoint, metricName string) []metricSample {
+	t.Helper()
+
+	var samples []metricSample
+	for _, line := range strings.Split(string(fetchMetricsBody(t, endpoint)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		separator := metricSeriesEnd(line)
+		if separator < 0 {
+			continue
+		}
+		series, fields := line[:separator], strings.Fields(line[separator:])
+		if len(fields) == 0 || len(fields) > 2 {
+			continue
+		}
+		if len(fields) == 2 {
+			if _, err := strconv.ParseInt(fields[1], 10, 64); err != nil {
+				continue
+			}
+		}
+		if !metricValuePattern.MatchString(fields[0]) {
+			continue
+		}
+		name := series
+		labels := map[string]string{}
+		if labelsStart := strings.IndexByte(series, '{'); labelsStart >= 0 {
+			name = series[:labelsStart]
+			if !strings.HasSuffix(series, "}") {
+				continue
+			}
+			var ok bool
+			labels, ok = parseMetricLabels(series[labelsStart+1 : len(series)-1])
+			if !ok {
+				continue
+			}
+		}
+		if name != metricName {
+			continue
+		}
+		value, err := strconv.ParseFloat(fields[0], 64)
+		if err != nil {
+			continue
+		}
+		samples = append(samples, metricSample{name: name, labels: labels, value: value})
+	}
+	return samples
+}
+
+func metricSeriesEnd(line string) int {
+	insideLabels := false
+	insideValue := false
+	escaped := false
+	for i := 0; i < len(line); i++ {
+		if insideValue {
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch line[i] {
+			case '\\':
+				escaped = true
+			case '"':
+				insideValue = false
+			}
+			continue
+		}
+		switch line[i] {
+		case '{':
+			insideLabels = true
+		case '}':
+			insideLabels = false
+		case '"':
+			if insideLabels {
+				insideValue = true
+			}
+		case ' ', '\t':
+			if !insideLabels {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func parseMetricLabels(input string) (map[string]string, bool) {
+	labels := make(map[string]string)
+	for input != "" {
+		equals := strings.IndexByte(input, '=')
+		if equals <= 0 || equals+1 >= len(input) || input[equals+1] != '"' {
+			return nil, false
+		}
+		name := input[:equals]
+		if !validMetricLabelName(name) {
+			return nil, false
+		}
+		if _, duplicate := labels[name]; duplicate {
+			return nil, false
+		}
+		valueEnd := equals + 2
+		for valueEnd < len(input) {
+			if input[valueEnd] == '\\' {
+				if valueEnd+1 >= len(input) || !strings.ContainsRune(`\"n`, rune(input[valueEnd+1])) {
+					return nil, false
+				}
+				valueEnd += 2
+				continue
+			}
+			if input[valueEnd] == '"' {
+				break
+			}
+			valueEnd++
+		}
+		if valueEnd >= len(input) {
+			return nil, false
+		}
+		value, err := strconv.Unquote(input[equals+1 : valueEnd+1])
+		if err != nil {
+			return nil, false
+		}
+		labels[name] = value
+		input = input[valueEnd+1:]
+		if input == "" {
+			break
+		}
+		if input[0] != ',' {
+			return nil, false
+		}
+		input = input[1:]
+		if input == "" {
+			return nil, false
+		}
+	}
+	return labels, true
+}
+
+func validMetricLabelName(name string) bool {
+	for i := 0; i < len(name); i++ {
+		valid := name[i] == '_' || name[i] >= 'a' && name[i] <= 'z' || name[i] >= 'A' && name[i] <= 'Z'
+		if i > 0 {
+			valid = valid || name[i] >= '0' && name[i] <= '9'
+		}
+		if !valid {
+			return false
+		}
+	}
+	return name != ""
+}
+
+func matchMetricLabels(sampleLabels, filterLabels map[string]string) bool {
+	for name, value := range filterLabels {
+		sampleValue, exists := sampleLabels[name]
+		if !exists || sampleValue != value {
+			return false
+		}
+	}
+	return true
+}
+
+func metricSamplesWithLabels(samples []metricSample, filterLabels map[string]string) []metricSample {
+	var matches []metricSample
+	for _, sample := range samples {
+		if matchMetricLabels(sample.labels, filterLabels) {
+			matches = append(matches, sample)
+		}
+	}
+	return matches
+}
+
+func singleMetricValue(samples []metricSample) (float64, error) {
+	if len(samples) != 1 {
+		return 0, fmt.Errorf("expected exactly one metric sample, got %d", len(samples))
+	}
+	return samples[0].value, nil
+}
+
+func waitForMetricStable(ctx context.Context, t *testing.T, endpoint string) {
 	t.Helper()
 	prev := -1.0
 	stableCount := 0
@@ -389,7 +573,7 @@ func waitForMetricStable(t *testing.T, endpoint string) {
 		prev = cur
 		stableCount = 0
 		return false
-	}, 60*time.Second, 300*time.Millisecond, "metrics did not stabilize after SIPp scenario")
+	}, contextTimeout(t, ctx), 300*time.Millisecond, "metrics did not stabilize after SIPp scenario")
 }
 
 func absScenarioPath(t *testing.T, filename string) string {
@@ -425,7 +609,7 @@ func startSippContainer(
 	}
 
 	if waitForExit {
-		req.WaitingFor = wait.ForExit().WithExitTimeout(300 * time.Second)
+		req.WaitingFor = wait.ForExit().WithExitTimeout(contextTimeout(t, ctx))
 	}
 
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
@@ -457,7 +641,7 @@ func waitForContainerExit(ctx context.Context, t *testing.T, c testcontainers.Co
 			return false
 		}
 		return !state.Running
-	}, 300*time.Second, 500*time.Millisecond, "SIPp container did not exit in time")
+	}, contextTimeout(t, ctx), 500*time.Millisecond, "SIPp container did not exit in time")
 }
 
 func newStatsCollector(containerID string) (*statsCollector, error) {
@@ -590,9 +774,6 @@ func runSippLoad(
 ) loadResult {
 	t.Helper()
 
-	ctx, cancel := context.WithTimeout(ctx, 600*time.Second)
-	defer cancel()
-
 	stats, statsErr := newStatsCollector(env.exporterContainer.GetContainerID())
 	require.NoError(t, statsErr)
 
@@ -647,7 +828,7 @@ func runSippLoad(
 	sippEnd := time.Now()
 	sippDuration := sippEnd.Sub(start)
 
-	waitForMetricStable(t, env.endpoint)
+	waitForMetricStable(ctx, t, env.endpoint)
 
 	stableTime := time.Now()
 	drainTime := stableTime.Sub(sippEnd)
@@ -705,9 +886,6 @@ func runConcurrentLoad(
 ) loadResult {
 	t.Helper()
 
-	ctx, cancel := context.WithTimeout(ctx, 600*time.Second)
-	defer cancel()
-
 	stats, statsErr := newStatsCollector(env.exporterContainer.GetContainerID())
 	require.NoError(t, statsErr)
 
@@ -745,23 +923,25 @@ func runConcurrentLoad(
 
 	var peakSessions float64
 	require.Eventually(t, func() bool {
-		s := getMetric(t, env.endpoint, "sip_exporter_sessions")
-		if s > peakSessions {
-			peakSessions = s
+		if metricExists(t, env.endpoint, "sip_exporter_sessions") {
+			sessions := getMetric(t, env.endpoint, "sip_exporter_sessions")
+			if sessions > peakSessions {
+				peakSessions = sessions
+			}
 		}
 		state, stateErr := uacContainer.State(ctx)
 		if stateErr != nil {
 			return false
 		}
 		return !state.Running
-	}, 300*time.Second, 500*time.Millisecond, "UAC container did not exit in time")
+	}, contextTimeout(t, ctx), 500*time.Millisecond, "UAC container did not exit in time")
 
 	waitForContainerExit(ctx, t, uasContainer)
 
 	sippEnd := time.Now()
 	sippDuration := sippEnd.Sub(start)
 
-	waitForMetricStable(t, env.endpoint)
+	waitForMetricStable(ctx, t, env.endpoint)
 
 	stableTime := time.Now()
 	drainTime := stableTime.Sub(sippEnd)

@@ -34,6 +34,241 @@ func TestCorrelatorRegisterAndLookup(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestTrackerLearnSourceAlias(t *testing.T) {
+	tests := []struct {
+		name       string
+		endpoints  []MediaEndpoint
+		matched    MediaEndpoint
+		sourceIP   string
+		sourcePort uint16
+		want       MediaEndpoint
+		wantOK     bool
+	}{
+		{
+			name: "two endpoints with same peer IP learns remapped port",
+			endpoints: []MediaEndpoint{
+				{IP: "10.0.0.1", Port: 4000},
+				{IP: "10.0.0.2", Port: 5000},
+			},
+			matched:    MediaEndpoint{IP: "10.0.0.2", Port: 5000},
+			sourceIP:   "10.0.0.1",
+			sourcePort: 4100,
+			want:       MediaEndpoint{IP: "10.0.0.1", Port: 4100},
+			wantOK:     true,
+		},
+		{
+			name:       "one endpoint is rejected",
+			endpoints:  []MediaEndpoint{{IP: "10.0.0.2", Port: 5000}},
+			matched:    MediaEndpoint{IP: "10.0.0.2", Port: 5000},
+			sourceIP:   "10.0.0.1",
+			sourcePort: 4100,
+		},
+		{
+			name: "three endpoints are rejected",
+			endpoints: []MediaEndpoint{
+				{IP: "10.0.0.1", Port: 4000},
+				{IP: "10.0.0.2", Port: 5000},
+				{IP: "10.0.0.3", Port: 6000},
+			},
+			matched:    MediaEndpoint{IP: "10.0.0.2", Port: 5000},
+			sourceIP:   "10.0.0.1",
+			sourcePort: 4100,
+		},
+		{
+			name: "changed source IP is rejected",
+			endpoints: []MediaEndpoint{
+				{IP: "10.0.0.1", Port: 4000},
+				{IP: "10.0.0.2", Port: 5000},
+			},
+			matched:    MediaEndpoint{IP: "10.0.0.2", Port: 5000},
+			sourceIP:   "10.0.0.99",
+			sourcePort: 4100,
+		},
+		{
+			name: "unchanged source port is rejected",
+			endpoints: []MediaEndpoint{
+				{IP: "10.0.0.1", Port: 4000},
+				{IP: "10.0.0.2", Port: 5000},
+			},
+			matched:    MediaEndpoint{IP: "10.0.0.2", Port: 5000},
+			sourceIP:   "10.0.0.1",
+			sourcePort: 4000,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := NewTracker(30 * time.Second)
+			for _, endpoint := range tt.endpoints {
+				tr.Register(endpoint.IP, endpoint.Port, sampleLabels("call-1"))
+			}
+
+			got, ok := tr.LearnSourceAlias(
+				"call-1", tt.matched.IP, tt.matched.Port, tt.sourceIP, tt.sourcePort,
+			)
+			require.Equal(t, tt.wantOK, ok)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestTrackerLearnSourceAliasRejectsRepeatedAlias(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 4000, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5000, sampleLabels("call-1"))
+
+	_, ok := tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4100)
+	require.True(t, ok)
+
+	got, ok := tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4100)
+	require.False(t, ok)
+	require.Equal(t, MediaEndpoint{}, got)
+
+	got, ok = tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4200)
+	require.False(t, ok)
+	require.Equal(t, MediaEndpoint{}, got)
+}
+
+func TestTrackerLearnSourceAliasRejectsOccupiedEndpoint(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*Tracker)
+	}{
+		{
+			name: "advertised endpoint",
+			setup: func(tr *Tracker) {
+				tr.Register("10.0.0.1", 4100, sampleLabels("call-2"))
+			},
+		},
+		{
+			name: "learned endpoint",
+			setup: func(tr *Tracker) {
+				tr.Register("10.0.0.1", 4001, sampleLabels("call-2"))
+				tr.Register("10.0.0.3", 6000, sampleLabels("call-2"))
+				_, ok := tr.LearnSourceAlias("call-2", "10.0.0.3", 6000, "10.0.0.1", 4100)
+				require.True(t, ok)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := NewTracker(30 * time.Second)
+			tr.Register("10.0.0.1", 4000, sampleLabels("call-1"))
+			tr.Register("10.0.0.2", 5000, sampleLabels("call-1"))
+			tt.setup(tr)
+
+			got, ok := tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4100)
+
+			require.False(t, ok)
+			require.Equal(t, MediaEndpoint{}, got)
+		})
+	}
+}
+
+func TestTrackerRegisterTransfersLearnedAliasToExplicitEndpoint(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 4000, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5000, sampleLabels("call-1"))
+	_, ok := tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4100)
+	require.True(t, ok)
+
+	_, ok = tr.Observe("10.0.0.9", 9000, "10.0.0.1", 4100, newHeaderSSRC(1, 42), time.Unix(1000, 0))
+	require.True(t, ok)
+
+	result := tr.Register("10.0.0.1", 4100, sampleLabels("call-2"))
+	require.True(t, result.Added)
+	require.Equal(t, &AliasOwnership{
+		Endpoint: MediaEndpoint{IP: "10.0.0.1", Port: 4100},
+		CallID:   "call-1",
+	}, result.DisplacedAlias)
+	labels, ok := tr.Lookup("10.0.0.1", 4100)
+	require.True(t, ok)
+	require.Equal(t, "call-2", labels.CallID)
+	_, ok = tr.Observe("10.0.0.9", 9000, "10.0.0.1", 4100, newHeaderSSRC(2, 42), time.Unix(1001, 0))
+	require.True(t, ok)
+	stats := tr.Snapshot()
+	require.Len(t, stats, 1)
+	require.Equal(t, "call-2", stats[0].CallID)
+
+	dialogResult, _ := tr.Unregister("call-1")
+	require.True(t, dialogResult.OneWay, "transfer must preserve the old dialog RTP history")
+	labels, ok = tr.Lookup("10.0.0.1", 4100)
+	require.True(t, ok)
+	require.Equal(t, "call-2", labels.CallID)
+}
+
+func TestTrackerCanLearnSourceAliasOwner(t *testing.T) {
+	matched := endpointKey{ip: "10.0.0.2", port: 5000}
+	tests := []struct {
+		name  string
+		setup func(*Tracker)
+		want  bool
+	}{
+		{
+			name: "matching unique owner",
+			setup: func(tr *Tracker) {
+				tr.Register(matched.ip, matched.port, sampleLabels("call-1"))
+			},
+			want: true,
+		},
+		{
+			name:  "zero owners",
+			setup: func(*Tracker) {},
+		},
+		{
+			name: "two owners",
+			setup: func(tr *Tracker) {
+				tr.Register(matched.ip, matched.port, sampleLabels("call-1"))
+				tr.Register(matched.ip, matched.port, sampleLabels("call-2"))
+			},
+		},
+		{
+			name: "foreign unique owner",
+			setup: func(tr *Tracker) {
+				tr.Register(matched.ip, matched.port, sampleLabels("call-2"))
+			},
+		},
+		{
+			name: "shared owner removal restores eligibility",
+			setup: func(tr *Tracker) {
+				tr.Register(matched.ip, matched.port, sampleLabels("call-1"))
+				tr.Register(matched.ip, matched.port, sampleLabels("call-2"))
+				tr.Unregister("call-2")
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := NewTracker(30 * time.Second)
+			tt.setup(tr)
+
+			tr.mu.Lock()
+			got := tr.canLearnSourceAlias("call-1", matched)
+			tr.mu.Unlock()
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestTrackerUnregisterReturnsLearnedAlias(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 4000, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5000, sampleLabels("call-1"))
+
+	_, ok := tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4100)
+	require.True(t, ok)
+
+	_, deleted := tr.Unregister("call-1")
+	require.ElementsMatch(t, []MediaEndpoint{
+		{IP: "10.0.0.1", Port: 4000},
+		{IP: "10.0.0.2", Port: 5000},
+		{IP: "10.0.0.1", Port: 4100},
+	}, deleted)
+}
+
 func TestCorrelatorUnregisterByCallID(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
@@ -62,6 +297,46 @@ func TestTrackerUnregisterReturnsDeletedEndpoints(t *testing.T) {
 	require.True(t, ips["10.0.0.1"] && ips["10.0.0.2"], "must return call-1 endpoints only")
 }
 
+func TestTrackerUnregisterReturnsSharedEndpointForEachOwner(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-2"))
+
+	_, deletedFirst := tr.Unregister("call-1")
+	require.Equal(t, []MediaEndpoint{{IP: "10.0.0.1", Port: 5004}}, deletedFirst)
+
+	labels, ok := tr.Lookup("10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Equal(t, "call-2", labels.CallID)
+
+	_, deletedSecond := tr.Unregister("call-2")
+	require.Equal(t, []MediaEndpoint{{IP: "10.0.0.1", Port: 5004}}, deletedSecond)
+	_, ok = tr.Lookup("10.0.0.1", 5004)
+	require.False(t, ok)
+}
+
+func TestTrackerUnregisterRestoresPreviousSharedEndpointOwner(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-2"))
+
+	_, deleted := tr.Unregister("call-2")
+	require.Equal(t, []MediaEndpoint{{IP: "10.0.0.1", Port: 5004}}, deleted)
+
+	labels, ok := tr.Lookup("10.0.0.1", 5004)
+	require.True(t, ok)
+	require.Equal(t, "call-1", labels.CallID)
+}
+
+func TestTrackerDuplicateEndpointRegistrationHasOneOwner(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+
+	_, deleted := tr.Unregister("call-1")
+	require.Equal(t, []MediaEndpoint{{IP: "10.0.0.1", Port: 5004}}, deleted)
+}
+
 func TestTrackerUnregisterReturnsRTCPEndpoints(t *testing.T) {
 	tr := NewTracker(30 * time.Second)
 	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
@@ -80,6 +355,22 @@ func TestTrackerUnregisterReturnsRTCPEndpoints(t *testing.T) {
 
 	_, deleted2 := tr.Unregister("call-2")
 	require.Len(t, deleted2, 2, "call-2 must also return both endpoints")
+}
+
+func TestTrackerUnregisterReturnsSharedRTCPEndpointForEachOwner(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5006, sampleLabels("call-2"))
+	tr.RegisterRTCP("10.0.0.3", 5005, "10.0.0.1", 5004, "call-1")
+	tr.RegisterRTCP("10.0.0.3", 5005, "10.0.0.2", 5006, "call-2")
+
+	_, deletedFirst := tr.Unregister("call-1")
+	require.Len(t, deletedFirst, 2)
+	require.Contains(t, deletedFirst, MediaEndpoint{IP: "10.0.0.3", Port: 5005})
+
+	_, deletedSecond := tr.Unregister("call-2")
+	require.Len(t, deletedSecond, 2)
+	require.Contains(t, deletedSecond, MediaEndpoint{IP: "10.0.0.3", Port: 5005})
 }
 
 func TestTrackerUnregisterNoRTCPOnlyRTPReturned(t *testing.T) {
@@ -171,6 +462,76 @@ func TestTrackerObserveDuplicateFlag(t *testing.T) {
 	require.Len(t, stats, 1)
 	require.Equal(t, uint64(2), stats[0].PacketsTotal)
 	require.Equal(t, uint64(1), stats[0].PacketsDuplicate, "snapshot must report 1 duplicate")
+}
+
+func TestTrackerObserveAliasSharedDestinationCounted(t *testing.T) {
+	tr := NewTracker(30 * time.Second)
+	tr.Register("10.0.0.1", 4000, sampleLabels("call-1"))
+	tr.Register("10.0.0.2", 5000, sampleLabels("call-1"))
+	tr.Register("10.0.0.1", 4001, sampleLabels("call-2"))
+	tr.Register("10.0.0.2", 5000, sampleLabels("call-2"))
+
+	result, ok := tr.Observe(
+		"10.0.0.1", 4100, "10.0.0.2", 5000, newHeader(1, 160), time.Unix(1000, 0),
+	)
+	require.True(t, ok)
+	require.True(t, result.Counted)
+	require.Nil(t, result.LearnedEndpoint)
+}
+
+func TestTrackerObserveAliasDuplicateAndSourceFallbackCounted(t *testing.T) {
+	tests := []struct {
+		name      string
+		endpoints []MediaEndpoint
+		observe   func(*testing.T, *Tracker) (ObserveResult, bool)
+		counted   bool
+		duplicate bool
+	}{
+		{
+			name: "duplicate",
+			endpoints: []MediaEndpoint{
+				{IP: "10.0.0.1", Port: 4000},
+				{IP: "10.0.0.2", Port: 5000},
+			},
+			observe: func(t *testing.T, tr *Tracker) (ObserveResult, bool) {
+				arrival := time.Unix(1000, 0)
+				_, ok := tr.Observe("10.0.0.99", 4100, "10.0.0.2", 5000, newHeader(1, 160), arrival)
+				require.True(t, ok)
+				return tr.Observe(
+					"10.0.0.1", 4100, "10.0.0.2", 5000, newHeader(1, 160), arrival.Add(time.Millisecond),
+				)
+			},
+			duplicate: true,
+		},
+		{
+			name: "source fallback",
+			endpoints: []MediaEndpoint{
+				{IP: "10.0.0.1", Port: 4000},
+				{IP: "10.0.0.1", Port: 5000},
+			},
+			observe: func(_ *testing.T, tr *Tracker) (ObserveResult, bool) {
+				return tr.Observe(
+					"10.0.0.1", 4000, "10.0.0.99", 5000, newHeader(1, 160), time.Unix(1000, 0),
+				)
+			},
+			counted: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := NewTracker(30 * time.Second)
+			for _, endpoint := range tt.endpoints {
+				tr.Register(endpoint.IP, endpoint.Port, sampleLabels("call-1"))
+			}
+
+			result, ok := tt.observe(t, tr)
+			require.True(t, ok)
+			require.Equal(t, tt.counted, result.Counted)
+			require.Equal(t, tt.duplicate, result.Duplicate)
+			require.Nil(t, result.LearnedEndpoint)
+		})
+	}
 }
 
 func TestTrackerSnapshotComputesMOSAndJitter(t *testing.T) {
@@ -469,6 +830,111 @@ func TestTrackerUnregisterResultSurvivesTTL(t *testing.T) {
 	require.True(t, r.MediaExpected, "media endpoints persist")
 	require.True(t, r.RTPObserved, "RTP fact must survive stream TTL")
 	require.False(t, r.OneWay, "two-way RTP was observed")
+}
+
+func TestTrackerRTPAcrossRevision(t *testing.T) {
+	tests := []struct {
+		name            string
+		observePrevious bool
+		observeCurrent  bool
+		want            RTPDialogResult
+	}{
+		{
+			name:            "previous revision RTP remains dialog evidence",
+			observePrevious: true,
+			want:            RTPDialogResult{MediaExpected: true, RTPObserved: true},
+		},
+		{
+			name:            "one-way uses only current revision RTP",
+			observePrevious: true,
+			observeCurrent:  true,
+			want: RTPDialogResult{
+				MediaExpected: true,
+				RTPObserved:   true,
+				OneWay:        true,
+			},
+		},
+		{
+			name: "dialog without RTP remains missing",
+			want: RTPDialogResult{MediaExpected: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := NewTracker(30 * time.Second)
+			tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+			tr.Register("10.0.0.2", 5006, sampleLabels("call-1"))
+			if tt.observePrevious {
+				_, ok := tr.Observe(
+					"10.0.0.99", 9999, "10.0.0.1", 5004,
+					newHeader(1, 160), time.Unix(1000, 0),
+				)
+				require.True(t, ok)
+			}
+
+			tr.Replace("call-1")
+			require.Empty(t, tr.Snapshot(), "previous revision streams must be removed")
+			tr.Register("10.0.1.1", 6004, sampleLabels("call-1"))
+			tr.Register("10.0.1.2", 6006, sampleLabels("call-1"))
+			if tt.observeCurrent {
+				_, ok := tr.Observe(
+					"10.0.1.99", 9999, "10.0.1.1", 6004,
+					newHeader(1, 160), time.Unix(1001, 0),
+				)
+				require.True(t, ok)
+			}
+
+			got, _ := tr.Unregister("call-1")
+			require.Equal(t, tt.want, got)
+			got, _ = tr.Unregister("call-1")
+			require.Equal(t, RTPDialogResult{}, got)
+		})
+	}
+}
+
+func TestMediaRevisionOwnedEndpoints(t *testing.T) {
+	t.Run("snapshot includes RTP RTCP and learned aliases", func(t *testing.T) {
+		tr := NewTracker(30 * time.Second)
+		tr.Register("10.0.0.1", 4000, sampleLabels("call-1"))
+		tr.Register("10.0.0.2", 5000, sampleLabels("call-1"))
+		tr.RegisterRTCP("10.0.0.2", 5007, "10.0.0.2", 5000, "call-1")
+		_, ok := tr.LearnSourceAlias("call-1", "10.0.0.2", 5000, "10.0.0.1", 4100)
+		require.True(t, ok)
+
+		require.ElementsMatch(t, []MediaEndpoint{
+			{IP: "10.0.0.1", Port: 4000},
+			{IP: "10.0.0.2", Port: 5000},
+			{IP: "10.0.0.2", Port: 5007},
+			{IP: "10.0.0.1", Port: 4100},
+		}, tr.OwnedEndpoints("call-1"))
+	})
+
+	t.Run("snapshot preserves coincident RTP and RTCP ownership", func(t *testing.T) {
+		tr := NewTracker(30 * time.Second)
+		tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+		tr.RegisterRTCP("10.0.0.1", 5004, "10.0.0.1", 5004, "call-1")
+
+		require.Equal(t, []MediaEndpoint{
+			{IP: "10.0.0.1", Port: 5004},
+			{IP: "10.0.0.1", Port: 5004},
+		}, tr.OwnedEndpoints("call-1"))
+	})
+
+	t.Run("snapshot stays empty after replacement and unregister", func(t *testing.T) {
+		tr := NewTracker(30 * time.Second)
+		tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+		tr.Replace("call-1")
+		require.Empty(t, tr.OwnedEndpoints("call-1"))
+		tr.Replace("call-1")
+		require.Empty(t, tr.OwnedEndpoints("call-1"))
+
+		tr.Register("10.0.0.1", 5004, sampleLabels("call-1"))
+		tr.Unregister("call-1")
+		require.Empty(t, tr.OwnedEndpoints("call-1"))
+		tr.Unregister("call-1")
+		require.Empty(t, tr.OwnedEndpoints("call-1"))
+	})
 }
 
 // TestTrackerLookupBySSRC verifies RTCP correlation: an SSRC from an RTCP report

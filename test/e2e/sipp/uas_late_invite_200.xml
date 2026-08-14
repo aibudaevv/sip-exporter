@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<scenario name="UAS late old INVITE 200 response">
+    <Global variables="new_answer_port" />
+    <recv request="INVITE" crlf="true">
+        <action>
+            <ereg regexp=".*" search_in="hdr" header="Via:" check_it="true" assign_to="initial_via" />
+        </action>
+    </recv>
+    <send>
+        <![CDATA[
+        SIP/2.0 200 OK
+        [last_Via:]
+        [last_From:]
+        [last_To:];tag=[call_number]
+        [last_Call-ID:]
+        [last_CSeq:]
+        Contact: sip:sipp@[local_ip]:[local_port]
+        User-Agent: sipp-rtp-uas
+        Content-Type: application/sdp
+        Content-Length: [len]
+
+        v=0
+        c=IN IP4 [local_ip]
+        m=audio [media_port] RTP/AVP 0 8
+        a=rtpmap:0 PCMU/8000
+        a=rtpmap:8 PCMA/8000
+        ]]>
+    </send>
+    <recv request="ACK" crlf="true"/>
+    <recv request="INVITE" crlf="true">
+        <action>
+            <ereg regexp=".*" search_in="hdr" header="Via:" check_it="true" assign_to="reinvite_via" />
+        </action>
+    </recv>
+    <send>
+        <![CDATA[
+        SIP/2.0 200 OK
+        Via: [$initial_via]
+        [last_From:]
+        [last_To:]
+        [last_Call-ID:]
+        CSeq: 1 INVITE
+        Contact: sip:sipp@[local_ip]:[local_port]
+        User-Agent: sipp-rtp-uas
+        Content-Type: application/sdp
+        Content-Length: [len]
+
+        v=0
+        c=IN IP4 [local_ip]
+        m=audio [media_port] RTP/AVP 0 8
+        a=rtpmap:0 PCMU/8000
+        a=rtpmap:8 PCMA/8000
+        ]]>
+    </send>
+    <recv request="ACK" crlf="true"/>
+    <send>
+        <![CDATA[
+        SIP/2.0 200 OK
+        Via: [$reinvite_via]
+        [last_From:]
+        [last_To:]
+        [last_Call-ID:]
+        CSeq: 2 INVITE
+        Contact: sip:sipp@[local_ip]:[local_port]
+        User-Agent: sipp-rtp-uas
+        Content-Type: application/sdp
+        Content-Length: [len]
+
+        v=0
+        c=IN IP4 [local_ip]
+        m=audio [$new_answer_port] RTP/AVP 0 8
+        a=rtpmap:0 PCMU/8000
+        a=rtpmap:8 PCMA/8000
+        ]]>
+    </send>
+    <recv request="ACK" crlf="true"/>
+    <recv request="OPTIONS" crlf="true"/>
+    <send>
+        <![CDATA[
+        SIP/2.0 200 OK
+        [last_Via:]
+        [last_From:]
+        [last_To:]
+        [last_Call-ID:]
+        [last_CSeq:]
+        Content-Length: 0
+        ]]>
+    </send>
+    <recv request="BYE" crlf="true"/>
+    <send>
+        <![CDATA[
+        SIP/2.0 200 OK
+        [last_Via:]
+        [last_From:]
+        [last_To:]
+        [last_Call-ID:]
+        [last_CSeq:]
+        Content-Length: 0
+        ]]>
+    </send>
+</scenario>

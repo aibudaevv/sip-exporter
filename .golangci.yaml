@@ -15,7 +15,7 @@
 # This file is licensed under the terms of the MIT license https://opensource.org/license/mit
 # Copyright (c) 2021-2025 Marat Reymers
 
-## Golden config for golangci-lint v2.7.1
+## Golden config for golangci-lint v2.9.0
 #
 # This is the best config for golangci-lint based on my experience and opinion.
 # It is very strict, but not extremely strict.
@@ -482,6 +482,14 @@ linters:
         linters: [ revive, staticcheck ]
       - text: 'G115' # integer overflow — expected in network code (port conversions)
         linters: [ gosec ]
+      # compoundPacketLen guarantees a full common header before the only call.
+      - path: 'internal/rtcp/parser\.go'
+        text: 'G602: slice index out of range'
+        linters: [ gosec ]
+      # These established public package names intentionally match stdlib packages.
+      - path: 'internal/version/version\.go|pkg/log/logger_test\.go'
+        text: 'var-naming: avoid package names that conflict with Go standard library package names'
+        linters: [ revive ]
       - path: '_test\.go'
         linters:
           - bodyclose

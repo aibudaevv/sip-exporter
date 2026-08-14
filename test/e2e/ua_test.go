@@ -129,7 +129,7 @@ func TestUA(t *testing.T) {
 
 			tt.check(t, env.endpoint)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -156,5 +156,5 @@ func TestUACarrierAndUALabelsCombined(t *testing.T) {
 	inviteNoCarrier := getMetricWithUA(t, env.endpoint, "sip_exporter_invite_total", "yealink")
 	require.Equal(t, inviteCarrierUA, inviteNoCarrier, "all traffic from loopback-carrier, totals must match")
 
-	waitForSessionsZero(t, env.endpoint)
+	assertDialogTeardown(t, env.endpoint)
 }

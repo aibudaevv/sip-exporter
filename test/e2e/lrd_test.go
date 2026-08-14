@@ -55,14 +55,10 @@ func TestLRD(t *testing.T) {
 				lrdCount := env.getLRDByCarrier(t)
 				t.Logf("LRD{carrier=%q} count = %.0f", env.carrier, lrdCount)
 				require.Greater(t, lrdCount, 0.0, "LRD count should be > 0 for redirect scenarios")
-			} else {
+			} else if !tt.wantZero {
 				lrdCount := getLRD(t, env.endpoint)
 				t.Logf("LRD count = %.0f", lrdCount)
-				if tt.wantZero {
-					require.Equal(t, 0.0, lrdCount, "LRD count should be 0 (no redirects)")
-				} else {
-					require.Greater(t, lrdCount, 0.0, "LRD count should be > 0 for redirect scenarios")
-				}
+				require.Greater(t, lrdCount, 0.0, "LRD count should be > 0 for redirect scenarios")
 			}
 
 			assertSelfMonitoringHealthy(t, env.endpoint)

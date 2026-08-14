@@ -82,7 +82,7 @@ func TestHostLabels(t *testing.T) {
 			}
 
 			assertHostLabels(t, env.endpoint, tt.wantCaller, tt.wantCalled, tt.notWantCaller, tt.notWantCalled, callCount)
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -108,26 +108,26 @@ func assertHostLabels(t *testing.T, endpoint, wantCaller, wantCalled, notWantCal
 		"sip_exporter_invite_200_total{%s} should exist", calledLabel)
 
 	inviteOK := getMetricWithLabel(t, endpoint, "sip_exporter_invite_total", callerLabel)
-	inviteBad := getMetricWithLabel(t, endpoint, "sip_exporter_invite_total", `caller_host="`+notWantCaller+`"`)
-	t.Logf("invite_total{%s}=%.0f, invite_total{caller_host=%q}=%.0f", callerLabel, inviteOK, notWantCaller, inviteBad)
+	require.False(t, metricWithLabelExists(t, endpoint, "sip_exporter_invite_total", `caller_host="`+notWantCaller+`"`),
+		"sip_exporter_invite_total{caller_host=%q} should be absent", notWantCaller)
+	t.Logf("invite_total{%s}=%.0f", callerLabel, inviteOK)
 	require.InDelta(t, float64(callCount), inviteOK, ratioDelta, "invite_total should carry caller_host=%q", wantCaller)
-	require.LessOrEqual(t, inviteBad, 3.0, "invite_total should NOT carry caller_host=%q", notWantCaller)
 
 	inviteCalledOK := getMetricWithLabel(t, endpoint, "sip_exporter_invite_total", calledLabel)
-	inviteCalledBad := getMetricWithLabel(t, endpoint, "sip_exporter_invite_total", `called_host="`+notWantCalled+`"`)
-	t.Logf("invite_total{%s}=%.0f, invite_total{called_host=%q}=%.0f", calledLabel, inviteCalledOK, notWantCalled, inviteCalledBad)
+	require.False(t, metricWithLabelExists(t, endpoint, "sip_exporter_invite_total", `called_host="`+notWantCalled+`"`),
+		"sip_exporter_invite_total{called_host=%q} should be absent", notWantCalled)
+	t.Logf("invite_total{%s}=%.0f", calledLabel, inviteCalledOK)
 	require.InDelta(t, float64(callCount), inviteCalledOK, ratioDelta, "invite_total should carry called_host=%q", wantCalled)
-	require.LessOrEqual(t, inviteCalledBad, 3.0, "invite_total should NOT carry called_host=%q", notWantCalled)
 
 	invite200CallerOK := getMetricWithLabel(t, endpoint, "sip_exporter_invite_200_total", callerLabel)
-	invite200CallerBad := getMetricWithLabel(t, endpoint, "sip_exporter_invite_200_total", `caller_host="`+notWantCaller+`"`)
-	t.Logf("invite_200_total{%s}=%.0f, invite_200_total{caller_host=%q}=%.0f", callerLabel, invite200CallerOK, notWantCaller, invite200CallerBad)
+	require.False(t, metricWithLabelExists(t, endpoint, "sip_exporter_invite_200_total", `caller_host="`+notWantCaller+`"`),
+		"sip_exporter_invite_200_total{caller_host=%q} should be absent", notWantCaller)
+	t.Logf("invite_200_total{%s}=%.0f", callerLabel, invite200CallerOK)
 	require.InDelta(t, float64(callCount), invite200CallerOK, ratioDelta, "invite_200_total should carry caller_host=%q", wantCaller)
-	require.LessOrEqual(t, invite200CallerBad, 3.0, "invite_200_total should NOT carry caller_host=%q", notWantCaller)
 
 	invite200CalledOK := getMetricWithLabel(t, endpoint, "sip_exporter_invite_200_total", calledLabel)
-	invite200CalledBad := getMetricWithLabel(t, endpoint, "sip_exporter_invite_200_total", `called_host="`+notWantCalled+`"`)
-	t.Logf("invite_200_total{%s}=%.0f, invite_200_total{called_host=%q}=%.0f", calledLabel, invite200CalledOK, notWantCalled, invite200CalledBad)
+	require.False(t, metricWithLabelExists(t, endpoint, "sip_exporter_invite_200_total", `called_host="`+notWantCalled+`"`),
+		"sip_exporter_invite_200_total{called_host=%q} should be absent", notWantCalled)
+	t.Logf("invite_200_total{%s}=%.0f", calledLabel, invite200CalledOK)
 	require.InDelta(t, float64(callCount), invite200CalledOK, ratioDelta, "invite_200_total should carry called_host=%q", wantCalled)
-	require.LessOrEqual(t, invite200CalledBad, 3.0, "invite_200_total should NOT carry called_host=%q", notWantCalled)
 }

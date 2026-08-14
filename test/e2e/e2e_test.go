@@ -4,6 +4,9 @@ package e2e
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -14,12 +17,15 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -27,9 +33,12 @@ import (
 )
 
 const (
-	sippImage     = "pbertera/sipp:latest"
-	testInterface = "lo"
-	ratioDelta    = 2.0
+	sippImage                       = "pbertera/sipp:latest"
+	testInterface                   = "lo"
+	testPortRangeStart              = 20000
+	testPortRangeEnd                = 30000
+	ratioDelta                      = 2.0
+	dialogMetricsSnapshotSettleTime = 1100 * time.Millisecond
 )
 
 // testEnv holds per-test network configuration.
@@ -41,33 +50,62 @@ type testEnv struct {
 	carrier        string
 }
 
+type metricSample struct {
+	name   string
+	labels map[string]string
+	value  float64
+}
+
 var (
-	portMu sync.Mutex
+	portMu             sync.Mutex
+	sippRunID          atomic.Uint64
+	nextTestPort       = testPortRangeStart
+	metricValuePattern = regexp.MustCompile(`^(?:NaN|[+-]?Inf|[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)$`)
 )
 
+func nextSippCallIDFormat() string {
+	return fmt.Sprintf("e2e-%d-%%u-%%p@%%s", sippRunID.Add(1))
+}
+
 // allocatePorts returns 3 port numbers for exporter, SIPp server, and SIPp client.
-// Uses the kernel's ephemeral port allocator (net.Listen ":0") for each port,
-// ensuring they are free at allocation time.
-// Gap layout: exporter=port[0], sippPort=port[1], [UAS media=port[1]+2],
-// sippClientPort=port[2], [UAC media=port[2]+2].
 func allocatePorts() (exporter, sipp, sippClient string) {
 	portMu.Lock()
 	defer portMu.Unlock()
-	ports := make([]int, 3)
-	listeners := make([]net.Listener, 3)
-	for i := range 3 {
-		l, err := net.Listen("tcp", "127.0.0.1:0")
+
+	return strconv.Itoa(allocateTCPPort()), strconv.Itoa(allocateUDPPort()), strconv.Itoa(allocateUDPPort())
+}
+
+func allocateTCPPort() int {
+	for {
+		port := takeNextTestPort()
+		l, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port})
 		if err != nil {
-			panic(fmt.Sprintf("allocatePorts: failed to get free port: %v", err))
+			continue
 		}
-		listeners[i] = l
-		ports[i] = l.Addr().(*net.TCPAddr).Port
+		_ = l.Close()
+		return port
 	}
-	// Close all listeners before returning so the ports are free for use.
-	for _, l := range listeners {
-		l.Close()
+}
+
+func allocateUDPPort() int {
+	for {
+		port := takeNextTestPort()
+		l, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port})
+		if err != nil {
+			continue
+		}
+		_ = l.Close()
+		return port
 	}
-	return strconv.Itoa(ports[0]), strconv.Itoa(ports[1]), strconv.Itoa(ports[2])
+}
+
+func takeNextTestPort() int {
+	if nextTestPort >= testPortRangeEnd {
+		panic(fmt.Sprintf("test port range %d-%d exhausted", testPortRangeStart, testPortRangeEnd-1))
+	}
+	port := nextTestPort
+	nextTestPort++
+	return port
 }
 
 // newTestEnv allocates free ports and starts an exporter container for the test.
@@ -458,26 +496,33 @@ func registerExporterCleanup(t *testing.T, container testcontainers.Container, e
 	})
 }
 
-// waitForSessionsZero polls sip_exporter_sessions until it reaches 0 (or ≤1 under
-// parallel packet-capture contention on lo, where a missed BYE/200 OK can leave
-// a dialog stuck for the 1800s default TTL).
+// waitForSessionsZero polls sip_exporter_sessions until every series reaches 0.
 func waitForSessionsZero(t *testing.T, endpoint string) {
 	t.Helper()
-	// No direct metricExists guard: sip_exporter_sessions is a GaugeVec that is
-	// only emitted for label sets created via WithLabelValues. In scenarios with
-	// no successful calls (e.g. 0_percent), sessions may never be instantiated.
-	// The indirect guard is assertSelfMonitoringHealthy (called below), which
-	// verifies packets_received_total > 0, proving the exporter is alive.
-	require.Eventually(t, func() bool {
-		return getMetric(t, endpoint, "sip_exporter_sessions") <= 1
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		err := zeroMetricSamplesError("sip_exporter_sessions",
+			readMetricSamples(t, endpoint, "sip_exporter_sessions"))
+		assert.NoError(collect, err)
 	}, 15*time.Second, 300*time.Millisecond,
-		"sessions should reach ≤1 after all calls terminated (packet-capture contention tolerance)")
+		"sessions should reach 0 after all calls terminated")
 
+	assertSelfMonitoringHealthy(t, endpoint)
+}
+
+func assertDialogTeardown(t *testing.T, endpoint string) {
+	t.Helper()
+	// A completed call can start and end between snapshot ticks, so historical
+	// INVITE counters do not imply that this lazy GaugeVec has a series.
+	if metricExists(t, endpoint, "sip_exporter_sessions") {
+		waitForSessionsZero(t, endpoint)
+		return
+	}
 	assertSelfMonitoringHealthy(t, endpoint)
 }
 
 func assertSelfMonitoringHealthy(t *testing.T, endpoint string) {
 	t.Helper()
+	waitForDialogMetricsSnapshot(t)
 
 	require.True(t, metricExists(t, endpoint, "sip_exporter_socket_packets_received_total"),
 		"sip_exporter_socket_packets_received_total should exist in /metrics output")
@@ -490,11 +535,11 @@ func assertSelfMonitoringHealthy(t *testing.T, endpoint string) {
 	require.True(t, metricExists(t, endpoint, "sip_exporter_active_dialogs"),
 		"sip_exporter_active_dialogs should exist in /metrics output")
 
-	received := getMetric(t, endpoint, "sip_exporter_socket_packets_received_total")
+	received := getMetricSum(t, endpoint, "sip_exporter_socket_packets_received_total")
 	require.Equal(t, true, received > 0, "socket_packets_received_total should be > 0 after traffic")
 
-	dropped := getMetric(t, endpoint, "sip_exporter_socket_packets_dropped_total")
-	require.Equal(t, 0.0, dropped, "socket_packets_dropped_total should be 0 (no drops)")
+	require.NoError(t, zeroMetricSamplesError("sip_exporter_socket_packets_dropped_total",
+		readMetricSamples(t, endpoint, "sip_exporter_socket_packets_dropped_total")))
 
 	require.Eventually(t, func() bool {
 		return getMetric(t, endpoint, "sip_exporter_channel_length") == 0.0
@@ -503,8 +548,27 @@ func assertSelfMonitoringHealthy(t *testing.T, endpoint string) {
 	capacity := getMetric(t, endpoint, "sip_exporter_channel_capacity")
 	require.Equal(t, 10000.0, capacity, "channel_capacity should be 10000")
 
-	dialogs := getMetric(t, endpoint, "sip_exporter_active_dialogs")
-	require.LessOrEqual(t, dialogs, 2.0, "active_dialogs should be ≤2 after all sessions completed (packet-capture contention tolerance)")
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		for _, metricName := range []string{
+			"sip_exporter_active_dialogs",
+			"sip_exporter_active_trackers",
+		} {
+			err := zeroMetricSamplesError(metricName, readMetricSamples(t, endpoint, metricName))
+			assert.NoError(collect, err)
+		}
+	}, 3*time.Second, 100*time.Millisecond,
+		"active dialogs and trackers should reach 0 after all sessions completed")
+}
+
+func waitForDialogMetricsSnapshot(t *testing.T) {
+	t.Helper()
+	timer := time.NewTimer(dialogMetricsSnapshotSettleTime)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-t.Context().Done():
+		require.NoError(t, t.Context().Err())
+	}
 }
 
 // waitForMetricStable polls sip_exporter_packets_total until the value stops
@@ -534,6 +598,18 @@ func getMetric(t *testing.T, endpoint string, metricName string) float64 {
 	return getMetricWithLabel(t, endpoint, metricName, "")
 }
 
+func getMetricSum(t *testing.T, endpoint string, metricName string) float64 {
+	t.Helper()
+
+	samples := readMetricSamples(t, endpoint, metricName)
+	require.NotEmpty(t, samples, "metric %s must have at least one sample", metricName)
+	var sum float64
+	for _, sample := range samples {
+		sum += sample.value
+	}
+	return sum
+}
+
 // fetchMetricsBody scrapes the raw /metrics body from the exporter endpoint using
 // a request-scoped context. All metric-reading helpers route through it so there is
 // a single HTTP call site (and no http.Get-without-context).
@@ -551,70 +627,252 @@ func fetchMetricsBody(t *testing.T, endpoint string) []byte {
 	return body
 }
 
-// metricExists checks whether a metric name appears in the exporter /metrics output.
-// Use before assertions that check a metric == 0 to prevent vacuum-pass when the
-// metric name is misspelled or missing entirely (getMetric returns 0.0 for unknown metrics).
-func metricExists(t *testing.T, endpoint string, metricName string) bool {
+// readMetricSamples reads samples whose metric name matches metricName exactly.
+func readMetricSamples(t *testing.T, endpoint string, metricName string) []metricSample {
 	t.Helper()
-	return strings.Contains(string(fetchMetricsBody(t, endpoint)), metricName)
+
+	var samples []metricSample
+	for _, line := range strings.Split(string(fetchMetricsBody(t, endpoint)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		separator := metricSeriesEnd(line)
+		if separator < 0 {
+			continue
+		}
+		series, fields := line[:separator], strings.Fields(line[separator:])
+		if len(fields) == 0 || len(fields) > 2 {
+			continue
+		}
+		if len(fields) == 2 {
+			if _, err := strconv.ParseInt(fields[1], 10, 64); err != nil {
+				continue
+			}
+		}
+		if !metricValuePattern.MatchString(fields[0]) {
+			continue
+		}
+		name := series
+		labels := map[string]string{}
+		if labelsStart := strings.IndexByte(series, '{'); labelsStart >= 0 {
+			name = series[:labelsStart]
+			if !strings.HasSuffix(series, "}") {
+				continue
+			}
+			var ok bool
+			labels, ok = parseMetricLabels(series[labelsStart+1 : len(series)-1])
+			if !ok {
+				continue
+			}
+		}
+		if name != metricName {
+			continue
+		}
+		value, err := strconv.ParseFloat(fields[0], 64)
+		if err != nil {
+			continue
+		}
+		samples = append(samples, metricSample{name: name, labels: labels, value: value})
+	}
+	return samples
 }
 
-// buildMetricRegex compiles a regex matching a Prometheus metric line,
-// optionally filtered by labels. If labelFilter is empty, matches any label
-// set; otherwise matches only lines containing all comma-separated filters.
-func buildMetricRegex(metricName string, labelFilter string) *regexp.Regexp {
-	if labelFilter != "" {
-		filters := strings.Split(labelFilter, ",")
-		quotedParts := make([]string, len(filters))
-		for i, f := range filters {
-			quotedParts[i] = regexp.QuoteMeta(f)
+func metricSeriesEnd(line string) int {
+	insideLabels := false
+	insideValue := false
+	escaped := false
+	for i := 0; i < len(line); i++ {
+		if insideValue {
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch line[i] {
+			case '\\':
+				escaped = true
+			case '"':
+				insideValue = false
+			}
+			continue
 		}
-		return regexp.MustCompile(`^` + metricName + `\{[^}]*` + strings.Join(quotedParts, `[^}]*`) + `[^}]*\}\s+([0-9.]+)`)
+		switch line[i] {
+		case '{':
+			insideLabels = true
+		case '}':
+			insideLabels = false
+		case '"':
+			if insideLabels {
+				insideValue = true
+			}
+		case ' ', '\t':
+			if !insideLabels {
+				return i
+			}
+		}
 	}
-	return regexp.MustCompile(`^` + metricName + `(?:\{[^}]*\})?\s+([0-9.]+)`)
+	return -1
+}
+
+func parseMetricLabels(input string) (map[string]string, bool) {
+	labels := make(map[string]string)
+	for input != "" {
+		equals := strings.IndexByte(input, '=')
+		if equals <= 0 || equals+1 >= len(input) || input[equals+1] != '"' {
+			return nil, false
+		}
+		name := input[:equals]
+		if !validMetricLabelName(name) {
+			return nil, false
+		}
+		if _, duplicate := labels[name]; duplicate {
+			return nil, false
+		}
+		valueEnd := equals + 2
+		for valueEnd < len(input) {
+			if input[valueEnd] == '\\' {
+				if valueEnd+1 >= len(input) || !strings.ContainsRune(`\"n`, rune(input[valueEnd+1])) {
+					return nil, false
+				}
+				valueEnd += 2
+				continue
+			}
+			if input[valueEnd] == '"' {
+				break
+			}
+			valueEnd++
+		}
+		if valueEnd >= len(input) {
+			return nil, false
+		}
+		value, err := strconv.Unquote(input[equals+1 : valueEnd+1])
+		if err != nil {
+			return nil, false
+		}
+		labels[name] = value
+		input = input[valueEnd+1:]
+		if input == "" {
+			break
+		}
+		if input[0] != ',' {
+			return nil, false
+		}
+		input = input[1:]
+		if input == "" {
+			return nil, false
+		}
+	}
+	return labels, true
+}
+
+func validMetricLabelName(name string) bool {
+	for i := 0; i < len(name); i++ {
+		valid := name[i] == '_' || name[i] >= 'a' && name[i] <= 'z' || name[i] >= 'A' && name[i] <= 'Z'
+		if i > 0 {
+			valid = valid || name[i] >= '0' && name[i] <= '9'
+		}
+		if !valid {
+			return false
+		}
+	}
+	return name != ""
+}
+
+func matchMetricLabels(sampleLabels, filterLabels map[string]string) bool {
+	for name, value := range filterLabels {
+		sampleValue, exists := sampleLabels[name]
+		if !exists || sampleValue != value {
+			return false
+		}
+	}
+	return true
+}
+
+func metricSamplesWithLabels(samples []metricSample, filterLabels map[string]string) []metricSample {
+	var matches []metricSample
+	for _, sample := range samples {
+		if matchMetricLabels(sample.labels, filterLabels) {
+			matches = append(matches, sample)
+		}
+	}
+	return matches
+}
+
+func singleMetricValue(samples []metricSample) (float64, error) {
+	if len(samples) != 1 {
+		return 0, fmt.Errorf("expected exactly one metric sample, got %d", len(samples))
+	}
+	return samples[0].value, nil
+}
+
+func zeroMetricSamplesError(metricName string, samples []metricSample) error {
+	if len(samples) == 0 {
+		return fmt.Errorf("%s has no samples", metricName)
+	}
+
+	var nonZero []string
+	for _, sample := range samples {
+		if sample.value != 0 {
+			nonZero = append(nonZero, formatMetricSample(sample))
+		}
+	}
+	if len(nonZero) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s has non-zero samples: %s", metricName, strings.Join(nonZero, ", "))
+}
+
+func formatMetricSample(sample metricSample) string {
+	labelNames := make([]string, 0, len(sample.labels))
+	for name := range sample.labels {
+		labelNames = append(labelNames, name)
+	}
+	sort.Strings(labelNames)
+
+	var labels []string
+	for _, name := range labelNames {
+		labels = append(labels, name+"="+strconv.Quote(sample.labels[name]))
+	}
+	series := sample.name
+	if len(labels) > 0 {
+		series += "{" + strings.Join(labels, ",") + "}"
+	}
+	return series + "=" + strconv.FormatFloat(sample.value, 'g', -1, 64)
+}
+
+// metricExists checks whether an exact metric sample appears in /metrics.
+func metricExists(t *testing.T, endpoint string, metricName string) bool {
+	t.Helper()
+	return len(readMetricSamples(t, endpoint, metricName)) > 0
 }
 
 // getMetricWithLabel reads a metric with an optional label filter.
-// If labelFilter is empty, matches any label set (first match).
-// If labelFilter is set (e.g. `carrier="loopback-carrier"`), matches that exact label.
+// The filter may contain a subset of labels, but it must identify exactly one sample.
 func getMetricWithLabel(t *testing.T, endpoint string, metricName string, labelFilter string) float64 {
 	t.Helper()
 
-	body := fetchMetricsBody(t, endpoint)
-
-	re := buildMetricRegex(metricName, labelFilter)
-	for _, line := range strings.Split(string(body), "\n") {
-		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 2 {
-			val, err := strconv.ParseFloat(matches[1], 64)
-			require.NoError(t, err)
-			return val
-		}
+	filterLabels, ok := parseMetricLabels(labelFilter)
+	require.True(t, ok, "invalid label filter %q", labelFilter)
+	if !ok {
+		return 0
 	}
-
-	return 0
+	matches := metricSamplesWithLabels(readMetricSamples(t, endpoint, metricName), filterLabels)
+	value, err := singleMetricValue(matches)
+	require.NoError(t, err, "read metric %s with labels %q", metricName, labelFilter)
+	return value
 }
 
-// metricWithLabelExists checks whether a metric matching the name AND label
-// filter appears in the exporter /metrics output. Use before assertions that
-// check a label-filtered metric == 0 to prevent vacuum-pass when the label
-// combination is misspelled or missing entirely.
-//
-// Unlike metricExists (which checks name only via strings.Contains), this uses
-// the same regex as getMetricWithLabel, ensuring the guard is label-aware.
+// metricWithLabelExists checks whether an exact metric sample contains every
+// requested label with the exact value.
 func metricWithLabelExists(t *testing.T, endpoint string, metricName string, labelFilter string) bool {
 	t.Helper()
 
-	body := fetchMetricsBody(t, endpoint)
-
-	re := buildMetricRegex(metricName, labelFilter)
-	for _, line := range strings.Split(string(body), "\n") {
-		if re.MatchString(strings.TrimSpace(line)) {
-			return true
-		}
+	filterLabels, ok := parseMetricLabels(labelFilter)
+	require.True(t, ok, "invalid label filter %q", labelFilter)
+	if !ok {
+		return false
 	}
-
-	return false
+	return len(metricSamplesWithLabels(readMetricSamples(t, endpoint, metricName), filterLabels)) > 0
 }
 
 // getMetricWithCarrier reads a metric filtered by carrier label.
@@ -633,10 +891,45 @@ func getMetricWithCarrierAndUA(t *testing.T, endpoint string, metricName string,
 	return getMetricWithLabel(t, endpoint, metricName, `carrier="`+carrier+`",ua_type="`+uaType+`"`)
 }
 
+func runSippCommand(cmd *exec.Cmd, stdout, stderr io.Writer) (string, string, error) {
+	var capturedStdout, capturedStderr strings.Builder
+	cmd.Stdout = io.MultiWriter(stdout, &capturedStdout)
+	cmd.Stderr = io.MultiWriter(stderr, &capturedStderr)
+	err := cmd.Run()
+	return strings.TrimSpace(capturedStdout.String()), strings.TrimSpace(capturedStderr.String()), err
+}
+
+func isExpectedSippExit(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == 1
+}
+
+func removeSippContainer(name string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "docker", "rm", "-f", name).CombinedOutput()
+	if err != nil && !strings.Contains(string(output), "No such container") {
+		return fmt.Errorf("remove SIPp container %s: %w: %s", name, err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func nextSippContainerName() (string, error) {
+	var suffix [16]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return "", fmt.Errorf("generate SIPp container name: %w", err)
+	}
+	return "sip-exporter-e2e-uas-" + hex.EncodeToString(suffix[:]), nil
+}
+
 // runSippScenario starts SIPp server and client via docker CLI (host network mode),
 // waits for calls to complete and returns statistics.
 func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario string, callCount int, env *testEnv) sippResult {
 	t.Helper()
+	callIDFormat := nextSippCallIDFormat()
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -650,8 +943,11 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 	sippVol := filepath.Dir(uasPath)
 	uasScenarioFile := filepath.Base(uasScenario)
 	uacScenarioFile := filepath.Base(uacScenario)
+	uasContainerName, err := nextSippContainerName()
+	require.NoError(t, err)
 
 	uasCmd := exec.CommandContext(ctx, "docker", "run", "--rm",
+		"--name", uasContainerName,
 		"--network", "host",
 		"-v", sippVol+":/scenarios:ro",
 		sippImage,
@@ -665,44 +961,37 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 	uasCmd.Stdout = stdout
 	uasCmd.Stderr = stderr
 	require.NoError(t, uasCmd.Start())
+	t.Cleanup(func() {
+		if err := removeSippContainer(uasContainerName); err != nil {
+			t.Logf("UAS cleanup: %v", err)
+		}
+	})
 
 	require.Eventually(t, func() bool {
 		return isUDPPortInUse(env.sippPort)
 	}, 10*time.Second, 50*time.Millisecond, "UAS should start listening on port %s", env.sippPort)
 
-	uacMaxAttempts := 3
-	for uacAttempt := 1; ; uacAttempt++ {
-		var uacStderr strings.Builder
-		uacCmd := exec.CommandContext(ctx, "docker", "run", "--rm",
-			"--network", "host",
-			"-v", sippVol+":/scenarios:ro",
-			sippImage,
-			"-sf", "/scenarios/"+uacScenarioFile,
-			"-i", "127.0.0.1",
-			"-p", env.sippClientPort,
-			"-m", strconv.Itoa(callCount),
-			"-nr",
-			"127.0.0.1:"+env.sippPort,
-		)
-		uacCmd.Stdout = stdout
-		if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
-			uacCmd.Stderr = io.MultiWriter(stderr, &uacStderr)
-		} else {
-			uacCmd.Stderr = &uacStderr
-		}
-		if err := uacCmd.Run(); err != nil {
-			if uacAttempt < uacMaxAttempts && ctx.Err() == nil && isUDPPortInUse(env.sippPort) {
-				t.Logf("UAC failed (attempt %d/%d), retrying: %v", uacAttempt, uacMaxAttempts, err)
-				if uacAttempt == 1 {
-					dumpUDPPort(t, env.sippClientPort)
-				}
-				time.Sleep(2 * time.Second)
-				continue
-			}
-			t.Logf("UAC stderr:\n%s", strings.TrimSpace(uacStderr.String()))
-			require.NoError(t, err)
-		}
-		break
+	uacCmd := exec.CommandContext(ctx, "docker", "run", "--rm",
+		"--network", "host",
+		"-v", sippVol+":/scenarios:ro",
+		sippImage,
+		"-sf", "/scenarios/"+uacScenarioFile,
+		"-i", "127.0.0.1",
+		"-p", env.sippClientPort,
+		"-m", strconv.Itoa(callCount),
+		"-cid_str", callIDFormat,
+		"-nr",
+		"127.0.0.1:"+env.sippPort,
+	)
+	uacStdout, uacStderr, err := runSippCommand(uacCmd, stdout, stderr)
+	if err != nil {
+		stopErr := removeSippContainer(uasContainerName)
+		cancel()
+		_ = uasCmd.Wait()
+		t.Logf("UAC stdout:\n%s", uacStdout)
+		t.Logf("UAC stderr:\n%s", uacStderr)
+		require.NoError(t, stopErr, "stop UAS after failed UAC execution")
+		require.NoError(t, err)
 	}
 
 	_ = uasCmd.Wait()
@@ -725,6 +1014,7 @@ func runSippScenario(ctx context.Context, t *testing.T, uasScenario, uacScenario
 // have the specified source address. The target address for UAC is uasIP:env.sippPort.
 func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacScenario string, callCount int, env *testEnv, uasIP, uacIP string) sippResult {
 	t.Helper()
+	callIDFormat := nextSippCallIDFormat()
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -783,6 +1073,7 @@ func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacS
 			"-i", uacIP,
 			"-p", env.sippClientPort,
 			"-m", strconv.Itoa(callCount),
+			"-cid_str", callIDFormat,
 			"-nr",
 			uasIP + ":" + env.sippPort,
 		},
@@ -822,7 +1113,7 @@ func runSippScenarioWithIPs(ctx context.Context, t *testing.T, uasScenario, uacS
 
 	waitForMetricStable(t, env.endpoint)
 
-	if dropped := getMetric(t, env.endpoint, "sip_exporter_socket_packets_dropped_total"); dropped > 0 {
+	if dropped := getMetricSum(t, env.endpoint, "sip_exporter_socket_packets_dropped_total"); dropped > 0 {
 		t.Logf("WARNING: %v packets dropped during test — threshold-based assertions may be unreliable under -parallel", dropped)
 	}
 
@@ -857,31 +1148,26 @@ func runSippUACOnly(ctx context.Context, t *testing.T, uacScenario string, callC
 	sippVol := filepath.Dir(uacPath)
 	uacScenarioFile := filepath.Base(uacScenario)
 
-	uacMaxAttempts := 3
-	for uacAttempt := 1; ; uacAttempt++ {
-		uacCmd := exec.Command("docker", "run", "--rm",
-			"--network", "host",
-			"-v", sippVol+":/scenarios:ro",
-			sippImage,
-			"-sf", "/scenarios/"+uacScenarioFile,
-			"-i", "127.0.0.1",
-			"-p", env.sippClientPort,
-			"-m", strconv.Itoa(callCount),
-			"-timeout", "5s",
-			"127.0.0.1:"+env.sippPort,
-		)
-		uacCmd.Stdout = stdout
-		uacCmd.Stderr = stderr
-		if err := uacCmd.Run(); err != nil {
-			if uacAttempt < uacMaxAttempts {
-				t.Logf("UAC-only failed (attempt %d/%d), retrying: %v", uacAttempt, uacMaxAttempts, err)
-				time.Sleep(time.Second)
-				continue
-			}
-			t.Logf("UAC-only failed after %d attempts: %v", uacMaxAttempts, err)
-		}
-		break
+	uacCmd := exec.CommandContext(ctx, "docker", "run", "--rm",
+		"--network", "host",
+		"-v", sippVol+":/scenarios:ro",
+		sippImage,
+		"-sf", "/scenarios/"+uacScenarioFile,
+		"-i", "127.0.0.1",
+		"-p", env.sippClientPort,
+		"-m", strconv.Itoa(callCount),
+		"-recv_timeout", "5000",
+		"-timeout", "5s",
+		"127.0.0.1:"+env.sippPort,
+	)
+	uacStdout, uacStderr, err := runSippCommand(uacCmd, stdout, stderr)
+	if err != nil {
+		t.Logf("UAC-only expected failure: %v", err)
+		t.Logf("UAC-only stdout:\n%s", uacStdout)
+		t.Logf("UAC-only stderr:\n%s", uacStderr)
 	}
+	require.True(t, isExpectedSippExit(ctx, err),
+		"UAC-only timeout scenario should exit with status 1 before its context deadline: %v", err)
 
 	waitForMetricStable(t, env.endpoint)
 }
@@ -1087,15 +1373,24 @@ func (e *testEnv) getLRDByCarrier(t *testing.T) float64 {
 
 func (e *testEnv) waitForSessionsZeroByCarrier(t *testing.T) {
 	t.Helper()
-	// No direct metricWithLabelExists guard: sip_exporter_sessions is a GaugeVec
-	// that may not be instantiated for a carrier with no successful calls.
-	// Indirect guard: assertSelfMonitoringHealthy (called below) verifies
-	// packets_received_total > 0, proving the exporter is alive.
-	require.Eventually(t, func() bool {
-		return getMetricWithCarrier(t, e.endpoint, "sip_exporter_sessions", e.carrier) <= 1
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		samples := readMetricSamples(t, e.endpoint, "sip_exporter_sessions")
+		matches := metricSamplesWithLabels(samples, map[string]string{"carrier": e.carrier})
+		assert.NoError(collect, zeroMetricSamplesError("sip_exporter_sessions", matches))
 	}, 10*time.Second, 300*time.Millisecond,
-		"sessions should reach ≤1 after all calls terminated (packet-capture contention tolerance)")
+		"sessions for carrier %q should reach 0 after all calls terminated", e.carrier)
 
+	assertSelfMonitoringHealthy(t, e.endpoint)
+}
+
+func (e *testEnv) assertDialogTeardownByCarrier(t *testing.T) {
+	t.Helper()
+	carrierLabel := `carrier="` + e.carrier + `"`
+	// Require sessions only when this carrier's snapshot series actually exists.
+	if metricWithLabelExists(t, e.endpoint, "sip_exporter_sessions", carrierLabel) {
+		e.waitForSessionsZeroByCarrier(t)
+		return
+	}
 	assertSelfMonitoringHealthy(t, e.endpoint)
 }
 
@@ -1107,6 +1402,10 @@ func isUDPPortInUse(port string) bool {
 	if err != nil {
 		return false
 	}
+	return udpPortInUse(data, port)
+}
+
+func udpPortInUse(data []byte, port string) bool {
 	p, err := strconv.Atoi(port)
 	if err != nil {
 		return false

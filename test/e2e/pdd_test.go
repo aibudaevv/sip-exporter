@@ -50,6 +50,10 @@ func TestPDD(t *testing.T) {
 			for _, s := range tt.scenarios {
 				if s.uacOnly {
 					runSippUACOnly(ctx, t, s.uac, s.count, env)
+					require.True(t, metricExists(t, env.endpoint, "sip_exporter_invite_total"),
+						"timeout scenario must emit INVITE traffic")
+					require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_invite_total"), 0.0,
+						"timeout scenario must emit at least one INVITE")
 				} else {
 					runSippScenario(ctx, t, s.uas, s.uac, s.count, env)
 				}
@@ -70,14 +74,14 @@ func TestPDD(t *testing.T) {
 				pdd := env.getPDDByCarrier(t)
 				t.Logf("PDD{carrier=%q} = %.2f ms", env.carrier, pdd)
 				require.Greater(t, pdd, 0.0, "PDD should be > 0: %s", tt.name)
-				env.waitForSessionsZeroByCarrier(t)
+				env.assertDialogTeardownByCarrier(t)
 			} else if tt.wantPDD {
 				pdd := getPDD(t, env.endpoint)
 				t.Logf("PDD = %.2f ms", pdd)
 				require.Greater(t, pdd, 0.0, "PDD should be > 0: %s (%s)", tt.name, tt.desc)
 				require.Greater(t, getMetric(t, env.endpoint, "sip_exporter_pdd_count"), 0.0,
 					"PDD histogram should have observations: %s", tt.name)
-				waitForSessionsZero(t, env.endpoint)
+				assertDialogTeardown(t, env.endpoint)
 			}
 		})
 	}

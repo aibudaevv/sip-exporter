@@ -325,7 +325,11 @@ func TestDialogerConcurrentCleanup(t *testing.T) {
 				},
 			)
 		} else {
-			d.Create(DialogParams{DialogID: "valid-" + strconv.Itoa(i), ExpiresAt: time.Now().Add(1 * time.Hour), CreatedAt: time.Now()})
+			d.Create(DialogParams{
+				DialogID:  "valid-" + strconv.Itoa(i),
+				ExpiresAt: time.Now().Add(1 * time.Hour),
+				CreatedAt: time.Now(),
+			})
 		}
 	}
 

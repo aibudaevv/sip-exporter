@@ -4,7 +4,6 @@ package e2e
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -36,15 +35,15 @@ func TestSCRAllScenarios(t *testing.T) {
 
 			if tt.wantExists {
 				require.True(t, metricExists(t, env.endpoint, "sip_exporter_scr"))
+				scr := getSCR(t, env.endpoint)
+				t.Logf("SCR = %.2f (want %.2f)", scr, tt.wantSCR)
+				require.InDelta(t, tt.wantSCR, scr, ratioDelta)
 			} else {
 				require.False(t, metricExists(t, env.endpoint, "sip_exporter_scr"),
 					"SCR metric should be absent when no INVITEs")
 			}
-			scr := getSCR(t, env.endpoint)
-			t.Logf("SCR = %.2f (want %.2f)", scr, tt.wantSCR)
-			require.InDelta(t, tt.wantSCR, scr, ratioDelta)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -84,7 +83,7 @@ func TestSCRMixed(t *testing.T) {
 			t.Logf("SCR = %.2f (want %.2f)", scr, wantSCR)
 			require.InDelta(t, wantSCR, scr, ratioDelta)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -94,24 +93,21 @@ func TestSCRSessionExpires(t *testing.T) {
 	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
-	scrBefore := getSCR(t, env.endpoint)
-	sessionsBefore := getSessions(t, env.endpoint)
-	t.Logf("Before: SCR = %.2f, sessions = %.0f", scrBefore, sessionsBefore)
+	require.False(t, metricExists(t, env.endpoint, "sip_exporter_scr"))
+	require.False(t, metricExists(t, env.endpoint, "sip_exporter_sessions"))
 
 	const callCount = 10
 	runSippScenario(ctx, t, "uas_short_expires.xml", "uac_short_expires.xml", callCount, env)
 
-	require.Eventually(t, func() bool {
-		return getMetric(t, env.endpoint, "sip_exporter_sessions") == 0
-	}, 15*time.Second, 500*time.Millisecond, "sessions did not expire within timeout")
+	waitForSessionsZero(t, env.endpoint)
 
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_scr"))
 	scrAfter := getSCR(t, env.endpoint)
 	sessionsAfter := getSessions(t, env.endpoint)
 	t.Logf("After: SCR = %.2f, sessions = %.0f", scrAfter, sessionsAfter)
 
-	require.True(t, metricExists(t, env.endpoint, "sip_exporter_sessions"))
 	require.Equal(t, 0.0, sessionsAfter, "sessions should be 0 after Session-Expires timeout")
-	require.Greater(t, scrAfter, scrBefore, "SCR should increase after Session-Expires timeout")
+	require.Equal(t, 100.0, scrAfter, "SCR should be 100%% after Session-Expires timeout")
 }
 
 func TestSCRWithCarrierConfig(t *testing.T) {
@@ -127,7 +123,7 @@ func TestSCRWithCarrierConfig(t *testing.T) {
 	t.Logf("SCR{carrier=%q} = %.2f (want %.2f)", env.carrier, scr, 100.0)
 	require.InDelta(t, 100.0, scr, ratioDelta)
 
-	env.waitForSessionsZeroByCarrier(t)
+	env.assertDialogTeardownByCarrier(t)
 }
 
 func TestSCRMixedWithCarrierConfig(t *testing.T) {
@@ -145,5 +141,5 @@ func TestSCRMixedWithCarrierConfig(t *testing.T) {
 	t.Logf("SCR{carrier=%q} = %.2f (want %.2f)", env.carrier, scr, wantSCR)
 	require.InDelta(t, wantSCR, scr, ratioDelta)
 
-	env.waitForSessionsZeroByCarrier(t)
+	env.assertDialogTeardownByCarrier(t)
 }

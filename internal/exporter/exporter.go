@@ -160,6 +160,19 @@ type (
 		body      []byte
 		timestamp time.Time
 	}
+	inviteTransaction struct {
+		reinvite  bool
+		final     bool
+		timestamp time.Time
+	}
+	inviteSDPKey struct {
+		callID, cseqID, fromTag string
+	}
+	expiredDialog struct {
+		cleanup service.CleanupResult
+		rtp     mediatracker.RTPDialogResult
+		aliases [][2]string
+	}
 
 	sockEntry struct {
 		fd    int
@@ -176,24 +189,40 @@ type (
 		Port uint16
 		_    [2]byte // explicit padding — cilium/ebpf uses binary.Size, not unsafe.Sizeof
 	}
+	rtpAliasKey struct {
+		endpoint rtpEndpointKey
+		callID   string
+	}
+	rtpEndpointMap interface {
+		Update(key, value any, flags ebpf.MapUpdateFlags) error
+		Delete(key any) error
+	}
 	exporter struct {
 		collections      []*ebpf.Collection
-		rtpEndpointsMaps []*ebpf.Map
-		socks            []sockEntry
-		messages         chan *rawPacket
-		done             chan struct{}
-		wg               sync.WaitGroup
-		closeOnce        sync.Once
-		packetPool       sync.Pool
-		sipPortSets      [][]uint16
-		services         services
-		carrierResolver  *carriers.Resolver
-		uaClassifier     *ua.Classifier
-		geoip            *geoip.Reader
-		localCountryCode string
-		hostLabels       bool
-		vqHandler        *vq.Handler
-		mediaTracker     *mediatracker.Tracker
+		rtpEndpointsMaps []rtpEndpointMap
+		rtpEndpointRefs  map[rtpEndpointKey]uint
+
+		dirtyRTPEndpoints map[rtpEndpointKey]bool
+		rtpAliasLabels    map[rtpAliasKey][2]string
+
+		rtpEndpointMutex  sync.Mutex
+		mediaLifecycleMu  sync.Mutex
+		dialogLifecycleMu sync.Mutex
+		socks             []sockEntry
+		messages          chan *rawPacket
+		done              chan struct{}
+		wg                sync.WaitGroup
+		closeOnce         sync.Once
+		packetPool        sync.Pool
+		sipPortSets       [][]uint16
+		services          services
+		carrierResolver   *carriers.Resolver
+		uaClassifier      *ua.Classifier
+		geoip             *geoip.Reader
+		localCountryCode  string
+		hostLabels        bool
+		vqHandler         *vq.Handler
+		mediaTracker      *mediatracker.Tracker
 		// pktSrcIP is written in parseRawPacket and read in handleMessage.
 		// Both run synchronously in the readPackets goroutine — no mutex needed.
 		// If packet parsing becomes parallel (worker pool), thread srcIP as a
@@ -211,8 +240,11 @@ type (
 		registerExpiryMutex   sync.RWMutex
 		inviteTracker         map[string]inviteEntry
 		inviteMutex           sync.RWMutex
-		inviteSDP             map[string]inviteSDPEntity
+		inviteSDP             map[inviteSDPKey]inviteSDPEntity
 		inviteSDPMutex        sync.Mutex
+		inviteTransactions    map[inviteSDPKey]inviteTransaction
+		inviteTransactionMu   sync.Mutex
+		closedInviteCalls     map[string]time.Time
 		optionsTracker        map[string]optionsEntry
 		optionsMutex          sync.RWMutex
 		byeTracker            map[string]byeEntry
@@ -258,6 +290,8 @@ type (
 	}
 )
 
+var _ rtpEndpointMap = (*ebpf.Map)(nil)
+
 func (e registerEntry) created() time.Time   { return e.timestamp }
 func (e inviteEntry) created() time.Time     { return e.timestamp }
 func (e optionsEntry) created() time.Time    { return e.timestamp }
@@ -283,10 +317,14 @@ func NewExporter(deps Deps) Exporter {
 		fasTracker:            newFasTracker(deps.FraudFASThreshold),
 		messages:              make(chan *rawPacket, messagesChanSize),
 		done:                  make(chan struct{}),
+		rtpEndpointRefs:       make(map[rtpEndpointKey]uint),
+		dirtyRTPEndpoints:     make(map[rtpEndpointKey]bool),
 		registerTracker:       make(map[string]registerEntry),
 		registerExpiryTracker: make(map[string]registerExpiryEntry),
 		inviteTracker:         make(map[string]inviteEntry),
-		inviteSDP:             make(map[string]inviteSDPEntity),
+		inviteSDP:             make(map[inviteSDPKey]inviteSDPEntity),
+		inviteTransactions:    make(map[inviteSDPKey]inviteTransaction),
+		closedInviteCalls:     make(map[string]time.Time),
 		optionsTracker:        make(map[string]optionsEntry),
 		byeTracker:            make(map[string]byeEntry),
 		packetPool: sync.Pool{
@@ -331,7 +369,7 @@ func (e *exporter) Initialize(cfg InitConfig) error {
 	e.mediaTracker.SetTTL(cfg.RTPStreamTTL)
 
 	collections := make([]*ebpf.Collection, 0, len(cfg.Interfaces))
-	rtpEndpointsMaps := make([]*ebpf.Map, 0, len(cfg.Interfaces))
+	rtpEndpointsMaps := make([]rtpEndpointMap, 0, len(cfg.Interfaces))
 	createdSocks := make([]sockEntry, 0, len(cfg.Interfaces))
 
 	// releaseAll rolls back every resource allocated so far on failure.
@@ -417,7 +455,9 @@ func createSocketForInterface(ifaceName string, progFD int, ignoreOutgoing bool)
 
 	socketRecvBufSize := socketRecvBufMB * miB
 	if setErr := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUFFORCE, socketRecvBufSize); setErr != nil {
-		if setErrFallback := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUF, socketRecvBufSize); setErrFallback != nil {
+		if setErrFallback := unix.SetsockoptInt(
+			sock, unix.SOL_SOCKET, unix.SO_RCVBUF, socketRecvBufSize,
+		); setErrFallback != nil {
 			return 0, fmt.Errorf("failed to set SO_RCVBUF: %w", setErrFallback)
 		}
 		zap.L().Warn("SO_RCVBUFFORCE failed, using SO_RCVBUF (buffer capped by rmem_max)", zap.Error(setErr))
@@ -433,8 +473,15 @@ func createSocketForInterface(ifaceName string, progFD int, ignoreOutgoing bool)
 		zap.Int("requested_bytes", socketRecvBufSize),
 		zap.Int("actual_bytes", actualBufSize))
 
-	if setErr := unix.SetsockoptTimeval(sock, unix.SOL_SOCKET, unix.SO_RCVTIMEO,
-		&unix.Timeval{Sec: int64(socketRcvTimeo / time.Second), Usec: int64(socketRcvTimeo % time.Second / time.Microsecond)}); setErr != nil {
+	if setErr := unix.SetsockoptTimeval(
+		sock,
+		unix.SOL_SOCKET,
+		unix.SO_RCVTIMEO,
+		&unix.Timeval{
+			Sec:  int64(socketRcvTimeo / time.Second),
+			Usec: int64(socketRcvTimeo % time.Second / time.Microsecond),
+		},
+	); setErr != nil {
 		return 0, fmt.Errorf("failed to set SO_RCVTIMEO: %w", setErr)
 	}
 
@@ -586,39 +633,38 @@ func (e *exporter) sipDialogMetricsUpdate() {
 			return
 		case <-ticker.C:
 		}
-		results := e.services.dialoger.Cleanup()
+		expired := e.cleanupExpiredDialogs()
 		e.cleanupRegisterTracker()
 		e.cleanupExpiredRegistrations()
 		e.registerScanTracker.cleanup()
 		e.inviteBurstTracker.cleanup()
 		e.cleanupInviteTracker()
 		e.cleanupInviteSDP()
+		e.cleanupInviteTransactions()
 		e.cleanupOptionsTracker()
 		e.cleanupByeTracker()
 		e.mediaTracker.Cleanup()
+		e.reconcileRTPEndpoints()
 		e.fasTracker.sweep(e.services.metricser)
 		s := e.services.dialoger.Size()
 
-		for _, r := range results {
-			e.fasTracker.clear(r.CallID)
-			e.services.metricser.SessionCompleted(r.Carrier, r.UAType, r.SourceCountry, r.Direction)
+		for _, r := range expired {
+			result := r.cleanup
+			e.emitRTPAliasReleased(r.aliases)
+			e.services.metricser.SessionCompleted(result.Carrier, result.UAType, result.SourceCountry, result.Direction)
 			e.services.metricser.UpdateSPD(
-				r.Carrier, r.UAType, r.SourceCountry, r.Direction, r.Duration,
+				result.Carrier, result.UAType, result.SourceCountry, result.Direction, result.Duration,
 			)
 			e.services.metricser.UpdateShortCalls(
-				r.Carrier, r.UAType, r.SourceCountry, r.Direction, r.Duration,
+				result.Carrier, result.UAType, result.SourceCountry, result.Direction, result.Duration,
 			)
 			e.services.metricser.UpdateBillableSeconds(
-				r.Carrier, r.DestinationCountry, r.Direction, r.Duration,
+				result.Carrier, result.DestinationCountry, result.Direction, result.Duration,
 			)
-			rtpResult, deleted := e.mediaTracker.Unregister(r.CallID)
-			for _, ep := range deleted {
-				e.rtpEndpointDelete(ep.IP, ep.Port)
-			}
-			e.handleRTPDialogResult(rtpResult, r.Carrier, r.UAType, r.SourceCountry, r.Direction)
+			e.handleRTPDialogResult(r.rtp, result.Carrier, result.UAType, result.SourceCountry, result.Direction)
 		}
 
-		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", len(results)))
+		zap.L().Debug("update metrics", zap.Int("size dialogs", s), zap.Int("expired", len(expired)))
 
 		e.services.metricser.UpdateSessions(e.services.dialoger.Counts())
 		e.services.metricser.UpdateActiveRegistrations(e.registrationCounts())
@@ -629,6 +675,21 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		e.updateRTPMetrics()
 		e.services.metricser.UpdateActiveDialogs(s)
 	}
+}
+
+func (e *exporter) cleanupExpiredDialogs() []expiredDialog {
+	e.dialogLifecycleMu.Lock()
+	defer e.dialogLifecycleMu.Unlock()
+
+	results := e.services.dialoger.Cleanup()
+	expired := make([]expiredDialog, 0, len(results))
+	for _, r := range results {
+		e.closeInviteTransactions(r.CallID)
+		e.fasTracker.clear(r.CallID)
+		rtpResult, aliases := e.unregisterMedia(r.CallID, false)
+		expired = append(expired, expiredDialog{cleanup: r, rtp: rtpResult, aliases: aliases})
+	}
+	return expired
 }
 
 func (e *exporter) updateTrackerSizes() {
@@ -656,7 +717,7 @@ func (e *exporter) updateTrackerSizes() {
 	e.services.metricser.UpdateTrackerSize("rtp", e.mediaTracker.StreamCount())
 }
 
-func cleanupExpired[V timed](mu sync.Locker, m map[string]V, ttl time.Duration) {
+func cleanupExpired[K comparable, V timed](mu sync.Locker, m map[K]V, ttl time.Duration) {
 	mu.Lock()
 	defer mu.Unlock()
 	now := time.Now()
@@ -1269,7 +1330,18 @@ func (e *exporter) handleRTP(
 		arrival = time.Now()
 		e.services.metricser.RTPKernelTimestampMissing()
 	}
+	e.mediaLifecycleMu.Lock()
 	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, dstIP.String(), dstPort, header, arrival)
+	if res.LearnedEndpoint != nil {
+		e.retainRTPEndpoint(res.LearnedEndpoint.IP, res.LearnedEndpoint.Port)
+		key, _ := ipPortToKey(res.LearnedEndpoint.IP, res.LearnedEndpoint.Port)
+		if e.rtpAliasLabels == nil {
+			e.rtpAliasLabels = make(map[rtpAliasKey][2]string)
+		}
+		e.rtpAliasLabels[rtpAliasKey{endpoint: key, callID: res.CallID}] = [2]string{res.Carrier, res.Direction}
+		e.services.metricser.RTPAliasLearned(res.Carrier, res.Direction, "source_port")
+	}
+	e.mediaLifecycleMu.Unlock()
 	if !ok {
 		// No correlated media endpoint for this flow → drop.
 		return "", nil
@@ -1391,12 +1463,13 @@ func (e *exporter) handleRequest(carrier, uaType, sourceCountry, direction strin
 	case bytes.Equal(packet.Method, []byte("REGISTER")):
 		e.storeRegisterTime(string(packet.CallID), carrier, uaType, sourceCountry, packet.SourceIP)
 	case bytes.Equal(packet.Method, []byte("INVITE")):
+		e.observeInviteTransaction(string(packet.CallID), string(packet.CSeq.ID), isReinvite, string(packet.From.Tag))
 		if !isReinvite && !isRetransmission {
 			e.storeInviteTime(string(packet.CallID), carrier, uaType, sourceCountry, direction)
 			e.inviteBurstTracker.record(packet.SourceIP, carrier, sourceCountry, direction, e.services.metricser)
 		}
 		if isSDPContentType(packet.ContentType) {
-			e.storeInviteSDP(string(packet.CallID), packet.Body)
+			e.storeInviteSDP(string(packet.CallID), string(packet.CSeq.ID), packet.Body, string(packet.From.Tag))
 		}
 	case bytes.Equal(packet.Method, []byte("CANCEL")):
 		e.removeInviteTime(string(packet.CallID))
@@ -1416,16 +1489,27 @@ func (e *exporter) handleResponse(
 	packet dto.Packet,
 ) {
 	isInviteResponse := bytes.Equal(packet.CSeq.Method, []byte("INVITE"))
+	isByeResponse := bytes.Equal(packet.CSeq.Method, []byte("BYE"))
+	if isInviteResponse || isByeResponse {
+		e.dialogLifecycleMu.Lock()
+		defer e.dialogLifecycleMu.Unlock()
+	}
 	isRegisterResponse := bytes.Equal(packet.CSeq.Method, []byte("REGISTER"))
 	is200OK := bytes.Equal(packet.ResponseStatus, []byte("200"))
+	isReinviteResponse := false
+	processInvite200OK := true
 
 	carrier := packetCarrier
 	uaType := packetUAType
 	sourceCountry := packetSourceCountry
 
 	if isInviteResponse {
+		isInviteResponse, isReinviteResponse, processInvite200OK = e.classifyInviteResponse(packet)
 		carrier, uaType, sourceCountry, direction = e.handleInviteResponse(
 			carrier, uaType, sourceCountry, direction, packet)
+		if len(packet.ResponseStatus) > 0 && packet.ResponseStatus[0] >= '3' {
+			e.deleteInviteSDP(string(packet.CallID), string(packet.CSeq.ID), string(packet.From.Tag))
+		}
 	}
 
 	if isRegisterResponse {
@@ -1444,20 +1528,6 @@ func (e *exporter) handleResponse(
 		}
 	}
 
-	// Detect re-INVITE response: dialog already exists for this INVITE.
-	// re-INVITE responses must not contaminate SER/SEER/ISA/SCR/ASR/NER
-	// atomic counters, since the INVITE itself was not counted in inviteTotal.
-	// This also deduplicates 200 OK retransmissions (Timer G on UDP): after
-	// the dialog is created by the first 200 OK, subsequent retransmissions
-	// hit the same HasActiveDialog check and are excluded from ratio counters.
-	isReinviteResponse := false
-	if isInviteResponse {
-		if dialogID, err := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag); err == nil &&
-			e.services.dialoger.HasActiveDialog(dialogID) {
-			isReinviteResponse = true
-		}
-	}
-
 	e.services.metricser.ResponseWithMetrics(
 		carrier,
 		uaType,
@@ -1468,7 +1538,7 @@ func (e *exporter) handleResponse(
 		is200OK,
 	)
 
-	if is200OK {
+	if is200OK && (!bytes.Equal(packet.CSeq.Method, []byte("INVITE")) || processInvite200OK) {
 		e.handle200OKResponse(carrier, uaType, sourceCountry, direction, packet, isRegisterResponse, isReinviteResponse)
 	} else if isRegisterResponse {
 		e.handleRegisterNon200Response(carrier, uaType, sourceCountry, direction, packet)
@@ -1612,7 +1682,9 @@ func (e *exporter) handleInvite200OK(
 		zap.L().Debug("refresh sip dialog (re-INVITE)",
 			zap.String("session", dialogID),
 			zap.Int("expires_sec", expires))
-		e.services.dialoger.Refresh(dialogID, expiresAt)
+		if !e.services.dialoger.Refresh(dialogID, expiresAt) {
+			return nil
+		}
 	} else {
 		zap.L().Debug("create sip dialog",
 			zap.String("session", dialogID),
@@ -1636,9 +1708,26 @@ func (e *exporter) handleInvite200OK(
 	labels := mediatracker.MediaLabels{
 		Carrier: carrier, UAType: uaType, SourceCountry: sourceCountry, CallID: callID, Direction: direction,
 	}
+	offerSDP, hasOfferSDP := e.takeInviteSDP(callID, string(packet.CSeq.ID), string(packet.From.Tag))
+	hasAnswerSDP := isSDPContentType(packet.ContentType)
+	if isReinvite && !hasOfferSDP {
+		return nil
+	}
+	e.mediaLifecycleMu.Lock()
+	defer e.mediaLifecycleMu.Unlock()
+	if isReinvite && hasOfferSDP {
+		e.replaceMediaRevision(callID, func() {
+			// Registration is ownership-idempotent; the main flow repeats it to
+			// collect FAS metadata without changing the primary INVITE path.
+			e.registerMediaEndpoints(offerSDP, labels)
+			if hasAnswerSDP {
+				e.registerMediaEndpoints(packet.Body, labels)
+			}
+		})
+	}
 	var offerEndpoints []fasEndpoint
 	mediaEndpoints := 0
-	if offerSDP, ok := e.takeInviteSDP(callID); ok {
+	if hasOfferSDP {
 		eps, _ := e.registerMediaEndpoints(offerSDP, labels)
 		mediaEndpoints += len(eps)
 		for _, ep := range eps {
@@ -1646,7 +1735,7 @@ func (e *exporter) handleInvite200OK(
 		}
 	}
 	answerSRTP := false
-	if isSDPContentType(packet.ContentType) {
+	if hasAnswerSDP {
 		eps, srtp := e.registerMediaEndpoints(packet.Body, labels)
 		mediaEndpoints += len(eps)
 		answerSRTP = srtp
@@ -1670,16 +1759,14 @@ func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {
 
 	zap.L().Debug("delete sip dialog", zap.String("delete session", dialogID))
 	result := e.services.dialoger.Delete(dialogID)
+	e.closeInviteTransactions(string(packet.CallID))
 	e.fasTracker.finalizeOnBye(string(packet.CallID), e.services.metricser)
 
 	if delayMs, byeCarrier, byeUAType, byeSC, ok := e.measureByeTime(string(packet.CallID)); ok {
 		e.services.metricser.UpdatePBD(byeCarrier, byeUAType, byeSC, result.Direction, delayMs)
 	}
 
-	rtpResult, deleted := e.mediaTracker.Unregister(string(packet.CallID))
-	for _, ep := range deleted {
-		e.rtpEndpointDelete(ep.IP, ep.Port)
-	}
+	rtpResult, _ := e.unregisterMedia(string(packet.CallID), true)
 	e.handleRTPDialogResult(rtpResult, result.Carrier, result.UAType, result.SourceCountry, result.Direction)
 	if result.Duration > 0 {
 		e.services.metricser.UpdateSPD(
@@ -2053,24 +2140,109 @@ func (e *exporter) getInviteCarrier(callID string) (string, string, string, stri
 	return entry.carrier, entry.uaType, entry.sourceCountry, entry.direction, true
 }
 
-// storeInviteSDP caches an INVITE SDP offer keyed by Call-ID so the media
-// endpoints can be registered when the 200 OK arrives.
-func (e *exporter) storeInviteSDP(callID string, body []byte) {
+// storeInviteSDP caches an INVITE SDP offer until its matching response arrives.
+func (e *exporter) storeInviteSDP(callID, cseqID string, body []byte, fromTags ...string) {
 	e.inviteSDPMutex.Lock()
 	defer e.inviteSDPMutex.Unlock()
-	e.inviteSDP[callID] = inviteSDPEntity{body: body, timestamp: time.Now()}
+	e.inviteSDP[inviteSDPKey{callID: callID, cseqID: cseqID, fromTag: inviteFromTag(fromTags)}] = inviteSDPEntity{
+		body: bytes.Clone(body), timestamp: time.Now(),
+	}
 }
 
-// takeInviteSDP returns and removes the cached INVITE SDP offer for a Call-ID.
-func (e *exporter) takeInviteSDP(callID string) ([]byte, bool) {
+func (e *exporter) observeInviteTransaction(callID, cseqID string, reinvite bool, fromTags ...string) {
+	e.inviteTransactionMu.Lock()
+	defer e.inviteTransactionMu.Unlock()
+	if e.inviteTransactions == nil {
+		e.inviteTransactions = make(map[inviteSDPKey]inviteTransaction)
+	}
+	key := inviteSDPKey{callID: callID, cseqID: cseqID, fromTag: inviteFromTag(fromTags)}
+	if transaction, ok := e.inviteTransactions[key]; ok && transaction.final {
+		return
+	}
+	e.inviteTransactions[key] = inviteTransaction{reinvite: reinvite, timestamp: time.Now()}
+}
+
+func (e *exporter) classifyInviteResponse(packet dto.Packet) (bool, bool, bool) {
+	callID, cseqID := string(packet.CallID), string(packet.CSeq.ID)
+	e.inviteTransactionMu.Lock()
+	defer e.inviteTransactionMu.Unlock()
+	if e.inviteTransactions == nil {
+		e.inviteTransactions = make(map[inviteSDPKey]inviteTransaction)
+	}
+	key := inviteSDPKey{callID: callID, cseqID: cseqID, fromTag: string(packet.From.Tag)}
+	transaction, ok := e.inviteTransactions[key]
+	if _, closed := e.closedInviteCalls[callID]; closed && (!ok || transaction.final) {
+		return false, false, false
+	}
+	if !ok {
+		if dialogID, err := normalizeDialogID(packet.CallID, packet.From.Tag, packet.To.Tag); err == nil &&
+			e.services.dialoger.HasActiveDialog(dialogID) {
+			transaction.reinvite = true
+		}
+	}
+	if len(packet.ResponseStatus) > 0 && packet.ResponseStatus[0] == '1' {
+		return !ok || !transaction.reinvite, ok && transaction.reinvite, false
+	}
+	if ok && transaction.final {
+		// Media ownership is Call-ID scoped, so the first final response wins for
+		// one CSeq; later forked branches must not replace the active revision.
+		return false, transaction.reinvite, false
+	}
+	transaction.final = true
+	transaction.timestamp = time.Now()
+	e.inviteTransactions[key] = transaction
+	return !transaction.reinvite, transaction.reinvite, bytes.Equal(packet.ResponseStatus, []byte("200"))
+}
+
+func (e *exporter) closeInviteTransactions(callID string) {
+	e.inviteTransactionMu.Lock()
+	defer e.inviteTransactionMu.Unlock()
+	if e.closedInviteCalls == nil {
+		e.closedInviteCalls = make(map[string]time.Time)
+	}
+	e.closedInviteCalls[callID] = time.Now()
+}
+
+func (e *exporter) cleanupInviteTransactions() {
+	e.inviteTransactionMu.Lock()
+	defer e.inviteTransactionMu.Unlock()
+	now := time.Now()
+	for key, transaction := range e.inviteTransactions {
+		if now.Sub(transaction.timestamp) > defaultInviteTTL {
+			delete(e.inviteTransactions, key)
+		}
+	}
+	for callID, closedAt := range e.closedInviteCalls {
+		if now.Sub(closedAt) > defaultInviteTTL {
+			delete(e.closedInviteCalls, callID)
+		}
+	}
+}
+
+// takeInviteSDP returns and removes the cached offer for one INVITE transaction.
+func (e *exporter) takeInviteSDP(callID, cseqID string, fromTags ...string) ([]byte, bool) {
 	e.inviteSDPMutex.Lock()
 	defer e.inviteSDPMutex.Unlock()
-	entry, ok := e.inviteSDP[callID]
+	key := inviteSDPKey{callID: callID, cseqID: cseqID, fromTag: inviteFromTag(fromTags)}
+	entry, ok := e.inviteSDP[key]
 	if !ok {
 		return nil, false
 	}
-	delete(e.inviteSDP, callID)
+	delete(e.inviteSDP, key)
 	return entry.body, true
+}
+
+func (e *exporter) deleteInviteSDP(callID, cseqID string, fromTags ...string) {
+	e.inviteSDPMutex.Lock()
+	defer e.inviteSDPMutex.Unlock()
+	delete(e.inviteSDP, inviteSDPKey{callID: callID, cseqID: cseqID, fromTag: inviteFromTag(fromTags)})
+}
+
+func inviteFromTag(fromTags []string) string {
+	if len(fromTags) > 0 {
+		return fromTags[0]
+	}
+	return ""
 }
 
 func (e *exporter) cleanupInviteSDP() {
@@ -2093,12 +2265,22 @@ func (e *exporter) registerMediaEndpoints(
 		ml := labels
 		ml.SDPCodecs = m.Codecs
 		ml.ClockRates = m.ClockRates
-		e.mediaTracker.Register(m.IP, m.Port, ml)
-		e.rtpEndpointInsert(m.IP, m.Port)
+		result := e.mediaTracker.Register(m.IP, m.Port, ml)
+		if result.Added {
+			e.retainRTPEndpoint(m.IP, m.Port)
+		}
+		if displaced := result.DisplacedAlias; displaced != nil {
+			aliases := e.releaseRTPAliases(
+				displaced.CallID, []mediatracker.MediaEndpoint{displaced.Endpoint},
+			)
+			e.emitRTPAliasReleased(aliases)
+			e.releaseRTPEndpoint(displaced.Endpoint.IP, displaced.Endpoint.Port)
+		}
 		// Register a separate RTCP endpoint for non-mux capture.
 		if rtcpIP, rtcpPort, ok := resolveRTCEndpoint(m); ok {
-			e.mediaTracker.RegisterRTCP(rtcpIP, rtcpPort, m.IP, m.Port, labels.CallID)
-			e.rtpEndpointInsert(rtcpIP, rtcpPort)
+			if e.mediaTracker.RegisterRTCP(rtcpIP, rtcpPort, m.IP, m.Port, labels.CallID) {
+				e.retainRTPEndpoint(rtcpIP, rtcpPort)
+			}
 		}
 		zap.L().Debug("RTP media endpoint registered",
 			zap.String("ip", m.IP), zap.Uint16("port", m.Port),
@@ -2146,32 +2328,127 @@ func ipPortToKey(ipStr string, port uint16) (rtpEndpointKey, bool) {
 	}, true
 }
 
-// rtpEndpointInsert adds a media endpoint to every BPF rtp_endpoints map (one
-// per interface collection) so that RTP is captured regardless of NIC.
-func (e *exporter) rtpEndpointInsert(ipStr string, port uint16) {
+// retainRTPEndpoint registers an endpoint in every BPF rtp_endpoints map when
+// its reference count transitions from zero to one.
+func (e *exporter) retainRTPEndpoint(ipStr string, port uint16) {
 	key, ok := ipPortToKey(ipStr, port)
 	if !ok {
 		return
 	}
-	for _, m := range e.rtpEndpointsMaps {
-		if err := m.Update(key, uint8(1), ebpf.UpdateAny); err != nil {
-			zap.L().Debug("failed to update rtp_endpoints BPF map",
-				zap.String("ip", ipStr), zap.Uint16("port", port), zap.Error(err))
-		}
+	e.rtpEndpointMutex.Lock()
+	defer e.rtpEndpointMutex.Unlock()
+	if e.rtpEndpointRefs == nil {
+		e.rtpEndpointRefs = make(map[rtpEndpointKey]uint)
+	}
+	if e.rtpEndpointRefs[key] > 0 {
+		e.rtpEndpointRefs[key]++
+		return
+	}
+	e.rtpEndpointRefs[key] = 1
+	e.setRTPEndpointPresence(key, true)
+}
+
+// unregisterMedia removes a dialog's media endpoints and releases matching BPF
+// endpoint references as one lifecycle operation.
+func (e *exporter) unregisterMedia(callID string, emitAliases bool) (mediatracker.RTPDialogResult, [][2]string) {
+	e.mediaLifecycleMu.Lock()
+	defer e.mediaLifecycleMu.Unlock()
+	result, deleted := e.mediaTracker.Unregister(callID)
+	for _, ep := range deleted {
+		e.releaseRTPEndpoint(ep.IP, ep.Port)
+	}
+	aliases := e.releaseRTPAliases(callID, deleted)
+	if emitAliases {
+		e.emitRTPAliasReleased(aliases)
+	}
+	return result, aliases
+}
+
+func (e *exporter) replaceMediaRevision(callID string, registerNext func()) {
+	owned := e.mediaTracker.OwnedEndpoints(callID)
+	for _, ep := range owned {
+		e.retainRTPEndpoint(ep.IP, ep.Port)
+	}
+	deleted := e.mediaTracker.Replace(callID)
+	for _, ep := range deleted {
+		e.releaseRTPEndpoint(ep.IP, ep.Port)
+	}
+	e.emitRTPAliasReleased(e.releaseRTPAliases(callID, deleted))
+	registerNext()
+	for _, ep := range owned {
+		e.releaseRTPEndpoint(ep.IP, ep.Port)
 	}
 }
 
-// rtpEndpointDelete removes a media endpoint from every BPF rtp_endpoints map.
-func (e *exporter) rtpEndpointDelete(ipStr string, port uint16) {
+func (e *exporter) releaseRTPAliases(callID string, endpoints []mediatracker.MediaEndpoint) [][2]string {
+	var aliases [][2]string
+	for _, ep := range endpoints {
+		endpoint, _ := ipPortToKey(ep.IP, ep.Port)
+		key := rtpAliasKey{endpoint: endpoint, callID: callID}
+		if labels, learned := e.rtpAliasLabels[key]; learned {
+			aliases = append(aliases, labels)
+			delete(e.rtpAliasLabels, key)
+		}
+	}
+	return aliases
+}
+
+func (e *exporter) emitRTPAliasReleased(aliases [][2]string) {
+	for _, labels := range aliases {
+		e.services.metricser.RTPAliasReleased(labels[0], labels[1])
+	}
+}
+
+// releaseRTPEndpoint removes an endpoint from every BPF rtp_endpoints map when
+// its reference count transitions from one to zero.
+func (e *exporter) releaseRTPEndpoint(ipStr string, port uint16) {
 	key, ok := ipPortToKey(ipStr, port)
 	if !ok {
 		return
 	}
+	e.rtpEndpointMutex.Lock()
+	defer e.rtpEndpointMutex.Unlock()
+	refs, ok := e.rtpEndpointRefs[key]
+	if !ok {
+		return
+	}
+	if refs > 1 {
+		e.rtpEndpointRefs[key] = refs - 1
+		return
+	}
+	delete(e.rtpEndpointRefs, key)
+	e.setRTPEndpointPresence(key, false)
+}
+
+func (e *exporter) setRTPEndpointPresence(key rtpEndpointKey, present bool) {
+	converged := true
 	for _, m := range e.rtpEndpointsMaps {
-		if err := m.Delete(key); err != nil {
-			zap.L().Debug("failed to delete from rtp_endpoints BPF map",
-				zap.String("ip", ipStr), zap.Uint16("port", port), zap.Error(err))
+		var err error
+		if present {
+			err = m.Update(key, uint8(1), ebpf.UpdateAny)
+		} else {
+			err = m.Delete(key)
 		}
+		if err != nil && (present || !errors.Is(err, ebpf.ErrKeyNotExist)) {
+			converged = false
+			zap.L().Debug("failed to reconcile rtp_endpoints BPF map", zap.Error(err))
+		}
+	}
+	if e.dirtyRTPEndpoints == nil {
+		e.dirtyRTPEndpoints = make(map[rtpEndpointKey]bool)
+	}
+	if converged {
+		delete(e.dirtyRTPEndpoints, key)
+		return
+	}
+	e.dirtyRTPEndpoints[key] = present
+}
+
+func (e *exporter) reconcileRTPEndpoints() {
+	e.rtpEndpointMutex.Lock()
+	defer e.rtpEndpointMutex.Unlock()
+	for key, present := range e.dirtyRTPEndpoints {
+		e.setRTPEndpointPresence(key, present)
 	}
 }
 

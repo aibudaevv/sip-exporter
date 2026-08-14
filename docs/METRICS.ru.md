@@ -63,6 +63,7 @@ SIP-метрики используют многоуровневую модел�
 > | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_out_of_order_total`, `rtp_jitter_milliseconds`, `rtp_pdv_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country, direction` |
 > | **RTP dialog** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country, direction` |
 > | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, direction, destination_country, caller_host, called_host, iface` |
+> | **INVITE redirects** | `invite_3xx_total` | `carrier, ua_type, source_country, direction` |
 > | **Фрод** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country, direction` |
 > | **Фрод (call-level)** | `fas_calls_total` | `carrier, ua_type, source_country, direction` |
 > | **Короткие вызовы** | `short_calls_total` | `carrier, ua_type, source_country, direction, threshold` |
@@ -521,7 +522,7 @@ sum by (destination_country) (rate(sip_exporter_invite_total[5m]))
 topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 ```
 
-> **Почему без исключения 3xx?** Строгий SER (по формуле в [Session Establishment Ratio (SER)](#session-establishment-ratio-ser)) вычитает 3xx-ответы из знаменателя. Но `300_total` — это счётчик ответов, и он **не** несёт `destination_country`, поэтому 3xx нельзя разделить по направлению в PromQL. Используется аппроксимация (200 OK / общие INVITE); для большинства развёртываний доля 3xx невелика и разница пренебрежимо мала.
+> **Почему без исключения 3xx?** Строгий SER (по формуле в [Session Establishment Ratio (SER)](#session-establishment-ratio-ser)) вычитает 3xx-ответы из знаменателя. Но `invite_3xx_total` **не** несёт `destination_country`, поэтому редиректы нельзя разделить по направлению в PromQL. Используется аппроксимация (200 OK / общие INVITE); для большинства развёртываний доля 3xx невелика и разница пренебрежимо мала.
 
 ---
 
@@ -564,6 +565,8 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 `sip_exporter_sip_retransmission_total{carrier="...",ua_type="...",direction="...",method="INVITE"}` *(counter)*: общее количество ретранслированных SIP-запросов, обнаруженных через Timer A (RFC 3261 §17.1.1.2). Ретрансляция идентифицируется, когда дубликат INVITE с тем же Call-ID приходит в пределах окна TTL invite-трекера (60с) без активного диалога. Сейчас только для INVITE; лейбл `method` зарезервирован для будущего обобщения на REGISTER/OPTIONS.
 
 `sip_exporter_invite_200_total{carrier,ua_type,source_country,destination_country,caller_host,called_host,iface}`: общее количество ответов `200 OK` на INVITE-запросы (успешные установления вызовов). Это числитель для [SER по направлению](#ser-по-направлению-promql) в PromQL. Несёт полный набор из 8 лейблов — как `invite_total`, включая `iface`.
+
+`sip_exporter_invite_3xx_total{carrier,ua_type,source_country,direction}`: общее количество принятых первых финальных ответов `3xx` на исходные INVITE-транзакции. Повторные и forked финальные ответы, re-INVITE и ответы на другие SIP-методы исключаются. Используйте этот счётчик вместе с `invite_total` и `invite_200_total`, чтобы рассчитывать оконный SER с той же семантикой редиректов, что и `sip_exporter_ser`.
 
 ## Метрики SIP-ответов (по кодам статуса)
 
@@ -793,7 +796,7 @@ sum by (carrier) (increase(sip_exporter_billable_seconds_total[1h])) / 3600
 
 Метрики RTP-медиа извлекаются из RTP-пакетов, захваченных eBPF-фильтром, и
 коррелируются с SIP-диалогами через SDP (медиа IP:port → carrier/ua_type/call-id).
-Все RTP-метрики несут лейблы `carrier`, `ua_type`, `codec` и `source_country`. Учитывается только RTP,
+RTP stream-метрики несут лейблы `carrier`, `ua_type`, `codec`, `source_country` и `direction`. Учитывается только RTP,
 принадлежащий установленному SIP-диалогу (после 200 OK на INVITE с SDP);
 RTP без коррелированного диалога отбрасывается.
 
@@ -835,18 +838,27 @@ RTP без коррелированного диалога отбрасывае�
 
 `sip_exporter_rtp_active_streams{carrier,ua_type,codec,source_country,direction}` *(gauge)*: количество активных RTP-потоков. Сэмплируется раз в секунду; простаивающие потоки истекают через 30 с.
 
+`sip_exporter_rtp_endpoint_mismatch_total{carrier,direction,type}` *(counter)*: source-port alias,
+обученные для symmetric RTP. `type` пока всегда равен `source_port`; счётчик увеличивается один раз
+для каждого успешно обученного alias и никогда не добавляет наблюдаемые IP-адрес или port в labels.
+
+`sip_exporter_rtp_alias_active{carrier,direction}` *(gauge)*: число активных обученных source-port alias.
+Значение увеличивается при обучении alias и уменьшается при замене media revision, завершении
+вызова или истечении диалога.
+
 > MOS и R-factor сэмплируются по каждому потоку раз в секунду; E-model использует
 > кодековые Ie/Bpl факторы из G.113. Неизвестные кодеки получают консервативное
 > значение по умолчанию (Ie=10). Burst/gap density использует упрощённую
 > эвристику по мотивам RFC 3611: серии из ≥ 3 последовательных потерь
 > классифицируются как burst, более короткие — как gap.
 
-> **Ограничение корреляции:** RTP-потоки коррелируются с SIP-диалогами по
-> совпадению source IP:port пакета с медиа-эндпоинтами из SDP
-> (`c=` IP + `m=` порт). Это требует симметричного RTP (source port равен
-> объявленному). При NAT/port remapping (асимметричный RTP) поток не
-> сопоставляется и исключается из RTP-метрик; метрики SIP-сигнализации не затрагиваются.
-> Будущая работа: port-learning по RFC 4961.
+> **Ограничение корреляции:** Сначала RTP сопоставляется с SDP endpoint по destination,
+> затем используется source fallback. Пакет, скоррелированный по destination, может обучить один
+> source-port alias для своего SDP peer, только если source IP совпадает с этим peer и ownership
+> однозначен. Это поддерживает symmetric RTP/NAT source-port remapping, но никогда не обучает смену
+> source IP, ICE/TURN endpoint change или произвольный UDP-трафик. Learned alias ограничены media
+> revision диалога и удаляются при re-INVITE replacement, BYE или expiry; отклонённый alias не влияет
+> на SIP-метрики.
 
 ### Метрики качества RTP-диалога
 

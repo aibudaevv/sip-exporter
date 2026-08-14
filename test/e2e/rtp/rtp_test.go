@@ -13,10 +13,8 @@ import (
 	"io"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -53,8 +51,8 @@ func exporterImage() string {
 	return image
 }
 
-// allocatePortsN returns n unique UDP port numbers (as strings). SIPp binds
-// UDP sockets, so TCP allocation cannot prove the selected port is available.
+// allocatePortsN returns n unique port numbers (as strings) available for both
+// UDP SIP/RTP sockets and the TCP HTTP listener used by the first port.
 func allocatePortsN(n int) []string {
 	portMu.Lock()
 	defer portMu.Unlock()
@@ -66,7 +64,12 @@ func allocatePortsN(n int) []string {
 			panic(fmt.Sprintf("allocatePortsN: failed to get free port: %v", err))
 		}
 		port := l.LocalAddr().(*net.UDPAddr).Port
-		l.Close()
+		tcpListener, tcpErr := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port})
+		_ = l.Close()
+		if tcpErr != nil {
+			continue
+		}
+		_ = tcpListener.Close()
 		if _, ok := usedPorts[port]; ok {
 			continue
 		}
@@ -159,7 +162,31 @@ func startExporterWithExtraEnv(
 		_ = c.Terminate(cleanupCtx)
 	})
 
-	return fmt.Sprintf("http://localhost:%s", httpPort)
+	endpoint := fmt.Sprintf("http://localhost:%s", httpPort)
+	waitForCaptureReady(t, endpoint, sipPort)
+	return endpoint
+}
+
+func waitForCaptureReady(t *testing.T, endpoint, sipPorts string) {
+	t.Helper()
+	sipPort := strings.Split(sipPorts, ",")[0]
+	port, err := strconv.Atoi(sipPort)
+	require.NoError(t, err)
+
+	listener, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port})
+	require.NoError(t, err)
+	defer listener.Close()
+
+	sender, err := net.DialUDP("udp4", nil, listener.LocalAddr().(*net.UDPAddr))
+	require.NoError(t, err)
+	defer sender.Close()
+
+	message := fmt.Sprintf("OPTIONS sip:ready@127.0.0.1:%s SIP/2.0\r\nFrom: readiness <sip:readiness@127.0.0.1>;tag=ready\r\nTo: service <sip:service@127.0.0.1:%s>\r\nCall-ID: capture-ready-%s\r\nCSeq: 1 OPTIONS\r\nUser-Agent: readiness\r\nContent-Length: 0\r\n\r\n", sipPort, sipPort, sipPort)
+	require.Eventually(t, func() bool {
+		_, err = sender.Write([]byte(message))
+		require.NoError(t, err)
+		return metricExists(t, endpoint, "sip_exporter_options_total")
+	}, 5*time.Second, 100*time.Millisecond, "AF_PACKET capture must be ready before sending test traffic")
 }
 
 // startExporterWithCarrierUA is like startExporter but additionally bind-mounts
@@ -257,7 +284,9 @@ func startExporterWithCarrierUA(
 		_ = c.Terminate(cleanupCtx)
 	})
 
-	return fmt.Sprintf("http://localhost:%s", httpPort)
+	endpoint := fmt.Sprintf("http://localhost:%s", httpPort)
+	waitForCaptureReady(t, endpoint, sipPort)
+	return endpoint
 }
 
 // socketPacketsMetric is the self-monitoring counter used to verify RTP delivery.
@@ -268,26 +297,10 @@ const socketPacketsMetric = "sip_exporter_socket_packets_received_total"
 // delivered to the exporter's AF_PACKET socket.
 func getSocketPacketsReceived(t *testing.T, endpoint string) float64 {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/metrics", nil)
-	require.NoError(t, err)
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	re := regexp.MustCompile(`^` + socketPacketsMetric + `(?:\{[^}]*\})?\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		m := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(m) == 2 {
-			v, parseErr := strconv.ParseFloat(m[1], 64)
-			require.NoError(t, parseErr)
-			return v
-		}
-	}
-	return 0
+	const ifaceFilter = `iface="lo"`
+	require.True(t, metricWithLabelsExists(t, endpoint, socketPacketsMetric, ifaceFilter),
+		"%s{%s} must exist", socketPacketsMetric, ifaceFilter)
+	return getMetricByLabel(t, endpoint, socketPacketsMetric, ifaceFilter)
 }
 
 // sendRTP sends count RTP-version-2 UDP packets to 127.0.0.1:port. The packets
@@ -383,7 +396,8 @@ func TestRTPReachesAppWithCapture(t *testing.T) {
 		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
 
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
 	}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
 
 	time.Sleep(1500 * time.Millisecond)
@@ -430,8 +444,6 @@ func TestRTPUncorrelatedDropped(t *testing.T) {
 		"uncorrelated RTP must NOT reach the socket (strict SDP-driven BPF drops it)")
 
 	// No RTP metrics counted.
-	require.False(t, metricLineExists(t, endpoint, "sip_exporter_rtp_packets_total"),
-		"uncorrelated RTP must be dropped (no rtp_packets_total metric line)")
-	require.Equal(t, 0.0, getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total"),
+	require.False(t, rtpMetricExists(t, endpoint, "sip_exporter_rtp_packets_total"),
 		"uncorrelated RTP must be dropped (no rtp_packets_total)")
 }

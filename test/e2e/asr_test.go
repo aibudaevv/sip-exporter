@@ -34,15 +34,15 @@ func TestASRAllScenarios(t *testing.T) {
 
 			if tt.wantExists {
 				require.True(t, metricExists(t, env.endpoint, "sip_exporter_asr"))
+				asr := getASR(t, env.endpoint)
+				t.Logf("ASR = %.2f (want %.2f)", asr, tt.wantASR)
+				require.InDelta(t, tt.wantASR, asr, ratioDelta)
 			} else {
 				require.False(t, metricExists(t, env.endpoint, "sip_exporter_asr"),
 					"ASR metric should be absent when no INVITEs")
 			}
-			asr := getASR(t, env.endpoint)
-			t.Logf("ASR = %.2f (want %.2f)", asr, tt.wantASR)
-			require.InDelta(t, tt.wantASR, asr, ratioDelta)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -82,7 +82,7 @@ func TestASRMixed(t *testing.T) {
 			t.Logf("ASR = %.2f (want %.2f)", asr, wantASR)
 			require.InDelta(t, wantASR, asr, ratioDelta)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -100,7 +100,7 @@ func TestASRWithCarrierConfig(t *testing.T) {
 	t.Logf("ASR{carrier=%q} = %.2f (want %.2f)", env.carrier, asr, 100.0)
 	require.InDelta(t, 100.0, asr, ratioDelta)
 
-	env.waitForSessionsZeroByCarrier(t)
+	env.assertDialogTeardownByCarrier(t)
 }
 
 func TestASRMixedWithCarrierConfig(t *testing.T) {
@@ -118,5 +118,5 @@ func TestASRMixedWithCarrierConfig(t *testing.T) {
 	t.Logf("ASR{carrier=%q} = %.2f (want %.2f)", env.carrier, asr, wantASR)
 	require.InDelta(t, wantASR, asr, ratioDelta)
 
-	env.waitForSessionsZeroByCarrier(t)
+	env.assertDialogTeardownByCarrier(t)
 }

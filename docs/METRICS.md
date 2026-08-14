@@ -63,6 +63,7 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 > | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_out_of_order_total`, `rtp_jitter_milliseconds`, `rtp_pdv_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country, direction` |
 > | **RTP dialog** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country, direction` |
 > | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, direction, destination_country, caller_host, called_host, iface` |
+> | **INVITE redirects** | `invite_3xx_total` | `carrier, ua_type, source_country, direction` |
 > | **Fraud** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country, direction` |
 > | **Fraud (call-level)** | `fas_calls_total` | `carrier, ua_type, source_country, direction` |
 > | **Short calls** | `short_calls_total` | `carrier, ua_type, source_country, direction, threshold` |
@@ -521,7 +522,7 @@ sum by (destination_country) (rate(sip_exporter_invite_total[5m]))
 topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 ```
 
-> **Why no 3xx exclusion?** Strict SER (per the formula in [Session Establishment Ratio (SER)](#session-establishment-ratio-ser)) subtracts 3xx responses from the denominator. But `300_total` is a response counter and does **not** carry `destination_country`, so 3xx cannot be partitioned by destination in PromQL. The approximation above (200 OK / total INVITE) is used instead; for most deployments the 3xx share is small and the difference is negligible.
+> **Why no 3xx exclusion?** Strict SER (per the formula in [Session Establishment Ratio (SER)](#session-establishment-ratio-ser)) subtracts 3xx responses from the denominator. But `invite_3xx_total` does **not** carry `destination_country`, so redirects cannot be partitioned by destination in PromQL. The approximation above (200 OK / total INVITE) is used instead; for most deployments the 3xx share is small and the difference is negligible.
 
 ---
 
@@ -566,6 +567,8 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 `sip_exporter_sip_retransmission_total{carrier="...",ua_type="...",direction="...",method="INVITE"}` *(counter)*: total number of retransmitted SIP requests detected via Timer A (RFC 3261 §17.1.1.2). A retransmission is identified when a duplicate INVITE with the same Call-ID arrives within the invite tracker TTL window (60s) without an active dialog. Currently INVITE-only; the `method` label is reserved for future generalization to REGISTER/OPTIONS.
 
 `sip_exporter_invite_200_total{carrier,ua_type,source_country,destination_country,caller_host,called_host,iface}`: total number of `200 OK` responses to INVITE requests (successful call establishments). This is the numerator for [SER-by-destination](#ser-by-destination-promql) PromQL calculations. Carries the full 8-label set — same as `invite_total`, including `iface`.
+
+`sip_exporter_invite_3xx_total{carrier,ua_type,source_country,direction}`: total number of accepted first-final `3xx` responses to initial INVITE transactions. Retransmitted/forked final responses, re-INVITEs, and responses to other SIP methods are excluded. Use this counter with `invite_total` and `invite_200_total` to calculate windowed SER with the same redirect semantics as `sip_exporter_ser`.
 
 ## SIP response metrics (by status code)
 
@@ -795,7 +798,8 @@ sum by (carrier) (increase(sip_exporter_billable_seconds_total[1h])) / 3600
 
 RTP media metrics are derived from RTP packets captured by the eBPF filter and
 correlated with SIP dialogs via SDP (media IP:port → carrier/ua_type/call-id).
-All RTP metrics carry the `carrier`, `ua_type`, `codec`, and `source_country` labels. Only RTP that
+RTP stream metrics carry the `carrier`, `ua_type`, `codec`, `source_country`, and `direction` labels.
+Only RTP that
 belongs to an established SIP dialog (after a 200 OK to INVITE with SDP) is
 counted; RTP without a correlated dialog is dropped.
 
@@ -847,17 +851,26 @@ counted; RTP without a correlated dialog is dropped.
 
 `sip_exporter_rtp_active_streams{carrier,ua_type,codec,source_country,direction}` *(gauge)*: number of active RTP streams. Sampled once per second; idle streams expire after 30 s.
 
+`sip_exporter_rtp_endpoint_mismatch_total{carrier,direction,type}` *(counter)*: source-port aliases
+learned for symmetric RTP. `type` is currently always `source_port`; the counter increments once for
+each successfully learned alias and never exposes an observed IP address or port as a label.
+
+`sip_exporter_rtp_alias_active{carrier,direction}` *(gauge)*: active learned source-port aliases.
+It increases when an alias is learned and decreases when its dialog media revision is replaced,
+the call ends, or the dialog expires.
+
 > MOS and R-factor are sampled per stream once per second; the E-model uses G.113 codec Ie/Bpl
 > factors. Unknown codecs get a conservative default (Ie=10). Burst/gap density uses a simplified
 > heuristic inspired by RFC 3611: consecutive loss runs of ≥ 3 packets are classified as burst,
 > shorter runs as gap.
 
-> **Correlation limitation:** RTP streams are correlated to SIP dialogs by matching
-> the packet's source IP:port against the media endpoints advertised in SDP
-> (`c=` IP + `m=` port). This requires symmetric RTP (source port equals the
-> advertised port). With NAT/port remapping (asymmetric RTP) the flow is not
-> matched and is dropped from RTP metrics; SIP signaling metrics are unaffected.
-> Future work: port-learning per RFC 4961.
+> **Correlation limitation:** RTP first matches an SDP-advertised endpoint by destination,
+> then by source fallback. A destination-correlated packet may learn one source-port alias for
+> its SDP peer only when its source IP matches that peer and ownership is unambiguous. This supports
+> symmetric RTP/NAT source-port remapping, but never learns a source-IP change, ICE/TURN endpoint
+> changes, or arbitrary UDP traffic. Learned aliases are scoped to the dialog media revision and are
+> removed on re-INVITE replacement, BYE, or expiry; SIP signaling metrics are unaffected by a
+> rejected alias.
 
 ### RTP Dialog Quality Metrics
 

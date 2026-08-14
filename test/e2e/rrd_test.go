@@ -35,6 +35,7 @@ func TestRRD(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			ctx := t.Context()
+			incompleteRegisters := 0
 
 			var env *testEnv
 			if tt.carrier {
@@ -46,11 +47,13 @@ func TestRRD(t *testing.T) {
 			for _, s := range tt.scenarios {
 				if s.uacOnly {
 					runSippUACOnly(ctx, t, s.uac, s.count, env)
+					incompleteRegisters += s.count
 				} else {
 					runSippScenario(ctx, t, s.uas, s.uac, s.count, env)
 				}
 			}
 
+			require.True(t, metricExists(t, env.endpoint, "sip_exporter_register_total"))
 			registerTotal := getMetric(t, env.endpoint, "sip_exporter_register_total")
 			require.Greater(t, registerTotal, 0.0, "should have REGISTER requests")
 
@@ -83,6 +86,15 @@ func TestRRD(t *testing.T) {
 					"RRD histogram should have observations")
 			}
 
+			if incompleteRegisters > 0 {
+				waitForDialogMetricsSnapshot(t)
+				registerLabel := `type="register"`
+				require.True(t, metricWithLabelExists(t, env.endpoint,
+					"sip_exporter_active_trackers", registerLabel))
+				require.Equal(t, float64(incompleteRegisters), getMetricWithLabel(t,
+					env.endpoint, "sip_exporter_active_trackers", registerLabel))
+				return
+			}
 			assertSelfMonitoringHealthy(t, env.endpoint)
 		})
 	}

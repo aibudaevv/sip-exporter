@@ -8,13 +8,21 @@ groups:
       - record: sip_exporter:ser_percent:5m
         expr: |
           100 * sum by (instance, carrier, direction) (rate(sip_exporter_invite_200_total[5m]))
-          / clamp_min(
+          / (
             sum by (instance, carrier, direction) (rate(sip_exporter_invite_total[5m]))
             - (
-              sum by (instance, carrier, direction) (rate(sip_exporter_300_total[5m]))
-              + sum by (instance, carrier, direction) (rate(sip_exporter_302_total[5m]))
-            ),
-            1
+              sum by (instance, carrier, direction) (rate(sip_exporter_invite_3xx_total[5m]))
+              or (
+                (
+                  sum by (instance, carrier, direction) (rate(sip_exporter_300_total[5m]))
+                  or 0 * sum by (instance, carrier, direction) (rate(sip_exporter_invite_total[5m]))
+                )
+                + (
+                  sum by (instance, carrier, direction) (rate(sip_exporter_302_total[5m]))
+                  or 0 * sum by (instance, carrier, direction) (rate(sip_exporter_invite_total[5m]))
+                )
+              )
+            )
           )
 
       - record: sip_exporter:asr_percent:5m

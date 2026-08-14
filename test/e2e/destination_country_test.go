@@ -70,20 +70,20 @@ func TestDestinationCountry(t *testing.T) {
 			require.True(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_total", wantLabel),
 				"invite_total{%s} must exist", wantLabel)
 			inviteOK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", wantLabel)
-			inviteBad := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", tt.notWantLabel)
-			t.Logf("invite_total{%s}=%.0f, invite_total{%s}=%.0f", wantLabel, inviteOK, tt.notWantLabel, inviteBad)
+			require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_total", tt.notWantLabel),
+				"invite_total{%s} must be absent", tt.notWantLabel)
+			t.Logf("invite_total{%s}=%.0f", wantLabel, inviteOK)
 			require.InDelta(t, float64(callCount), inviteOK, ratioDelta, "invite_total should carry %s", wantLabel)
-			require.LessOrEqual(t, inviteBad, 3.0, "invite_total should NOT carry %s", tt.notWantLabel)
 
 			require.True(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", wantLabel),
 				"invite_200_total{%s} must exist", wantLabel)
 			invite200OK := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", wantLabel)
-			invite200Bad := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", tt.notWantLabel)
-			t.Logf("invite_200_total{%s}=%.0f, invite_200_total{%s}=%.0f", wantLabel, invite200OK, tt.notWantLabel, invite200Bad)
+			require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", tt.notWantLabel),
+				"invite_200_total{%s} must be absent", tt.notWantLabel)
+			t.Logf("invite_200_total{%s}=%.0f", wantLabel, invite200OK)
 			require.InDelta(t, float64(callCount), invite200OK, ratioDelta, "invite_200_total should carry %s", wantLabel)
-			require.LessOrEqual(t, invite200Bad, 3.0, "invite_200_total should NOT carry %s", tt.notWantLabel)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }

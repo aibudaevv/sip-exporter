@@ -142,7 +142,7 @@ Coverage depends on what the host actually sees:
 |----------|--------|--------------------------------------|
 | SIP and RTP/RTCP over IPv4/UDP | Supported | The sensor must see signaling and both media directions on the same call path. |
 | `rtcp-mux`, SDP `a=rtcp`, or legacy RTP/RTCP port+1 | Supported | The final IPv4 endpoint and port must be present in SDP visible to the exporter. |
-| NAT/SBC with stable SDP-advertised media endpoints | Conditional | RTP correlation uses the advertised source IP:port; source-port remapping (symmetric RTP) is not correlated. |
+| NAT/SBC with stable SDP-advertised media endpoints | Supported | Symmetric RTP source-port remapping is learned after destination-correlated RTP when the source IP still matches the SDP peer. Source-IP changes and ambiguous shared endpoints are not learned. |
 | SIP over TCP/TLS, IPv6 SIP/SDP/media, or fragmented UDP | Unsupported | The capture and SDP path are IPv4/UDP-only and do not reassemble IP fragments. |
 | RTP without visible SDP, or ICE/TURN endpoint changes after SDP | Unsupported | The kernel filter has no endpoint to register, so the media is dropped. |
 | SPAN/TAP or other mirrored traffic | Not supported for QoE/direction | Packet collection may occur, but `direction` is not trustworthy because the sensor does not own the traffic IPs. Deploy on the forwarding host. |
@@ -366,9 +366,9 @@ Full setup, metrics reference, and alerting guidance: [docs/fraud-detection.md](
 ## Development
 
 ### Requirements
-- Go 1.25+
+- Go 1.26.6+
 - Clang/LLVM (for eBPF compilation)
-- golangci-lint v2.7.1 and goimports (for `make lint` / `make imports`)
+- golangci-lint v2.9.0 and goimports (for `make lint` / `make imports`)
 - Linux kernel with eBPF support
 - Root privileges (required for eBPF and packet socket)
 

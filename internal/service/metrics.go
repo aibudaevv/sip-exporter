@@ -63,6 +63,7 @@ type (
 		sipPacketsTotal  prometheus.Counter
 
 		requestInviteTotal      *prometheus.CounterVec
+		requestInvite3xxTotal   *prometheus.CounterVec
 		requestReinviteTotal    *prometheus.CounterVec
 		requestInvite200OKTotal *prometheus.CounterVec
 		requestACKTotal         *prometheus.CounterVec
@@ -152,6 +153,9 @@ type (
 		sessionsMissingRTP *prometheus.CounterVec
 		rtpActiveStreams   *prometheus.GaugeVec
 
+		rtpEndpointMismatch *prometheus.CounterVec
+		rtpAliasActive      *prometheus.GaugeVec
+
 		rtcpJitter         *prometheus.HistogramVec
 		rtcpLossFraction   *prometheus.HistogramVec
 		rtcpCumulativeLoss *prometheus.CounterVec
@@ -219,6 +223,8 @@ type (
 		UpdateRTPLossDistribution(carrier, uaType, codec, sourceCountry, direction string,
 			burstDensity, gapDensity float64)
 		UpdateRTPActiveStreams(counts []LabeledCount)
+		RTPAliasLearned(carrier, direction, mismatchType string)
+		RTPAliasReleased(carrier, direction string)
 		OneWayCall(carrier, uaType, sourceCountry, direction string)
 		MissingRTP(carrier, uaType, sourceCountry, direction string)
 		UpdateRTCPJitter(carrier, uaType, codec, sourceCountry, direction string, jitterMs float64)
@@ -317,6 +323,9 @@ func (m *metrics) initRequestCounters(reg *prometheus.Registry) {
 	m.requestInviteTotal = newCounterVecWithRegistry(
 		"sip_exporter_invite_total",
 		"Total number of INVITE requests", clInvite, reg)
+	m.requestInvite3xxTotal = newCounterVecWithRegistry(
+		"sip_exporter_invite_3xx_total",
+		"Total number of 3xx responses to initial INVITE requests", cl, reg)
 	m.requestReinviteTotal = newCounterVecWithRegistry(
 		"sip_exporter_reinvite_total",
 		"Total number of re-INVITE requests (INVITE within an existing dialog)", cl, reg)
@@ -694,6 +703,12 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 	m.rtpActiveStreams = newGaugeVecWithRegistry(
 		"sip_exporter_rtp_active_streams",
 		"Number of active RTP streams correlated with SIP dialogs", rl, reg)
+	m.rtpEndpointMismatch = newCounterVecWithRegistry(
+		"sip_exporter_rtp_endpoint_mismatch_total",
+		"Total number of learned RTP endpoint mismatches", []string{"carrier", "direction", "type"}, reg)
+	m.rtpAliasActive = newGaugeVecWithRegistry(
+		"sip_exporter_rtp_alias_active",
+		"Number of active learned RTP endpoint aliases", []string{"carrier", "direction"}, reg)
 	m.rtpKernelTimestampMissing = newCounterWithRegistry(
 		"sip_exporter_rtp_kernel_timestamp_missing_total",
 		"RTP packets missing kernel SO_TIMESTAMPNS (PDV fell back to processing time; growing rate means unreliable PDV)",
@@ -935,6 +950,7 @@ func (m *metrics) Request(
 			carrier, uaType, sourceCountry, direction,
 			destinationCountry, callerHost, calledHost, iface,
 		).Inc()
+		m.requestInvite3xxTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Add(0)
 		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry, direction).inviteTotal.Add(1)
 	case bytes.Equal(in, []byte("MESSAGE")):
 		m.requestMessageTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
@@ -955,6 +971,7 @@ func (m *metrics) Response(carrier, uaType, sourceCountry, direction string, in 
 
 	if isInviteResponse && len(in) == 3 && in[0] == '3' {
 		m.getOrCreateCarrierCounters(carrier, uaType, sourceCountry, direction).invite3xxTotal.Add(1)
+		m.requestInvite3xxTotal.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
 	}
 
 	if isInviteResponse && isEffectiveResponse(in) {
@@ -1297,6 +1314,15 @@ func (m *metrics) UpdateRTPLossDistribution(
 func (m *metrics) UpdateRTPActiveStreams(counts []LabeledCount) {
 	setGaugeFromCounts(m.rtpActiveStreams, &m.prevRTPKeys, counts,
 		[]string{"carrier", "ua_type", "codec", "source_country", "direction"})
+}
+
+func (m *metrics) RTPAliasLearned(carrier, direction, mismatchType string) {
+	m.rtpEndpointMismatch.WithLabelValues(carrier, direction, mismatchType).Inc()
+	m.rtpAliasActive.WithLabelValues(carrier, direction).Inc()
+}
+
+func (m *metrics) RTPAliasReleased(carrier, direction string) {
+	m.rtpAliasActive.WithLabelValues(carrier, direction).Dec()
 }
 
 func (m *metrics) OneWayCall(carrier, uaType, sourceCountry, direction string) {

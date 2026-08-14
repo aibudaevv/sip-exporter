@@ -35,15 +35,15 @@ func TestNERAllScenarios(t *testing.T) {
 
 			if tt.wantExists {
 				require.True(t, metricExists(t, env.endpoint, "sip_exporter_ner"))
+				ner := getNER(t, env.endpoint)
+				t.Logf("NER = %.2f (want %.2f)", ner, tt.wantNER)
+				require.InDelta(t, tt.wantNER, ner, ratioDelta)
 			} else {
 				require.False(t, metricExists(t, env.endpoint, "sip_exporter_ner"),
 					"NER metric should be absent when no INVITEs")
 			}
-			ner := getNER(t, env.endpoint)
-			t.Logf("NER = %.2f (want %.2f)", ner, tt.wantNER)
-			require.InDelta(t, tt.wantNER, ner, ratioDelta)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -64,7 +64,7 @@ func TestNERMixed(t *testing.T) {
 	t.Logf("NER = %.2f (want %.2f)", ner, wantNER)
 	require.InDelta(t, wantNER, ner, ratioDelta)
 
-	waitForSessionsZero(t, env.endpoint)
+	assertDialogTeardown(t, env.endpoint)
 }
 
 func TestNEREquals100MinusISA(t *testing.T) {
@@ -81,7 +81,7 @@ func TestNEREquals100MinusISA(t *testing.T) {
 	t.Logf("NER = %.2f, ISA = %.2f", ner, isa)
 	require.InDelta(t, percentScale-isa, ner, 0.01, "NER must equal 100 - ISA")
 
-	waitForSessionsZero(t, env.endpoint)
+	assertDialogTeardown(t, env.endpoint)
 }
 
 func TestNERWithCarrierConfig(t *testing.T) {
