@@ -3,6 +3,7 @@
 package load
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -74,17 +75,38 @@ const (
 )
 
 var (
-	resultsMu   sync.Mutex
-	loadResults = &ResultsData{
+	resultsMu         sync.Mutex
+	activeRunRecorder *runRecorderV2
+	loadResults       = &ResultsData{
 		Version: 1,
 		Results: make(map[string]ScenarioResult),
 	}
 )
 
-func recordResult(scenario string, metrics map[string]MetricEntry) {
+func beginScenario(t *testing.T) {
+	t.Helper()
+	if activeRunRecorder == nil {
+		return
+	}
+	if err := activeRunRecorder.Begin(t.Name(), time.Now()); err != nil {
+		t.Fatalf("begin load result row: %v", err)
+	}
+	t.Cleanup(func() {
+		activeRunRecorder.Finalize(t.Name(), t.Failed(), time.Now())
+	})
+}
+
+func recordResult(t *testing.T, metrics map[string]MetricEntry) {
+	t.Helper()
+	scenario := t.Name()
 	resultsMu.Lock()
-	defer resultsMu.Unlock()
 	loadResults.Results[scenario] = ScenarioResult{Metrics: metrics}
+	resultsMu.Unlock()
+	if activeRunRecorder != nil {
+		if err := activeRunRecorder.Complete(scenario, metrics, time.Now()); err != nil {
+			t.Fatalf("complete load result row: %v", err)
+		}
+	}
 }
 
 func resultsFilePath() string {
@@ -334,9 +356,44 @@ func saveAndCompare() int {
 }
 
 func TestMain(m *testing.M) {
+	if err := configureActiveRunRecorder(); err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: configure result recorder: %v\n", err)
+		os.Exit(1)
+	}
 	code := m.Run()
-	if extra := saveAndCompare(); extra != 0 && code == 0 {
-		code = extra
+	if activeRunRecorder != nil {
+		if err := activeRunRecorder.Save(time.Now()); err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: save result v2 artifact: %v\n", err)
+			if code == 0 {
+				code = 1
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "Result v2 artifact saved to %s\n",
+				filepath.Join(os.Getenv(loadArtifactDirEnv), resultV2File))
+		}
 	}
 	os.Exit(code)
+}
+
+func configureActiveRunRecorder() error {
+	mode, err := loadRunModeFromEnvironment()
+	if err != nil || mode == "" {
+		return err
+	}
+	root := os.Getenv(loadArtifactDirEnv)
+	if root == "" {
+		return fmt.Errorf("%s is required when %s is set", loadArtifactDirEnv, loadModeEnv)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	fingerprint, err := collectEnvironmentFingerprint(ctx)
+	if err != nil {
+		return err
+	}
+	commit := getGitCommit()
+	if commit == "" {
+		return fmt.Errorf("read git commit")
+	}
+	activeRunRecorder, err = newRunRecorderV2(mode, root, fingerprint, commit, time.Now())
+	return err
 }

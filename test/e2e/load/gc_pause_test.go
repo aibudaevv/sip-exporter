@@ -53,9 +53,11 @@ func percentile(sorted []float64, p float64) float64 {
 }
 
 func TestBenchmarkGCPauseDuration(t *testing.T) {
+	beginScenario(t)
 	t.Setenv("SIP_EXPORTER_E2E_GODEBUG", "gctrace=1")
 
 	env := newTestEnv(t.Context(), t)
+	recordMetricsSnapshot(t, "metrics-before.prom", env.endpoint)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
@@ -70,7 +72,7 @@ func TestBenchmarkGCPauseDuration(t *testing.T) {
 	uasContainer := startSippContainer(ctx, t,
 		[]string{"-sf", "/scenarios/call_highrate_uas.xml", "-i", "127.0.0.1", "-p", env.sippPort,
 			"-m", fmt.Sprintf("%d", callCount), "-nostdin"},
-		sippVol, false,
+		sippVol, "", false,
 	)
 
 	time.Sleep(500 * time.Millisecond)
@@ -81,7 +83,7 @@ func TestBenchmarkGCPauseDuration(t *testing.T) {
 		[]string{"-sf", "/scenarios/call_highrate_uac.xml", "-i", "127.0.0.1", "-p", env.sippClientPort,
 			"-m", fmt.Sprintf("%d", callCount), "-r", fmt.Sprintf("%d", rate),
 			"127.0.0.1:" + env.sippPort},
-		sippVol, true,
+		sippVol, "generator", true,
 	)
 
 	waitForContainerExit(ctx, t, uasContainer)
@@ -115,8 +117,11 @@ func TestBenchmarkGCPauseDuration(t *testing.T) {
 	t.Logf("Max: %.3f ms", maxPause)
 
 	require.Less(t, maxPause, 50.0, "max STW pause SLO: < 50ms")
+	memMB := getSingleMemSample(t, env.exporterContainer.GetContainerID())
+	recordRawResourceSamples(t, ResourceSamplesV2{MemoryMB: []float64{memMB}})
+	recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)
 
-	recordResult(t.Name(), map[string]MetricEntry{
+	recordResult(t, map[string]MetricEntry{
 		"avg_ms": {Value: avgPause, Unit: "ms", Direction: dirLowerIsBetter},
 		"p95_ms": {Value: p95, Unit: "ms", Direction: dirLowerIsBetter},
 		"max_ms": {Value: maxPause, Unit: "ms", Direction: dirLowerIsBetter},

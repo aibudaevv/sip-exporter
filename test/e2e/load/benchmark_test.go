@@ -21,6 +21,7 @@ func TestLoadINVITEFlood(t *testing.T) {
 	rates := []int{100, 500, 1000, 2000, 5000}
 	for _, rate := range rates {
 		t.Run(fmt.Sprintf("rate_%d", rate), func(t *testing.T) {
+			beginScenario(t)
 			env := newTestEnv(t.Context(), t)
 
 			ctx, cancel := context.WithTimeout(t.Context(), subtestTimeout)
@@ -42,7 +43,7 @@ func TestLoadINVITEFlood(t *testing.T) {
 			require.Greater(t, result.PacketsAfter, result.PacketsBefore,
 				"exporter should have processed packets")
 
-			recordResult(t.Name(), map[string]MetricEntry{
+			recordResult(t, map[string]MetricEntry{
 				"actual_pps": {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
 				"loss_rate":  {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
 				"cpu_peak":   {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},
@@ -57,6 +58,7 @@ func TestLoadFullCallFlow(t *testing.T) {
 	rates := []int{100, 500, 1000, 1200, 1400, 1600, 1800}
 	for _, rate := range rates {
 		t.Run(fmt.Sprintf("rate_%d", rate), func(t *testing.T) {
+			beginScenario(t)
 			env := newTestEnv(t.Context(), t)
 
 			ctx, cancel := context.WithTimeout(t.Context(), subtestTimeout)
@@ -83,7 +85,7 @@ func TestLoadFullCallFlow(t *testing.T) {
 			require.GreaterOrEqual(t, ser, 99.0,
 				"SER SLO: >= 99%% at rate %d (got %.2f%%)", rate, ser)
 
-			recordResult(t.Name(), map[string]MetricEntry{
+			recordResult(t, map[string]MetricEntry{
 				"actual_pps": {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
 				"loss_rate":  {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
 				"ser":        {Value: ser, Unit: "%", Direction: dirHigherIsBetter},
@@ -99,6 +101,7 @@ func TestLoadConcurrentSessions(t *testing.T) {
 	limits := []int{500, 1000, 2000}
 	for _, limit := range limits {
 		t.Run(fmt.Sprintf("concurrent_%d", limit), func(t *testing.T) {
+			beginScenario(t)
 			env := newTestEnv(t.Context(), t)
 
 			callCount := limit * 2
@@ -123,7 +126,7 @@ func TestLoadConcurrentSessions(t *testing.T) {
 			require.Greater(t, result.PacketsAfter, result.PacketsBefore,
 				"exporter should have processed packets")
 
-			recordResult(t.Name(), map[string]MetricEntry{
+			recordResult(t, map[string]MetricEntry{
 				"sessions": {Value: result.PeakSessions, Unit: "count", Direction: dirHigherIsBetter},
 				"invites":  {Value: inviteTotal, Unit: "count", Direction: dirHigherIsBetter},
 				"cpu_peak": {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},

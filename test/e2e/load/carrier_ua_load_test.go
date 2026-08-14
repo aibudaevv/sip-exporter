@@ -35,6 +35,7 @@ func TestLoadDualUAType(t *testing.T) {
 	rates := []int{500, 1000, 1800}
 	for _, rate := range rates {
 		t.Run(fmt.Sprintf("rate_%d", rate), func(t *testing.T) {
+			beginScenario(t)
 			env := newTestEnvWithCarrierAndUA(t.Context(), t, carriersYAML, userAgentsYAML)
 
 			ctx, cancel := context.WithTimeout(t.Context(), dualUATestTimeout)
@@ -50,6 +51,7 @@ func TestLoadDualUAType(t *testing.T) {
 			statsCtx, statsCancel := context.WithCancel(ctx)
 			stats.start(statsCtx, env.exporterContainer.GetContainerID())
 
+			recordMetricsSnapshot(t, "metrics-before.prom", env.endpoint)
 			protocolsBefore := readProtocolCounters(t, env.endpoint)
 			packetsBefore := protocolsBefore.SIPPackets
 			errorsBefore := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
@@ -63,13 +65,13 @@ func TestLoadDualUAType(t *testing.T) {
 			uasYealink := startSippContainer(ctx, t,
 				[]string{"-sf", "/scenarios/" + uasFile, "-i", "127.0.0.1", "-p", env.sippPort,
 					"-m", strconv.Itoa(callCountPerType), "-nr", "-nostdin"},
-				sippVol, false,
+				sippVol, "", false,
 			)
 
 			uasGrandstream := startSippContainer(ctx, t,
 				[]string{"-sf", "/scenarios/" + uasFile, "-i", "127.0.0.1", "-p", env.sippPort2,
 					"-m", strconv.Itoa(callCountPerType), "-nr", "-nostdin"},
-				sippVol, false,
+				sippVol, "", false,
 			)
 
 			time.Sleep(500 * time.Millisecond)
@@ -84,7 +86,7 @@ func TestLoadDualUAType(t *testing.T) {
 					"-cid_str", nextSippCallIDFormat(),
 					"-nr",
 					"127.0.0.1:" + env.sippPort},
-				yealinkVol, true,
+				yealinkVol, "generator-yealink", true,
 			)
 
 			grandstreamUacPath := absScenarioPath(t, "call_highrate_grandstream_uac.xml")
@@ -97,7 +99,7 @@ func TestLoadDualUAType(t *testing.T) {
 					"-cid_str", nextSippCallIDFormat(),
 					"-nr",
 					"127.0.0.1:" + env.sippPort2},
-				grandstreamVol, true,
+				grandstreamVol, "generator-grandstream", true,
 			)
 
 			waitForContainerExit(ctx, t, uasYealink)
@@ -110,7 +112,9 @@ func TestLoadDualUAType(t *testing.T) {
 
 			statsCancel()
 			cpuAvg, cpuPeak, memMaxMB := stats.stop()
+			recordResourceSamples(t, stats)
 
+			recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)
 			protocolsAfter := readProtocolCounters(t, env.endpoint)
 			protocols := protocolsAfter.delta(protocolsBefore)
 			packetsAfter := protocolsAfter.SIPPackets
@@ -126,6 +130,10 @@ func TestLoadDualUAType(t *testing.T) {
 			lossRate := capture.LossPct / 100
 
 			errorCount := errorsAfter - errorsBefore
+			recordLoadResultEvidence(t, loadResult{
+				Capture: capture, Protocols: protocols,
+				CPUAvg: cpuAvg, CPUPeak: cpuPeak, MemMaxMB: memMaxMB,
+			})
 
 			inviteYealink := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", `ua_type="yealink"`)
 			inviteGrandstream := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", `ua_type="grandstream"`)
@@ -154,7 +162,7 @@ func TestLoadDualUAType(t *testing.T) {
 			require.GreaterOrEqual(t, serGrandstream, 49.0,
 				"SER Grandstream SLO: >= 49%% on loopback at rate %d (got %.2f%%)", rate, serGrandstream)
 
-			recordResult(t.Name(), map[string]MetricEntry{
+			recordResult(t, map[string]MetricEntry{
 				"actual_pps":          {Value: actualPPS, Unit: "pps", Direction: dirHigherIsBetter},
 				"loss_rate":           {Value: lossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
 				"ser_yealink":         {Value: serYealink, Unit: "%", Direction: dirHigherIsBetter},

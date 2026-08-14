@@ -142,6 +142,7 @@ func newMultiNICEnv(ctx context.Context, t *testing.T, ifaces []string, pairs []
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
+		recordContainerLogs(cleanupCtx, t, "exporter.log", c)
 		if testing.Verbose() {
 			logs, logErr := c.Logs(cleanupCtx)
 			if logErr == nil {
@@ -195,6 +196,7 @@ func runMultiNICLoad(
 	statsCtx, statsCancel := context.WithCancel(ctx)
 	stats.start(statsCtx, env.exporterContainer.GetContainerID())
 
+	recordMetricsSnapshot(t, "metrics-before.prom", env.endpoint)
 	protocolsBefore := readProtocolCounters(t, env.endpoint)
 	packetsBefore := protocolsBefore.SIPPackets
 	errorsBefore := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
@@ -208,7 +210,7 @@ func runMultiNICLoad(
 	sippVol := filepath.Dir(uacPath)
 	uacFile := filepath.Base(uacScenario)
 
-	uacs := make([]testcontainers.Container, len(env.uacTargets))
+	uacs := make([]*startedSippContainer, len(env.uacTargets))
 	for i, tgt := range env.uacTargets {
 		uacs[i] = startSippContainer(ctx, t,
 			[]string{
@@ -220,7 +222,7 @@ func runMultiNICLoad(
 				"-nr",
 				tgt.uasIP + ":" + env.sipPort,
 			},
-			sippVol, false,
+			sippVol, fmt.Sprintf("generator-%d", i), false,
 		)
 	}
 
@@ -229,6 +231,7 @@ func runMultiNICLoad(
 
 	for _, uac := range uacs {
 		waitForContainerExit(ctx, t, uac)
+		uac.recordEvidence(ctx, t, time.Now())
 	}
 
 	sippEnd := time.Now()
@@ -241,7 +244,9 @@ func runMultiNICLoad(
 
 	statsCancel()
 	cpuAvg, cpuPeak, memMaxMB := stats.stop()
+	recordResourceSamples(t, stats)
 
+	recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)
 	protocolsAfter := readProtocolCounters(t, env.endpoint)
 	protocols := protocolsAfter.delta(protocolsBefore)
 	packetsAfter := protocolsAfter.SIPPackets
@@ -272,6 +277,7 @@ func runMultiNICLoad(
 		CPUPeak:       cpuPeak,
 		MemMaxMB:      memMaxMB,
 	}
+	recordLoadResultEvidence(t, result)
 
 	t.Logf("MultiNIC N=%d: actual=%.0f PPS (exp=%.0f), captured=%.0f, loss=%.2f%%, "+
 		"drain=%v, cpu=%.2f%%(peak=%.2f%%), mem=%.1fMB, errors=%.0f",
@@ -291,6 +297,7 @@ func TestLoadMultiInterface(t *testing.T) {
 
 	for _, n := range []int{1, 2, 3} {
 		t.Run(fmt.Sprintf("interfaces_%d", n), func(t *testing.T) {
+			beginScenario(t)
 			ctx := t.Context()
 
 			pairs := setupVethPairs(t, n)
@@ -316,7 +323,7 @@ func TestLoadMultiInterface(t *testing.T) {
 			require.Greater(t, result.PacketsAfter, result.PacketsBefore,
 				"exporter should have processed packets at N=%d", n)
 
-			recordResult(t.Name(), map[string]MetricEntry{
+			recordResult(t, map[string]MetricEntry{
 				"actual_pps": {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
 				"loss_rate":  {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
 				"cpu_avg":    {Value: result.CPUAvg, Unit: "%", Direction: dirLowerIsBetter},

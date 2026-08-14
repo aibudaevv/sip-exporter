@@ -83,6 +83,7 @@ func TestLoadVQScenarios(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			for _, rate := range tt.rates {
 				t.Run(fmt.Sprintf("rate_%d", rate), func(t *testing.T) {
+					beginScenario(t)
 					env := newTestEnv(t.Context(), t)
 
 					ctx, cancel := context.WithTimeout(t.Context(), subtestTimeout)
@@ -121,7 +122,7 @@ func TestLoadVQScenarios(t *testing.T) {
 					for k, v := range extras {
 						resultMetrics[k] = v
 					}
-					recordResult(t.Name(), resultMetrics)
+					recordResult(t, resultMetrics)
 				})
 			}
 		})

@@ -51,7 +51,9 @@ func TestBenchmarkMemoryPerDialog(t *testing.T) {
 
 	for _, limit := range limits {
 		t.Run(fmt.Sprintf("dialogs_%d", limit), func(t *testing.T) {
+			beginScenario(t)
 			env := newTestEnv(t.Context(), t)
+			recordMetricsSnapshot(t, "metrics-before.prom", env.endpoint)
 
 			var sessions float64
 			if limit > 0 {
@@ -69,19 +71,19 @@ func TestBenchmarkMemoryPerDialog(t *testing.T) {
 				uasContainer := startSippContainer(ctx, t,
 					[]string{"-sf", "/scenarios/concurrent_uas.xml", "-i", "127.0.0.1", "-p", env.sippPort,
 						"-m", fmt.Sprintf("%d", callCount), "-nostdin"},
-					sippVol, false,
+					sippVol, "", false,
 				)
 
 				time.Sleep(500 * time.Millisecond)
 
 				uacPath := absScenarioPath(t, "concurrent_uac.xml")
 				sippVol = uacPath[:len(uacPath)-len("/concurrent_uac.xml")]
-				startSippContainer(ctx, t,
+				uacContainer := startSippContainer(ctx, t,
 					[]string{"-sf", "/scenarios/concurrent_uac.xml", "-i", "127.0.0.1", "-p", env.sippClientPort,
 						"-m", fmt.Sprintf("%d", callCount), "-r", fmt.Sprintf("%d", rate),
 						"-l", fmt.Sprintf("%d", limit),
 						"127.0.0.1:" + env.sippPort},
-					sippVol, false,
+					sippVol, "generator", false,
 				)
 
 				waitForSessions(ctx, t, env.endpoint, float64(limit))
@@ -89,6 +91,10 @@ func TestBenchmarkMemoryPerDialog(t *testing.T) {
 				t.Logf("Sessions reached: %.0f (target: %d)", sessions, limit)
 
 				memMB := getSingleMemSample(t, env.exporterContainer.GetContainerID())
+				recordRawResourceSamples(t, ResourceSamplesV2{MemoryMB: []float64{memMB}})
+				recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)
+				waitForContainerExit(ctx, t, uacContainer)
+				uacContainer.recordEvidence(ctx, t, time.Now())
 
 				t.Logf("Dialogs: limit=%d, actual_sessions=%.0f, mem=%.1fMB",
 					limit, sessions, memMB)
@@ -98,7 +104,7 @@ func TestBenchmarkMemoryPerDialog(t *testing.T) {
 					memMB:   memMB,
 				})
 
-				recordResult(t.Name(), map[string]MetricEntry{
+				recordResult(t, map[string]MetricEntry{
 					"sessions": {Value: sessions, Unit: "count", Direction: dirHigherIsBetter},
 					"mem_mb":   {Value: memMB, Unit: "MB", Direction: dirLowerIsBetter},
 				})
@@ -106,13 +112,15 @@ func TestBenchmarkMemoryPerDialog(t *testing.T) {
 				waitForContainerExit(ctx, t, uasContainer)
 			} else {
 				memMB := getSingleMemSample(t, env.exporterContainer.GetContainerID())
+				recordRawResourceSamples(t, ResourceSamplesV2{MemoryMB: []float64{memMB}})
+				recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)
 				t.Logf("Baseline (no traffic): %.1f MB", memMB)
 				measurements = append(measurements, dialogMeasurement{
 					dialogs: 0,
 					memMB:   memMB,
 				})
 
-				recordResult(t.Name(), map[string]MetricEntry{
+				recordResult(t, map[string]MetricEntry{
 					"mem_mb": {Value: memMB, Unit: "MB", Direction: dirLowerIsBetter},
 				})
 			}
