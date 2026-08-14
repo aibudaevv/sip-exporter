@@ -17,7 +17,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 // vethPair describes one pair of the vethXa (exporter side) / vethXb (UAC side)
@@ -121,31 +120,9 @@ func newMultiNICEnv(ctx context.Context, t *testing.T, ifaces []string, pairs []
 	nextBasePort += 2 + len(ifaces)
 	portMu.Unlock()
 
-	exporterLogLevel := "error"
-	if testing.Verbose() {
-		exporterLogLevel = "info"
-	}
-
-	envVars := map[string]string{
-		"SIP_EXPORTER_INTERFACE":       strings.Join(ifaces, ","),
-		"SIP_EXPORTER_HTTP_PORT":       httpPort,
-		"SIP_EXPORTER_SIP_PORTS":       sipPort,
-		"SIP_EXPORTER_LOGGER_LEVEL":    exporterLogLevel,
-		"SIP_EXPORTER_IGNORE_OUTGOING": "true",
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
-
-	req := testcontainers.ContainerRequest{
-		Image:       exporterImage(),
-		Privileged:  true,
-		NetworkMode: "host",
-		Env:         envVars,
-		WaitingFor: wait.ForHTTP("/metrics").
-			WithPort(httpPort + "/tcp").
-			WithStartupTimeout(120 * time.Second),
-	}
+	req := exporterContainerRequest(
+		ctx, t, strings.Join(ifaces, ","), httpPort, sipPort,
+	)
 
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
@@ -212,9 +189,6 @@ func runMultiNICLoad(
 ) loadResult {
 	t.Helper()
 
-	ctx, cancel := context.WithTimeout(ctx, 600*time.Second)
-	defer cancel()
-
 	stats, statsErr := newStatsCollector(env.exporterContainer.GetContainerID())
 	require.NoError(t, statsErr)
 
@@ -256,7 +230,7 @@ func runMultiNICLoad(
 	sippEnd := time.Now()
 	sippDuration := sippEnd.Sub(start)
 
-	waitForMetricStable(t, env.endpoint)
+	waitForMetricStable(ctx, t, env.endpoint)
 
 	stableTime := time.Now()
 	drainTime := stableTime.Sub(sippEnd)

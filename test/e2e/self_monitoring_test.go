@@ -21,7 +21,7 @@ func TestSelfMonitoringSocketPacketsReceived(t *testing.T) {
 		val := getMetricSum(t, env.endpoint, "sip_exporter_socket_packets_received_total")
 		require.Greater(t, val, 0.0, "socket_packets_received_total should be > 0 after traffic")
 
-		waitForSessionsZero(t, env.endpoint)
+		assertDialogTeardown(t, env.endpoint)
 	})
 }
 
@@ -39,7 +39,7 @@ func TestSelfMonitoringSocketPacketsDropped(t *testing.T) {
 		val := getMetricSum(t, env.endpoint, "sip_exporter_socket_packets_dropped_total")
 		require.Equal(t, 0.0, val, "socket_packets_dropped_total should be 0 (no drops expected)")
 
-		waitForSessionsZero(t, env.endpoint)
+		assertDialogTeardown(t, env.endpoint)
 	})
 }
 
@@ -86,7 +86,7 @@ func TestSelfMonitoringParseErrorsZeroForValidTraffic(t *testing.T) {
 			}
 		}
 
-		waitForSessionsZero(t, env.endpoint)
+		assertDialogTeardown(t, env.endpoint)
 	})
 }
 
@@ -139,6 +139,6 @@ func TestSelfMonitoringActiveDialogs(t *testing.T) {
 		}, 30*time.Second, 100*time.Millisecond, "active_dialogs should be > 0 during active calls")
 
 		<-sippDone
-		waitForSessionsZero(t, env.endpoint)
+		assertDialogTeardown(t, env.endpoint)
 	})
 }

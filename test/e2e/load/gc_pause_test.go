@@ -83,7 +83,7 @@ func TestBenchmarkGCPauseDuration(t *testing.T) {
 	)
 
 	waitForContainerExit(ctx, t, uasContainer)
-	waitForMetricStable(t, env.endpoint)
+	waitForMetricStable(ctx, t, env.endpoint)
 
 	logsReader, err := env.exporterContainer.Logs(t.Context())
 	require.NoError(t, err)

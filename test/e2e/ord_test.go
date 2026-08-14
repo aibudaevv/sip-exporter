@@ -64,7 +64,7 @@ func TestORD(t *testing.T) {
 			}
 
 			if !tt.carrier {
-				waitForSessionsZero(t, env.endpoint)
+				assertDialogTeardown(t, env.endpoint)
 			}
 		})
 	}

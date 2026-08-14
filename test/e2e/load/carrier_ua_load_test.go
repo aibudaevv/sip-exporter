@@ -104,7 +104,7 @@ func TestLoadDualUAType(t *testing.T) {
 			sippEnd := time.Now()
 			sippDuration := sippEnd.Sub(start)
 
-			waitForMetricStable(t, env.endpoint)
+			waitForMetricStable(ctx, t, env.endpoint)
 
 			statsCancel()
 			cpuAvg, cpuPeak, memMaxMB := stats.stop()

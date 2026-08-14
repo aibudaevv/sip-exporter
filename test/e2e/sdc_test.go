@@ -4,7 +4,6 @@ package e2e
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -44,7 +43,7 @@ func TestSDCAllScenarios(t *testing.T) {
 					"SDC metric should be absent when no sessions complete")
 			}
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -83,7 +82,7 @@ func TestSDCMixed(t *testing.T) {
 			t.Logf("SDC = %.0f (want %.0f)", sdc, float64(tt.completedCount))
 			require.Equal(t, float64(tt.completedCount), sdc)
 
-			waitForSessionsZero(t, env.endpoint)
+			assertDialogTeardown(t, env.endpoint)
 		})
 	}
 }
@@ -93,23 +92,19 @@ func TestSDCSessionExpires(t *testing.T) {
 	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
-	require.False(t, metricExists(t, env.endpoint, "sip_exporter_sdc_total"),
-		"SDC metric should be absent before sessions complete")
+	require.False(t, metricExists(t, env.endpoint, "sip_exporter_sdc_total"))
 
 	const callCount = 10
 	runSippScenario(ctx, t, "uas_short_expires.xml", "uac_short_expires.xml", callCount, env)
 
-	require.Eventually(t, func() bool {
-		return metricExists(t, env.endpoint, "sip_exporter_sessions") &&
-			getMetric(t, env.endpoint, "sip_exporter_sessions") == 0
-	}, 15*time.Second, 500*time.Millisecond, "sessions did not expire within timeout")
+	waitForSessionsZero(t, env.endpoint)
 
-	require.True(t, metricExists(t, env.endpoint, "sip_exporter_sdc_total"),
-		"SDC metric should exist after Session-Expires timeout")
-	sdc := getSDC(t, env.endpoint)
-	t.Logf("After: SDC = %.0f", sdc)
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_sdc_total"))
+	sdcAfter := getSDC(t, env.endpoint)
+	t.Logf("After: SDC = %.0f", sdcAfter)
 
-	require.Equal(t, float64(callCount), sdc, "SDC should equal %d after Session-Expires timeout", callCount)
+	require.Equal(t, float64(callCount), sdcAfter,
+		"SDC should equal completed Session-Expires calls")
 }
 
 func TestSDCWithCarrierConfig(t *testing.T) {
@@ -124,7 +119,7 @@ func TestSDCWithCarrierConfig(t *testing.T) {
 	t.Logf("SDC{carrier=%q} = %.0f (want %.0f)", env.carrier, sdc, float64(callCount))
 	require.Equal(t, float64(callCount), sdc)
 
-	env.waitForSessionsZeroByCarrier(t)
+	env.assertDialogTeardownByCarrier(t)
 }
 
 func TestSDCMixedWithCarrierConfig(t *testing.T) {
@@ -141,5 +136,5 @@ func TestSDCMixedWithCarrierConfig(t *testing.T) {
 	t.Logf("SDC{carrier=%q} = %.0f (want %.0f)", env.carrier, sdc, float64(completedCount))
 	require.Equal(t, float64(completedCount), sdc)
 
-	env.waitForSessionsZeroByCarrier(t)
+	env.assertDialogTeardownByCarrier(t)
 }

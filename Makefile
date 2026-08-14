@@ -21,12 +21,15 @@ test:
 test-all: docker_build
 	@echo "=== Unit tests ==="
 	go test -v ./internal/... ./pkg/...
-	@echo "=== E2E tests ==="
+	@echo "=== Main E2E tests ==="
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
-		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -timeout 10m ./test/e2e/
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 1 -timeout 45m ./test/e2e/
+	@echo "=== RTP E2E tests ==="
+	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 1 -timeout 15m ./test/e2e/rtp/
 	@echo "=== Load tests ==="
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
-		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -timeout 30m ./test/e2e/load/...
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m ./test/e2e/load/...
 	@echo "=== All tests passed ==="
 
 test-e2e: docker_build
@@ -36,29 +39,29 @@ test-e2e: docker_build
 #example: make test-e2e-run TEST=TestSERAllScenarios/100_percent
 test-e2e-run: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
-		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 2 -failfast -timeout 10m -run "$(TEST)" ./test/e2e/
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 1 -failfast -timeout 10m -run "$(TEST)" ./test/e2e/
 
 # RTP e2e tests run SEPARATELY from main e2e and load tests: both create AF_PACKET
 # sockets on lo, and concurrent runs cause packet loss/duplication (see AGENTS.md).
 test-rtp: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
-		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -timeout 15m ./test/e2e/rtp/
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 1 -timeout 15m ./test/e2e/rtp/
 
 test-rtp-run: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
-		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 1 -timeout 30s -run "$(TEST)" ./test/e2e/rtp/
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 1 -failfast -timeout 30s -run "$(TEST)" ./test/e2e/rtp/
 
 test-load: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
-		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -timeout 30m ./test/e2e/load/...
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m ./test/e2e/load/...
 
 test-load-run: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
-		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -timeout 30m -run "$(TEST)" ./test/e2e/load/...
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run "$(TEST)" ./test/e2e/load/...
 
 test-load-rtp: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
-		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -timeout 10m -run 'TestLoadFullCallWithRTP|TestBenchmarkMemoryPerRTPStream' ./test/e2e/load/...
+		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 1 -timeout 10m -run 'TestLoadFullCallWithRTP|TestBenchmarkMemoryPerRTPStream' ./test/e2e/load/...
 
 test-load-update-baseline:
 	cp test/e2e/load/load_result.json test/e2e/load/baseline.json

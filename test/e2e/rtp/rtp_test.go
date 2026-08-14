@@ -13,10 +13,8 @@ import (
 	"io"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -268,26 +266,10 @@ const socketPacketsMetric = "sip_exporter_socket_packets_received_total"
 // delivered to the exporter's AF_PACKET socket.
 func getSocketPacketsReceived(t *testing.T, endpoint string) float64 {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/metrics", nil)
-	require.NoError(t, err)
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	re := regexp.MustCompile(`^` + socketPacketsMetric + `(?:\{[^}]*\})?\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		m := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(m) == 2 {
-			v, parseErr := strconv.ParseFloat(m[1], 64)
-			require.NoError(t, parseErr)
-			return v
-		}
-	}
-	return 0
+	const ifaceFilter = `iface="lo"`
+	require.True(t, metricWithLabelsExists(t, endpoint, socketPacketsMetric, ifaceFilter),
+		"%s{%s} must exist", socketPacketsMetric, ifaceFilter)
+	return getMetricByLabel(t, endpoint, socketPacketsMetric, ifaceFilter)
 }
 
 // sendRTP sends count RTP-version-2 UDP packets to 127.0.0.1:port. The packets
@@ -383,7 +365,8 @@ func TestRTPReachesAppWithCapture(t *testing.T) {
 		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
 
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
 	}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
 
 	time.Sleep(1500 * time.Millisecond)
@@ -430,8 +413,6 @@ func TestRTPUncorrelatedDropped(t *testing.T) {
 		"uncorrelated RTP must NOT reach the socket (strict SDP-driven BPF drops it)")
 
 	// No RTP metrics counted.
-	require.False(t, metricLineExists(t, endpoint, "sip_exporter_rtp_packets_total"),
-		"uncorrelated RTP must be dropped (no rtp_packets_total metric line)")
-	require.Equal(t, 0.0, getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total"),
+	require.False(t, rtpMetricExists(t, endpoint, "sip_exporter_rtp_packets_total"),
 		"uncorrelated RTP must be dropped (no rtp_packets_total)")
 }

@@ -68,7 +68,8 @@ func TestRTPQualityMetricsBaseline(t *testing.T) {
 	runSippRTP(t.Context(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_r_factor_count") > 0
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_r_factor_count") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_r_factor_count") > 0
 	}, 10*time.Second, 500*time.Millisecond, "r_factor histogram must have samples")
 
 	rAvg := avgHistogramValue(t, endpoint, "sip_exporter_rtp_r_factor")
@@ -76,7 +77,8 @@ func TestRTPQualityMetricsBaseline(t *testing.T) {
 	require.Greater(t, rAvg, 85.0, "clean G.711 R-factor should be >85")
 
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_mos_f1_count") > 0
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_mos_f1_count") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_mos_f1_count") > 0
 	}, 10*time.Second, 500*time.Millisecond, "mos_f1 must have samples")
 
 	f1Avg := avgHistogramValue(t, endpoint, "sip_exporter_rtp_mos_f1")
@@ -103,7 +105,8 @@ func TestRTPQualityMetricsDegraded(t *testing.T) {
 	runSippRTP(t.Context(), t, uasSIP, uacSIP, uasMedia, uacMedia)
 
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_r_factor_count") > 0
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_r_factor_count") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_r_factor_count") > 0
 	}, 15*time.Second, 500*time.Millisecond, "r_factor must have samples under netem")
 
 	rAvg := avgHistogramValue(t, endpoint, "sip_exporter_rtp_r_factor")
@@ -111,7 +114,8 @@ func TestRTPQualityMetricsDegraded(t *testing.T) {
 	require.Less(t, rAvg, 85.0, "degraded R-factor should be <85")
 
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_mos_f1_count") > 0
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_mos_f1_count") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_mos_f1_count") > 0
 	}, 10*time.Second, 500*time.Millisecond, "mos_f1 must have samples under netem")
 
 	f1Avg := avgHistogramValue(t, endpoint, "sip_exporter_rtp_mos_f1")
@@ -138,7 +142,8 @@ func TestRTPTeardownMetrics(t *testing.T) {
 			rtpSeqs: []uint16{1, 2, 2, 3, 4, 4, 5},
 			check: func(t *testing.T, endpoint string) {
 				require.Eventually(t, func() bool {
-					return getRTPMetric(t, endpoint, "sip_exporter_rtp_duplicate_packets_total") >= 2
+					return rtpMetricExists(t, endpoint, "sip_exporter_rtp_duplicate_packets_total") &&
+						getRTPMetric(t, endpoint, "sip_exporter_rtp_duplicate_packets_total") >= 2
 				}, 10*time.Second, 500*time.Millisecond, "duplicate packets must be counted")
 			},
 		},
@@ -147,10 +152,12 @@ func TestRTPTeardownMetrics(t *testing.T) {
 			rtpSeqs: []uint16{1, 2, 3, 4, 5, 10, 11, 12, 14, 15},
 			check: func(t *testing.T, endpoint string) {
 				require.Eventually(t, func() bool {
-					return getRTPMetric(t, endpoint, "sip_exporter_rtp_burst_loss_density_count") > 0
+					return rtpMetricExists(t, endpoint, "sip_exporter_rtp_burst_loss_density_count") &&
+						getRTPMetric(t, endpoint, "sip_exporter_rtp_burst_loss_density_count") > 0
 				}, 10*time.Second, 500*time.Millisecond, "burst_loss_density must have samples")
 				require.Eventually(t, func() bool {
-					return getRTPMetric(t, endpoint, "sip_exporter_rtp_gap_loss_density_count") > 0
+					return rtpMetricExists(t, endpoint, "sip_exporter_rtp_gap_loss_density_count") &&
+						getRTPMetric(t, endpoint, "sip_exporter_rtp_gap_loss_density_count") > 0
 				}, 10*time.Second, 500*time.Millisecond, "gap_loss_density must have samples")
 
 				burstAvg := avgHistogramValue(t, endpoint, "sip_exporter_rtp_burst_loss_density")
@@ -165,7 +172,8 @@ func TestRTPTeardownMetrics(t *testing.T) {
 			waitFirst: true,
 			check: func(t *testing.T, endpoint string) {
 				require.Eventually(t, func() bool {
-					return getMetricByLabel(t, endpoint, "sip_exporter_rtp_oneway_calls_total", labelCarrier, labelUAType) >= 1
+					return metricWithLabelsExists(t, endpoint, "sip_exporter_rtp_oneway_calls_total", labelCarrier, labelUAType) &&
+						getMetricByLabel(t, endpoint, "sip_exporter_rtp_oneway_calls_total", labelCarrier, labelUAType) >= 1
 				}, 10*time.Second, 500*time.Millisecond, "one-way call must be detected at teardown")
 			},
 		},
@@ -174,7 +182,8 @@ func TestRTPTeardownMetrics(t *testing.T) {
 			waitFirst: true,
 			check: func(t *testing.T, endpoint string) {
 				require.Eventually(t, func() bool {
-					return getMetricByLabel(t, endpoint, "sip_exporter_sessions_missing_rtp_total", labelCarrier, labelUAType) >= 1
+					return metricWithLabelsExists(t, endpoint, "sip_exporter_sessions_missing_rtp_total", labelCarrier, labelUAType) &&
+						getMetricByLabel(t, endpoint, "sip_exporter_sessions_missing_rtp_total", labelCarrier, labelUAType) >= 1
 				}, 10*time.Second, 500*time.Millisecond, "missing RTP must be detected at teardown")
 			},
 		},
@@ -193,7 +202,8 @@ func TestRTPTeardownMetrics(t *testing.T) {
 				"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
 
 			require.Eventually(t, func() bool {
-				return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
+				return metricWithLabelsExists(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) &&
+					getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
 			}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
 
 			if tt.rtpSeqs != nil {

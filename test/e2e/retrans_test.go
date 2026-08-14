@@ -94,7 +94,7 @@ func TestINVITERetransmissionDedup(t *testing.T) {
 	require.InDelta(t, 100.0, ser, ratioDelta,
 		"SER should be ~100%% despite INVITE retransmissions")
 
-	waitForSessionsZero(t, env.endpoint)
+	assertDialogTeardown(t, env.endpoint)
 }
 
 // TestSIPRetransmissionMetricObserved verifies that the new

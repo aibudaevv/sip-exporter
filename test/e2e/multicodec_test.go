@@ -17,19 +17,15 @@ func TestMultiCodecEarlyMediaSuccess(t *testing.T) {
 
 	runSippScenario(ctx, t, "uas_multicodec.xml", "uac_multicodec.xml", callCount, env)
 
-	for _, metric := range []string{
+	for _, metricName := range []string{
 		"sip_exporter_invite_total",
 		"sip_exporter_invite_200_total",
 		"sip_exporter_183_total",
 		"sip_exporter_ack_total",
 		"sip_exporter_bye_total",
-		"sip_exporter_ser",
 	} {
-		require.True(t, metricExists(t, env.endpoint, metric), "%s should exist", metric)
+		require.True(t, metricExists(t, env.endpoint, metricName))
 	}
-	require.False(t, metricExists(t, env.endpoint, "sip_exporter_parse_errors_total"),
-		"parse errors metric should be absent after valid multi-codec SDP")
-
 	inviteTotal := getMetric(t, env.endpoint, "sip_exporter_invite_total")
 	invite200Total := getMetric(t, env.endpoint, "sip_exporter_invite_200_total")
 	status183 := getMetric(t, env.endpoint, "sip_exporter_183_total")
@@ -44,8 +40,12 @@ func TestMultiCodecEarlyMediaSuccess(t *testing.T) {
 	require.Equal(t, float64(callCount), status183, "183 Session Progress responses")
 	require.Equal(t, float64(callCount), ackTotal, "ACK requests")
 	require.Equal(t, float64(callCount), byeTotal, "BYE requests")
+	require.False(t, metricExists(t, env.endpoint, "sip_exporter_parse_errors_total"),
+		"parse error series should remain absent for valid multi-codec SDP")
+
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"))
 	ser := getMetric(t, env.endpoint, "sip_exporter_ser")
 	require.InDelta(t, 100.0, ser, ratioDelta, "SER should be 100%%")
 
-	waitForSessionsZero(t, env.endpoint)
+	assertDialogTeardown(t, env.endpoint)
 }

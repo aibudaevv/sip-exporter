@@ -25,7 +25,8 @@ func TestRTPBothDirections(t *testing.T) {
 		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
 
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_sessions") >= 1
+		return metricExists(t, endpoint, "sip_exporter_sessions") &&
+			getMetricByLabel(t, endpoint, "sip_exporter_sessions") >= 1
 	}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
 
 	// Send RTP in both directions, retrying until the exporter reports both
@@ -33,7 +34,8 @@ func TestRTPBothDirections(t *testing.T) {
 	// timing-sensitive; small bursts can be missed.
 	rtpSeqs := []uint16{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 	require.Eventually(t, func() bool {
-		if getRTPMetric(t, endpoint, "sip_exporter_rtp_active_streams") >= 2 {
+		if rtpMetricExists(t, endpoint, "sip_exporter_rtp_active_streams") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_active_streams") >= 2 {
 			return true
 		}
 		sendControlledRTP(t, uacMediaNum, rtpSeqs)
@@ -79,7 +81,8 @@ func TestRTPFullIntegrationMetricsVerified(t *testing.T) {
 		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
 
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
 	}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
 
 	// --- RTP metrics with concrete labels ---
@@ -90,7 +93,8 @@ func TestRTPFullIntegrationMetricsVerified(t *testing.T) {
 	// timing-sensitive; small bursts can be missed.
 	rtpSeqs := []uint16{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 	require.Eventually(t, func() bool {
-		if getMetricByLabel(t, endpoint, "sip_exporter_rtp_packets_total", rtpLabels...) > 0 {
+		if metricWithLabelsExists(t, endpoint, "sip_exporter_rtp_packets_total", rtpLabels...) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_rtp_packets_total", rtpLabels...) > 0 {
 			return true
 		}
 		sendControlledRTP(t, uacMediaNum, rtpSeqs)
@@ -98,23 +102,16 @@ func TestRTPFullIntegrationMetricsVerified(t *testing.T) {
 		return false
 	}, 15*time.Second, 3*time.Second, "rtp_packets_total must be observed with labels")
 
-	// No spurious loss on clean G.711a. The lost counter is only created on the
-	// first detected gap, so for clean traffic the series is absent and the
-	// scraped value is 0; asserting 0 verifies the loss algorithm does not
-	// miscount on a lossless stream.
-	require.Eventually(t, func() bool {
-		return !metricLineExists(t, endpoint, "sip_exporter_rtp_packets_lost_total", rtpLabels...) ||
-			getMetricByLabel(t, endpoint, "sip_exporter_rtp_packets_lost_total", rtpLabels...) == 0
-	}, 10*time.Second, 500*time.Millisecond, "no RTP loss should be detected on clean G.711a")
-
 	// Jitter histogram (emitted by the 1s snapshot).
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_rtp_jitter_milliseconds_count", rtpLabels...) > 0
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_rtp_jitter_milliseconds_count", rtpLabels...) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_rtp_jitter_milliseconds_count", rtpLabels...) > 0
 	}, 10*time.Second, 500*time.Millisecond, "rtp_jitter histogram must have samples")
 
 	// MOS histogram + sane E-model range for clean G.711 (~3.9-4.4).
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_rtp_mos_score_count", rtpLabels...) > 0
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_rtp_mos_score_count", rtpLabels...) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_rtp_mos_score_count", rtpLabels...) > 0
 	}, 10*time.Second, 500*time.Millisecond, "rtp_mos histogram must have samples")
 	mosSum := getMetricByLabel(t, endpoint, "sip_exporter_rtp_mos_score_sum", rtpLabels...)
 	mosCount := getMetricByLabel(t, endpoint, "sip_exporter_rtp_mos_score_count", rtpLabels...)
@@ -126,7 +123,8 @@ func TestRTPFullIntegrationMetricsVerified(t *testing.T) {
 
 	// Active streams gauge: both media directions tracked, with retry.
 	require.Eventually(t, func() bool {
-		if getMetricByLabel(t, endpoint, "sip_exporter_rtp_active_streams", rtpLabels...) >= 2 {
+		if metricWithLabelsExists(t, endpoint, "sip_exporter_rtp_active_streams", rtpLabels...) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_rtp_active_streams", rtpLabels...) >= 2 {
 			return true
 		}
 		sendControlledRTP(t, uacMediaNum, rtpSeqs)
@@ -136,18 +134,26 @@ func TestRTPFullIntegrationMetricsVerified(t *testing.T) {
 
 	wait()
 
+	// No spurious loss on clean G.711a. Check after the complete RTP injection
+	// window so a late sequence gap cannot be missed.
+	require.False(t,
+		metricWithLabelsExists(t, endpoint, "sip_exporter_rtp_packets_lost_total", rtpLabels...),
+		"no RTP loss should be detected on clean G.711a")
+
 	// --- SIP regression: signalling metrics correct with RTP capture ON ---
 	sipLabels := []string{labelCarrier, labelUAType}
 
 	// INVITE request counted for the dialog's labels.
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_invite_total", sipLabels...) >= 1
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_invite_total", sipLabels...) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_invite_total", sipLabels...) >= 1
 	}, 10*time.Second, 500*time.Millisecond, "invite_total must be counted")
 
 	// SER = (INVITE→200 OK)/(INVITE - INVITE→3xx)*100 = 100 for one successful
 	// call. RTP capture being enabled must not break SIP metric computation.
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_ser", sipLabels...) >= 99.0
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_ser", sipLabels...) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_ser", sipLabels...) >= 99.0
 	}, 10*time.Second, 500*time.Millisecond, "SER must be ~100%% (RTP capture must not break SIP metrics)")
 }
 
@@ -167,14 +173,16 @@ func TestRTPStreamExpiry(t *testing.T) {
 		"uas_nortp.xml", "uac_nortp.xml", uasSIP, uacSIP, uasMedia, uacMedia, "127.0.0.1", "127.0.0.1")
 
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_sessions") >= 1
+		return metricExists(t, endpoint, "sip_exporter_sessions") &&
+			getMetricByLabel(t, endpoint, "sip_exporter_sessions") >= 1
 	}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
 
 	// Inject RTP while the dialog is active. The retry makes the assertion
 	// independent of a transiently missed loopback AF_PACKET packet.
 	rtpSeqs := []uint16{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 	require.Eventually(t, func() bool {
-		if getRTPMetric(t, endpoint, "sip_exporter_rtp_active_streams") >= 2 {
+		if rtpMetricExists(t, endpoint, "sip_exporter_rtp_active_streams") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_active_streams") >= 2 {
 			return true
 		}
 		sendControlledRTP(t, uacMediaNum, rtpSeqs)
@@ -187,7 +195,8 @@ func TestRTPStreamExpiry(t *testing.T) {
 	// After the idle TTL (2s) + the 1s snapshot cycle, streams expire and the
 	// gauge returns to 0 (the background ticker runs Cleanup() every second).
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_active_streams") == 0
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_active_streams") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_active_streams") == 0
 	}, 12*time.Second, 500*time.Millisecond,
 		"rtp_active_streams must drop to 0 after SIP_EXPORTER_RTP_STREAM_TTL idle window")
 }

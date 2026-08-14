@@ -37,5 +37,5 @@ func TestAuthCompletion401ChallengeThenSuccess(t *testing.T) {
 	require.Equal(t, float64(callCount), byeTotal,
 		"1 BYE per call")
 
-	waitForSessionsZero(t, env.endpoint)
+	assertDialogTeardown(t, env.endpoint)
 }

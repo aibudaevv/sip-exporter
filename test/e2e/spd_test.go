@@ -54,7 +54,7 @@ func TestSPD(t *testing.T) {
 				spd := env.getSPDByCarrier(t)
 				t.Logf("SPD{carrier=%q} = %.4f seconds", env.carrier, spd)
 				require.Greater(t, spd, 0.0, "SPD should be > 0 after successful calls")
-				env.waitForSessionsZeroByCarrier(t)
+				env.assertDialogTeardownByCarrier(t)
 			} else if !tt.wantZero {
 				spd := getSPD(t, env.endpoint)
 				t.Logf("SPD = %.4f seconds", spd)
@@ -63,7 +63,7 @@ func TestSPD(t *testing.T) {
 					"SPD histogram should have observations")
 			}
 			if !tt.carrier {
-				waitForSessionsZero(t, env.endpoint)
+				assertDialogTeardown(t, env.endpoint)
 			}
 		})
 	}

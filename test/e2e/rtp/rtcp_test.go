@@ -3,14 +3,9 @@
 package rtp
 
 import (
-	"context"
 	"encoding/binary"
-	"io"
 	"net"
-	"net/http"
-	"regexp"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -40,7 +35,8 @@ func TestRTCPNonMuxLegacyPort(t *testing.T) {
 	)
 
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_packets_total") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
 	}, 15*time.Second, 500*time.Millisecond, "RTP must flow before injecting RTCP")
 
 	// Bind a dummy listener on the legacy RTCP port (port+1) — SIPp does not bind
@@ -60,7 +56,8 @@ func TestRTCPNonMuxLegacyPort(t *testing.T) {
 	wait()
 
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) > 0
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) > 0
 	}, 10*time.Second, 500*time.Millisecond,
 		"RTCP injected to the legacy port+1 must be captured (S12-14 synthesis)")
 }
@@ -118,7 +115,7 @@ func TestRTCPNonMuxSSRCReuse(t *testing.T) {
 	waitB()
 
 	require.Eventually(t, func() bool {
-		return metricExists(t, endpoint, "sip_exporter_rtcp_reports_total") &&
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) &&
 			getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) == 4
 	}, 10*time.Second, 500*time.Millisecond, "all four RRs must correlate to their non-mux streams")
 	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_cumulative_loss_total"))
@@ -164,7 +161,8 @@ func TestRTCPExplicitAttrPort(t *testing.T) {
 	)
 
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_packets_total") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
 	}, 15*time.Second, 500*time.Millisecond, "RTP must flow before injecting RTCP")
 
 	// Inject RTP to the RTP port (establishes the stream under testSSRC), then
@@ -179,7 +177,8 @@ func TestRTCPExplicitAttrPort(t *testing.T) {
 	wait()
 
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) > 0
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) > 0
 	}, 10*time.Second, 500*time.Millisecond,
 		"RTCP injected to the explicit a=rtcp port must be captured (RFC 3605)")
 }
@@ -337,7 +336,8 @@ func TestRTCPMetricsFromInjectedRR(t *testing.T) {
 	// Wait until RTP has flowed: confirms the media endpoint is registered AND the
 	// UAS media socket is bound (so injected packets complete the HOST cycle).
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_packets_total") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
 	}, 15*time.Second, 500*time.Millisecond, "RTP must flow before injecting RTCP")
 
 	// Inject a few RTP packets (paced — the AF_PACKET socket drops under a burst)
@@ -357,18 +357,25 @@ func TestRTCPMetricsFromInjectedRR(t *testing.T) {
 	// RTCP metric families are observed — reports, jitter, RTT, loss-fraction, and
 	// cumulative-loss (the delta from the second RR proves D3 baseline semantics).
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) > 0 &&
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) > 0 &&
+			rtpMetricExists(t, endpoint, "sip_exporter_rtcp_jitter_milliseconds_count") &&
 			getRTPMetric(t, endpoint, "sip_exporter_rtcp_jitter_milliseconds_count") > 0 &&
+			rtpMetricExists(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds_count") &&
 			getRTPMetric(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds_count") > 0 &&
+			rtpMetricExists(t, endpoint, "sip_exporter_rtcp_loss_fraction_percent_count") &&
 			getRTPMetric(t, endpoint, "sip_exporter_rtcp_loss_fraction_percent_count") > 0 &&
+			rtpMetricExists(t, endpoint, "sip_exporter_rtcp_cumulative_loss_total") &&
 			getRTPMetric(t, endpoint, "sip_exporter_rtcp_cumulative_loss_total") > 0
 	}, 10*time.Second, 500*time.Millisecond,
 		"all five RTCP metrics must be observed")
 
 	// RTT value check (not just count): LSR was 5s ago, DLSR=1s → RTT ≈ 4000ms.
 	// Proves the formula end-to-end, not merely that an observation landed.
-	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds"),
-		"rtt histogram must exist before reading its value")
+	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds_sum"),
+		"rtt histogram sum must exist before reading its value")
+	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds_count"),
+		"rtt histogram count must exist before reading its value")
 	rttSum := getRTPMetric(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds_sum")
 	rttCount := getRTPMetric(t, endpoint, "sip_exporter_rtcp_rtt_milliseconds_count")
 	require.Greater(t, rttCount, 0.0)
@@ -379,8 +386,10 @@ func TestRTCPMetricsFromInjectedRR(t *testing.T) {
 	// Loss-fraction value check (not just count): the RR carries fracLost=10 →
 	// 10/256*100 ≈ 3.9%. Proves the fracLost byte extraction + scale end-to-end,
 	// not merely that an observation landed (guards against a byte-offset regression).
-	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_loss_fraction_percent"),
-		"loss-fraction histogram must exist before reading its value")
+	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_loss_fraction_percent_sum"),
+		"loss-fraction histogram sum must exist before reading its value")
+	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_loss_fraction_percent_count"),
+		"loss-fraction histogram count must exist before reading its value")
 	lossSum := getRTPMetric(t, endpoint, "sip_exporter_rtcp_loss_fraction_percent_sum")
 	lossCount := getRTPMetric(t, endpoint, "sip_exporter_rtcp_loss_fraction_percent_count")
 	require.Greater(t, lossCount, 0.0)
@@ -390,8 +399,10 @@ func TestRTCPMetricsFromInjectedRR(t *testing.T) {
 	// Jitter value check (not just count): every RR carries jitter=1600 ticks →
 	// 200ms at clockRate 8000. Proves the tick→ms conversion end-to-end, not
 	// merely that an observation landed.
-	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_jitter_milliseconds"),
-		"jitter histogram must exist before reading its value")
+	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_jitter_milliseconds_sum"),
+		"jitter histogram sum must exist before reading its value")
+	require.True(t, metricExists(t, endpoint, "sip_exporter_rtcp_jitter_milliseconds_count"),
+		"jitter histogram count must exist before reading its value")
 	jitSum := getRTPMetric(t, endpoint, "sip_exporter_rtcp_jitter_milliseconds_sum")
 	jitCount := getRTPMetric(t, endpoint, "sip_exporter_rtcp_jitter_milliseconds_count")
 	require.Greater(t, jitCount, 0.0)
@@ -425,7 +436,8 @@ func TestRTCPSenderReportCaptured(t *testing.T) {
 	)
 
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_packets_total") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
 	}, 15*time.Second, 500*time.Millisecond, "RTP must flow before injecting RTCP")
 
 	sendRTPWithSSRC(t, uasMediaNum, testSSRC, 20)
@@ -436,7 +448,8 @@ func TestRTCPSenderReportCaptured(t *testing.T) {
 	wait()
 
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="sr"`) > 0
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_rtcp_reports_total", `type="sr"`) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="sr"`) > 0
 	}, 10*time.Second, 500*time.Millisecond,
 		"RTCP Sender Report (PT 200) must be captured and labelled type=sr")
 }
@@ -463,7 +476,8 @@ func TestRTCPBothDirections(t *testing.T) {
 	)
 
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_packets_total") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
 	}, 15*time.Second, 500*time.Millisecond, "RTP must flow before injecting RTCP")
 
 	const ssrcA uint32 = 0xCAFEBABE
@@ -478,7 +492,8 @@ func TestRTCPBothDirections(t *testing.T) {
 	wait()
 
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) >= 2
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) >= 2
 	}, 10*time.Second, 500*time.Millisecond,
 		"RTCP from both legs must be captured (per-stream SSRC isolation)")
 }
@@ -486,26 +501,9 @@ func TestRTCPBothDirections(t *testing.T) {
 // getRTCPOrphanCount scrapes the label-less rtcp_orphan_reports_total counter.
 func getRTCPOrphanCount(t *testing.T, endpoint string) float64 {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/metrics", nil)
-	require.NoError(t, err)
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	re := regexp.MustCompile(`^sip_exporter_rtcp_orphan_reports_total\s+([0-9.]+)`)
-	for _, line := range strings.Split(string(body), "\n") {
-		m := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(m) == 2 {
-			v, parseErr := strconv.ParseFloat(m[1], 64)
-			require.NoError(t, parseErr)
-			return v
-		}
-	}
-	return 0
+	const metricName = "sip_exporter_rtcp_orphan_reports_total"
+	require.True(t, metricExists(t, endpoint, metricName), "%s must exist", metricName)
+	return getMetricByLabel(t, endpoint, metricName)
 }
 
 // TestRTCPRefreshesStreamTTL proves end-to-end that RTCP reports refresh the
@@ -537,7 +535,8 @@ func TestRTCPRefreshesStreamTTL(t *testing.T) {
 
 	// Wait until RTP flows: media endpoint registered, UAS socket bound.
 	require.Eventually(t, func() bool {
-		return getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
+		return rtpMetricExists(t, endpoint, "sip_exporter_rtp_packets_total") &&
+			getRTPMetric(t, endpoint, "sip_exporter_rtp_packets_total") > 0
 	}, 15*time.Second, 500*time.Millisecond, "RTP must flow before injecting RTCP")
 
 	// Establish a stream under testSSRC, then STOP injecting RTP. SIPp's own
@@ -567,7 +566,8 @@ func TestRTCPRefreshesStreamTTL(t *testing.T) {
 	// rtcp_reports_total grew to 5 and rtcp_orphan_reports_total stayed at 0.
 	// Without the fix: the last two RRs are orphans → reports stalls at 3.
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) >= 4
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_rtcp_reports_total", `type="rr"`) >= 4
 	}, 5*time.Second, 500*time.Millisecond,
 		"RRs sent past the RTP-idle TTL must correlate (RTCP refreshed stream TTL)")
 

@@ -31,12 +31,14 @@ func TestFASNoRTPFiresAfterThreshold(t *testing.T) {
 
 	// Dialog established (200 OK processed → FAS pending stored).
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_sessions") >= 1
+		return metricExists(t, endpoint, "sip_exporter_sessions") &&
+			getMetricByLabel(t, endpoint, "sip_exporter_sessions") >= 1
 	}, 10*time.Second, 200*time.Millisecond, "dialog must be established (200 OK)")
 
 	// No RTP injected → after the threshold + ≤1s sweep tick, FAS must fire.
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_fas_calls_total") >= 1
+		return metricExists(t, endpoint, "sip_exporter_fas_calls_total") &&
+			getMetricByLabel(t, endpoint, "sip_exporter_fas_calls_total") >= 1
 	}, 20*time.Second, 500*time.Millisecond,
 		"fas_calls_total must fire for an answered call with no RTP within the threshold")
 
@@ -60,7 +62,8 @@ func TestFASRTPPreventsFire(t *testing.T) {
 
 	// Wait for the 200 OK to register media endpoints (FAS pending stored).
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_sessions") >= 1
+		return metricExists(t, endpoint, "sip_exporter_sessions") &&
+			getMetricByLabel(t, endpoint, "sip_exporter_sessions") >= 1
 	}, 10*time.Second, 200*time.Millisecond, "dialog must be established (200 OK)")
 
 	// Inject ≥2 RTP packets to the UAC media endpoint → media established → FAS cleared.
@@ -69,9 +72,8 @@ func TestFASRTPPreventsFire(t *testing.T) {
 	// Wait past the threshold so a pending entry would have fired if not cleared.
 	time.Sleep(2 * fasE2EThreshold)
 
-	// FAS must NOT have fired: the metric is absent (counters only appear after
-	// the first increment; getMetricByLabel returns 0 when no sample is present).
-	require.Zero(t, getMetricByLabel(t, endpoint, "sip_exporter_fas_calls_total"),
+	// FAS must NOT have fired: counters only appear after the first increment.
+	require.False(t, metricExists(t, endpoint, "sip_exporter_fas_calls_total"),
 		"established media (≥2 RTP) must prevent FAS")
 
 	wait()
