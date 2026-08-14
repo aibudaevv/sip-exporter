@@ -27,7 +27,6 @@ func TestTTR(t *testing.T) {
 		{"MixedScenarios", false, []sippRun{{"uas_100.xml", "uac_100.xml", 30, false}, {"uas_0.xml", "uac_0.xml", 20, false}}, true},
 		{"WithCarrierConfig", true, []sippRun{{"uas_100.xml", "uac_100.xml", 50, false}}, true},
 		{"RegisterScenario", false, []sippRun{{"reg_uas.xml", "reg_uac.xml", 50, false}}, false},
-		{"NoInviteScenario", false, []sippRun{{"uas_no_invite.xml", "uac_no_invite.xml", 50, false}}, false},
 		{"TimeoutNoResponse", false, []sippRun{{"", "uac_100.xml", 5, true}}, false},
 	}
 

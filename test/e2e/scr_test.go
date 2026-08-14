@@ -4,7 +4,6 @@ package e2e
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -94,24 +93,21 @@ func TestSCRSessionExpires(t *testing.T) {
 	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
-	scrBefore := getSCR(t, env.endpoint)
-	sessionsBefore := getSessions(t, env.endpoint)
-	t.Logf("Before: SCR = %.2f, sessions = %.0f", scrBefore, sessionsBefore)
+	require.False(t, metricExists(t, env.endpoint, "sip_exporter_scr"))
+	require.False(t, metricExists(t, env.endpoint, "sip_exporter_sessions"))
 
 	const callCount = 10
 	runSippScenario(ctx, t, "uas_short_expires.xml", "uac_short_expires.xml", callCount, env)
 
-	require.Eventually(t, func() bool {
-		return getMetric(t, env.endpoint, "sip_exporter_sessions") == 0
-	}, 15*time.Second, 500*time.Millisecond, "sessions did not expire within timeout")
+	waitForSessionsZero(t, env.endpoint)
 
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_scr"))
 	scrAfter := getSCR(t, env.endpoint)
 	sessionsAfter := getSessions(t, env.endpoint)
 	t.Logf("After: SCR = %.2f, sessions = %.0f", scrAfter, sessionsAfter)
 
-	require.True(t, metricExists(t, env.endpoint, "sip_exporter_sessions"))
 	require.Equal(t, 0.0, sessionsAfter, "sessions should be 0 after Session-Expires timeout")
-	require.Greater(t, scrAfter, scrBefore, "SCR should increase after Session-Expires timeout")
+	require.Equal(t, 100.0, scrAfter, "SCR should be 100%% after Session-Expires timeout")
 }
 
 func TestSCRWithCarrierConfig(t *testing.T) {

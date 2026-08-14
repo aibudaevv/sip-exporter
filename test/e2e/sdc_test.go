@@ -4,7 +4,6 @@ package e2e
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -93,20 +92,19 @@ func TestSDCSessionExpires(t *testing.T) {
 	ctx := t.Context()
 	env := newTestEnv(ctx, t)
 
-	sdcBefore := getSDC(t, env.endpoint)
-	t.Logf("Before: SDC = %.0f", sdcBefore)
+	require.False(t, metricExists(t, env.endpoint, "sip_exporter_sdc_total"))
 
 	const callCount = 10
 	runSippScenario(ctx, t, "uas_short_expires.xml", "uac_short_expires.xml", callCount, env)
 
-	require.Eventually(t, func() bool {
-		return getMetric(t, env.endpoint, "sip_exporter_sessions") == 0
-	}, 15*time.Second, 500*time.Millisecond, "sessions did not expire within timeout")
+	waitForSessionsZero(t, env.endpoint)
 
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_sdc_total"))
 	sdcAfter := getSDC(t, env.endpoint)
 	t.Logf("After: SDC = %.0f", sdcAfter)
 
-	require.Equal(t, sdcBefore+float64(callCount), sdcAfter, "SDC should increase by %d after Session-Expires timeout", callCount)
+	require.Equal(t, float64(callCount), sdcAfter,
+		"SDC should equal completed Session-Expires calls")
 }
 
 func TestSDCWithCarrierConfig(t *testing.T) {

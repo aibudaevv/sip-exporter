@@ -18,22 +18,18 @@ func TestMethodCountersFullCallFlow(t *testing.T) {
 
 	runSippScenario(ctx, t, "uas_100.xml", "uac_100.xml", callCount, env)
 
-	tests := []struct {
-		name       string
-		metricName string
-	}{
-		{"invite_total", "sip_exporter_invite_total"},
-		{"invite_200_total", "sip_exporter_invite_200_total"},
-		{"ack_total", "sip_exporter_ack_total"},
-		{"bye_total", "sip_exporter_bye_total"},
+	metricNames := []string{
+		"sip_exporter_invite_total",
+		"sip_exporter_invite_200_total",
+		"sip_exporter_ack_total",
+		"sip_exporter_bye_total",
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			val := getMetric(t, env.endpoint, tt.metricName)
-			t.Logf("%s = %.0f (want %.0f)", tt.metricName, val, float64(callCount))
-			require.Equal(t, float64(callCount), val)
-		})
+	for _, metricName := range metricNames {
+		require.True(t, metricExists(t, env.endpoint, metricName))
+		val := getMetric(t, env.endpoint, metricName)
+		t.Logf("%s = %.0f (want %.0f)", metricName, val, float64(callCount))
+		require.Equal(t, float64(callCount), val)
 	}
 
 	assertDialogTeardown(t, env.endpoint)
@@ -48,6 +44,7 @@ func TestMethodCountersOptions(t *testing.T) {
 
 	runSippScenario(ctx, t, "uas_no_invite.xml", "uac_no_invite.xml", callCount, env)
 
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_options_total"))
 	optionsTotal := getMetric(t, env.endpoint, "sip_exporter_options_total")
 	t.Logf("options_total = %.0f (want %.0f)", optionsTotal, float64(callCount))
 	require.Equal(t, float64(callCount), optionsTotal)
@@ -57,7 +54,6 @@ func TestMethodCountersOptions(t *testing.T) {
 // REFER, PRACK, and MESSAGE requests.
 func TestMethodCountersOtherMethods(t *testing.T) {
 	t.Parallel()
-	ctx := t.Context()
 	const callCount = 50
 
 	tests := []struct {
@@ -77,9 +73,11 @@ func TestMethodCountersOtherMethods(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			ctx := t.Context()
 			env := newTestEnv(ctx, t)
 			runSippScenario(ctx, t, tt.uasScenario, tt.uacScenario, callCount, env)
 
+			require.True(t, metricExists(t, env.endpoint, tt.metricName))
 			val := getMetric(t, env.endpoint, tt.metricName)
 			t.Logf("%s = %.0f (want %.0f)", tt.metricName, val, float64(callCount))
 			require.Equal(t, float64(callCount), val)

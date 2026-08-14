@@ -24,6 +24,7 @@ const (
 	sippHelperExitCodeEnv = "SIP_EXPORTER_E2E_SIPP_HELPER_EXIT_CODE"
 	sippScenarioChildEnv  = "SIP_EXPORTER_E2E_SIPP_SCENARIO_CHILD"
 	sippStopFileEnv       = "SIP_EXPORTER_E2E_SIPP_STOP_FILE"
+	sippUASExitFileEnv    = "SIP_EXPORTER_E2E_SIPP_UAS_EXIT_FILE"
 )
 
 func TestMain(m *testing.M) {
@@ -32,6 +33,14 @@ func TestMain(m *testing.M) {
 			if err := os.WriteFile(os.Getenv(sippStopFileEnv), []byte("stopped\n"), 0o600); err != nil {
 				os.Exit(2)
 			}
+			os.Exit(0)
+		}
+		if len(os.Args) > 1 && os.Args[1] == "exec" {
+			data, err := os.ReadFile("/proc/net/udp")
+			if err != nil {
+				os.Exit(2)
+			}
+			_, _ = os.Stdout.Write(data)
 			os.Exit(0)
 		}
 		if strings.Contains(strings.Join(os.Args, " "), "/scenarios/uas_100.xml") {
@@ -66,6 +75,12 @@ func TestMain(m *testing.M) {
 }
 
 func runSippTestUAS(args []string) {
+	if exitFile := os.Getenv(sippUASExitFileEnv); exitFile != "" {
+		defer func() {
+			time.Sleep(200 * time.Millisecond)
+			_ = os.WriteFile(exitFile, []byte("exited\n"), 0o600)
+		}()
+	}
 	for i, arg := range args {
 		if arg != "-p" || i+1 >= len(args) {
 			continue

@@ -34,6 +34,8 @@ import (
 const (
 	sippImage                       = "pbertera/sipp:latest"
 	testInterface                   = "lo"
+	testPortRangeStart              = 20000
+	testPortRangeEnd                = 30000
 	ratioDelta                      = 2.0
 	dialogMetricsSnapshotSettleTime = 1100 * time.Millisecond
 )
@@ -55,32 +57,49 @@ type metricSample struct {
 
 var (
 	portMu             sync.Mutex
+	nextTestPort       = testPortRangeStart
 	metricValuePattern = regexp.MustCompile(`^(?:NaN|[+-]?Inf|[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)$`)
 )
 
 // allocatePorts returns 3 port numbers for exporter, SIPp server, and SIPp client.
-// Uses the kernel's ephemeral port allocator (net.Listen ":0") for each port,
-// ensuring they are free at allocation time.
-// Gap layout: exporter=port[0], sippPort=port[1], [UAS media=port[1]+2],
-// sippClientPort=port[2], [UAC media=port[2]+2].
 func allocatePorts() (exporter, sipp, sippClient string) {
 	portMu.Lock()
 	defer portMu.Unlock()
-	ports := make([]int, 3)
-	listeners := make([]net.Listener, 3)
-	for i := range 3 {
-		l, err := net.Listen("tcp", "127.0.0.1:0")
+
+	return strconv.Itoa(allocateTCPPort()), strconv.Itoa(allocateUDPPort()), strconv.Itoa(allocateUDPPort())
+}
+
+func allocateTCPPort() int {
+	for {
+		port := takeNextTestPort()
+		l, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port})
 		if err != nil {
-			panic(fmt.Sprintf("allocatePorts: failed to get free port: %v", err))
+			continue
 		}
-		listeners[i] = l
-		ports[i] = l.Addr().(*net.TCPAddr).Port
+		_ = l.Close()
+		return port
 	}
-	// Close all listeners before returning so the ports are free for use.
-	for _, l := range listeners {
-		l.Close()
+}
+
+func allocateUDPPort() int {
+	for {
+		port := takeNextTestPort()
+		l, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port})
+		if err != nil {
+			continue
+		}
+		_ = l.Close()
+		return port
 	}
-	return strconv.Itoa(ports[0]), strconv.Itoa(ports[1]), strconv.Itoa(ports[2])
+}
+
+func takeNextTestPort() int {
+	if nextTestPort >= testPortRangeEnd {
+		panic(fmt.Sprintf("test port range %d-%d exhausted", testPortRangeStart, testPortRangeEnd-1))
+	}
+	port := nextTestPort
+	nextTestPort++
+	return port
 }
 
 // newTestEnv allocates free ports and starts an exporter container for the test.
@@ -1127,6 +1146,7 @@ func runSippUACOnly(ctx context.Context, t *testing.T, uacScenario string, callC
 		"-i", "127.0.0.1",
 		"-p", env.sippClientPort,
 		"-m", strconv.Itoa(callCount),
+		"-recv_timeout", "5000",
 		"-timeout", "5s",
 		"127.0.0.1:"+env.sippPort,
 	)
@@ -1372,6 +1392,10 @@ func isUDPPortInUse(port string) bool {
 	if err != nil {
 		return false
 	}
+	return udpPortInUse(data, port)
+}
+
+func udpPortInUse(data []byte, port string) bool {
 	p, err := strconv.Atoi(port)
 	if err != nil {
 		return false
