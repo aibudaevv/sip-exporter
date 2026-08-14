@@ -5,6 +5,7 @@ package load
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -18,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -29,7 +31,7 @@ import (
 )
 
 const (
-	sippImage     = "pbertera/sipp:latest"
+	sippImage     = "pbertera/sipp@sha256:063e8e9c8ecf54552e8efc3c363007afbfd3cae5a0f3f037db1c2e7fa4cd0349"
 	testInterface = "lo"
 )
 
@@ -65,6 +67,7 @@ type (
 
 	loadResult struct {
 		Duration      time.Duration
+		Generator     GeneratorResult
 		PacketsBefore float64
 		PacketsAfter  float64
 		ActualPPS     float64
@@ -599,24 +602,14 @@ func startSippContainer(
 ) testcontainers.Container {
 	t.Helper()
 
-	req := testcontainers.ContainerRequest{
-		Image:       sippImage,
-		NetworkMode: "host",
-		Cmd:         args,
-		Mounts: testcontainers.Mounts(
-			testcontainers.BindMount(sippVol, "/scenarios"),
-		),
-	}
-
-	if waitForExit {
-		req.WaitingFor = wait.ForExit().WithExitTimeout(contextTimeout(t, ctx))
-	}
+	req := sippContainerRequest(ctx, t, args, sippVol, "", waitForExit)
 
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
 		Started:          true,
 		Logger:           log.New(io.Discard, "", 0),
 	})
+	require.NoError(t, err)
 
 	if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
 		logs, logErr := c.Logs(ctx)
@@ -627,10 +620,109 @@ func startSippContainer(
 		}
 	}
 
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = c.Terminate(ctx) })
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = c.Terminate(cleanupCtx)
+	})
 
 	return c
+}
+
+func sippContainerRequest(
+	ctx context.Context,
+	t *testing.T,
+	args []string,
+	sippVol, statsDir string,
+	waitForExit bool,
+) testcontainers.ContainerRequest {
+	t.Helper()
+	cmd := append([]string(nil), args...)
+	mounts := testcontainers.Mounts(testcontainers.BindMount(sippVol, "/scenarios"))
+	if statsDir != "" {
+		cmd = append(cmd, "-trace_stat", "-stat_delimiter", ";", "-stf", "/artifacts/stats.csv")
+		mounts = append(mounts, testcontainers.BindMount(statsDir, "/artifacts"))
+	}
+
+	req := testcontainers.ContainerRequest{
+		Image:       sippImage,
+		NetworkMode: "host",
+		Cmd:         cmd,
+		Mounts:      mounts,
+	}
+
+	if waitForExit {
+		req.WaitingFor = wait.ForExit().WithExitTimeout(contextTimeout(t, ctx))
+	}
+
+	return req
+}
+
+func runSippGenerator(
+	ctx context.Context,
+	t *testing.T,
+	args []string,
+	sippVol string,
+	phases PhaseTimestamps,
+) (GeneratorResult, error) {
+	t.Helper()
+	statsDir := t.TempDir()
+	req := sippContainerRequest(ctx, t, args, sippVol, statsDir, true)
+	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+		Logger:           log.New(io.Discard, "", 0),
+	})
+	if err != nil {
+		return GeneratorResult{}, fmt.Errorf("start SIPp generator: %w", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = c.Terminate(cleanupCtx)
+	})
+
+	phases.MeasureEnd = time.Now()
+	state, err := c.State(ctx)
+	if err != nil {
+		return GeneratorResult{}, fmt.Errorf("read SIPp generator state: %w", err)
+	}
+	if state.ExitCode != 0 || os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
+		logs, logErr := c.Logs(ctx)
+		if logErr == nil {
+			defer logs.Close()
+			logBytes, _ := io.ReadAll(logs)
+			t.Logf("SIPp generator logs:\n%s", strings.TrimSpace(string(logBytes)))
+		}
+	}
+
+	stats, err := os.ReadFile(filepath.Join(statsDir, "stats.csv"))
+	if err != nil {
+		return GeneratorResult{ExitCode: int(state.ExitCode), Phases: phases},
+			fmt.Errorf("read SIPp statistics: %w", err)
+	}
+	return parseSIPpStats(stats, int(state.ExitCode), phases)
+}
+
+func waitForSIPpUDPReady(
+	ctx context.Context,
+	t *testing.T,
+	c testcontainers.Container,
+	port string,
+) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		state, err := c.State(ctx)
+		if err != nil || !state.Running {
+			return false
+		}
+		conn, err := net.ListenPacket("udp", net.JoinHostPort("127.0.0.1", port))
+		if err != nil {
+			return errors.Is(err, syscall.EADDRINUSE)
+		}
+		_ = conn.Close()
+		return false
+	}, contextTimeout(t, ctx), 25*time.Millisecond, "SIPp UAS did not bind UDP port %s", port)
 }
 
 func waitForContainerExit(ctx context.Context, t *testing.T, c testcontainers.Container) {
@@ -779,11 +871,20 @@ func runSippLoad(
 
 	statsCtx, statsCancel := context.WithCancel(ctx)
 	stats.start(statsCtx, env.exporterContainer.GetContainerID())
+	statsStopped := false
+	defer func() {
+		if !statsStopped {
+			statsCancel()
+			stats.stop()
+		}
+	}()
 
 	packetsBefore := getMetric(t, env.endpoint, "sip_exporter_packets_total")
 	errorsBefore := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
 
-	start := time.Now()
+	phases := PhaseTimestamps{WarmupStart: time.Now()}
+	var generator GeneratorResult
+	spec := WorkloadSpec{Calls: callCount, Rate: float64(rate)}
 
 	if uasScenario != "" {
 		uasPath := absScenarioPath(t, uasScenario)
@@ -796,19 +897,23 @@ func runSippLoad(
 			sippVol, false,
 		)
 
-		time.Sleep(500 * time.Millisecond)
+		waitForSIPpUDPReady(ctx, t, uasContainer, env.sippPort)
+		phases.Ready = time.Now()
 
 		uacPath := absScenarioPath(t, uacScenario)
 		sippVol = filepath.Dir(uacPath)
 		uacFile := filepath.Base(uacScenario)
 
-		startSippContainer(ctx, t,
+		phases.MeasureStart = time.Now()
+		var generatorErr error
+		generator, generatorErr = runSippGenerator(ctx, t,
 			[]string{"-sf", "/scenarios/" + uacFile, "-i", "127.0.0.1", "-p", env.sippClientPort,
 				"-m", strconv.Itoa(callCount), "-r", strconv.Itoa(rate),
 				"-nr",
 				"127.0.0.1:" + env.sippPort},
-			sippVol, true,
+			sippVol, phases,
 		)
+		require.NoError(t, generatorErr)
 
 		waitForContainerExit(ctx, t, uasContainer)
 	} else {
@@ -816,25 +921,29 @@ func runSippLoad(
 		sippVol := filepath.Dir(uacPath)
 		uacFile := filepath.Base(uacScenario)
 
-		startSippContainer(ctx, t,
+		phases.Ready = time.Now()
+		phases.MeasureStart = time.Now()
+		var generatorErr error
+		generator, generatorErr = runSippGenerator(ctx, t,
 			[]string{"-sf", "/scenarios/" + uacFile, "-i", "127.0.0.1", "-p", env.sippClientPort,
 				"-m", strconv.Itoa(callCount), "-r", strconv.Itoa(rate),
 				"-nr",
 				"127.0.0.1:" + env.sippPort},
-			sippVol, true,
+			sippVol, phases,
 		)
+		require.NoError(t, generatorErr)
 	}
-
-	sippEnd := time.Now()
-	sippDuration := sippEnd.Sub(start)
 
 	waitForMetricStable(ctx, t, env.endpoint)
 
-	stableTime := time.Now()
-	drainTime := stableTime.Sub(sippEnd)
+	generator.Phases.DrainEnd = time.Now()
+	require.NoError(t, generator.Validate(spec))
+	sippDuration := generator.Phases.MeasureEnd.Sub(generator.Phases.MeasureStart)
+	drainTime := generator.Phases.DrainEnd.Sub(generator.Phases.MeasureEnd)
 
 	statsCancel()
 	cpuAvg, cpuPeak, memMaxMB := stats.stop()
+	statsStopped = true
 
 	packetsAfter := getMetric(t, env.endpoint, "sip_exporter_packets_total")
 	errorsAfter := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
@@ -858,6 +967,7 @@ func runSippLoad(
 
 	result := loadResult{
 		Duration:      sippDuration,
+		Generator:     generator,
 		PacketsBefore: packetsBefore,
 		PacketsAfter:  packetsAfter,
 		ActualPPS:     actualPPS,
@@ -891,6 +1001,13 @@ func runConcurrentLoad(
 
 	statsCtx, statsCancel := context.WithCancel(ctx)
 	stats.start(statsCtx, env.exporterContainer.GetContainerID())
+	statsStopped := false
+	defer func() {
+		if !statsStopped {
+			statsCancel()
+			stats.stop()
+		}
+	}()
 
 	packetsBefore := getMetric(t, env.endpoint, "sip_exporter_packets_total")
 
@@ -906,7 +1023,7 @@ func runConcurrentLoad(
 		sippVol, false,
 	)
 
-	time.Sleep(1 * time.Second)
+	waitForSIPpUDPReady(ctx, t, uasContainer, env.sippPort)
 
 	uacPath := absScenarioPath(t, uacScenario)
 	sippVol = filepath.Dir(uacPath)
@@ -948,6 +1065,7 @@ func runConcurrentLoad(
 
 	statsCancel()
 	cpuAvg, cpuPeak, memMaxMB := stats.stop()
+	statsStopped = true
 
 	packetsAfter := getMetric(t, env.endpoint, "sip_exporter_packets_total")
 
