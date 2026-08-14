@@ -1,16 +1,19 @@
 # Benchmark Results
 
-Load testing results for sip-exporter, measuring packet capture reliability under high SIP traffic.
+Historical load-testing observations for sip-exporter.
 
-## TL;DR
+> [!WARNING]
+> These results are not a current release-verification report. The existing load harness does not
+> yet prove generator completion and achieved rate, symmetric loss/duplication accounting, real
+> multi-interface routing, or statistically comparable resource baselines. Capacity and sizing
+> claims are suspended until the release verifier is rebuilt and a new baseline is accepted.
 
-- **Zero packet loss** up to 1,800 CPS (~21,200 PPS) with the measured full SIP dialog lifecycle
-- **< 15% CPU** and **9–16 MB RAM** at the measured full-call maximum
-- **GC stop-the-world pauses < 1 ms** in the measured workload, leaving substantial headroom relative to the 4 MB socket buffer
-- **Multi-NIC:** ~0.25% CPU and ~1 MiB RAM per additional interface
-- **Minimum:** 1 core / 128 MB for ≤ 1,000 CPS; 2 cores / 256 MB for ≤ 2,000 CPS
+The tables below are retained to document earlier observations and test intent. They must not be
+used as release gates or production sizing guidance.
 
-## System Requirements
+## Historical Sizing Table (Not Release-Verified)
+
+The resource limits in this table were not enforced by cgroups in the current suite.
 
 | Traffic Level | Min CPU | Min RAM | GOMAXPROCS | Notes |
 |--------------|---------|---------|------------|-------|
@@ -19,16 +22,18 @@ Load testing results for sip-exporter, measuring packet capture reliability unde
 | ≤ 2,000 CPS | 2 cores | 256 MB | 2 | Multi-core recommended for stability |
 | > 2,000 CPS | 4 cores | 512 MB | 4 | Not tested, conservative estimate |
 
-Key parameters for sizing:
+Historical assumptions that require revalidation:
 
 - **CPU:** ~8% of one core at 2,000 CPS on i7-8665U (multi-core)
 - **RAM:** 10-15 MB base + ~1 MB per 1,000 active dialogs + ~128 bytes per active RTP stream
 - **Network:** eBPF socket filter adds zero latency to SIP/RTP traffic (filters in kernel)
 - **Scrape interval:** 5-10 seconds recommended (scrape takes < 10 ms even at max load)
 
-## Reliability: Measured Zero Packet Loss
+## Historical Capture Results
 
-All scenarios tested with 3 consecutive runs per configuration; **0% loss required on every run**. On loopback each packet is captured twice (send + receive).
+The old report described three manual runs per configuration. The current Make target does not
+enforce those repetitions, and the old packet accounting cannot distinguish excess capture from
+loss-free capture. Treat the following values as historical only.
 
 | Scenario | What it tests | Max tested | PPS | CPU avg | RAM | Loss |
 |----------|---------------|------------|-----|---------|-----|------|
@@ -38,7 +43,7 @@ All scenarios tested with 3 consecutive runs per configuration; **0% loss requir
 | VQ Report Flood | VQ PUBLISH parsing throughput (2 pkts/report) | 2,000 CPS | ~3,840 | 3.3% | 13 MB | 0.00% |
 | VQ + Response | VQ PUBLISH with 200 OK, bidirectional (4 pkts/report) | 1,000 CPS | ~3,420 | 3.0% | 14 MB | 0.00% |
 | Full Call + VQ | Full lifecycle + VQ PUBLISH after BYE (18 pkts/call) | 1,000 CPS | ~15,270 | 6.1% | 16 MB | 0.00% |
-| Full Call + RTP | SIP dialog + 4s G.711a RTP both directions | 100 CPS | SIP ~302 / RTP ~199K | 4.8% | 12 MB | 0.00% |
+| Full Call + RTP | SIP dialog + historical G.711a RTP scenario | 100 CPS | SIP ~302 / RTP ~199K | 4.8% | 12 MB | 0.00% |
 
 SER (Session Establishment Rate) is 100% in every scenario that completes a full dialog (Full Call Flow, Full Call + VQ, Full Call + RTP). RTP processing adds minimal overhead: at 100 CPS with ~200K RTP packets, CPU stays under 5% avg and SIP metrics are unaffected.
 
@@ -56,12 +61,14 @@ SER (Session Establishment Rate) is 100% in every scenario that completes a full
 
 - Tests use [SIPp](https://sipp.sourceforge.net/) via [testcontainers-go](https://golang.testcontainers.org/) to generate real SIP traffic
 - Exporter runs as Docker container (`--privileged --network host`) with eBPF on `lo`
-- Packet loss is calculated as: `1 - (captured / expected) × 100%`
-- Each test runs sequentially (no parallel execution); 3 consecutive runs per configuration, 0% loss required on all runs
+- Historical loss was calculated as `1 - (captured / expected) × 100%`; excess capture was clamped
+  to zero loss and therefore was not detected as duplication.
+- Tests run sequentially, but the current Make target performs one process run rather than enforcing
+  the three-run release policy described by the old report.
 
 ## Resource Usage
 
-### CPU & Memory by Rate (Full Call Flow)
+### Historical CPU & Memory by Rate (Full Call Flow)
 
 | Rate (CPS) | PPS (actual) | CPU avg | CPU peak | RAM | Loss | Stable |
 |------------|-------------|---------|----------|-----|------|--------|
@@ -73,9 +80,11 @@ SER (Session Establishment Rate) is 100% in every scenario that completes a full
 | 1,600 | ~18,800 | 8.2-11.8% | 11.0-13.4% | 8.4-16.7 MB | 0.00% | 3/3 |
 | 1,800 | ~21,200 | 7.5-11.0% | 9.4-14.6% | 9.0-16.5 MB | 0.00% | 3/3 |
 
-### Scrape Performance Under Load
+### Historical Scrape Measurements
 
-HTTP GET `/metrics` response time while processing 2,000 CPS (14,000 PPS). 50 scrapes at 100 ms spacing.
+The current test starts its 50 requests only after the synchronous UAC run returns and closes each
+response without reading the complete body. These numbers therefore do not prove full scrape latency
+under concurrent load.
 
 | Metric | Value |
 |--------|-------|
@@ -84,11 +93,13 @@ HTTP GET `/metrics` response time while processing 2,000 CPS (14,000 PPS). 50 sc
 | P95 | 6.4 ms |
 | Max | 8.4 ms |
 
-Scrape does not interfere with packet processing. Safe to scrape every 5-10 seconds even at maximum load.
+No release-level scrape interval or interference conclusion is currently verified.
 
 ### Memory Stability & GC
 
-**Memory:** 2-minute continuous run at 500 CPS (7,000 PPS), 840,000 packets processed. Memory starts at 12.8 MB, peaks at 14.4 MB, ends at 12.6 MB — growth rate **-0.09 MB/min (stable)**, CPU avg 4.6% / peak 5.9%. This run shows stable memory after warmup; it is not a proof of leak absence under every workload.
+**Memory (historical):** a manual 2-minute run reported stable container memory. The current automated
+suite does not reproduce that soak or separate working set from reclaimable cache, so this observation
+is not a release gate or a general leak claim.
 
 **GC:** Stop-the-world pauses at 2,000 CPS (14,000 PPS), 85 GC cycles over ~5 s of traffic.
 
@@ -99,9 +110,13 @@ Scrape does not interfere with packet processing. Safe to scrape every 5-10 seco
 | P95 STW | 0.264 ms |
 | Max STW | 0.970 ms |
 
-Maximum STW pause is **< 1 ms** in this benchmark. With `SO_RCVBUFFORCE = 4 MB`, this leaves substantial measured headroom relative to the socket buffer; it does not prove that GC can never contribute to packet loss in another deployment.
+The historical run observed a sub-millisecond maximum STW pause. The current release process does not
+yet reproduce that result with validated offered load and capture integrity.
 
-## Multi-Interface Scaling
+## Historical Multi-Interface Scaling
+
+Both endpoints of the old veth fixture lived in the host namespace, so local routing could bypass the
+intended veth path. The following table is retained for history and does not verify per-NIC scaling.
 
 Each subtest runs N parallel SIPp UAC flood scenarios (`flood_uac.xml`, 1 INVITE per call, `callCount=1000`, `rate=500` per UAC). The exporter listens on `lo` + (N-1) veth pairs with one AF_PACKET socket per interface; all sockets feed a single Go channel.
 
@@ -112,29 +127,24 @@ Each subtest runs N parallel SIPp UAC flood scenarios (`flood_uac.xml`, 1 INVITE
 | 3 (lo + veth0a + veth1a) | 1,043 | 3,000 | 0.76% | 1.23% | 17.13 MB | 0.00% | 0 |
 
 - **Packets scale linearly**: 1,000 → 2,000 → 3,000, zero cross-interface loss. CPU scales sub-linearly (0.51% → 0.78% → 0.76% avg) — the shared parser/channel/pipeline amortises across sockets.
-- **Per-NIC cost:** ~0.25% CPU and ~1 MiB RAM per additional interface. No bottleneck up to N=3.
+- The historical report inferred per-NIC resource cost, but that conclusion requires a peer namespace
+  and exact per-interface capture accounting before it can be used.
 
-## Reproducing Benchmarks
+## Running the Current Exploratory Suite
+
+These commands run the existing suite for investigation; they do not produce release-verification
+evidence or an accepted sizing baseline.
 
 ```bash
-# Build Docker image
-make docker_build
+# Use a unique image tag; do not reuse intermediate tags.
+make version=load-review-<unique-id> docker_build
 
-# Run all load tests (whole package, sequential — includes TestBenchmark* tests)
-SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(cat VERSION) \
-  go test -tags=e2e -v -count=1 -timeout 30m ./test/e2e/load/...
+# Run the load package alone. Never overlap it with main or RTP E2E.
+make version=load-review-<unique-id> test-load
 
-# Run specific test
-SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(cat VERSION) \
-  go test -tags=e2e -v -count=1 -timeout 5m -run 'TestLoadFullCallFlow/rate_1800' ./test/e2e/load/...
-
-# Run with single core (test scheduler sensitivity)
-SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(cat VERSION) SIP_EXPORTER_E2E_GOMAXPROCS=1 \
-  go test -tags=e2e -v -count=1 -timeout 30m -run 'TestLoad' ./test/e2e/load/...
-
-# Run with GC trace
-SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(cat VERSION) SIP_EXPORTER_E2E_GODEBUG=gctrace=1 \
-  go test -tags=e2e -v -count=1 -timeout 5m -run 'TestLoadFullCallFlow/rate_1800' ./test/e2e/load/...
+# Run one targeted scenario through the Makefile wrapper.
+make version=load-review-<unique-id> test-load-run \
+  TEST='TestLoadFullCallFlow/rate_1800'
 ```
 
 ---
@@ -142,7 +152,7 @@ SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(cat VERSION) SIP_EXPORTER_E2E_GODEBUG=gctr
 <details>
 <summary><b>Appendix: Micro-Benchmarks & Detailed Analysis</b></summary>
 
-Developer-focused data: per-operation costs, memory-per-entry breakdowns, and the GOMAXPROCS detail tables.
+Historical developer-focused data: per-operation costs, memory estimates, and GOMAXPROCS tables.
 
 ## GOMAXPROCS Comparison: 1 Core vs 8 Cores
 

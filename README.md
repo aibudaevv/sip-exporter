@@ -82,7 +82,10 @@ SIP + RTP Traffic → NIC → eBPF socket filter → AF_PACKET socket → Go pol
 
 ## Performance
 
-Zero packet loss in the measured full SIP dialog lifecycle up to **1,800 CPS** (~21,200 PPS), at **<15% CPU** and **9–16 MB RAM**. GC stop-the-world pauses under **1 ms** in the measured workload, leaving substantial headroom relative to the socket buffer. Memory remained stable during the benchmark run.
+The published benchmark tables are historical observations, not a current release-verification
+contract. Their capacity, sizing, scrape-latency, and multi-interface claims are being revalidated
+with stricter generator, capture-integrity, resource, and baseline checks. Do not use the historical
+figures for release acceptance or production sizing until that verification is complete.
 
 Go micro-benchmarks:
 
@@ -92,7 +95,7 @@ Go micro-benchmarks:
 | Parse INVITE packet (L2→SIP) | ~1.1 μs | 808 B/op |
 | Parse 200 OK packet (L2→SIP) | ~2.0 μs | 1176 B/op |
 
-Full load test results: [docs/BENCHMARK.md](./docs/BENCHMARK.md).
+Historical results and their current verification status: [docs/BENCHMARK.md](./docs/BENCHMARK.md).
 
 ## Install
 
@@ -389,9 +392,10 @@ Test suite:
 
 ## Benchmark
 
-Load testing results: **0% packet loss at 1,800 CPS (~21,200 PPS) for the measured full call flow**.
+The published load-testing results are historical and are not currently release-verified or suitable
+for production sizing.
 
-See [BENCHMARK.md](./docs/BENCHMARK.md) for detailed results, methodology, and optimization notes.
+See [BENCHMARK.md](./docs/BENCHMARK.md) for the historical results and their verification status.
 
 ## Alerting
 
