@@ -190,7 +190,8 @@ func TestRTPSequenceGapLoss(t *testing.T) {
 
 	wait := startControlledSIPDialog(t, uasSIP, uacSIP, uasMedia, uacMedia)
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 1
 	}, 10*time.Second, 200*time.Millisecond, "dialog must be established")
 
 	time.Sleep(1500 * time.Millisecond)

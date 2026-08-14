@@ -688,12 +688,13 @@ func TestSDPFilterLateInvite200OKUsesMatchingCSeq(t *testing.T) {
 
 		endpoint := startExporterWithCarrierUA(t.Context(), t,
 			httpPort, uasSIP, integrationCarriersYAML, integrationUserAgentsYAML, "")
+		optionsLabels := []string{labelCarrier, `ua_type="other"`}
+		optionsBefore := getMetricByLabel(t, endpoint, "sip_exporter_options_total", optionsLabels...)
 		finish := startLateCSeqSippContainers(t.Context(), t,
 			uasSIP, uacSIP, oldOffer, oldAnswer, newOffer, newAnswer)
 
 		require.Eventually(t, func() bool {
-			return metricExists(t, endpoint, "sip_exporter_options_total") &&
-				getMetricByLabel(t, endpoint, "sip_exporter_options_total") == 1
+			return getMetricByLabel(t, endpoint, "sip_exporter_options_total", optionsLabels...) == optionsBefore+1
 		}, 5*time.Second, 200*time.Millisecond,
 			"SIPp must complete the CSeq 2 transaction before RTP verification")
 
@@ -745,7 +746,8 @@ func TestSDPFilterLateInvite200OKAfterByeDoesNotRestoreDialog(t *testing.T) {
 	marker := newOptionsMarker(t, endpoint, dialog.sendOptionsMarker)
 
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) == 1
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) == 1
 	}, 5*time.Second, 100*time.Millisecond, "initial dialog must be established")
 	dialog.end()
 	require.Eventually(t, func() bool {
@@ -809,7 +811,8 @@ func TestSDPFilterReinviteLifecycle(t *testing.T) {
 			dialog := startReinviteDialog(t, uasSIP, uacSIP, media[1], media[0], 0)
 			marker := newOptionsMarker(t, endpoint, dialog.sendOptionsMarker)
 			require.Eventually(t, func() bool {
-				return getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) == 1
+				return metricWithLabelsExists(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) &&
+					getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) == 1
 			}, 5*time.Second, 100*time.Millisecond, "initial dialog must be established")
 
 			waitForOptionsProcessing(t, endpoint, func() { dialog.sendOptionsMarker(90) })
@@ -889,8 +892,8 @@ func TestSDPFilterSharedEntrySurvivesLatestOwnerBye(t *testing.T) {
 	endSecondDialog := startControlledSIPDialog(t, uasSIPB, uacSIPB, sharedMedia, uacMediaB)
 
 	require.Eventually(t, func() bool {
-		return getMetricByLabel(t, endpoint, "sip_exporter_sessions",
-			labelCarrier, labelUAType) >= 2
+		return metricWithLabelsExists(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) &&
+			getMetricByLabel(t, endpoint, "sip_exporter_sessions", labelCarrier, labelUAType) >= 2
 	}, 10*time.Second, 200*time.Millisecond, "both dialogs must be established")
 
 	endSecondDialog()

@@ -51,8 +51,8 @@ func exporterImage() string {
 	return image
 }
 
-// allocatePortsN returns n unique UDP port numbers (as strings). SIPp binds
-// UDP sockets, so TCP allocation cannot prove the selected port is available.
+// allocatePortsN returns n unique port numbers (as strings) available for both
+// UDP SIP/RTP sockets and the TCP HTTP listener used by the first port.
 func allocatePortsN(n int) []string {
 	portMu.Lock()
 	defer portMu.Unlock()
@@ -64,7 +64,12 @@ func allocatePortsN(n int) []string {
 			panic(fmt.Sprintf("allocatePortsN: failed to get free port: %v", err))
 		}
 		port := l.LocalAddr().(*net.UDPAddr).Port
-		l.Close()
+		tcpListener, tcpErr := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port})
+		_ = l.Close()
+		if tcpErr != nil {
+			continue
+		}
+		_ = tcpListener.Close()
 		if _, ok := usedPorts[port]; ok {
 			continue
 		}
@@ -157,7 +162,31 @@ func startExporterWithExtraEnv(
 		_ = c.Terminate(cleanupCtx)
 	})
 
-	return fmt.Sprintf("http://localhost:%s", httpPort)
+	endpoint := fmt.Sprintf("http://localhost:%s", httpPort)
+	waitForCaptureReady(t, endpoint, sipPort)
+	return endpoint
+}
+
+func waitForCaptureReady(t *testing.T, endpoint, sipPorts string) {
+	t.Helper()
+	sipPort := strings.Split(sipPorts, ",")[0]
+	port, err := strconv.Atoi(sipPort)
+	require.NoError(t, err)
+
+	listener, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port})
+	require.NoError(t, err)
+	defer listener.Close()
+
+	sender, err := net.DialUDP("udp4", nil, listener.LocalAddr().(*net.UDPAddr))
+	require.NoError(t, err)
+	defer sender.Close()
+
+	message := fmt.Sprintf("OPTIONS sip:ready@127.0.0.1:%s SIP/2.0\r\nFrom: readiness <sip:readiness@127.0.0.1>;tag=ready\r\nTo: service <sip:service@127.0.0.1:%s>\r\nCall-ID: capture-ready-%s\r\nCSeq: 1 OPTIONS\r\nUser-Agent: readiness\r\nContent-Length: 0\r\n\r\n", sipPort, sipPort, sipPort)
+	require.Eventually(t, func() bool {
+		_, err = sender.Write([]byte(message))
+		require.NoError(t, err)
+		return metricExists(t, endpoint, "sip_exporter_options_total")
+	}, 5*time.Second, 100*time.Millisecond, "AF_PACKET capture must be ready before sending test traffic")
 }
 
 // startExporterWithCarrierUA is like startExporter but additionally bind-mounts
@@ -255,7 +284,9 @@ func startExporterWithCarrierUA(
 		_ = c.Terminate(cleanupCtx)
 	})
 
-	return fmt.Sprintf("http://localhost:%s", httpPort)
+	endpoint := fmt.Sprintf("http://localhost:%s", httpPort)
+	waitForCaptureReady(t, endpoint, sipPort)
+	return endpoint
 }
 
 // socketPacketsMetric is the self-monitoring counter used to verify RTP delivery.
