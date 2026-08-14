@@ -104,8 +104,10 @@ func runSippRTPLoad(
 	statsCtx, statsCancel := context.WithCancel(ctx)
 	stats.start(statsCtx, env.exporterContainer.GetContainerID())
 
-	packetsBefore := getMetric(t, env.endpoint, "sip_exporter_packets_total")
+	protocolsBefore := readProtocolCounters(t, env.endpoint)
+	packetsBefore := protocolsBefore.SIPPackets
 	errorsBefore := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
+	expectedTotal := float64(callCount) * rtpSipPacketsPerCall
 
 	start := time.Now()
 
@@ -151,7 +153,7 @@ func runSippRTPLoad(
 	sippEnd := time.Now()
 	sippDuration := sippEnd.Sub(start)
 
-	waitForMetricStable(ctx, t, env.endpoint)
+	waitForExactSIPCapture(ctx, t, env.endpoint, packetsBefore, expectedTotal)
 
 	stableTime := time.Now()
 	drainTime := stableTime.Sub(sippEnd)
@@ -159,31 +161,29 @@ func runSippRTPLoad(
 	statsCancel()
 	cpuAvg, cpuPeak, memMaxMB := stats.stop()
 
-	packetsAfter := getMetric(t, env.endpoint, "sip_exporter_packets_total")
+	protocolsAfter := readProtocolCounters(t, env.endpoint)
+	protocols := protocolsAfter.delta(protocolsBefore)
+	packetsAfter := protocolsAfter.SIPPackets
 	errorsAfter := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
 
-	totalCaptured := packetsAfter - packetsBefore
+	capture := newCaptureResult(expectedTotal, protocols.SIPPackets)
+	require.NoError(t, capture.ValidateExact())
+	totalCaptured := capture.Captured
 	actualPPS := 0.0
 	if sippDuration.Seconds() > 0 {
 		actualPPS = totalCaptured / sippDuration.Seconds()
 	}
-	expectedTotal := float64(callCount) * rtpSipPacketsPerCall
 	expectedPPS := float64(rate) * rtpSipPacketsPerCall
-	lossRate := 0.0
-	if expectedTotal > 0 {
-		lossRate = 1 - totalCaptured/expectedTotal
-		if lossRate < 0 {
-			lossRate = 0
-		}
-	}
 
 	result := loadResult{
 		Duration:      sippDuration,
+		Capture:       capture,
+		Protocols:     protocols,
 		PacketsBefore: packetsBefore,
 		PacketsAfter:  packetsAfter,
 		ActualPPS:     actualPPS,
 		ExpectedPPS:   expectedPPS,
-		LossRate:      lossRate,
+		LossRate:      capture.LossPct / 100,
 		ErrorCount:    errorsAfter - errorsBefore,
 		DrainTime:     drainTime,
 		CPUAvg:        cpuAvg,
@@ -225,9 +225,7 @@ func TestLoadFullCallWithRTP(t *testing.T) {
 			require.GreaterOrEqual(t, ser, 99.0,
 				"SER SLO: >= 99%% with RTP capture enabled (got %.2f%%)", ser)
 
-			require.True(t, metricExists(t, env.endpoint, "sip_exporter_rtp_packets_total"),
-				"rtp_packets_total must have at least one series")
-			rtpPackets := getMetricSum(t, env.endpoint, "sip_exporter_rtp_packets_total")
+			rtpPackets := result.Protocols.RTPPackets
 			require.Greater(t, rtpPackets, 0.0,
 				"RTP packets must be captured")
 

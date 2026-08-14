@@ -42,6 +42,7 @@ func TestLoadDualUAType(t *testing.T) {
 
 			callCountPerType := rate * 5
 			totalCallCount := callCountPerType * 2
+			expectedTotal := float64(totalCallCount) * dualUAPacketsPerCall
 
 			stats, statsErr := newStatsCollector(env.exporterContainer.GetContainerID())
 			require.NoError(t, statsErr)
@@ -49,7 +50,8 @@ func TestLoadDualUAType(t *testing.T) {
 			statsCtx, statsCancel := context.WithCancel(ctx)
 			stats.start(statsCtx, env.exporterContainer.GetContainerID())
 
-			packetsBefore := getMetric(t, env.endpoint, "sip_exporter_packets_total")
+			protocolsBefore := readProtocolCounters(t, env.endpoint)
+			packetsBefore := protocolsBefore.SIPPackets
 			errorsBefore := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
 
 			start := time.Now()
@@ -104,29 +106,24 @@ func TestLoadDualUAType(t *testing.T) {
 			sippEnd := time.Now()
 			sippDuration := sippEnd.Sub(start)
 
-			waitForMetricStable(ctx, t, env.endpoint)
+			waitForExactSIPCapture(ctx, t, env.endpoint, packetsBefore, expectedTotal)
 
 			statsCancel()
 			cpuAvg, cpuPeak, memMaxMB := stats.stop()
 
-			packetsAfter := getMetric(t, env.endpoint, "sip_exporter_packets_total")
+			protocolsAfter := readProtocolCounters(t, env.endpoint)
+			protocols := protocolsAfter.delta(protocolsBefore)
+			packetsAfter := protocolsAfter.SIPPackets
 			errorsAfter := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
 
-			totalCaptured := packetsAfter - packetsBefore
+			capture := newCaptureResult(expectedTotal, protocols.SIPPackets)
+			require.NoError(t, capture.ValidateExact())
+			totalCaptured := capture.Captured
 			actualPPS := 0.0
 			if sippDuration.Seconds() > 0 {
 				actualPPS = totalCaptured / sippDuration.Seconds()
 			}
-			expectedTotal := float64(totalCallCount) * dualUAPacketsPerCall
-			lossRate := 0.0
-			if expectedTotal > 0 {
-				lossRate = 1 - totalCaptured/expectedTotal
-				if lossRate < 0 {
-					t.Logf("WARNING: captured %.0f > expected %.0f (%.2f%% extra), possible retransmission",
-						totalCaptured, expectedTotal, -lossRate*100)
-					lossRate = 0
-				}
-			}
+			lossRate := capture.LossPct / 100
 
 			errorCount := errorsAfter - errorsBefore
 

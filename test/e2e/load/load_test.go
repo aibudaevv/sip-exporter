@@ -68,6 +68,8 @@ type (
 	loadResult struct {
 		Duration      time.Duration
 		Generator     GeneratorResult
+		Capture       CaptureResult
+		Protocols     ProtocolCounters
 		PacketsBefore float64
 		PacketsAfter  float64
 		ActualPPS     float64
@@ -563,20 +565,40 @@ func singleMetricValue(samples []metricSample) (float64, error) {
 	return samples[0].value, nil
 }
 
-func waitForMetricStable(ctx context.Context, t *testing.T, endpoint string) {
+func metricSumOrZero(t *testing.T, endpoint, metricName string) float64 {
 	t.Helper()
-	prev := -1.0
-	stableCount := 0
+	var total float64
+	for _, sample := range readMetricSamples(t, endpoint, metricName) {
+		total += sample.value
+	}
+	return total
+}
+
+func readProtocolCounters(t *testing.T, endpoint string) ProtocolCounters {
+	t.Helper()
+	return ProtocolCounters{
+		SIPPackets:     metricSumOrZero(t, endpoint, "sip_exporter_packets_total"),
+		RTPPackets:     metricSumOrZero(t, endpoint, "sip_exporter_rtp_packets_total"),
+		RTCPReports:    metricSumOrZero(t, endpoint, "sip_exporter_rtcp_reports_total"),
+		VQReports:      metricSumOrZero(t, endpoint, "sip_exporter_vq_reports_total"),
+		SocketReceived: metricSumOrZero(t, endpoint, "sip_exporter_socket_packets_received_total"),
+		SocketDropped:  metricSumOrZero(t, endpoint, "sip_exporter_socket_packets_dropped_total"),
+	}
+}
+
+func waitForExactSIPCapture(
+	ctx context.Context,
+	t *testing.T,
+	endpoint string,
+	before, expected float64,
+) {
+	t.Helper()
 	require.Eventually(t, func() bool {
-		cur := getMetric(t, endpoint, "sip_exporter_packets_total")
-		if cur == prev {
-			stableCount++
-			return stableCount >= 2
-		}
-		prev = cur
-		stableCount = 0
-		return false
-	}, contextTimeout(t, ctx), 300*time.Millisecond, "metrics did not stabilize after SIPp scenario")
+		captured := metricSumOrZero(t, endpoint, "sip_exporter_packets_total") - before
+		channelLength := metricSumOrZero(t, endpoint, "sip_exporter_channel_length")
+		return exactCaptureComplete(expected, captured, channelLength)
+	}, contextTimeout(t, ctx), 25*time.Millisecond,
+		"SIP capture did not reach exact drained total %.0f", expected)
 }
 
 func absScenarioPath(t *testing.T, filename string) string {
@@ -879,8 +901,10 @@ func runSippLoad(
 		}
 	}()
 
-	packetsBefore := getMetric(t, env.endpoint, "sip_exporter_packets_total")
+	protocolsBefore := readProtocolCounters(t, env.endpoint)
+	packetsBefore := protocolsBefore.SIPPackets
 	errorsBefore := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
+	expectedTotal := float64(callCount) * packetsPerCall
 
 	phases := PhaseTimestamps{WarmupStart: time.Now()}
 	var generator GeneratorResult
@@ -934,7 +958,7 @@ func runSippLoad(
 		require.NoError(t, generatorErr)
 	}
 
-	waitForMetricStable(ctx, t, env.endpoint)
+	waitForExactSIPCapture(ctx, t, env.endpoint, packetsBefore, expectedTotal)
 
 	generator.Phases.DrainEnd = time.Now()
 	require.NoError(t, generator.Validate(spec))
@@ -945,34 +969,30 @@ func runSippLoad(
 	cpuAvg, cpuPeak, memMaxMB := stats.stop()
 	statsStopped = true
 
-	packetsAfter := getMetric(t, env.endpoint, "sip_exporter_packets_total")
+	protocolsAfter := readProtocolCounters(t, env.endpoint)
+	protocols := protocolsAfter.delta(protocolsBefore)
+	packetsAfter := protocolsAfter.SIPPackets
 	errorsAfter := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
 
-	totalCaptured := packetsAfter - packetsBefore
+	capture := newCaptureResult(expectedTotal, protocols.SIPPackets)
+	require.NoError(t, capture.ValidateExact())
+	totalCaptured := capture.Captured
 	actualPPS := 0.0
 	if sippDuration.Seconds() > 0 {
 		actualPPS = totalCaptured / sippDuration.Seconds()
 	}
-	expectedTotal := float64(callCount) * packetsPerCall
 	expectedPPS := float64(rate) * packetsPerCall
-	lossRate := 0.0
-	if expectedTotal > 0 {
-		lossRate = 1 - totalCaptured/expectedTotal
-		if lossRate < 0 {
-			t.Logf("WARNING: captured %.0f > expected %.0f (%.2f%% extra), possible retransmission or duplicate packets",
-				totalCaptured, expectedTotal, -lossRate*100)
-			lossRate = 0
-		}
-	}
 
 	result := loadResult{
 		Duration:      sippDuration,
 		Generator:     generator,
+		Capture:       capture,
+		Protocols:     protocols,
 		PacketsBefore: packetsBefore,
 		PacketsAfter:  packetsAfter,
 		ActualPPS:     actualPPS,
 		ExpectedPPS:   expectedPPS,
-		LossRate:      lossRate,
+		LossRate:      capture.LossPct / 100,
 		ErrorCount:    errorsAfter - errorsBefore,
 		DrainTime:     drainTime,
 		CPUAvg:        cpuAvg,
@@ -1009,7 +1029,9 @@ func runConcurrentLoad(
 		}
 	}()
 
-	packetsBefore := getMetric(t, env.endpoint, "sip_exporter_packets_total")
+	protocolsBefore := readProtocolCounters(t, env.endpoint)
+	packetsBefore := protocolsBefore.SIPPackets
+	expectedTotal := float64(callCount) * fullCallPacketsPerCall
 
 	start := time.Now()
 
@@ -1058,7 +1080,7 @@ func runConcurrentLoad(
 	sippEnd := time.Now()
 	sippDuration := sippEnd.Sub(start)
 
-	waitForMetricStable(ctx, t, env.endpoint)
+	waitForExactSIPCapture(ctx, t, env.endpoint, packetsBefore, expectedTotal)
 
 	stableTime := time.Now()
 	drainTime := stableTime.Sub(sippEnd)
@@ -1067,7 +1089,11 @@ func runConcurrentLoad(
 	cpuAvg, cpuPeak, memMaxMB := stats.stop()
 	statsStopped = true
 
-	packetsAfter := getMetric(t, env.endpoint, "sip_exporter_packets_total")
+	protocolsAfter := readProtocolCounters(t, env.endpoint)
+	protocols := protocolsAfter.delta(protocolsBefore)
+	packetsAfter := protocolsAfter.SIPPackets
+	capture := newCaptureResult(expectedTotal, protocols.SIPPackets)
+	require.NoError(t, capture.ValidateExact())
 
 	actualPPS := 0.0
 	if sippDuration.Seconds() > 0 {
@@ -1076,6 +1102,8 @@ func runConcurrentLoad(
 
 	result := loadResult{
 		Duration:      sippDuration,
+		Capture:       capture,
+		Protocols:     protocols,
 		PacketsBefore: packetsBefore,
 		PacketsAfter:  packetsAfter,
 		ActualPPS:     actualPPS,

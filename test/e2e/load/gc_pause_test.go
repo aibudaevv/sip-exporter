@@ -62,6 +62,8 @@ func TestBenchmarkGCPauseDuration(t *testing.T) {
 
 	callCount := 10000
 	rate := 2000
+	packetsBefore := metricSumOrZero(t, env.endpoint, "sip_exporter_packets_total")
+	expectedTotal := float64(callCount) * fullCallPacketsPerCall
 
 	uasPath := absScenarioPath(t, "call_highrate_uas.xml")
 	sippVol := uasPath[:len(uasPath)-len("/call_highrate_uas.xml")]
@@ -83,7 +85,7 @@ func TestBenchmarkGCPauseDuration(t *testing.T) {
 	)
 
 	waitForContainerExit(ctx, t, uasContainer)
-	waitForMetricStable(ctx, t, env.endpoint)
+	waitForExactSIPCapture(ctx, t, env.endpoint, packetsBefore, expectedTotal)
 
 	logsReader, err := env.exporterContainer.Logs(t.Context())
 	require.NoError(t, err)

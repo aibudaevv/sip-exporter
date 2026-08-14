@@ -195,8 +195,12 @@ func runMultiNICLoad(
 	statsCtx, statsCancel := context.WithCancel(ctx)
 	stats.start(statsCtx, env.exporterContainer.GetContainerID())
 
-	packetsBefore := getMetric(t, env.endpoint, "sip_exporter_packets_total")
+	protocolsBefore := readProtocolCounters(t, env.endpoint)
+	packetsBefore := protocolsBefore.SIPPackets
 	errorsBefore := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
+
+	const packetsPerCall = 1.0 // flood_uac.xml sends 1 INVITE per call
+	expectedTotal := float64(callCount * len(env.uacTargets) * int(packetsPerCall))
 
 	start := time.Now()
 
@@ -230,7 +234,7 @@ func runMultiNICLoad(
 	sippEnd := time.Now()
 	sippDuration := sippEnd.Sub(start)
 
-	waitForMetricStable(ctx, t, env.endpoint)
+	waitForExactSIPCapture(ctx, t, env.endpoint, packetsBefore, expectedTotal)
 
 	stableTime := time.Now()
 	drainTime := stableTime.Sub(sippEnd)
@@ -238,35 +242,30 @@ func runMultiNICLoad(
 	statsCancel()
 	cpuAvg, cpuPeak, memMaxMB := stats.stop()
 
-	packetsAfter := getMetric(t, env.endpoint, "sip_exporter_packets_total")
+	protocolsAfter := readProtocolCounters(t, env.endpoint)
+	protocols := protocolsAfter.delta(protocolsBefore)
+	packetsAfter := protocolsAfter.SIPPackets
 	errorsAfter := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
 
-	totalCaptured := packetsAfter - packetsBefore
+	capture := newCaptureResult(expectedTotal, protocols.SIPPackets)
+	require.NoError(t, capture.ValidateExact())
+	totalCaptured := capture.Captured
 	actualPPS := 0.0
 	if sippDuration.Seconds() > 0 {
 		actualPPS = totalCaptured / sippDuration.Seconds()
 	}
 
-	const packetsPerCall = 1.0 // flood_uac.xml sends 1 INVITE per call
-	expectedTotal := float64(callCount * len(env.uacTargets) * int(packetsPerCall))
 	expectedPPS := float64(rate * len(env.uacTargets) * int(packetsPerCall))
-	lossRate := 0.0
-	if expectedTotal > 0 {
-		lossRate = 1 - totalCaptured/expectedTotal
-		if lossRate < 0 {
-			t.Logf("WARNING: captured %.0f > expected %.0f (%.2f%% extra)",
-				totalCaptured, expectedTotal, -lossRate*100)
-			lossRate = 0
-		}
-	}
 
 	result := loadResult{
 		Duration:      sippDuration,
+		Capture:       capture,
+		Protocols:     protocols,
 		PacketsBefore: packetsBefore,
 		PacketsAfter:  packetsAfter,
 		ActualPPS:     actualPPS,
 		ExpectedPPS:   expectedPPS,
-		LossRate:      lossRate,
+		LossRate:      capture.LossPct / 100,
 		ErrorCount:    errorsAfter - errorsBefore,
 		DrainTime:     drainTime,
 		CPUAvg:        cpuAvg,
@@ -329,7 +328,7 @@ func TestLoadMultiInterface(t *testing.T) {
 					Direction: dirLowerIsBetter,
 				},
 				"socket_packets_received": {
-					Value:     totalPackets,
+					Value:     result.Protocols.SocketReceived,
 					Unit:      "count",
 					Direction: dirHigherIsBetter,
 				},

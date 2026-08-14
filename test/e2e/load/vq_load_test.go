@@ -103,7 +103,7 @@ func TestLoadVQScenarios(t *testing.T) {
 					require.Greater(t, result.PacketsAfter, result.PacketsBefore,
 						"exporter should have processed packets")
 
-					vqReports := getMetric(t, env.endpoint, "sip_exporter_vq_reports_total")
+					vqReports := result.Protocols.VQReports
 					expectedReports := float64(callCount)
 					t.Logf("vq_reports_total = %.0f (want %.0f)", vqReports, expectedReports)
 					require.Equal(t, expectedReports, vqReports)
