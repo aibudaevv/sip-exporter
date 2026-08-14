@@ -366,9 +366,9 @@ Full setup, metrics reference, and alerting guidance: [docs/fraud-detection.md](
 ## Development
 
 ### Requirements
-- Go 1.25+
+- Go 1.26.6+
 - Clang/LLVM (for eBPF compilation)
-- golangci-lint v2.7.1 and goimports (for `make lint` / `make imports`)
+- golangci-lint v2.9.0 and goimports (for `make lint` / `make imports`)
 - Linux kernel with eBPF support
 - Root privileges (required for eBPF and packet socket)
 

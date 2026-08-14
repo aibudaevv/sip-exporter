@@ -358,7 +358,7 @@ sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
 ## Разработка
 
 ### Требования
-- Go 1.25+
+- Go 1.26.6+
 - Clang/LLVM (для компиляции eBPF)
 - Ядро Linux с поддержкой eBPF
 - Права root (требуются для eBPF и packet socket)

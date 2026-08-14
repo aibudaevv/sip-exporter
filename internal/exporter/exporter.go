@@ -455,7 +455,9 @@ func createSocketForInterface(ifaceName string, progFD int, ignoreOutgoing bool)
 
 	socketRecvBufSize := socketRecvBufMB * miB
 	if setErr := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUFFORCE, socketRecvBufSize); setErr != nil {
-		if setErrFallback := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_RCVBUF, socketRecvBufSize); setErrFallback != nil {
+		if setErrFallback := unix.SetsockoptInt(
+			sock, unix.SOL_SOCKET, unix.SO_RCVBUF, socketRecvBufSize,
+		); setErrFallback != nil {
 			return 0, fmt.Errorf("failed to set SO_RCVBUF: %w", setErrFallback)
 		}
 		zap.L().Warn("SO_RCVBUFFORCE failed, using SO_RCVBUF (buffer capped by rmem_max)", zap.Error(setErr))
@@ -471,8 +473,15 @@ func createSocketForInterface(ifaceName string, progFD int, ignoreOutgoing bool)
 		zap.Int("requested_bytes", socketRecvBufSize),
 		zap.Int("actual_bytes", actualBufSize))
 
-	if setErr := unix.SetsockoptTimeval(sock, unix.SOL_SOCKET, unix.SO_RCVTIMEO,
-		&unix.Timeval{Sec: int64(socketRcvTimeo / time.Second), Usec: int64(socketRcvTimeo % time.Second / time.Microsecond)}); setErr != nil {
+	if setErr := unix.SetsockoptTimeval(
+		sock,
+		unix.SOL_SOCKET,
+		unix.SO_RCVTIMEO,
+		&unix.Timeval{
+			Sec:  int64(socketRcvTimeo / time.Second),
+			Usec: int64(socketRcvTimeo % time.Second / time.Microsecond),
+		},
+	); setErr != nil {
 		return 0, fmt.Errorf("failed to set SO_RCVTIMEO: %w", setErr)
 	}
 

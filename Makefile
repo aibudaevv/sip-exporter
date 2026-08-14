@@ -1,5 +1,5 @@
 version := $(shell cat VERSION)
-GOLANGCI_LINT_VERSION := v2.7.1
+GOLANGCI_LINT_VERSION := v2.9.0
 .DEFAULT_GOAL := docker_build
 
 .PHONY: build docker_build ebpf_compile go_build clean ebpf_log lint lint-deps vet imports test test-e2e test-e2e-run test-rtp test-rtp-run test-load test-load-run test-load-rtp test-load-update-baseline test-all vulncheck trivy-fs trivy-image security
