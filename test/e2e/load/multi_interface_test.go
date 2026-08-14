@@ -289,8 +289,7 @@ func runMultiNICLoad(
 }
 
 // TestLoadMultiInterface verifies linear scaling from N=1 to N=3 interfaces.
-// Each subtest records results into load_result.json via recordResult, keyed
-// by subtest name, for later baseline comparison.
+// Each subtest records metrics in the active run artifact for later aggregation.
 func TestLoadMultiInterface(t *testing.T) {
 	const callCount = 1000
 	const rate = 500
