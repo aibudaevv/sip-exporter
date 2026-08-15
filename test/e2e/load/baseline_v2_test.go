@@ -34,6 +34,7 @@ type (
 
 	BaselineScenarioV2 struct {
 		Name    string             `json:"name"`
+		Limits  WorkloadLimits     `json:"limits"`
 		Metrics []BaselineMetricV2 `json:"metrics"`
 	}
 
@@ -56,6 +57,7 @@ type (
 
 	AggregatedScenarioV2 struct {
 		Name    string
+		Limits  WorkloadLimits
 		Metrics []AggregatedMetricV2
 	}
 
@@ -154,6 +156,9 @@ func (f BenchmarkFingerprint) validate() error {
 }
 
 func (s BaselineScenarioV2) validate() error {
+	if err := s.Limits.validate(); err != nil {
+		return err
+	}
 	if len(s.Metrics) == 0 {
 		return fmt.Errorf("has no metrics")
 	}
@@ -242,7 +247,7 @@ func aggregateRunArtifacts(mode runMode, runs []RunArtifactV2) (AggregatedRunV2,
 		aggregated.SourceCommits[i] = runs[i].Commit
 	}
 	for _, referenceScenario := range runs[0].Results {
-		scenario := AggregatedScenarioV2{Name: referenceScenario.Name}
+		scenario := AggregatedScenarioV2{Name: referenceScenario.Name, Limits: referenceScenario.Limits}
 		for metricName, referenceMetric := range referenceScenario.Metrics {
 			values := make([]float64, len(runs))
 			for i := range runs {
@@ -304,6 +309,9 @@ func compareRunInventory(reference, current RunArtifactV2) error {
 		currentScenario, ok := currentScenarios[name]
 		if !ok {
 			return fmt.Errorf("missing scenario %q", name)
+		}
+		if currentScenario.Limits != referenceScenario.Limits {
+			return fmt.Errorf("scenario %q limits mismatch", name)
 		}
 		if err := compareMetricInventory(name, referenceScenario.Metrics, currentScenario.Metrics); err != nil {
 			return err
@@ -368,6 +376,21 @@ func thresholdPolicy(scenario string, metric AggregatedMetricV2) (float64, error
 			return 0, fmt.Errorf("metric %q must be lower-is-better", metric.Name)
 		}
 		return 10, nil
+	case "cpu_p95_percent", "working_set_p99_mb":
+		if metric.Direction != dirLowerIsBetter {
+			return 0, fmt.Errorf("metric %q must be lower-is-better", metric.Name)
+		}
+		return 10, nil
+	case "throttling_percent", "channel_peak", "socket_drops", "rtp_drops":
+		if metric.Direction != dirLowerIsBetter {
+			return 0, fmt.Errorf("metric %q must be lower-is-better", metric.Name)
+		}
+		return 0, nil
+	case "gc_max_stw_ms", "scrape_p50_ms", "scrape_p95_ms", "scrape_p99_ms":
+		if metric.Direction != dirLowerIsBetter {
+			return 0, fmt.Errorf("latency metric %q must be lower-is-better", metric.Name)
+		}
+		return 20, nil
 	default:
 		if strings.HasSuffix(metric.Name, "_ms") &&
 			(strings.Contains(scenario, "GC") || strings.Contains(scenario, "Scrape")) {
@@ -394,7 +417,7 @@ func buildCandidateBaseline(aggregated AggregatedRunV2, createdAt time.Time) (Ba
 		Results:       make([]BaselineScenarioV2, 0, len(aggregated.Results)),
 	}
 	for _, aggregatedScenario := range aggregated.Results {
-		scenario := BaselineScenarioV2{Name: aggregatedScenario.Name}
+		scenario := BaselineScenarioV2{Name: aggregatedScenario.Name, Limits: aggregatedScenario.Limits}
 		for _, aggregatedMetric := range aggregatedScenario.Metrics {
 			tolerance, err := thresholdPolicy(aggregatedScenario.Name, aggregatedMetric)
 			if err != nil {
@@ -528,6 +551,9 @@ func validateComparisonInventory(baseline BaselineV2, current AggregatedRunV2) e
 		if !ok {
 			return fmt.Errorf("release is missing scenario %q", scenarioName)
 		}
+		if baselineScenario.Limits != currentScenario.Limits {
+			return fmt.Errorf("scenario %q limits mismatch", scenarioName)
+		}
 		baselineMetrics := baselineMetricInventory(baselineScenario.Metrics)
 		currentMetrics := aggregatedMetricInventory(currentScenario.Metrics)
 		for _, name := range sortedKeys(currentMetrics) {
@@ -595,6 +621,9 @@ func validateReleaseAggregate(current AggregatedRunV2) error {
 			return fmt.Errorf("duplicate release scenario %q", scenario.Name)
 		}
 		seenScenarios[scenario.Name] = struct{}{}
+		if err := scenario.Limits.validate(); err != nil {
+			return fmt.Errorf("release scenario %q: %w", scenario.Name, err)
+		}
 		if len(scenario.Metrics) == 0 {
 			return fmt.Errorf("release scenario %q has no metrics", scenario.Name)
 		}

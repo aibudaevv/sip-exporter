@@ -42,11 +42,19 @@ func allocateRTPPorts() (http, uasSIP, uacSIP, uasMedia, uacMedia string) {
 // newRTPTestEnv starts the exporter with RTP capture enabled and allocates
 // separate media ports for SIPp's -mp flag.
 func newRTPTestEnv(ctx context.Context, t *testing.T) *testEnv {
+	return newRTPTestEnvWithLimits(ctx, t, peakLimits)
+}
+
+func newRTPTestEnvWithLimits(
+	ctx context.Context,
+	t *testing.T,
+	limits WorkloadLimits,
+) *testEnv {
 	t.Helper()
 
 	httpPort, uasSIP, uacSIP, uasMedia, uacMedia := allocateRTPPorts()
 
-	req := exporterContainerRequest(ctx, t, testInterface, httpPort, uasSIP)
+	req := exporterContainerRequest(ctx, t, testInterface, httpPort, uasSIP, limits)
 
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
@@ -62,6 +70,8 @@ func newRTPTestEnv(ctx context.Context, t *testing.T) *testEnv {
 		}
 	}
 	require.NoError(t, err)
+	require.NoError(t, verifyContainerLimits(ctx, c.GetContainerID(), limits))
+	recordScenarioLimits(t, limits)
 
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -86,6 +96,7 @@ func newRTPTestEnv(ctx context.Context, t *testing.T) *testEnv {
 		uasMediaPort:      uasMedia,
 		uacMediaPort:      uacMedia,
 		exporterContainer: c,
+		limits:            limits,
 	}
 }
 
@@ -99,19 +110,14 @@ func runSippRTPLoad(
 ) loadResult {
 	t.Helper()
 
-	stats, statsErr := newStatsCollector(env.exporterContainer.GetContainerID())
-	require.NoError(t, statsErr)
-
-	statsCtx, statsCancel := context.WithCancel(ctx)
-	stats.start(statsCtx, env.exporterContainer.GetContainerID())
+	measurement, measurementErr := newSteadyMeasurement(ctx, env)
+	require.NoError(t, measurementErr)
 
 	recordMetricsSnapshot(t, "metrics-before.prom", env.endpoint)
 	protocolsBefore := readProtocolCounters(t, env.endpoint)
 	packetsBefore := protocolsBefore.SIPPackets
 	errorsBefore := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
 	expectedTotal := float64(callCount) * rtpSipPacketsPerCall
-
-	start := time.Now()
 
 	uasPath := absScenarioPath(t, "uas_rtp.xml")
 	sippVol := filepath.Dir(uasPath)
@@ -130,12 +136,14 @@ func runSippRTPLoad(
 		sippVol, "", false,
 	)
 
-	time.Sleep(500 * time.Millisecond)
+	waitForSIPpUDPReady(ctx, t, uasContainer, env.sippPort)
 
 	uacPath := absScenarioPath(t, "uac_rtp.xml")
 	sippVol = filepath.Dir(uacPath)
 
-	startSippContainer(ctx, t,
+	measureStart := time.Now()
+	require.NoError(t, measurement.Begin(ctx, measureStart))
+	uacContainer := startSippContainer(ctx, t,
 		[]string{
 			"-sf", "/scenarios/uac_rtp.xml",
 			"-i", "127.0.0.1",
@@ -149,20 +157,25 @@ func runSippRTPLoad(
 		},
 		sippVol, "generator", true,
 	)
+	measureEnd := time.Now()
+	resourceSummary := finishSteadyMeasurement(ctx, t, measurement, measureEnd)
+	generator, generatorErr := uacContainer.readGeneratorEvidence(ctx, t, PhaseTimestamps{
+		WarmupStart: measureStart, Ready: measureStart, MeasureStart: measureStart,
+		MeasureEnd: measureEnd, DrainEnd: measureEnd,
+	})
+	require.NoError(t, generatorErr)
+	evidenceAt := time.Now()
 
 	waitForContainerExit(ctx, t, uasContainer)
-
-	sippEnd := time.Now()
-	sippDuration := sippEnd.Sub(start)
+	uasExitAt := time.Now()
+	sippDuration := measureEnd.Sub(measureStart)
 
 	waitForExactSIPCapture(ctx, t, env.endpoint, packetsBefore, expectedTotal)
 
 	stableTime := time.Now()
-	drainTime := stableTime.Sub(sippEnd)
-
-	statsCancel()
-	cpuAvg, cpuPeak, memMaxMB := stats.stop()
-	recordResourceSamples(t, stats)
+	require.NoError(t, validatePostPhaseOrdering(measureEnd, evidenceAt, uasExitAt, stableTime))
+	drainTime := stableTime.Sub(measureEnd)
+	generator.Phases.DrainEnd = stableTime
 
 	recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)
 	protocolsAfter := readProtocolCounters(t, env.endpoint)
@@ -181,6 +194,7 @@ func runSippRTPLoad(
 
 	result := loadResult{
 		Duration:      sippDuration,
+		Generator:     generator,
 		Capture:       capture,
 		Protocols:     protocols,
 		PacketsBefore: packetsBefore,
@@ -190,15 +204,14 @@ func runSippRTPLoad(
 		LossRate:      capture.LossPct / 100,
 		ErrorCount:    errorsAfter - errorsBefore,
 		DrainTime:     drainTime,
-		CPUAvg:        cpuAvg,
-		CPUPeak:       cpuPeak,
-		MemMaxMB:      memMaxMB,
+		Resources:     resourceSummary,
 	}
 	recordLoadResultEvidence(t, result)
 
 	t.Logf("RTP load: actual=%.0f PPS, captured=%.0f, expected=%.0f, loss=%.2f%%, drain=%v, cpu=%.2f%%(peak=%.2f%%), mem=%.1fMB, errors=%.0f",
 		result.ActualPPS, totalCaptured, expectedTotal, result.LossRate*100, result.DrainTime,
-		result.CPUAvg, result.CPUPeak, result.MemMaxMB, result.ErrorCount)
+		result.Resources.CPUP95Percent, result.Resources.CPUP95Percent,
+		result.Resources.WorkingSetP99MB, result.ErrorCount)
 
 	return result
 }
@@ -237,17 +250,19 @@ func TestLoadFullCallWithRTP(t *testing.T) {
 
 			t.Logf("Full call + RTP rate=%d: actual=%.0f PPS, rtp_packets=%.0f, ser=%.1f%%, loss=%.2f%%, cpu=%.2f%%(peak=%.2f%%), mem=%.1fMB",
 				rate, result.ActualPPS, rtpPackets, ser, result.LossRate*100,
-				result.CPUAvg, result.CPUPeak, result.MemMaxMB)
+				result.Resources.CPUP95Percent, result.Resources.CPUP95Percent,
+				result.Resources.WorkingSetP99MB)
 
-			recordResult(t, map[string]MetricEntry{
+			metrics := resourceMetricEntries(result.Resources)
+			for name, metric := range map[string]MetricEntry{
 				"actual_pps":  {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
 				"loss_rate":   {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
 				"ser":         {Value: ser, Unit: "%", Direction: dirHigherIsBetter},
-				"cpu_peak":    {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},
-				"cpu_avg":     {Value: result.CPUAvg, Unit: "%", Direction: dirLowerIsBetter},
-				"mem_mb":      {Value: result.MemMaxMB, Unit: "MB", Direction: dirLowerIsBetter},
 				"rtp_packets": {Value: rtpPackets, Unit: "count", Direction: dirHigherIsBetter},
-			})
+			} {
+				metrics[name] = metric
+			}
+			recordResult(t, metrics)
 		})
 	}
 }
@@ -268,7 +283,7 @@ func TestBenchmarkMemoryPerRTPStream(t *testing.T) {
 	for _, limit := range limits {
 		t.Run(fmt.Sprintf("streams_%d", limit), func(t *testing.T) {
 			beginScenario(t)
-			env := newRTPTestEnv(t.Context(), t)
+			env := newRTPTestEnvWithLimits(t.Context(), t, diagnosticMemoryLimits)
 			recordMetricsSnapshot(t, "metrics-before.prom", env.endpoint)
 
 			var streams float64
@@ -298,7 +313,7 @@ func TestBenchmarkMemoryPerRTPStream(t *testing.T) {
 					sippVol, "", false,
 				)
 
-				time.Sleep(500 * time.Millisecond)
+				waitForSIPpUDPReady(ctx, t, uasContainer, env.sippPort)
 
 				uacPath := absScenarioPath(t, "uac_rtp.xml")
 				sippVol = filepath.Dir(uacPath)
@@ -329,8 +344,8 @@ func TestBenchmarkMemoryPerRTPStream(t *testing.T) {
 				}, contextTimeout(t, ctx), 500*time.Millisecond,
 					"RTP streams did not reach %.0f (got %.0f)", targetStreams, streams)
 
-				memMB := getSingleMemSample(t, env.exporterContainer.GetContainerID())
-				recordRawResourceSamples(t, ResourceSamplesV2{MemoryMB: []float64{memMB}})
+				resources := measureSteadySnapshot(ctx, t, env)
+				memMB := resources.WorkingSetP99MB
 				recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)
 				waitForContainerExit(ctx, t, uacContainer)
 				uacContainer.recordEvidence(ctx, t, time.Now())
@@ -343,15 +358,16 @@ func TestBenchmarkMemoryPerRTPStream(t *testing.T) {
 					memMB:   memMB,
 				})
 
-				recordResult(t, map[string]MetricEntry{
-					"streams": {Value: streams, Unit: "count", Direction: dirHigherIsBetter},
-					"mem_mb":  {Value: memMB, Unit: "MB", Direction: dirLowerIsBetter},
-				})
+				metrics := resourceMetricEntries(resources)
+				metrics["streams"] = MetricEntry{
+					Value: streams, Unit: "count", Direction: dirHigherIsBetter,
+				}
+				recordResult(t, metrics)
 
 				waitForContainerExit(ctx, t, uasContainer)
 			} else {
-				memMB := getSingleMemSample(t, env.exporterContainer.GetContainerID())
-				recordRawResourceSamples(t, ResourceSamplesV2{MemoryMB: []float64{memMB}})
+				resources := measureSteadySnapshot(t.Context(), t, env)
+				memMB := resources.WorkingSetP99MB
 				recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)
 				t.Logf("Baseline (no traffic): %.1f MB", memMB)
 				measurements = append(measurements, streamMeasurement{
@@ -359,9 +375,7 @@ func TestBenchmarkMemoryPerRTPStream(t *testing.T) {
 					memMB:   memMB,
 				})
 
-				recordResult(t, map[string]MetricEntry{
-					"mem_mb": {Value: memMB, Unit: "MB", Direction: dirLowerIsBetter},
-				})
+				recordResult(t, resourceMetricEntries(resources))
 			}
 		})
 	}

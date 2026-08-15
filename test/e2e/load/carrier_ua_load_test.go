@@ -45,18 +45,13 @@ func TestLoadDualUAType(t *testing.T) {
 			totalCallCount := callCountPerType * 2
 			expectedTotal := float64(totalCallCount) * dualUAPacketsPerCall
 
-			stats, statsErr := newStatsCollector(env.exporterContainer.GetContainerID())
-			require.NoError(t, statsErr)
-
-			statsCtx, statsCancel := context.WithCancel(ctx)
-			stats.start(statsCtx, env.exporterContainer.GetContainerID())
+			measurement, measurementErr := newSteadyMeasurement(ctx, env)
+			require.NoError(t, measurementErr)
 
 			recordMetricsSnapshot(t, "metrics-before.prom", env.endpoint)
 			protocolsBefore := readProtocolCounters(t, env.endpoint)
 			packetsBefore := protocolsBefore.SIPPackets
 			errorsBefore := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
-
-			start := time.Now()
 
 			uasPath := absScenarioPath(t, "call_highrate_uas.xml")
 			sippVol := filepath.Dir(uasPath)
@@ -74,12 +69,15 @@ func TestLoadDualUAType(t *testing.T) {
 				sippVol, "", false,
 			)
 
-			time.Sleep(500 * time.Millisecond)
+			waitForSIPpUDPReady(ctx, t, uasYealink, env.sippPort)
+			waitForSIPpUDPReady(ctx, t, uasGrandstream, env.sippPort2)
+			measureStart := time.Now()
+			require.NoError(t, measurement.Begin(ctx, measureStart))
 
 			yealinkUacPath := absScenarioPath(t, "call_highrate_yealink_uac.xml")
 			yealinkVol := filepath.Dir(yealinkUacPath)
 
-			startSippContainer(ctx, t,
+			yealinkUAC := startSippContainer(ctx, t,
 				[]string{"-sf", "/scenarios/call_highrate_yealink_uac.xml",
 					"-i", "127.0.0.1", "-p", env.sippClientPort,
 					"-m", strconv.Itoa(callCountPerType), "-r", strconv.Itoa(rate),
@@ -92,7 +90,7 @@ func TestLoadDualUAType(t *testing.T) {
 			grandstreamUacPath := absScenarioPath(t, "call_highrate_grandstream_uac.xml")
 			grandstreamVol := filepath.Dir(grandstreamUacPath)
 
-			startSippContainer(ctx, t,
+			grandstreamUAC := startSippContainer(ctx, t,
 				[]string{"-sf", "/scenarios/call_highrate_grandstream_uac.xml",
 					"-i", "127.0.0.1", "-p", env.sippClientPort2,
 					"-m", strconv.Itoa(callCountPerType), "-r", strconv.Itoa(rate),
@@ -102,17 +100,36 @@ func TestLoadDualUAType(t *testing.T) {
 				grandstreamVol, "generator-grandstream", true,
 			)
 
-			waitForContainerExit(ctx, t, uasYealink)
-			waitForContainerExit(ctx, t, uasGrandstream)
+			waitForContainerExit(ctx, t, yealinkUAC)
+			waitForContainerExit(ctx, t, grandstreamUAC)
+			measureEnd := time.Now()
+			sippDuration := measureEnd.Sub(measureStart)
+			resourceSummary := finishSteadyMeasurement(ctx, t, measurement, measureEnd)
 
-			sippEnd := time.Now()
-			sippDuration := sippEnd.Sub(start)
+			generatorPhases := PhaseTimestamps{
+				WarmupStart: measureStart, Ready: measureStart, MeasureStart: measureStart,
+				MeasureEnd: measureEnd, DrainEnd: measureEnd,
+			}
+			yealinkGenerator, generatorErr := yealinkUAC.readGeneratorEvidence(ctx, t, generatorPhases)
+			require.NoError(t, generatorErr)
+			yealinkEvidenceAt := time.Now()
+			grandstreamGenerator, generatorErr := grandstreamUAC.readGeneratorEvidence(ctx, t, generatorPhases)
+			require.NoError(t, generatorErr)
+			grandstreamEvidenceAt := time.Now()
+			waitForContainerExit(ctx, t, uasYealink)
+			yealinkUASExitAt := time.Now()
+			waitForContainerExit(ctx, t, uasGrandstream)
+			grandstreamUASExitAt := time.Now()
 
 			waitForExactSIPCapture(ctx, t, env.endpoint, packetsBefore, expectedTotal)
-
-			statsCancel()
-			cpuAvg, cpuPeak, memMaxMB := stats.stop()
-			recordResourceSamples(t, stats)
+			drainAt := time.Now()
+			yealinkGenerator.Phases.DrainEnd = drainAt
+			grandstreamGenerator.Phases.DrainEnd = drainAt
+			require.NoError(t, validatePostPhaseOrdering(
+				measureEnd,
+				yealinkEvidenceAt, grandstreamEvidenceAt,
+				yealinkUASExitAt, grandstreamUASExitAt, drainAt,
+			))
 
 			recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)
 			protocolsAfter := readProtocolCounters(t, env.endpoint)
@@ -132,8 +149,12 @@ func TestLoadDualUAType(t *testing.T) {
 			errorCount := errorsAfter - errorsBefore
 			recordLoadResultEvidence(t, loadResult{
 				Capture: capture, Protocols: protocols,
-				CPUAvg: cpuAvg, CPUPeak: cpuPeak, MemMaxMB: memMaxMB,
+				Resources: resourceSummary,
 			})
+			if activeRunRecorder != nil {
+				require.NoError(t, activeRunRecorder.AttachGenerator(t.Name(), yealinkGenerator))
+				require.NoError(t, activeRunRecorder.AttachGenerator(t.Name(), grandstreamGenerator))
+			}
 
 			inviteYealink := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", `ua_type="yealink"`)
 			inviteGrandstream := getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", `ua_type="grandstream"`)
@@ -141,7 +162,9 @@ func TestLoadDualUAType(t *testing.T) {
 			serGrandstream := getMetricWithLabel(t, env.endpoint, "sip_exporter_ser", `ua_type="grandstream"`)
 
 			t.Logf("Dual UA rate=%d: actual=%.0f PPS, captured=%.0f, expected=%.0f, loss=%.2f%%, cpu=%.2f%%(peak=%.2f%%), mem=%.1fMB, errors=%.0f",
-				rate, actualPPS, totalCaptured, expectedTotal, lossRate*100, cpuAvg, cpuPeak, memMaxMB, errorCount)
+				rate, actualPPS, totalCaptured, expectedTotal, lossRate*100,
+				resourceSummary.CPUP95Percent, resourceSummary.CPUP95Percent,
+				resourceSummary.WorkingSetP99MB, errorCount)
 			t.Logf("  Yealink: invites=%.0f, ser=%.2f%%", inviteYealink, serYealink)
 			t.Logf("  Grandstream: invites=%.0f, ser=%.2f%%", inviteGrandstream, serGrandstream)
 
@@ -162,17 +185,18 @@ func TestLoadDualUAType(t *testing.T) {
 			require.GreaterOrEqual(t, serGrandstream, 49.0,
 				"SER Grandstream SLO: >= 49%% on loopback at rate %d (got %.2f%%)", rate, serGrandstream)
 
-			recordResult(t, map[string]MetricEntry{
+			metrics := resourceMetricEntries(resourceSummary)
+			for name, metric := range map[string]MetricEntry{
 				"actual_pps":          {Value: actualPPS, Unit: "pps", Direction: dirHigherIsBetter},
 				"loss_rate":           {Value: lossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
 				"ser_yealink":         {Value: serYealink, Unit: "%", Direction: dirHigherIsBetter},
 				"ser_grandstream":     {Value: serGrandstream, Unit: "%", Direction: dirHigherIsBetter},
 				"invites_yealink":     {Value: inviteYealink, Unit: "count", Direction: dirHigherIsBetter},
 				"invites_grandstream": {Value: inviteGrandstream, Unit: "count", Direction: dirHigherIsBetter},
-				"cpu_peak":            {Value: cpuPeak, Unit: "%", Direction: dirLowerIsBetter},
-				"cpu_avg":             {Value: cpuAvg, Unit: "%", Direction: dirLowerIsBetter},
-				"mem_mb":              {Value: memMaxMB, Unit: "MB", Direction: dirLowerIsBetter},
-			})
+			} {
+				metrics[name] = metric
+			}
+			recordResult(t, metrics)
 		})
 	}
 }

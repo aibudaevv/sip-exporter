@@ -28,7 +28,8 @@ func validBaselineV2() BaselineV2 {
 		RepeatCount:   5,
 		SourceCommits: []string{"a", "b", "c", "d", "e"},
 		Results: []BaselineScenarioV2{{
-			Name: "TestLoad/row",
+			Name:   "TestLoad/row",
+			Limits: WorkloadLimits{CPUCores: 2, MemoryBytes: 256 << 20},
 			Metrics: []BaselineMetricV2{{
 				Name:         "actual_cps",
 				Median:       100,
@@ -76,6 +77,12 @@ func TestBaselineV2RejectsInvalidSchema(t *testing.T) {
 		}},
 		{name: "empty metrics", mutate: func(baseline *BaselineV2) {
 			baseline.Results[0].Metrics = nil
+		}},
+		{name: "missing CPU limit", mutate: func(baseline *BaselineV2) {
+			baseline.Results[0].Limits.CPUCores = 0
+		}},
+		{name: "missing memory limit", mutate: func(baseline *BaselineV2) {
+			baseline.Results[0].Limits.MemoryBytes = 0
 		}},
 		{name: "empty metric name", mutate: func(baseline *BaselineV2) {
 			baseline.Results[0].Metrics[0].Name = ""
@@ -270,6 +277,39 @@ func TestAggregateRunArtifactsRequiresCompatibleFingerprint(t *testing.T) {
 	}
 }
 
+func TestAggregateRunArtifactsRequiresMatchingScenarioLimits(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*WorkloadLimits)
+	}{
+		{name: "CPU", mutate: func(limits *WorkloadLimits) { limits.CPUCores = 1 }},
+		{name: "memory", mutate: func(limits *WorkloadLimits) { limits.MemoryBytes = 128 << 20 }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runs := runArtifactsForAggregation(runModeRelease, 3)
+			tt.mutate(&runs[1].Results[0].Limits)
+
+			_, err := aggregateRunArtifacts(runModeRelease, runs)
+			require.ErrorContains(t, err, "limits")
+		})
+	}
+}
+
+func TestCandidateBaselineOwnsScenarioLimits(t *testing.T) {
+	runs := runArtifactsForAggregation(runModeCandidate, 5)
+	aggregated, err := aggregateRunArtifacts(runModeCandidate, runs)
+	require.NoError(t, err)
+
+	baseline, err := buildCandidateBaseline(aggregated, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, runs[0].Results[0].Limits, baseline.Results[0].Limits)
+
+	aggregated.Results[0].Limits.CPUCores = 99
+	require.Equal(t, float64(2), baseline.Results[0].Limits.CPUCores)
+}
+
 func TestAggregateRunArtifactsIgnoresCommitAndImageForFingerprint(t *testing.T) {
 	runs := runArtifactsForAggregation(runModeRelease, 3)
 	runs[1].Commit = "different"
@@ -298,10 +338,18 @@ func TestAggregateRunArtifactsCalculatesMedianWithoutMutatingInput(t *testing.T)
 	got, err := aggregateRunArtifacts(runModeRelease, runs)
 	require.NoError(t, err)
 	require.Equal(t, []AggregatedScenarioV2{{
-		Name: "TestLoadINVITEFlood/rate_100",
+		Name:   "TestLoadINVITEFlood/rate_100",
+		Limits: WorkloadLimits{CPUCores: 2, MemoryBytes: 256 << 20},
 		Metrics: []AggregatedMetricV2{
 			{Name: "actual_cps", Median: 200, Unit: "cps", Direction: dirHigherIsBetter},
+			{Name: "channel_peak", Median: 0, Unit: "count", Direction: dirLowerIsBetter},
+			{Name: "cpu_p95_percent", Median: 0, Unit: "%", Direction: dirLowerIsBetter},
 			{Name: "errors", Median: 1, Unit: "count", Direction: dirLowerIsBetter},
+			{Name: "gc_max_stw_ms", Median: 0, Unit: "ms", Direction: dirLowerIsBetter},
+			{Name: "rtp_drops", Median: 0, Unit: "count", Direction: dirLowerIsBetter},
+			{Name: "socket_drops", Median: 0, Unit: "count", Direction: dirLowerIsBetter},
+			{Name: "throttling_percent", Median: 0, Unit: "%", Direction: dirLowerIsBetter},
+			{Name: "working_set_p99_mb", Median: 0, Unit: "MiB", Direction: dirLowerIsBetter},
 		},
 	}}, got.Results)
 	require.Equal(t, wantRuns, runs)
@@ -372,6 +420,41 @@ func TestThresholdPolicyUsesFixedMetricClasses(t *testing.T) {
 	}
 }
 
+func TestThresholdPolicyClassifiesCanonicalResourceMetrics(t *testing.T) {
+	tests := []struct {
+		name     string
+		scenario string
+		metric   string
+		want     float64
+	}{
+		{name: "CPU", scenario: "TestLoad/row", metric: "cpu_p95_percent", want: 10},
+		{name: "working set", scenario: "TestLoad/row", metric: "working_set_p99_mb", want: 10},
+		{name: "throttling", scenario: "TestLoad/row", metric: "throttling_percent"},
+		{name: "channel", scenario: "TestLoad/row", metric: "channel_peak"},
+		{name: "socket drops", scenario: "TestLoad/row", metric: "socket_drops"},
+		{name: "RTP drops", scenario: "TestLoad/row", metric: "rtp_drops"},
+		{name: "GC", scenario: "TestBenchmarkGCPauseDuration", metric: "gc_max_stw_ms", want: 20},
+		{name: "scrape p50", scenario: "TestBenchmarkScrapeLatencyUnderLoad", metric: "scrape_p50_ms", want: 20},
+		{name: "scrape p95", scenario: "TestBenchmarkScrapeLatencyUnderLoad", metric: "scrape_p95_ms", want: 20},
+		{name: "scrape p99", scenario: "TestBenchmarkScrapeLatencyUnderLoad", metric: "scrape_p99_ms", want: 20},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := thresholdPolicy(tt.scenario, AggregatedMetricV2{
+				Name: tt.metric, Direction: dirLowerIsBetter,
+			})
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+
+			_, err = thresholdPolicy(tt.scenario, AggregatedMetricV2{
+				Name: tt.metric, Direction: dirHigherIsBetter,
+			})
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestCandidateBaselineBuildsOwnedArtifact(t *testing.T) {
 	runs := runArtifactsForAggregation(runModeCandidate, 5)
 	for i := range runs {
@@ -390,7 +473,14 @@ func TestCandidateBaselineBuildsOwnedArtifact(t *testing.T) {
 	require.Equal(t, createdAt, got.CreatedAt)
 	require.Equal(t, []BaselineMetricV2{
 		{Name: "actual_cps", Median: 100, Unit: "cps", Direction: dirHigherIsBetter, TolerancePct: 3},
+		{Name: "channel_peak", Median: 0, Unit: "count", Direction: dirLowerIsBetter, TolerancePct: 0},
+		{Name: "cpu_p95_percent", Median: 0, Unit: "%", Direction: dirLowerIsBetter, TolerancePct: 10},
 		{Name: "errors", Median: 0, Unit: "count", Direction: dirLowerIsBetter, TolerancePct: 0},
+		{Name: "gc_max_stw_ms", Median: 0, Unit: "ms", Direction: dirLowerIsBetter, TolerancePct: 20},
+		{Name: "rtp_drops", Median: 0, Unit: "count", Direction: dirLowerIsBetter, TolerancePct: 0},
+		{Name: "socket_drops", Median: 0, Unit: "count", Direction: dirLowerIsBetter, TolerancePct: 0},
+		{Name: "throttling_percent", Median: 0, Unit: "%", Direction: dirLowerIsBetter, TolerancePct: 0},
+		{Name: "working_set_p99_mb", Median: 0, Unit: "MiB", Direction: dirLowerIsBetter, TolerancePct: 10},
 	}, got.Results[0].Metrics)
 	require.NoError(t, got.Validate())
 }
@@ -430,7 +520,8 @@ func TestCandidateBaselineWriterCannotReplaceAcceptedBaseline(t *testing.T) {
 		Name: "aaa_metric", Median: 1, Unit: "count", Direction: dirHigherIsBetter,
 	})
 	baseline.Results = append(baseline.Results, BaselineScenarioV2{
-		Name: "AFirstScenario",
+		Name:   "AFirstScenario",
+		Limits: WorkloadLimits{CPUCores: 2, MemoryBytes: 256 << 20},
 		Metrics: []BaselineMetricV2{{
 			Name: "metric", Median: 1, Unit: "count", Direction: dirHigherIsBetter,
 		}},
@@ -472,7 +563,7 @@ func acceptedBaselineForRelease(aggregated AggregatedRunV2) BaselineV2 {
 		},
 	}
 	for _, aggregatedScenario := range aggregated.Results {
-		scenario := BaselineScenarioV2{Name: aggregatedScenario.Name}
+		scenario := BaselineScenarioV2{Name: aggregatedScenario.Name, Limits: aggregatedScenario.Limits}
 		for _, aggregatedMetric := range aggregatedScenario.Metrics {
 			tolerance, err := thresholdPolicy(aggregatedScenario.Name, aggregatedMetric)
 			if err != nil {
@@ -550,6 +641,12 @@ func TestCompareReleaseRejectsInvalidInputs(t *testing.T) {
 		{name: "changed tolerance", mutate: func(baseline *BaselineV2, _ *AggregatedRunV2) {
 			baseline.Results[0].Metrics[0].TolerancePct = 4
 		}},
+		{name: "changed CPU limit", mutate: func(baseline *BaselineV2, _ *AggregatedRunV2) {
+			baseline.Results[0].Limits.CPUCores = 1
+		}},
+		{name: "changed memory limit", mutate: func(baseline *BaselineV2, _ *AggregatedRunV2) {
+			baseline.Results[0].Limits.MemoryBytes = 128 << 20
+		}},
 	}
 
 	for _, tt := range tests {
@@ -575,7 +672,7 @@ func TestCompareReleaseReturnsFullReportAndRegressionError(t *testing.T) {
 
 	report, err := compareRelease(baseline, current)
 	require.ErrorContains(t, err, "actual_cps")
-	require.Len(t, report.Entries, 2)
+	require.Len(t, report.Entries, 9)
 	require.Equal(t, StatusRegression, report.Entries[0].Status)
 	require.Equal(t, StatusOK, report.Entries[1].Status)
 }
@@ -591,7 +688,13 @@ func TestCompareReleaseValidatesCompleteInventoryBeforePolicy(t *testing.T) {
 	require.NoError(t, err)
 	baseline := acceptedBaselineForRelease(current)
 	baselineMetricForTest(&baseline, "actual_cps").TolerancePct = 99
-	current.Results[0].Metrics = current.Results[0].Metrics[:1]
+	metrics := make([]AggregatedMetricV2, 0, len(current.Results[0].Metrics)-1)
+	for _, metric := range current.Results[0].Metrics {
+		if metric.Name != "errors" {
+			metrics = append(metrics, metric)
+		}
+	}
+	current.Results[0].Metrics = metrics
 
 	for range 100 {
 		_, err := compareRelease(baseline, current)
@@ -602,14 +705,18 @@ func TestCompareReleaseValidatesCompleteInventoryBeforePolicy(t *testing.T) {
 func TestCompareReleaseSortsMultiScenarioReport(t *testing.T) {
 	runs := runArtifactsForAggregation(runModeRelease, 3)
 	for i := range runs {
+		limits := WorkloadLimits{CPUCores: 2, MemoryBytes: 256 << 20}
+		resources := ResourceSummaryV2{Limits: limits}
+		metrics := resourceMetricEntries(resources)
+		metrics["z_metric"] = MetricEntry{Value: 1, Unit: "count", Direction: dirHigherIsBetter}
 		runs[i].Results = append(runs[i].Results, ScenarioResultV2{
 			Name:       "AFirstScenario",
 			Status:     scenarioStatusComplete,
 			StartedAt:  runs[i].StartedAt,
 			FinishedAt: runs[i].FinishedAt,
-			Metrics: map[string]MetricEntry{
-				"z_metric": {Value: 1, Unit: "count", Direction: dirHigherIsBetter},
-			},
+			Limits:     limits,
+			Resources:  &resources,
+			Metrics:    metrics,
 		})
 	}
 	current, err := aggregateRunArtifacts(runModeRelease, runs)
@@ -617,10 +724,28 @@ func TestCompareReleaseSortsMultiScenarioReport(t *testing.T) {
 
 	report, err := compareRelease(acceptedBaselineForRelease(current), current)
 	require.NoError(t, err)
-	require.Equal(t, []string{"AFirstScenario/z_metric", "TestLoadINVITEFlood/rate_100/actual_cps"}, []string{
-		report.Entries[0].Scenario + "/" + report.Entries[0].Metric,
-		report.Entries[1].Scenario + "/" + report.Entries[1].Metric,
-	})
+	keys := make([]string, len(report.Entries))
+	for i, entry := range report.Entries {
+		keys[i] = entry.Scenario + "/" + entry.Metric
+	}
+	require.Equal(t, []string{
+		"AFirstScenario/channel_peak",
+		"AFirstScenario/cpu_p95_percent",
+		"AFirstScenario/gc_max_stw_ms",
+		"AFirstScenario/rtp_drops",
+		"AFirstScenario/socket_drops",
+		"AFirstScenario/throttling_percent",
+		"AFirstScenario/working_set_p99_mb",
+		"AFirstScenario/z_metric",
+		"TestLoadINVITEFlood/rate_100/actual_cps",
+		"TestLoadINVITEFlood/rate_100/channel_peak",
+		"TestLoadINVITEFlood/rate_100/cpu_p95_percent",
+		"TestLoadINVITEFlood/rate_100/gc_max_stw_ms",
+		"TestLoadINVITEFlood/rate_100/rtp_drops",
+		"TestLoadINVITEFlood/rate_100/socket_drops",
+		"TestLoadINVITEFlood/rate_100/throttling_percent",
+		"TestLoadINVITEFlood/rate_100/working_set_p99_mb",
+	}, keys)
 }
 
 func baselineMetricForTest(baseline *BaselineV2, name string) *BaselineMetricV2 {

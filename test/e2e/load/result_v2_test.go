@@ -48,6 +48,7 @@ type (
 		StartedAt  time.Time              `json:"started_at"`
 		FinishedAt time.Time              `json:"finished_at,omitempty"`
 		Failure    string                 `json:"failure,omitempty"`
+		Limits     WorkloadLimits         `json:"limits"`
 		Generator  *GeneratorResult       `json:"generator,omitempty"`
 		Capture    *CaptureResult         `json:"capture,omitempty"`
 		Protocols  *ProtocolCounters      `json:"protocols,omitempty"`
@@ -57,14 +58,20 @@ type (
 	}
 
 	ResourceSummaryV2 struct {
-		CPUAvg   float64 `json:"cpu_avg_percent"`
-		CPUPeak  float64 `json:"cpu_peak_percent"`
-		MemMaxMB float64 `json:"memory_max_mb"`
+		Limits            WorkloadLimits `json:"limits"`
+		CPUP95Percent     float64        `json:"cpu_p95_percent"`
+		WorkingSetP99MB   float64        `json:"working_set_p99_mb"`
+		ThrottlingPercent float64        `json:"throttling_percent"`
+		ChannelPeak       float64        `json:"channel_peak"`
+		SocketDrops       float64        `json:"socket_drops"`
+		RTPDrops          float64        `json:"rtp_drops"`
+		GCMaxSTWMS        float64        `json:"gc_max_stw_ms"`
 	}
 
 	ResourceSamplesV2 struct {
-		CPUPercent []float64 `json:"cpu_percent"`
-		MemoryMB   []float64 `json:"memory_mb"`
+		Resources []resourceSample    `json:"resources,omitempty"`
+		Metrics   []metricSamplePoint `json:"metrics,omitempty"`
+		GCPauses  []gcPauseSample     `json:"gc_pauses,omitempty"`
 	}
 
 	RunArtifactV2 struct {
@@ -166,8 +173,14 @@ func (r ScenarioResultV2) validate() error {
 	if r.StartedAt.IsZero() || r.FinishedAt.IsZero() || r.FinishedAt.Before(r.StartedAt) {
 		return fmt.Errorf("invalid timestamps")
 	}
+	if err := r.Limits.validate(); err != nil {
+		return err
+	}
 	if len(r.Metrics) == 0 {
 		return fmt.Errorf("missing metrics")
+	}
+	if r.Resources == nil {
+		return fmt.Errorf("missing resource summary")
 	}
 	for name, metric := range r.Metrics {
 		if name == "" || metric.Unit == "" ||
@@ -193,10 +206,27 @@ func (r ScenarioResultV2) validate() error {
 	) {
 		return fmt.Errorf("protocol counters contain a non-finite value")
 	}
-	if r.Resources != nil && !finiteFloats(
-		r.Resources.CPUAvg, r.Resources.CPUPeak, r.Resources.MemMaxMB,
+	if err := r.Resources.Limits.validate(); err != nil {
+		return fmt.Errorf("resource summary: %w", err)
+	}
+	if r.Resources.Limits != r.Limits {
+		return fmt.Errorf("resource limits do not match scenario limits")
+	}
+	if !finiteFloats(
+		r.Resources.CPUP95Percent, r.Resources.WorkingSetP99MB,
+		r.Resources.ThrottlingPercent, r.Resources.ChannelPeak,
+		r.Resources.SocketDrops, r.Resources.RTPDrops, r.Resources.GCMaxSTWMS,
 	) {
 		return fmt.Errorf("resource summary contains a non-finite value")
+	}
+	for name, expected := range resourceMetricEntries(*r.Resources) {
+		actual, ok := r.Metrics[name]
+		if !ok {
+			return fmt.Errorf("missing canonical resource metric %q", name)
+		}
+		if actual != expected {
+			return fmt.Errorf("canonical resource metric %q does not match resource summary", name)
+		}
 	}
 	return nil
 }
@@ -388,6 +418,20 @@ func (r *runRecorderV2) RecordArtifact(name, filename string, data []byte) error
 	return nil
 }
 
+func (r *runRecorderV2) AttachLimits(name string, limits WorkloadLimits) error {
+	if err := limits.validate(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	index, ok := r.rows[name]
+	if !ok {
+		return fmt.Errorf("scenario %q was not started", name)
+	}
+	r.run.Results[index].Limits = limits
+	return nil
+}
+
 func (r *runRecorderV2) AttachLoadResult(name string, result loadResult) error {
 	if err := validateLoadResultEvidence(result); err != nil {
 		return err
@@ -406,11 +450,11 @@ func (r *runRecorderV2) AttachLoadResult(name string, result loadResult) error {
 	}
 	r.run.Results[index].Capture = &capture
 	r.run.Results[index].Protocols = &protocols
-	r.run.Results[index].Resources = &ResourceSummaryV2{
-		CPUAvg:   result.CPUAvg,
-		CPUPeak:  result.CPUPeak,
-		MemMaxMB: result.MemMaxMB,
+	resources := result.Resources
+	if resources.Limits != r.run.Results[index].Limits {
+		return fmt.Errorf("resource limits do not match scenario limits")
 	}
+	r.run.Results[index].Resources = &resources
 	return nil
 }
 
@@ -430,8 +474,15 @@ func validateLoadResultEvidence(result loadResult) error {
 	) {
 		return fmt.Errorf("protocol counters contain a non-finite value")
 	}
-	if !finiteFloats(result.CPUAvg, result.CPUPeak, result.MemMaxMB) {
+	if !finiteFloats(
+		result.Resources.CPUP95Percent, result.Resources.WorkingSetP99MB,
+		result.Resources.ThrottlingPercent, result.Resources.ChannelPeak,
+		result.Resources.SocketDrops, result.Resources.RTPDrops, result.Resources.GCMaxSTWMS,
+	) {
 		return fmt.Errorf("resource summary contains a non-finite value")
+	}
+	if err := result.Resources.Limits.validate(); err != nil {
+		return fmt.Errorf("resource summary: %w", err)
 	}
 	return nil
 }
@@ -605,6 +656,16 @@ func recordLoadResultEvidence(t *testing.T, result loadResult) {
 	}
 	if err := activeRunRecorder.AttachLoadResult(t.Name(), result); err != nil {
 		t.Fatalf("attach load result evidence: %v", err)
+	}
+}
+
+func recordScenarioLimits(t *testing.T, limits WorkloadLimits) {
+	t.Helper()
+	if activeRunRecorder == nil {
+		return
+	}
+	if err := activeRunRecorder.AttachLimits(t.Name(), limits); err != nil {
+		t.Fatalf("attach workload limits: %v", err)
 	}
 }
 

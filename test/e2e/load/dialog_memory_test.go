@@ -11,24 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func getSingleMemSample(t *testing.T, containerID string) float64 {
-	t.Helper()
-
-	stats, err := newStatsCollector(containerID)
-	require.NoError(t, err)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-
-	stats.start(ctx, containerID)
-	time.Sleep(2 * time.Second)
-	cancel()
-	<-stats.done
-
-	_, _, memMaxMB := stats.stop()
-	return memMaxMB
-}
-
 func waitForSessions(ctx context.Context, t *testing.T, endpoint string, target float64) {
 	t.Helper()
 	require.Eventually(t, func() bool {
@@ -52,7 +34,7 @@ func TestBenchmarkMemoryPerDialog(t *testing.T) {
 	for _, limit := range limits {
 		t.Run(fmt.Sprintf("dialogs_%d", limit), func(t *testing.T) {
 			beginScenario(t)
-			env := newTestEnv(t.Context(), t)
+			env := newTestEnvWithLimits(t.Context(), t, diagnosticMemoryLimits)
 			recordMetricsSnapshot(t, "metrics-before.prom", env.endpoint)
 
 			var sessions float64
@@ -74,7 +56,7 @@ func TestBenchmarkMemoryPerDialog(t *testing.T) {
 					sippVol, "", false,
 				)
 
-				time.Sleep(500 * time.Millisecond)
+				waitForSIPpUDPReady(ctx, t, uasContainer, env.sippPort)
 
 				uacPath := absScenarioPath(t, "concurrent_uac.xml")
 				sippVol = uacPath[:len(uacPath)-len("/concurrent_uac.xml")]
@@ -90,8 +72,8 @@ func TestBenchmarkMemoryPerDialog(t *testing.T) {
 				sessions = getMetric(t, env.endpoint, "sip_exporter_sessions")
 				t.Logf("Sessions reached: %.0f (target: %d)", sessions, limit)
 
-				memMB := getSingleMemSample(t, env.exporterContainer.GetContainerID())
-				recordRawResourceSamples(t, ResourceSamplesV2{MemoryMB: []float64{memMB}})
+				resources := measureSteadySnapshot(ctx, t, env)
+				memMB := resources.WorkingSetP99MB
 				recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)
 				waitForContainerExit(ctx, t, uacContainer)
 				uacContainer.recordEvidence(ctx, t, time.Now())
@@ -104,15 +86,16 @@ func TestBenchmarkMemoryPerDialog(t *testing.T) {
 					memMB:   memMB,
 				})
 
-				recordResult(t, map[string]MetricEntry{
-					"sessions": {Value: sessions, Unit: "count", Direction: dirHigherIsBetter},
-					"mem_mb":   {Value: memMB, Unit: "MB", Direction: dirLowerIsBetter},
-				})
+				metrics := resourceMetricEntries(resources)
+				metrics["sessions"] = MetricEntry{
+					Value: sessions, Unit: "count", Direction: dirHigherIsBetter,
+				}
+				recordResult(t, metrics)
 
 				waitForContainerExit(ctx, t, uasContainer)
 			} else {
-				memMB := getSingleMemSample(t, env.exporterContainer.GetContainerID())
-				recordRawResourceSamples(t, ResourceSamplesV2{MemoryMB: []float64{memMB}})
+				resources := measureSteadySnapshot(t.Context(), t, env)
+				memMB := resources.WorkingSetP99MB
 				recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)
 				t.Logf("Baseline (no traffic): %.1f MB", memMB)
 				measurements = append(measurements, dialogMeasurement{
@@ -120,9 +103,7 @@ func TestBenchmarkMemoryPerDialog(t *testing.T) {
 					memMB:   memMB,
 				})
 
-				recordResult(t, map[string]MetricEntry{
-					"mem_mb": {Value: memMB, Unit: "MB", Direction: dirLowerIsBetter},
-				})
+				recordResult(t, resourceMetricEntries(resources))
 			}
 		})
 	}

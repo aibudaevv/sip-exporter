@@ -95,7 +95,8 @@ func TestLoadVQScenarios(t *testing.T) {
 
 					t.Logf("%s rate=%d: actual=%.0f PPS, expected=%.0f PPS, loss=%.2f%%, drain=%v, cpu=%.2f%%(peak=%.2f%%), mem=%.1fMB",
 						tt.name, rate, result.ActualPPS, result.ExpectedPPS, result.LossRate*100,
-						result.DrainTime, result.CPUAvg, result.CPUPeak, result.MemMaxMB)
+						result.DrainTime, result.Resources.CPUP95Percent,
+						result.Resources.CPUP95Percent, result.Resources.WorkingSetP99MB)
 
 					totalPackets := result.PacketsAfter - result.PacketsBefore
 					maxErrors := totalPackets * 0.001
@@ -111,13 +112,13 @@ func TestLoadVQScenarios(t *testing.T) {
 
 					extras := tt.extraChecks(t, env, callCount)
 
-					resultMetrics := map[string]MetricEntry{
+					resultMetrics := resourceMetricEntries(result.Resources)
+					for name, metric := range map[string]MetricEntry{
 						"actual_pps": {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
 						"loss_rate":  {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
-						"cpu_peak":   {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},
-						"cpu_avg":    {Value: result.CPUAvg, Unit: "%", Direction: dirLowerIsBetter},
-						"mem_mb":     {Value: result.MemMaxMB, Unit: "MB", Direction: dirLowerIsBetter},
 						"vq_reports": {Value: vqReports, Unit: "count", Direction: dirHigherIsBetter},
+					} {
+						resultMetrics[name] = metric
 					}
 					for k, v := range extras {
 						resultMetrics[k] = v

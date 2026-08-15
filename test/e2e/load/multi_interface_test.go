@@ -43,6 +43,7 @@ type multiNICEnv struct {
 	sipPort           string
 	exporterContainer testcontainers.Container
 	uacTargets        []uacTarget
+	limits            WorkloadLimits
 }
 
 // setupVethPairs creates n-1 veth pairs for multi-interface load testing
@@ -121,7 +122,7 @@ func newMultiNICEnv(ctx context.Context, t *testing.T, ifaces []string, pairs []
 	portMu.Unlock()
 
 	req := exporterContainerRequest(
-		ctx, t, strings.Join(ifaces, ","), httpPort, sipPort,
+		ctx, t, strings.Join(ifaces, ","), httpPort, sipPort, peakLimits,
 	)
 
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
@@ -138,6 +139,8 @@ func newMultiNICEnv(ctx context.Context, t *testing.T, ifaces []string, pairs []
 		}
 	}
 	require.NoError(t, err)
+	require.NoError(t, verifyContainerLimits(ctx, c.GetContainerID(), peakLimits))
+	recordScenarioLimits(t, peakLimits)
 
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -175,12 +178,13 @@ func newMultiNICEnv(ctx context.Context, t *testing.T, ifaces []string, pairs []
 		sipPort:           sipPort,
 		exporterContainer: c,
 		uacTargets:        targets,
+		limits:            peakLimits,
 	}
 }
 
 // runMultiNICLoad runs N UAC instances in parallel (one per interface), each
 // sending callCount INVITEs at the given rate. Returns aggregated loadResult.
-// Uses one statsCollector for the single exporter container.
+// Uses one steady-state coordinator for the single exporter container.
 func runMultiNICLoad(
 	ctx context.Context,
 	t *testing.T,
@@ -190,11 +194,11 @@ func runMultiNICLoad(
 ) loadResult {
 	t.Helper()
 
-	stats, statsErr := newStatsCollector(env.exporterContainer.GetContainerID())
-	require.NoError(t, statsErr)
-
-	statsCtx, statsCancel := context.WithCancel(ctx)
-	stats.start(statsCtx, env.exporterContainer.GetContainerID())
+	measurementEnv := &testEnv{
+		endpoint: env.endpoint, exporterContainer: env.exporterContainer, limits: env.limits,
+	}
+	measurement, measurementErr := newSteadyMeasurement(ctx, measurementEnv)
+	require.NoError(t, measurementErr)
 
 	recordMetricsSnapshot(t, "metrics-before.prom", env.endpoint)
 	protocolsBefore := readProtocolCounters(t, env.endpoint)
@@ -204,15 +208,13 @@ func runMultiNICLoad(
 	const packetsPerCall = 1.0 // flood_uac.xml sends 1 INVITE per call
 	expectedTotal := float64(callCount * len(env.uacTargets) * int(packetsPerCall))
 
-	start := time.Now()
-
 	uacPath := absScenarioPath(t, uacScenario)
 	sippVol := filepath.Dir(uacPath)
 	uacFile := filepath.Base(uacScenario)
 
 	uacs := make([]*startedSippContainer, len(env.uacTargets))
 	for i, tgt := range env.uacTargets {
-		uacs[i] = startSippContainer(ctx, t,
+		uacs[i] = prepareSippContainer(ctx, t,
 			[]string{
 				"-sf", "/scenarios/" + uacFile,
 				"-i", tgt.uacIP,
@@ -222,29 +224,44 @@ func runMultiNICLoad(
 				"-nr",
 				tgt.uasIP + ":" + env.sipPort,
 			},
-			sippVol, fmt.Sprintf("generator-%d", i), false,
+			sippVol, fmt.Sprintf("generator-%d", i),
 		)
 	}
-
-	// Brief settle to let all UAC containers bind their sockets.
-	time.Sleep(500 * time.Millisecond)
+	measureStart := time.Now()
+	require.NoError(t, measurement.Begin(ctx, measureStart))
+	startPreparedSippContainers(ctx, t, uacs...)
 
 	for _, uac := range uacs {
 		waitForContainerExit(ctx, t, uac)
-		uac.recordEvidence(ctx, t, time.Now())
 	}
 
-	sippEnd := time.Now()
-	sippDuration := sippEnd.Sub(start)
+	measureEnd := time.Now()
+	sippDuration := measureEnd.Sub(measureStart)
+	resourceSummary := finishSteadyMeasurement(ctx, t, measurement, measureEnd)
+	postPhase := make([]time.Time, 0, len(uacs)+1)
+	generators := make([]GeneratorResult, len(uacs))
+	for i, uac := range uacs {
+		var generatorErr error
+		generators[i], generatorErr = uac.readGeneratorEvidence(ctx, t, PhaseTimestamps{
+			WarmupStart: measureStart, Ready: measureStart, MeasureStart: measureStart,
+			MeasureEnd: measureEnd, DrainEnd: measureEnd,
+		})
+		require.NoError(t, generatorErr)
+		postPhase = append(postPhase, time.Now())
+	}
 
 	waitForExactSIPCapture(ctx, t, env.endpoint, packetsBefore, expectedTotal)
 
 	stableTime := time.Now()
-	drainTime := stableTime.Sub(sippEnd)
-
-	statsCancel()
-	cpuAvg, cpuPeak, memMaxMB := stats.stop()
-	recordResourceSamples(t, stats)
+	postPhase = append(postPhase, stableTime)
+	require.NoError(t, validatePostPhaseOrdering(measureEnd, postPhase...))
+	drainTime := stableTime.Sub(measureEnd)
+	if activeRunRecorder != nil {
+		for _, generator := range generators {
+			generator.Phases.DrainEnd = stableTime
+			require.NoError(t, activeRunRecorder.AttachGenerator(t.Name(), generator))
+		}
+	}
 
 	recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)
 	protocolsAfter := readProtocolCounters(t, env.endpoint)
@@ -273,9 +290,7 @@ func runMultiNICLoad(
 		LossRate:      capture.LossPct / 100,
 		ErrorCount:    errorsAfter - errorsBefore,
 		DrainTime:     drainTime,
-		CPUAvg:        cpuAvg,
-		CPUPeak:       cpuPeak,
-		MemMaxMB:      memMaxMB,
+		Resources:     resourceSummary,
 	}
 	recordLoadResultEvidence(t, result)
 
@@ -283,7 +298,8 @@ func runMultiNICLoad(
 		"drain=%v, cpu=%.2f%%(peak=%.2f%%), mem=%.1fMB, errors=%.0f",
 		len(env.uacTargets), result.ActualPPS, result.ExpectedPPS,
 		totalCaptured, result.LossRate*100, result.DrainTime,
-		result.CPUAvg, result.CPUPeak, result.MemMaxMB, result.ErrorCount)
+		result.Resources.CPUP95Percent, result.Resources.CPUP95Percent,
+		result.Resources.WorkingSetP99MB, result.ErrorCount)
 
 	return result
 }
@@ -322,12 +338,10 @@ func TestLoadMultiInterface(t *testing.T) {
 			require.Greater(t, result.PacketsAfter, result.PacketsBefore,
 				"exporter should have processed packets at N=%d", n)
 
-			recordResult(t, map[string]MetricEntry{
+			metrics := resourceMetricEntries(result.Resources)
+			for name, metric := range map[string]MetricEntry{
 				"actual_pps": {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
 				"loss_rate":  {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
-				"cpu_avg":    {Value: result.CPUAvg, Unit: "%", Direction: dirLowerIsBetter},
-				"cpu_peak":   {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},
-				"mem_mb":     {Value: result.MemMaxMB, Unit: "MB", Direction: dirLowerIsBetter},
 				"drain_time_ms": {
 					Value:     float64(result.DrainTime.Milliseconds()),
 					Unit:      "ms",
@@ -339,7 +353,10 @@ func TestLoadMultiInterface(t *testing.T) {
 					Direction: dirHigherIsBetter,
 				},
 				"errors": {Value: result.ErrorCount, Unit: "count", Direction: dirLowerIsBetter},
-			})
+			} {
+				metrics[name] = metric
+			}
+			recordResult(t, metrics)
 		})
 	}
 }

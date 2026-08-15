@@ -15,6 +15,10 @@ import (
 
 func validRunArtifactV2() RunArtifactV2 {
 	started := time.Date(2026, time.August, 14, 15, 0, 0, 0, time.UTC)
+	limits := WorkloadLimits{CPUCores: 2, MemoryBytes: 256 << 20}
+	resources := ResourceSummaryV2{Limits: limits}
+	metrics := resourceMetricEntries(resources)
+	metrics["actual_cps"] = MetricEntry{Value: 100, Unit: "cps", Direction: dirHigherIsBetter}
 	return RunArtifactV2{
 		Version:         2,
 		Mode:            runModeTargeted,
@@ -32,9 +36,9 @@ func validRunArtifactV2() RunArtifactV2 {
 			Status:     scenarioStatusComplete,
 			StartedAt:  started,
 			FinishedAt: started.Add(30 * time.Second),
-			Metrics: map[string]MetricEntry{
-				"actual_cps": {Value: 100, Unit: "cps", Direction: dirHigherIsBetter},
-			},
+			Limits:     limits,
+			Metrics:    metrics,
+			Resources:  &resources,
 		}},
 	}
 }
@@ -68,6 +72,29 @@ func TestRunArtifactV2RejectsInvalidSchema(t *testing.T) {
 			run.Results[0].FinishedAt = time.Time{}
 		}},
 		{name: "missing metrics", mutate: func(run *RunArtifactV2) { run.Results[0].Metrics = nil }},
+		{name: "missing resource summary", mutate: func(run *RunArtifactV2) {
+			run.Results[0].Resources = nil
+		}},
+		{name: "missing canonical resource metric", mutate: func(run *RunArtifactV2) {
+			delete(run.Results[0].Metrics, "cpu_p95_percent")
+		}},
+		{name: "mismatched canonical resource metric", mutate: func(run *RunArtifactV2) {
+			run.Results[0].Metrics["cpu_p95_percent"] = MetricEntry{
+				Value: 1, Unit: "%", Direction: dirLowerIsBetter,
+			}
+		}},
+		{name: "missing CPU limit", mutate: func(run *RunArtifactV2) {
+			run.Results[0].Limits.CPUCores = 0
+		}},
+		{name: "negative CPU limit", mutate: func(run *RunArtifactV2) {
+			run.Results[0].Limits.CPUCores = -1
+		}},
+		{name: "missing memory limit", mutate: func(run *RunArtifactV2) {
+			run.Results[0].Limits.MemoryBytes = 0
+		}},
+		{name: "negative memory limit", mutate: func(run *RunArtifactV2) {
+			run.Results[0].Limits.MemoryBytes = -1
+		}},
 		{name: "missing metric unit", mutate: func(run *RunArtifactV2) {
 			run.Results[0].Metrics["actual_cps"] = MetricEntry{Value: 100, Direction: dirHigherIsBetter}
 		}},
@@ -93,7 +120,13 @@ func TestRunArtifactV2RejectsInvalidSchema(t *testing.T) {
 			run.Results[0].Protocols = &ProtocolCounters{SIPPackets: math.NaN()}
 		}},
 		{name: "infinite resource summary", mutate: func(run *RunArtifactV2) {
-			run.Results[0].Resources = &ResourceSummaryV2{CPUAvg: math.Inf(1)}
+			run.Results[0].Resources.CPUP95Percent = math.Inf(1)
+		}},
+		{name: "resource summary without limits", mutate: func(run *RunArtifactV2) {
+			run.Results[0].Resources = &ResourceSummaryV2{}
+		}},
+		{name: "resource summary limits mismatch", mutate: func(run *RunArtifactV2) {
+			run.Results[0].Resources = &ResourceSummaryV2{Limits: nominalLimits}
 		}},
 	}
 
@@ -196,6 +229,7 @@ func TestRunRecorderV2CompletesScenarioWithOwnedMetrics(t *testing.T) {
 		validRunArtifactV2().Environment, "a104fd2", started)
 	require.NoError(t, err)
 	require.NoError(t, recorder.Begin("complete-scenario", started.Add(time.Second)))
+	require.NoError(t, recorder.AttachLimits("complete-scenario", peakLimits))
 	metrics := map[string]MetricEntry{
 		"actual_cps": {Value: 100, Unit: "cps", Direction: dirHigherIsBetter},
 	}
@@ -205,6 +239,7 @@ func TestRunRecorderV2CompletesScenarioWithOwnedMetrics(t *testing.T) {
 
 	run := recorder.Snapshot()
 	require.Equal(t, scenarioStatusComplete, run.Results[0].Status)
+	require.Equal(t, peakLimits, run.Results[0].Limits)
 	require.Equal(t, 100.0, run.Results[0].Metrics["actual_cps"].Value)
 }
 
@@ -319,13 +354,15 @@ func TestRunRecorderV2AttachesTypedLoadEvidence(t *testing.T) {
 		validRunArtifactV2().Environment, "a104fd2", time.Now())
 	require.NoError(t, err)
 	require.NoError(t, recorder.Begin("scenario", time.Now()))
+	require.NoError(t, recorder.AttachLimits("scenario", peakLimits))
 	evidence := loadResult{
 		Generator: GeneratorResult{SuccessfulCalls: 10, ActualRate: 100},
 		Capture:   CaptureResult{Expected: 70, Captured: 70},
 		Protocols: ProtocolCounters{SIPPackets: 70, RTPPackets: 400},
-		CPUAvg:    25,
-		CPUPeak:   40,
-		MemMaxMB:  64,
+		Resources: ResourceSummaryV2{
+			Limits: peakLimits, CPUP95Percent: 40, WorkingSetP99MB: 64,
+			ThrottlingPercent: 0.5, ChannelPeak: 3, GCMaxSTWMS: 2,
+		},
 	}
 
 	require.NoError(t, recorder.AttachLoadResult("scenario", evidence))
@@ -334,7 +371,33 @@ func TestRunRecorderV2AttachesTypedLoadEvidence(t *testing.T) {
 	require.Equal(t, evidence.Generator, *row.Generator)
 	require.Equal(t, evidence.Capture, *row.Capture)
 	require.Equal(t, evidence.Protocols, *row.Protocols)
-	require.Equal(t, ResourceSummaryV2{CPUAvg: 25, CPUPeak: 40, MemMaxMB: 64}, *row.Resources)
+	require.Equal(t, evidence.Resources, *row.Resources)
+}
+
+func TestRunRecorderV2RejectsIncompleteTypedResourceEvidence(t *testing.T) {
+	tests := []struct {
+		name      string
+		rowLimits WorkloadLimits
+		resources ResourceSummaryV2
+	}{
+		{name: "missing resource limits", rowLimits: peakLimits},
+		{name: "resource limits mismatch", rowLimits: peakLimits,
+			resources: ResourceSummaryV2{Limits: nominalLimits}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder, err := newRunRecorderV2(runModeTargeted, t.TempDir(),
+				validRunArtifactV2().Environment, "a104fd2", time.Now())
+			require.NoError(t, err)
+			require.NoError(t, recorder.Begin("scenario", time.Now()))
+			require.NoError(t, recorder.AttachLimits("scenario", tt.rowLimits))
+
+			err = recorder.AttachLoadResult("scenario", loadResult{Resources: tt.resources})
+
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestRunRecorderV2EmptyRunFailsWithoutFabricatedRows(t *testing.T) {
@@ -430,6 +493,7 @@ func TestRecordResultV2CompletesStartedRow(t *testing.T) {
 
 	t.Run("row", func(t *testing.T) {
 		beginScenario(t)
+		recordScenarioLimits(t, peakLimits)
 		recordResult(t, map[string]MetricEntry{
 			"actual_cps": {Value: 100, Unit: "cps", Direction: dirHigherIsBetter},
 		})

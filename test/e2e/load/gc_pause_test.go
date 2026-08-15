@@ -5,126 +5,76 @@ package load
 import (
 	"context"
 	"fmt"
-	"io"
+	"math"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/require"
 )
 
 // gcLineRe matches Go runtime gctrace lines: "gc N @Ts ... A+B+C ms clock".
 // A = sweep-termination STW (start of GC), B = concurrent mark (NOT STW),
 // C = mark-termination STW (end of GC). Groups 1+2 capture A and C;
 // their sum is the total stop-the-world duration per GC cycle.
-var gcLineRe = regexp.MustCompile(`gc \d+ @[\d.]+s.*?([\d.]+)\+[\d.]+\+([\d.]+) ms clock`)
+var gcLineRe = regexp.MustCompile(`gc \d+ @([\d.]+)s.*?([\d.]+)\+[\d.]+\+([\d.]+) ms clock`)
+var gcFrameRe = regexp.MustCompile(`^gc \d+ @`)
+var gcTimestampRe = regexp.MustCompile(`^gc \d+ @(\S+)s(?:\s|$)`)
 
-func parseGCPauses(logs string) []float64 {
-	var pauses []float64
-	for _, line := range strings.Split(logs, "\n") {
-		matches := gcLineRe.FindStringSubmatch(line)
-		if len(matches) == 3 {
-			sweepStop, markStop := matches[1], matches[2]
-			sweep, err1 := strconv.ParseFloat(sweepStop, 64)
-			mark, err2 := strconv.ParseFloat(markStop, 64)
-			if err1 == nil && err2 == nil {
-				pauses = append(pauses, sweep+mark)
-			}
+func parseGCPauseSamples(
+	logs string, containerStart, start, end time.Time,
+) ([]gcPauseSample, error) {
+	var samples []gcPauseSample
+	for _, rawLine := range strings.Split(logs, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if !gcFrameRe.MatchString(line) {
+			continue
 		}
+		timestampMatch := gcTimestampRe.FindStringSubmatch(line)
+		if len(timestampMatch) != 2 {
+			return nil, fmt.Errorf("parse gctrace timestamp from %q", line)
+		}
+		uptimeSeconds, err := strconv.ParseFloat(timestampMatch[1], 64)
+		if err != nil || math.IsNaN(uptimeSeconds) || math.IsInf(uptimeSeconds, 0) || uptimeSeconds < 0 {
+			return nil, fmt.Errorf("parse gctrace timestamp %q", timestampMatch[1])
+		}
+		at := containerStart.Add(time.Duration(uptimeSeconds * float64(time.Second)))
+		if at.Before(start) || !at.Before(end) {
+			continue
+		}
+		matches := gcLineRe.FindStringSubmatch(line)
+		if len(matches) != 4 {
+			return nil, fmt.Errorf("parse in-phase gctrace frame %q", line)
+		}
+		sweep, sweepErr := strconv.ParseFloat(matches[2], 64)
+		mark, markErr := strconv.ParseFloat(matches[3], 64)
+		if sweepErr != nil || markErr != nil || !finiteFloats(sweep, mark) || sweep < 0 || mark < 0 {
+			return nil, fmt.Errorf("parse in-phase gctrace pauses %q", line)
+		}
+		samples = append(samples, gcPauseSample{
+			At:         at,
+			DurationMS: sweep + mark,
+		})
 	}
-	return pauses
-}
-
-func percentile(sorted []float64, p float64) float64 {
-	if len(sorted) == 0 {
-		return 0
-	}
-	idx := p / 100.0 * float64(len(sorted)-1)
-	lower := int(idx)
-	upper := lower + 1
-	if upper >= len(sorted) {
-		return sorted[len(sorted)-1]
-	}
-	frac := idx - float64(lower)
-	return sorted[lower]*(1-frac) + sorted[upper]*frac
+	return samples, nil
 }
 
 func TestBenchmarkGCPauseDuration(t *testing.T) {
 	beginScenario(t)
-	t.Setenv("SIP_EXPORTER_E2E_GODEBUG", "gctrace=1")
-
 	env := newTestEnv(t.Context(), t)
-	recordMetricsSnapshot(t, "metrics-before.prom", env.endpoint)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 
 	callCount := 10000
 	rate := 2000
-	packetsBefore := metricSumOrZero(t, env.endpoint, "sip_exporter_packets_total")
-	expectedTotal := float64(callCount) * fullCallPacketsPerCall
+	result := runSippLoad(ctx, t, "call_highrate_uas.xml", "call_highrate_uac.xml",
+		callCount, rate, fullCallPacketsPerCall, env)
 
-	uasPath := absScenarioPath(t, "call_highrate_uas.xml")
-	sippVol := uasPath[:len(uasPath)-len("/call_highrate_uas.xml")]
-	uasContainer := startSippContainer(ctx, t,
-		[]string{"-sf", "/scenarios/call_highrate_uas.xml", "-i", "127.0.0.1", "-p", env.sippPort,
-			"-m", fmt.Sprintf("%d", callCount), "-nostdin"},
-		sippVol, "", false,
-	)
-
-	time.Sleep(500 * time.Millisecond)
-
-	uacPath := absScenarioPath(t, "call_highrate_uac.xml")
-	sippVol = uacPath[:len(uacPath)-len("/call_highrate_uac.xml")]
-	startSippContainer(ctx, t,
-		[]string{"-sf", "/scenarios/call_highrate_uac.xml", "-i", "127.0.0.1", "-p", env.sippClientPort,
-			"-m", fmt.Sprintf("%d", callCount), "-r", fmt.Sprintf("%d", rate),
-			"127.0.0.1:" + env.sippPort},
-		sippVol, "generator", true,
-	)
-
-	waitForContainerExit(ctx, t, uasContainer)
-	waitForExactSIPCapture(ctx, t, env.endpoint, packetsBefore, expectedTotal)
-
-	logsReader, err := env.exporterContainer.Logs(t.Context())
-	require.NoError(t, err)
-	defer logsReader.Close()
-
-	logBytes, err := io.ReadAll(logsReader)
-	require.NoError(t, err)
-
-	pauses := parseGCPauses(string(logBytes))
-	require.NotEmpty(t, pauses, "expected GC trace output in container logs")
-
-	sort.Float64s(pauses)
-
-	minPause := pauses[0]
-	maxPause := pauses[len(pauses)-1]
-	var sum float64
-	for _, p := range pauses {
-		sum += p
+	t.Logf("GC max STW at %d CPS: %.3f ms", rate, result.Resources.GCMaxSTWMS)
+	metrics := resourceMetricEntries(result.Resources)
+	metrics["actual_pps"] = MetricEntry{
+		Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter,
 	}
-	avgPause := sum / float64(len(pauses))
-	p95 := percentile(pauses, 95)
-
-	t.Logf("=== GC Pause Summary (2000 CPS, %d GC cycles) ===", len(pauses))
-	t.Logf("Min: %.3f ms", minPause)
-	t.Logf("Avg: %.3f ms", avgPause)
-	t.Logf("P95: %.3f ms", p95)
-	t.Logf("Max: %.3f ms", maxPause)
-
-	require.Less(t, maxPause, 50.0, "max STW pause SLO: < 50ms")
-	memMB := getSingleMemSample(t, env.exporterContainer.GetContainerID())
-	recordRawResourceSamples(t, ResourceSamplesV2{MemoryMB: []float64{memMB}})
-	recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)
-
-	recordResult(t, map[string]MetricEntry{
-		"avg_ms": {Value: avgPause, Unit: "ms", Direction: dirLowerIsBetter},
-		"p95_ms": {Value: p95, Unit: "ms", Direction: dirLowerIsBetter},
-		"max_ms": {Value: maxPause, Unit: "ms", Direction: dirLowerIsBetter},
-		"min_ms": {Value: minPause, Unit: "ms", Direction: dirLowerIsBetter},
-	})
+	recordResult(t, metrics)
 }

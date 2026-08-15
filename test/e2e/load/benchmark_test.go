@@ -32,7 +32,8 @@ func TestLoadINVITEFlood(t *testing.T) {
 
 			t.Logf("INVITE flood rate=%d: actual=%.0f PPS, expected=%.0f PPS, loss=%.2f%%, drain=%v, cpu=%.2f%%(peak=%.2f%%), mem=%.1fMB",
 				rate, result.ActualPPS, result.ExpectedPPS, result.LossRate*100,
-				result.DrainTime, result.CPUAvg, result.CPUPeak, result.MemMaxMB)
+				result.DrainTime, result.Resources.CPUP95Percent,
+				result.Resources.CPUP95Percent, result.Resources.WorkingSetP99MB)
 
 			totalPackets := result.PacketsAfter - result.PacketsBefore
 			maxErrors := totalPackets * 0.001
@@ -43,13 +44,10 @@ func TestLoadINVITEFlood(t *testing.T) {
 			require.Greater(t, result.PacketsAfter, result.PacketsBefore,
 				"exporter should have processed packets")
 
-			recordResult(t, map[string]MetricEntry{
-				"actual_pps": {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
-				"loss_rate":  {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
-				"cpu_peak":   {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},
-				"cpu_avg":    {Value: result.CPUAvg, Unit: "%", Direction: dirLowerIsBetter},
-				"mem_mb":     {Value: result.MemMaxMB, Unit: "MB", Direction: dirLowerIsBetter},
-			})
+			metrics := resourceMetricEntries(result.Resources)
+			metrics["actual_pps"] = MetricEntry{Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter}
+			metrics["loss_rate"] = MetricEntry{Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter}
+			recordResult(t, metrics)
 		})
 	}
 }
@@ -59,7 +57,11 @@ func TestLoadFullCallFlow(t *testing.T) {
 	for _, rate := range rates {
 		t.Run(fmt.Sprintf("rate_%d", rate), func(t *testing.T) {
 			beginScenario(t)
-			env := newTestEnv(t.Context(), t)
+			limits := peakLimits
+			if rate == 1000 {
+				limits = nominalLimits
+			}
+			env := newTestEnvWithLimits(t.Context(), t, limits)
 
 			ctx, cancel := context.WithTimeout(t.Context(), subtestTimeout)
 			defer cancel()
@@ -70,7 +72,8 @@ func TestLoadFullCallFlow(t *testing.T) {
 
 			t.Logf("Full call rate=%d: actual=%.0f PPS, expected=%.0f PPS, loss=%.2f%%, drain=%v, cpu=%.2f%%(peak=%.2f%%), mem=%.1fMB",
 				rate, result.ActualPPS, result.ExpectedPPS, result.LossRate*100,
-				result.DrainTime, result.CPUAvg, result.CPUPeak, result.MemMaxMB)
+				result.DrainTime, result.Resources.CPUP95Percent,
+				result.Resources.CPUP95Percent, result.Resources.WorkingSetP99MB)
 
 			totalPackets := result.PacketsAfter - result.PacketsBefore
 			maxErrors := totalPackets * 0.001
@@ -85,14 +88,11 @@ func TestLoadFullCallFlow(t *testing.T) {
 			require.GreaterOrEqual(t, ser, 99.0,
 				"SER SLO: >= 99%% at rate %d (got %.2f%%)", rate, ser)
 
-			recordResult(t, map[string]MetricEntry{
-				"actual_pps": {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
-				"loss_rate":  {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
-				"ser":        {Value: ser, Unit: "%", Direction: dirHigherIsBetter},
-				"cpu_peak":   {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},
-				"cpu_avg":    {Value: result.CPUAvg, Unit: "%", Direction: dirLowerIsBetter},
-				"mem_mb":     {Value: result.MemMaxMB, Unit: "MB", Direction: dirLowerIsBetter},
-			})
+			metrics := resourceMetricEntries(result.Resources)
+			metrics["actual_pps"] = MetricEntry{Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter}
+			metrics["loss_rate"] = MetricEntry{Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter}
+			metrics["ser"] = MetricEntry{Value: ser, Unit: "%", Direction: dirHigherIsBetter}
+			recordResult(t, metrics)
 		})
 	}
 }
@@ -115,7 +115,8 @@ func TestLoadConcurrentSessions(t *testing.T) {
 
 			t.Logf("Concurrent %d: peak_sessions=%.0f, invites=%.0f, drain=%v, cpu=%.2f%%(peak=%.2f%%), mem=%.1fMB, duration=%v",
 				limit, result.PeakSessions, inviteTotal, result.DrainTime,
-				result.CPUAvg, result.CPUPeak, result.MemMaxMB, result.Duration)
+				result.Resources.CPUP95Percent, result.Resources.CPUP95Percent,
+				result.Resources.WorkingSetP99MB, result.Duration)
 
 			require.Greater(t, result.PeakSessions, float64(0),
 				"peak sessions should be > 0 during concurrent load")
@@ -126,13 +127,10 @@ func TestLoadConcurrentSessions(t *testing.T) {
 			require.Greater(t, result.PacketsAfter, result.PacketsBefore,
 				"exporter should have processed packets")
 
-			recordResult(t, map[string]MetricEntry{
-				"sessions": {Value: result.PeakSessions, Unit: "count", Direction: dirHigherIsBetter},
-				"invites":  {Value: inviteTotal, Unit: "count", Direction: dirHigherIsBetter},
-				"cpu_peak": {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},
-				"cpu_avg":  {Value: result.CPUAvg, Unit: "%", Direction: dirLowerIsBetter},
-				"mem_mb":   {Value: result.MemMaxMB, Unit: "MB", Direction: dirLowerIsBetter},
-			})
+			metrics := resourceMetricEntries(result.Resources)
+			metrics["sessions"] = MetricEntry{Value: result.PeakSessions, Unit: "count", Direction: dirHigherIsBetter}
+			metrics["invites"] = MetricEntry{Value: inviteTotal, Unit: "count", Direction: dirHigherIsBetter}
+			recordResult(t, metrics)
 		})
 	}
 }
