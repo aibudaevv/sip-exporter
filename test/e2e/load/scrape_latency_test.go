@@ -96,7 +96,8 @@ func summarizeScrapes(
 }
 
 func validateScrapeGates(summary ScrapeSummary) error {
-	if summary.Count <= 0 || !finiteFloats(summary.P50MS, summary.P95MS, summary.P99MS) {
+	if summary.Count <= 0 || !finiteFloats(summary.P50MS, summary.P95MS, summary.P99MS) ||
+		summary.P50MS < 0 || summary.P50MS > summary.P95MS || summary.P95MS > summary.P99MS {
 		return fmt.Errorf("invalid scrape summary")
 	}
 	if summary.P95MS >= 100 {
@@ -108,9 +109,10 @@ func validateScrapeGates(summary ScrapeSummary) error {
 	return nil
 }
 
-func TestBenchmarkScrapeLatencyUnderLoad(t *testing.T) {
+func TestReleaseFullCallPeak(t *testing.T) {
+	profile := releaseFullCallPeakProfile()
 	beginScenario(t)
-	env := newTestEnv(t.Context(), t)
+	env := newTestEnvWithLimits(t.Context(), t, profile.Limits)
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 
@@ -120,26 +122,27 @@ func TestBenchmarkScrapeLatencyUnderLoad(t *testing.T) {
 	protocolsBefore := readProtocolCounters(t, env.endpoint)
 	errorsBefore := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
 
-	callCount := 10000
-	rate := 2000
-	expectedTotal := float64(callCount) * fullCallPacketsPerCall
+	expectedTotal := float64(profile.Workload.Calls) * profile.PacketsPerCall
+	phases := PhaseTimestamps{WarmupStart: time.Now()}
 
 	uasPath := absScenarioPath(t, "call_highrate_uas.xml")
 	sippVol := filepath.Dir(uasPath)
 	uasContainer := startSippContainer(ctx, t,
 		[]string{"-sf", "/scenarios/call_highrate_uas.xml", "-i", "127.0.0.1", "-p", env.sippPort,
-			"-m", strconv.Itoa(callCount), "-nr", "-nostdin"},
+			"-m", strconv.Itoa(profile.Workload.Calls), "-nr", "-nostdin"},
 		sippVol, "", false,
 	)
 	waitForSIPpUDPReady(ctx, t, uasContainer, env.sippPort)
+	phases.Ready = time.Now()
 
 	uacPath := absScenarioPath(t, "call_highrate_uac.xml")
 	sippVol = filepath.Dir(uacPath)
 	measureStart := time.Now()
+	phases.MeasureStart = measureStart
 	require.NoError(t, measurement.Begin(ctx, measureStart))
 	uacContainer := startSippContainer(ctx, t,
 		[]string{"-sf", "/scenarios/call_highrate_uac.xml", "-i", "127.0.0.1", "-p", env.sippClientPort,
-			"-m", strconv.Itoa(callCount), "-r", strconv.Itoa(rate), "-nr",
+			"-m", strconv.Itoa(profile.Workload.Calls), "-r", strconv.Itoa(int(profile.Workload.Rate)), "-nr",
 			"127.0.0.1:" + env.sippPort},
 		sippVol, "generator", false,
 	)
@@ -163,32 +166,33 @@ func TestBenchmarkScrapeLatencyUnderLoad(t *testing.T) {
 		}
 	}
 	measureEnd := time.Now()
+	phases.MeasureEnd = measureEnd
 	resources := finishSteadyMeasurement(ctx, t, measurement, measureEnd)
-	uacContainer.recordEvidence(ctx, t, measureEnd)
+	generator, generatorErr := uacContainer.readGeneratorEvidence(ctx, t, phases)
+	require.NoError(t, generatorErr)
 	evidenceAt := time.Now()
 	scrapes, err := summarizeScrapes(observations, measureStart, measureEnd)
 	require.NoError(t, err)
-	require.NoError(t, validateScrapeGates(scrapes))
 	waitForContainerExit(ctx, t, uasContainer)
 	uasExitAt := time.Now()
 	waitForExactSIPCapture(ctx, t, env.endpoint, protocolsBefore.SIPPackets, expectedTotal)
 	drainAt := time.Now()
 	require.NoError(t, validatePostPhaseOrdering(measureEnd, evidenceAt, uasExitAt, drainAt))
+	generator.Phases.DrainEnd = drainAt
+	require.NoError(t, generator.Validate(profile.Workload))
 	recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)
 	protocols := readProtocolCounters(t, env.endpoint).delta(protocolsBefore)
 	capture := newCaptureResult(expectedTotal, protocols.SIPPackets)
-	require.NoError(t, capture.ValidateExact())
 	result := loadResult{
-		Capture: capture, Protocols: protocols, Resources: resources,
+		Generator: generator, Capture: capture, Protocols: protocols, Resources: resources,
 		ErrorCount: getMetric(t, env.endpoint, "sip_exporter_system_error_total") - errorsBefore,
 	}
 	recordLoadResultEvidence(t, result)
-
-	t.Logf("Scrapes at %d CPS: count=%d p50=%.2fms p95=%.2fms p99=%.2fms",
-		rate, scrapes.Count, scrapes.P50MS, scrapes.P95MS, scrapes.P99MS)
-	metrics := resourceMetricEntries(resources)
-	metrics["scrape_p50_ms"] = MetricEntry{Value: scrapes.P50MS, Unit: "ms", Direction: dirLowerIsBetter}
-	metrics["scrape_p95_ms"] = MetricEntry{Value: scrapes.P95MS, Unit: "ms", Direction: dirLowerIsBetter}
-	metrics["scrape_p99_ms"] = MetricEntry{Value: scrapes.P99MS, Unit: "ms", Direction: dirLowerIsBetter}
-	recordResult(t, metrics)
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_invite_total"))
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"))
+	invites := getMetric(t, env.endpoint, "sip_exporter_invite_total")
+	ser := getMetric(t, env.endpoint, "sip_exporter_ser")
+	require.NoError(t, validateReleaseRow(releaseRowSpec{RequireScrapes: profile.RequireScrapes},
+		releaseRowFromLoad(profile, result, map[string]float64{"invites": invites, "ser": ser}, &scrapes)))
+	recordReleaseResult(t, result, map[string]float64{"invites": invites, "ser": ser}, &scrapes)
 }

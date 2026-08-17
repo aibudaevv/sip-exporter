@@ -860,7 +860,7 @@ func startPreparedSippContainers(
 	errs := make(chan error, len(containers))
 	for _, c := range containers {
 		go func() {
-			c.started = barrier.wait()
+			barrier.wait()
 			errs <- c.Start(ctx)
 		}()
 	}
@@ -869,7 +869,17 @@ func startPreparedSippContainers(
 	for range containers {
 		require.NoError(t, <-errs)
 	}
-	return releasedAt
+	startedAt := time.Time{}
+	for _, c := range containers {
+		inspection, err := c.Inspect(ctx)
+		require.NoError(t, err)
+		c.started, err = time.Parse(time.RFC3339Nano, inspection.State.StartedAt)
+		require.NoError(t, err)
+		if startedAt.IsZero() || c.started.Before(startedAt) {
+			startedAt = c.started
+		}
+	}
+	return startedAt
 }
 
 func (c *startedSippContainer) recordEvidence(
@@ -1467,6 +1477,7 @@ func runConcurrentLoad(
 	recordMetricsSnapshot(t, "metrics-before.prom", env.endpoint)
 	protocolsBefore := readProtocolCounters(t, env.endpoint)
 	packetsBefore := protocolsBefore.SIPPackets
+	errorsBefore := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
 	expectedTotal := float64(callCount) * fullCallPacketsPerCall
 
 	uasPath := absScenarioPath(t, uasScenario)
@@ -1484,7 +1495,9 @@ func runConcurrentLoad(
 	sippVol = filepath.Dir(uacPath)
 	uacFile := filepath.Base(uacScenario)
 
+	phases := PhaseTimestamps{WarmupStart: time.Now(), Ready: time.Now()}
 	measureStart := time.Now()
+	phases.MeasureStart = measureStart
 	require.NoError(t, measurement.Begin(ctx, measureStart))
 	uacContainer := startSippContainer(ctx, t,
 		[]string{"-sf", "/scenarios/" + uacFile, "-i", "127.0.0.1", "-p", env.sippClientPort,
@@ -1496,11 +1509,16 @@ func runConcurrentLoad(
 	)
 
 	var peakSessions float64
+	var peakReachedAt time.Time
 	require.Eventually(t, func() bool {
 		if metricExists(t, env.endpoint, "sip_exporter_sessions") {
 			sessions := getMetric(t, env.endpoint, "sip_exporter_sessions")
 			if sessions > peakSessions {
 				peakSessions = sessions
+			}
+			if sessions == float64(limit) {
+				peakReachedAt = time.Now()
+				return true
 			}
 		}
 		state, stateErr := uacContainer.State(ctx)
@@ -1508,14 +1526,13 @@ func runConcurrentLoad(
 			return false
 		}
 		return !state.Running
-	}, contextTimeout(t, ctx), 500*time.Millisecond, "UAC container did not exit in time")
+	}, contextTimeout(t, ctx), 25*time.Millisecond, "concurrent sessions did not reach exactly %d", limit)
+	waitForContainerExit(ctx, t, uacContainer)
 	measureEnd := time.Now()
+	phases.MeasureEnd = measureEnd
 	sippDuration := measureEnd.Sub(measureStart)
 	resourceSummary := finishSteadyMeasurement(ctx, t, measurement, measureEnd)
-	generator, generatorErr := uacContainer.readGeneratorEvidence(ctx, t, PhaseTimestamps{
-		WarmupStart: measureStart, Ready: measureStart, MeasureStart: measureStart,
-		MeasureEnd: measureEnd, DrainEnd: measureEnd,
-	})
+	generator, generatorErr := uacContainer.readGeneratorEvidence(ctx, t, phases)
 	require.NoError(t, generatorErr)
 	evidenceAt := time.Now()
 
@@ -1528,11 +1545,14 @@ func runConcurrentLoad(
 	require.NoError(t, validatePostPhaseOrdering(measureEnd, evidenceAt, uasExitAt, stableTime))
 	drainTime := stableTime.Sub(measureEnd)
 	generator.Phases.DrainEnd = stableTime
+	generator.ActualRate = float64(callCount) / peakReachedAt.Sub(measureStart).Seconds()
+	require.NoError(t, generator.Validate(WorkloadSpec{Calls: callCount, Rate: float64(rate)}))
 
 	recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)
 	protocolsAfter := readProtocolCounters(t, env.endpoint)
 	protocols := protocolsAfter.delta(protocolsBefore)
 	packetsAfter := protocolsAfter.SIPPackets
+	errorsAfter := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
 	capture := newCaptureResult(expectedTotal, protocols.SIPPackets)
 	require.NoError(t, capture.ValidateExact())
 
@@ -1549,6 +1569,7 @@ func runConcurrentLoad(
 		PacketsBefore: packetsBefore,
 		PacketsAfter:  packetsAfter,
 		ActualPPS:     actualPPS,
+		ErrorCount:    errorsAfter - errorsBefore,
 		DrainTime:     drainTime,
 		PeakSessions:  peakSessions,
 		Resources:     resourceSummary,
