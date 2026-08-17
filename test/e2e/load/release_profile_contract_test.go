@@ -53,6 +53,18 @@ func TestReleaseProfileSpecs(t *testing.T) {
 			wantLimits:   peakLimits,
 			wantBusiness: map[string]float64{"invites": 2000, "peak_sessions": 2000},
 		},
+		{
+			name:        "multi NIC",
+			profile:     releaseMultiNICProfile(),
+			wantCalls:   45000,
+			wantRate:    1500,
+			wantLimits:  peakLimits,
+			wantScrapes: false,
+			wantBusiness: map[string]float64{
+				"invites_iface_1": 15000, "invites_iface_2": 15000, "invites_iface_3": 15000,
+				"cross_interface_series": 0, "unexpected_series": 0,
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -227,6 +239,20 @@ func TestReleaseProfileMutationMatrix(t *testing.T) {
 						"ser_loopback_yealink":         100,
 						"ser_loopback_grandstream":     100,
 						"unexpected_label_series":      0,
+					})
+			},
+		},
+		{
+			name:        "multi NIC",
+			businessKey: "invites_iface_1",
+			evidence: func() releaseRowEvidence {
+				profile := releaseMultiNICProfile()
+				generators := validMultiNICGenerators()
+				return releaseMultiNICRowFromLoad(profile, validReleaseLoadResult(profile), generators,
+					map[string]float64{
+						"invites_iface_1": 15000, "invites_iface_2": 15000,
+						"invites_iface_3": 15000, "cross_interface_series": 0,
+						"unexpected_series": 0,
 					})
 			},
 		},

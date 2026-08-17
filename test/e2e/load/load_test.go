@@ -772,7 +772,7 @@ func startSippContainer(
 	waitForExit bool,
 ) *startedSippContainer {
 	t.Helper()
-	return newSippContainer(ctx, t, args, sippVol, evidencePrefix, waitForExit, true)
+	return newSippContainer(ctx, t, args, sippVol, evidencePrefix, waitForExit, true, "host")
 }
 
 func prepareSippContainer(
@@ -783,7 +783,19 @@ func prepareSippContainer(
 	evidencePrefix string,
 ) *startedSippContainer {
 	t.Helper()
-	return newSippContainer(ctx, t, args, sippVol, evidencePrefix, false, false)
+	return newSippContainer(ctx, t, args, sippVol, evidencePrefix, false, false, "host")
+}
+
+func prepareSippContainerInPeerNetns(
+	ctx context.Context,
+	t *testing.T,
+	args []string,
+	sippVol, evidencePrefix, peerContainerID string,
+) *startedSippContainer {
+	t.Helper()
+	return newSippContainer(
+		ctx, t, args, sippVol, evidencePrefix, false, false, "container:"+peerContainerID,
+	)
 }
 
 func newSippContainer(
@@ -793,6 +805,7 @@ func newSippContainer(
 	sippVol string,
 	evidencePrefix string,
 	waitForExit, start bool,
+	networkMode string,
 ) *startedSippContainer {
 	t.Helper()
 
@@ -805,7 +818,7 @@ func newSippContainer(
 	if evidencePrefix != "" {
 		statsDir = t.TempDir()
 	}
-	req := sippContainerRequest(ctx, t, args, sippVol, statsDir, waitForExit)
+	req := sippContainerRequest(ctx, t, args, sippVol, statsDir, waitForExit, networkMode)
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
@@ -942,6 +955,7 @@ func sippContainerRequest(
 	args []string,
 	sippVol, statsDir string,
 	waitForExit bool,
+	networkMode string,
 ) testcontainers.ContainerRequest {
 	t.Helper()
 	cmd := append([]string(nil), args...)
@@ -953,7 +967,7 @@ func sippContainerRequest(
 
 	req := testcontainers.ContainerRequest{
 		Image:       sippImage,
-		NetworkMode: "host",
+		NetworkMode: container.NetworkMode(networkMode),
 		Cmd:         cmd,
 		Mounts:      mounts,
 	}

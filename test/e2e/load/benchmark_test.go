@@ -13,18 +13,23 @@ import (
 )
 
 const (
-	floodPacketsPerCall      = 1.0
-	fullCallPacketsPerCall   = 7.0
-	subtestTimeout           = 20 * time.Second
-	releaseDuration          = 30 * time.Second
-	nominalFullCallRate      = 1000
-	peakFullCallRate         = 1800
-	inviteFloodRate          = 5000
-	releaseConcurrentDialogs = 2000
-	concurrentCreationRate   = 100
-	carrierUARatePerType     = 900
-	carrierUACallsPerType    = carrierUARatePerType * int(releaseDuration/time.Second)
-	carrierUAStartSkewLimit  = time.Duration(float64(releaseDuration) * (1 - minOfferedRateRatio))
+	floodPacketsPerCall       = 1.0
+	fullCallPacketsPerCall    = 7.0
+	subtestTimeout            = 20 * time.Second
+	releaseDuration           = 30 * time.Second
+	nominalFullCallRate       = 1000
+	peakFullCallRate          = 1800
+	inviteFloodRate           = 5000
+	releaseConcurrentDialogs  = 2000
+	concurrentCreationRate    = 100
+	carrierUARatePerType      = 900
+	carrierUACallsPerType     = carrierUARatePerType * int(releaseDuration/time.Second)
+	carrierUAStartSkewLimit   = time.Duration(float64(releaseDuration) * (1 - minOfferedRateRatio))
+	multiNICCount             = 3
+	multiNICRatePerInterface  = 500
+	multiNICCallsPerInterface = multiNICRatePerInterface *
+		int(releaseDuration/time.Second)
+	multiNICStartSkewLimit = 600 * time.Millisecond
 )
 
 type releaseProfileSpec struct {
@@ -86,6 +91,87 @@ func releaseCarrierUAProfile() releaseProfileSpec {
 			"unexpected_label_series":      0,
 		},
 	}
+}
+
+func releaseMultiNICProfile() releaseProfileSpec {
+	return releaseProfileSpec{
+		Workload:       WorkloadSpec{Calls: 45000, Rate: 1500},
+		PacketsPerCall: floodPacketsPerCall,
+		Limits:         peakLimits,
+		Business: map[string]float64{
+			"invites_iface_1": 15000, "invites_iface_2": 15000, "invites_iface_3": 15000,
+			"cross_interface_series": 0, "unexpected_series": 0,
+		},
+	}
+}
+
+func releaseMultiNICRowFromLoad(
+	profile releaseProfileSpec,
+	result loadResult,
+	generators []GeneratorResult,
+	actualBusiness map[string]float64,
+) releaseRowEvidence {
+	evidence := releaseRowFromLoad(profile, result, actualBusiness, nil)
+	generatorSpec := WorkloadSpec{Calls: multiNICCallsPerInterface, Rate: multiNICRatePerInterface}
+	evidence.Generators = make([]releaseGeneratorEvidence, len(generators))
+	for i, generator := range generators {
+		evidence.Generators[i] = releaseGeneratorEvidence{Spec: generatorSpec, Result: generator}
+	}
+	return evidence
+}
+
+func validateMultiNICGeneratorOverlap(generators []GeneratorResult) error {
+	if len(generators) == 0 {
+		return fmt.Errorf("multi-NIC generators are missing")
+	}
+	earliestStart := generators[0].Phases.WarmupStart
+	latestStart := earliestStart
+	latestMeasureStart := generators[0].Phases.MeasureStart
+	earliestEnd := generators[0].Phases.MeasureEnd
+	for _, generator := range generators {
+		if generator.Phases.WarmupStart.IsZero() || generator.Phases.MeasureStart.IsZero() ||
+			generator.Phases.MeasureEnd.IsZero() {
+			return fmt.Errorf("multi-NIC generator interval is missing")
+		}
+		earliestStart = earlierTime(earliestStart, generator.Phases.WarmupStart)
+		latestStart = laterTime(latestStart, generator.Phases.WarmupStart)
+		latestMeasureStart = laterTime(latestMeasureStart, generator.Phases.MeasureStart)
+		earliestEnd = earlierTime(earliestEnd, generator.Phases.MeasureEnd)
+	}
+	if startSkew := latestStart.Sub(earliestStart); startSkew > multiNICStartSkewLimit {
+		return fmt.Errorf("multi-NIC generator start skew %v exceeds %v",
+			startSkew, multiNICStartSkewLimit)
+	}
+	if !latestMeasureStart.Before(earliestEnd) {
+		return fmt.Errorf("multi-NIC generator intervals do not overlap")
+	}
+	return nil
+}
+
+func aggregateMultiNICGenerators(generators []GeneratorResult) GeneratorResult {
+	var aggregate GeneratorResult
+	for _, generator := range generators {
+		aggregate.ExitCode = max(aggregate.ExitCode, generator.ExitCode)
+		aggregate.SuccessfulCalls += generator.SuccessfulCalls
+		aggregate.FailedCalls += generator.FailedCalls
+		aggregate.Retransmissions += generator.Retransmissions
+		aggregate.Phases.WarmupStart = earlierTime(
+			aggregate.Phases.WarmupStart, generator.Phases.WarmupStart,
+		)
+		aggregate.Phases.Ready = earlierTime(aggregate.Phases.Ready, generator.Phases.Ready)
+		aggregate.Phases.MeasureStart = earlierTime(
+			aggregate.Phases.MeasureStart, generator.Phases.MeasureStart,
+		)
+		aggregate.Phases.MeasureEnd = laterTime(
+			aggregate.Phases.MeasureEnd, generator.Phases.MeasureEnd,
+		)
+		aggregate.Phases.DrainEnd = laterTime(aggregate.Phases.DrainEnd, generator.Phases.DrainEnd)
+	}
+	measureDuration := aggregate.Phases.MeasureEnd.Sub(aggregate.Phases.MeasureStart)
+	if measureDuration > 0 {
+		aggregate.ActualRate = float64(aggregate.SuccessfulCalls) / measureDuration.Seconds()
+	}
+	return aggregate
 }
 
 func releaseCarrierUARowFromLoad(
@@ -237,7 +323,7 @@ func releaseBusinessMetricEntry(name string, value float64) MetricEntry {
 	switch {
 	case name == "ser" || strings.HasPrefix(name, "ser_"):
 		return MetricEntry{Value: value, Unit: "%", Direction: dirHigherIsBetter}
-	case strings.HasPrefix(name, "unexpected_"):
+	case strings.HasPrefix(name, "cross_") || strings.HasPrefix(name, "unexpected_"):
 		return MetricEntry{Value: value, Unit: "count", Direction: dirLowerIsBetter}
 	default:
 		return MetricEntry{Value: value, Unit: "count", Direction: dirHigherIsBetter}

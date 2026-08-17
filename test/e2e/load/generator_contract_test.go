@@ -16,7 +16,7 @@ func TestSIPpGeneratorRequestIsPinnedAndWritesStatistics(t *testing.T) {
 	statsDir := t.TempDir()
 	req := sippContainerRequest(t.Context(), t,
 		[]string{"-sf", "/scenarios/flood_uac.xml"},
-		"/host/scenarios", statsDir, true)
+		"/host/scenarios", statsDir, true, "host")
 
 	require.Contains(t, req.Image, "@sha256:")
 	require.NotContains(t, req.Image, ":latest")
