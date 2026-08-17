@@ -118,30 +118,24 @@ func resourceSampleFromStats(
 	if limits.CPUCores <= 0 || limits.MemoryBytes <= 0 {
 		return resourceSample{}, fmt.Errorf("invalid workload limits")
 	}
+	if stats.Read.IsZero() || stats.PreRead.IsZero() || !stats.Read.After(stats.PreRead) {
+		return resourceSample{}, fmt.Errorf("invalid Docker stats interval")
+	}
 	cpuUsage := stats.CPUStats.CPUUsage.TotalUsage
 	previousCPUUsage := stats.PreCPUStats.CPUUsage.TotalUsage
-	systemUsage := stats.CPUStats.SystemUsage
-	previousSystemUsage := stats.PreCPUStats.SystemUsage
-	if cpuUsage < previousCPUUsage || systemUsage <= previousSystemUsage {
+	if cpuUsage < previousCPUUsage {
 		return resourceSample{}, fmt.Errorf("invalid CPU stats delta")
 	}
 	cpuDelta := float64(cpuUsage - previousCPUUsage)
-	systemDelta := float64(systemUsage - previousSystemUsage)
-	onlineCPUs := stats.CPUStats.OnlineCPUs
-	if onlineCPUs == 0 {
-		onlineCPUs = uint32(len(stats.CPUStats.CPUUsage.PercpuUsage))
-	}
-	if onlineCPUs == 0 {
-		return resourceSample{}, fmt.Errorf("missing online CPU count")
-	}
-	cpuCoresUsed := cpuDelta / systemDelta * float64(onlineCPUs)
+	elapsed := float64(stats.Read.Sub(stats.PreRead))
+	cpuQuotaPercent := cpuDelta / elapsed / limits.CPUCores * 100
 	workingSet, err := workingSetBytes(stats.MemoryStats.Usage, stats.MemoryStats.Stats)
 	if err != nil {
 		return resourceSample{}, err
 	}
 	return resourceSample{
 		At:                  at,
-		CPUQuotaPercent:     cpuCoresUsed / limits.CPUCores * 100,
+		CPUQuotaPercent:     cpuQuotaPercent,
 		WorkingSetBytes:     workingSet,
 		CPUPeriods:          stats.CPUStats.ThrottlingData.Periods,
 		CPUThrottledPeriods: stats.CPUStats.ThrottlingData.ThrottledPeriods,

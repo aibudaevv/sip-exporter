@@ -347,12 +347,46 @@ func TestPercentileRejectsInvalidInput(t *testing.T) {
 
 func TestResourceSampleFromStatsNormalizesCPUToQuota(t *testing.T) {
 	at := time.Date(2026, 8, 14, 12, 0, 1, 0, time.UTC)
-	stats := validDockerStats(at)
+	validLimits := WorkloadLimits{CPUCores: 2, MemoryBytes: 256 << 20}
+	tests := []struct {
+		name   string
+		limits WorkloadLimits
+		mutate func(*container.StatsResponse)
+		want   float64
+	}{
+		{name: "one-core quota", limits: WorkloadLimits{CPUCores: 1, MemoryBytes: 256 << 20}, want: 100},
+		{name: "two-core quota", limits: validLimits, want: 50},
+		{name: "host delta ignored", limits: validLimits, mutate: func(s *container.StatsResponse) {
+			s.CPUStats.SystemUsage = s.PreCPUStats.SystemUsage
+		}, want: 50},
+		{name: "online CPU count ignored", limits: validLimits, mutate: func(s *container.StatsResponse) {
+			s.CPUStats.OnlineCPUs = 0
+			s.CPUStats.CPUUsage.PercpuUsage = nil
+		}, want: 50},
+		{name: "zero CPU delta", limits: validLimits, mutate: func(s *container.StatsResponse) {
+			s.CPUStats.CPUUsage.TotalUsage = s.PreCPUStats.CPUUsage.TotalUsage
+		}, want: 0},
+		{name: "above one hundred is not clamped", limits: WorkloadLimits{CPUCores: 1, MemoryBytes: 256 << 20}, mutate: func(s *container.StatsResponse) {
+			s.CPUStats.CPUUsage.TotalUsage = 2_500_000_000
+		}, want: 200},
+	}
 
-	got, err := resourceSampleFromStats(at, stats, WorkloadLimits{CPUCores: 2, MemoryBytes: 256 << 20})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stats := validDockerStats(at)
+			if tt.mutate != nil {
+				tt.mutate(&stats)
+			}
 
+			got, err := resourceSampleFromStats(at, stats, tt.limits)
+
+			require.NoError(t, err)
+			require.InDelta(t, tt.want, got.CPUQuotaPercent, 0.000001)
+		})
+	}
+
+	got, err := resourceSampleFromStats(at, validDockerStats(at), validLimits)
 	require.NoError(t, err)
-	require.InDelta(t, 50, got.CPUQuotaPercent, 0.000001)
 	require.Equal(t, uint64(80<<20), got.WorkingSetBytes)
 	require.Equal(t, uint64(100), got.CPUPeriods)
 	require.Equal(t, uint64(2), got.CPUThrottledPeriods)
@@ -367,8 +401,17 @@ func TestResourceSampleFromStatsRejectsInvalidInputs(t *testing.T) {
 	}{
 		{name: "zero CPU quota", limits: WorkloadLimits{MemoryBytes: 256 << 20}},
 		{name: "zero memory limit", limits: WorkloadLimits{CPUCores: 2}},
-		{name: "zero system delta", limits: WorkloadLimits{CPUCores: 2, MemoryBytes: 256 << 20}, mutate: func(s *container.StatsResponse) {
-			s.PreCPUStats.SystemUsage = s.CPUStats.SystemUsage
+		{name: "zero read timestamp", limits: WorkloadLimits{CPUCores: 2, MemoryBytes: 256 << 20}, mutate: func(s *container.StatsResponse) {
+			s.Read = time.Time{}
+		}},
+		{name: "zero previous timestamp", limits: WorkloadLimits{CPUCores: 2, MemoryBytes: 256 << 20}, mutate: func(s *container.StatsResponse) {
+			s.PreRead = time.Time{}
+		}},
+		{name: "equal timestamps", limits: WorkloadLimits{CPUCores: 2, MemoryBytes: 256 << 20}, mutate: func(s *container.StatsResponse) {
+			s.PreRead = s.Read
+		}},
+		{name: "reversed timestamps", limits: WorkloadLimits{CPUCores: 2, MemoryBytes: 256 << 20}, mutate: func(s *container.StatsResponse) {
+			s.PreRead = s.Read.Add(time.Nanosecond)
 		}},
 		{name: "CPU counter rollback", limits: WorkloadLimits{CPUCores: 2, MemoryBytes: 256 << 20}, mutate: func(s *container.StatsResponse) {
 			s.PreCPUStats.CPUUsage.TotalUsage = s.CPUStats.CPUUsage.TotalUsage + 1
@@ -422,15 +465,16 @@ func TestThrottlingPercentRejectsInvalidCounters(t *testing.T) {
 
 func validDockerStats(at time.Time) container.StatsResponse {
 	return container.StatsResponse{
-		Read: at,
+		Read:    at,
+		PreRead: at.Add(-time.Second),
 		CPUStats: container.CPUStats{
-			CPUUsage:       container.CPUUsage{TotalUsage: 3_000},
+			CPUUsage:       container.CPUUsage{TotalUsage: 1_500_000_000},
 			SystemUsage:    14_000,
 			OnlineCPUs:     4,
 			ThrottlingData: container.ThrottlingData{Periods: 100, ThrottledPeriods: 2},
 		},
 		PreCPUStats: container.CPUStats{
-			CPUUsage:    container.CPUUsage{TotalUsage: 2_000},
+			CPUUsage:    container.CPUUsage{TotalUsage: 500_000_000},
 			SystemUsage: 10_000,
 		},
 		MemoryStats: container.MemoryStats{

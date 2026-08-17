@@ -1198,11 +1198,7 @@ func (m *steadyMeasurement) collectDockerStats(ctx context.Context) {
 		if !measuring {
 			continue
 		}
-		at := stats.Read
-		if at.IsZero() {
-			at = time.Now()
-		}
-		sample, err := resourceSampleFromStats(at, stats, m.env.limits)
+		sample, err := resourceSampleFromStats(stats.Read, stats, m.env.limits)
 		if err != nil {
 			m.setMeasurementError(err)
 			continue
