@@ -2,7 +2,9 @@ version := $(shell cat VERSION)
 GOLANGCI_LINT_VERSION := v2.9.0
 .DEFAULT_GOAL := docker_build
 
-.PHONY: build docker_build ebpf_compile go_build clean ebpf_log lint lint-deps vet imports test test-e2e test-e2e-run test-rtp test-rtp-run test-load test-load-run test-load-rtp test-all vulncheck trivy-fs trivy-image security
+.PHONY: build docker_build ebpf_compile go_build clean ebpf_log lint lint-deps vet imports test test-e2e test-e2e-run test-rtp test-rtp-run test-load test-load-run test-load-rtp test-load-helper test-load-targeted test-load-release test-load-candidate test-all vulncheck trivy-fs trivy-image security
+
+load_release_tests := ^(TestReleaseFullCallNominal|TestReleaseSoak|TestReleaseINVITEFlood|TestReleaseConcurrentDialogs|TestReleaseCarrierUA|TestReleaseMultiInterface|TestReleaseFullCallPeak|TestReleaseVQMixed)$$
 
 build: ebpf_compile go_build
 docker_build:
@@ -58,6 +60,51 @@ test-load: docker_build
 test-load-run: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
 		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run "$(TEST)" ./test/e2e/load/...
+
+test-load-helper: docker_build
+	@test -n "$(TEST)" || (echo "TEST is required"; exit 2)
+	env -u SIP_EXPORTER_LOAD_MODE -u SIP_EXPORTER_LOAD_ARTIFACT_DIR \
+		SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
+		TESTCONTAINERS_VERBOSE=false \
+		SIP_EXPORTER_LOAD_FINALIZE_MODE="$(SIP_EXPORTER_LOAD_FINALIZE_MODE)" \
+		SIP_EXPORTER_LOAD_FINALIZE_ARTIFACT_DIR="$(ARTIFACT_DIR)" \
+		SIP_EXPORTER_LOAD_FINALIZE_BASELINE="$(BASELINE)" \
+		go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run "$(TEST)" ./test/e2e/load/...
+
+test-load-targeted: docker_build
+	@test -n "$(TEST)" || (echo "TEST is required"; exit 2)
+	@test -n "$(ARTIFACT_DIR)" || (echo "ARTIFACT_DIR is required"; exit 2)
+	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
+		TESTCONTAINERS_VERBOSE=false \
+		SIP_EXPORTER_LOAD_MODE=targeted \
+		SIP_EXPORTER_LOAD_ARTIFACT_DIR="$(ARTIFACT_DIR)" \
+		go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run "$(TEST)" ./test/e2e/load/...
+
+test-load-release: docker_build
+	@test -n "$(ARTIFACT_DIR)" || (echo "ARTIFACT_DIR is required"; exit 2)
+	@test -n "$(BASELINE)" || (echo "BASELINE is required"; exit 2)
+	@for run in 1 2 3; do \
+		SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
+		TESTCONTAINERS_VERBOSE=false \
+		SIP_EXPORTER_LOAD_MODE=release \
+		SIP_EXPORTER_LOAD_ARTIFACT_DIR="$(ARTIFACT_DIR)/run-$$run" \
+		go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run '$(load_release_tests)' ./test/e2e/load/... || exit $$?; \
+	done
+	SIP_EXPORTER_LOAD_FINALIZE_MODE=release $(MAKE) test-load-helper \
+		TEST='^TestFinalizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" version="$(version)"
+
+test-load-candidate: docker_build
+	@test -n "$(ARTIFACT_DIR)" || (echo "ARTIFACT_DIR is required"; exit 2)
+	@test -z "$(BASELINE)" || (echo "BASELINE is not accepted for candidate mode"; exit 2)
+	@for run in 1 2 3 4 5; do \
+		SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
+		TESTCONTAINERS_VERBOSE=false \
+		SIP_EXPORTER_LOAD_MODE=candidate \
+		SIP_EXPORTER_LOAD_ARTIFACT_DIR="$(ARTIFACT_DIR)/run-$$run" \
+		go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run '$(load_release_tests)' ./test/e2e/load/... || exit $$?; \
+	done
+	SIP_EXPORTER_LOAD_FINALIZE_MODE=candidate $(MAKE) test-load-helper \
+		TEST='^TestFinalizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" version="$(version)"
 
 test-load-rtp: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
