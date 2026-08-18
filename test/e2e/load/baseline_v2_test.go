@@ -6,6 +6,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -376,7 +377,8 @@ func thresholdPolicy(scenario string, metric AggregatedMetricV2) (float64, error
 			return 0, fmt.Errorf("metric %q must be lower-is-better", metric.Name)
 		}
 		return 10, nil
-	case "cpu_p95_percent", "working_set_p99_mb":
+	case "cpu_p95_percent", "working_set_p99_mb", "working_set_first_minute_median_mb",
+		"working_set_last_minute_median_mb", "working_set_growth_mb":
 		if metric.Direction != dirLowerIsBetter {
 			return 0, fmt.Errorf("metric %q must be lower-is-better", metric.Name)
 		}
@@ -668,8 +670,9 @@ func classifyMetricV2(
 		}
 		return StatusImprovement
 	}
-	lower := baseline * (1 - tolerance/100)
-	upper := baseline * (1 + tolerance/100)
+	margin := math.Abs(baseline) * tolerance / 100
+	lower := baseline - margin
+	upper := baseline + margin
 	if direction == dirHigherIsBetter {
 		switch {
 		case current < lower:

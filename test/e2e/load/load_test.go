@@ -69,19 +69,20 @@ type (
 	}
 
 	loadResult struct {
-		Duration      time.Duration
-		Generator     GeneratorResult
-		Capture       CaptureResult
-		Protocols     ProtocolCounters
-		PacketsBefore float64
-		PacketsAfter  float64
-		ActualPPS     float64
-		ExpectedPPS   float64
-		LossRate      float64
-		ErrorCount    float64
-		DrainTime     time.Duration
-		PeakSessions  float64
-		Resources     ResourceSummaryV2
+		Duration        time.Duration
+		Generator       GeneratorResult
+		Capture         CaptureResult
+		Protocols       ProtocolCounters
+		PacketsBefore   float64
+		PacketsAfter    float64
+		ActualPPS       float64
+		ExpectedPPS     float64
+		LossRate        float64
+		ErrorCount      float64
+		DrainTime       time.Duration
+		PeakSessions    float64
+		Resources       ResourceSummaryV2
+		ResourceSamples ResourceSamplesV2
 	}
 
 	steadyMeasurement struct {
@@ -1326,12 +1327,22 @@ func finishSteadyMeasurement(
 	measurement *steadyMeasurement,
 	end time.Time,
 ) ResourceSummaryV2 {
+	summary, _ := finishSteadyMeasurementWithSamples(ctx, t, measurement, end)
+	return summary
+}
+
+func finishSteadyMeasurementWithSamples(
+	ctx context.Context,
+	t *testing.T,
+	measurement *steadyMeasurement,
+	end time.Time,
+) (ResourceSummaryV2, ResourceSamplesV2) {
 	t.Helper()
 	summary, samples, err := measurement.End(ctx, end)
 	require.NoError(t, err)
 	require.NoError(t, validateAbsoluteResourceGates(summary))
 	recordRawResourceSamples(t, samples)
-	return summary
+	return summary, samples
 }
 
 func measureSteadySnapshot(
@@ -1418,7 +1429,7 @@ func runSippLoad(
 	}
 
 	measureEnd := phases.MeasureEnd
-	resourceSummary := finishSteadyMeasurement(ctx, t, measurement, measureEnd)
+	resourceSummary, resourceSamples := finishSteadyMeasurementWithSamples(ctx, t, measurement, measureEnd)
 	postPhase := make([]time.Time, 0, 3)
 	if uasContainer != nil {
 		waitForContainerExit(ctx, t, uasContainer)
@@ -1453,18 +1464,19 @@ func runSippLoad(
 	expectedPPS := float64(rate) * packetsPerCall
 
 	result := loadResult{
-		Duration:      sippDuration,
-		Generator:     generator,
-		Capture:       capture,
-		Protocols:     protocols,
-		PacketsBefore: packetsBefore,
-		PacketsAfter:  packetsAfter,
-		ActualPPS:     actualPPS,
-		ExpectedPPS:   expectedPPS,
-		LossRate:      capture.LossPct / 100,
-		ErrorCount:    errorsAfter - errorsBefore,
-		DrainTime:     drainTime,
-		Resources:     resourceSummary,
+		Duration:        sippDuration,
+		Generator:       generator,
+		Capture:         capture,
+		Protocols:       protocols,
+		PacketsBefore:   packetsBefore,
+		PacketsAfter:    packetsAfter,
+		ActualPPS:       actualPPS,
+		ExpectedPPS:     expectedPPS,
+		LossRate:        capture.LossPct / 100,
+		ErrorCount:      errorsAfter - errorsBefore,
+		DrainTime:       drainTime,
+		Resources:       resourceSummary,
+		ResourceSamples: resourceSamples,
 	}
 	recordLoadResultEvidence(t, result)
 

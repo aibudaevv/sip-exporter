@@ -17,6 +17,8 @@ const (
 	fullCallPacketsPerCall    = 7.0
 	subtestTimeout            = 20 * time.Second
 	releaseDuration           = 30 * time.Second
+	releaseSoakDuration       = 10 * time.Minute
+	releaseSoakRate           = 500
 	nominalFullCallRate       = 1000
 	peakFullCallRate          = 1800
 	inviteFloodRate           = 5000
@@ -60,6 +62,15 @@ func releaseFullCallPeakProfile() releaseProfileSpec {
 		Limits:         peakLimits,
 		RequireScrapes: true,
 		Business:       map[string]float64{"invites": float64(peakFullCallRate * int(releaseDuration/time.Second)), "ser": 100},
+	}
+}
+
+func releaseSoakProfile() releaseProfileSpec {
+	return releaseProfileSpec{
+		Workload:       WorkloadSpec{Calls: releaseSoakRate * int(releaseSoakDuration/time.Second), Rate: releaseSoakRate},
+		PacketsPerCall: fullCallPacketsPerCall,
+		Limits:         nominalLimits,
+		Business:       map[string]float64{"invites": float64(releaseSoakRate * int(releaseSoakDuration/time.Second)), "ser": 100},
 	}
 }
 
@@ -330,6 +341,24 @@ func TestReleaseFullCallNominal(t *testing.T) {
 	recordReleaseResult(t, result, map[string]float64{"invites": invites, "ser": ser}, nil)
 }
 
+func TestReleaseSoak(t *testing.T) {
+	profile := releaseSoakProfile()
+	beginScenario(t)
+	env := newTestEnvWithLimits(t.Context(), t, profile.Limits)
+	result := runSippLoad(t.Context(), t, "call_highrate_uas.xml", "call_highrate_uac.xml",
+		profile.Workload.Calls, int(profile.Workload.Rate), profile.PacketsPerCall, env)
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_invite_total"))
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"))
+	invites := getMetric(t, env.endpoint, "sip_exporter_invite_total")
+	ser := getMetric(t, env.endpoint, "sip_exporter_ser")
+	growth, err := summarizeSoakWorkingSet(result.ResourceSamples.Resources,
+		result.Generator.Phases.MeasureStart, result.Generator.Phases.MeasureEnd)
+	require.NoError(t, err)
+	require.NoError(t, validateReleaseRow(releaseRowSpec{}, releaseRowFromLoad(profile, result,
+		map[string]float64{"invites": invites, "ser": ser}, nil)))
+	recordSoakReleaseResult(t, result, map[string]float64{"invites": invites, "ser": ser}, growth)
+}
+
 func TestReleaseINVITEFlood(t *testing.T) {
 	profile := releaseINVITEFloodProfile()
 	beginScenario(t)
@@ -373,6 +402,31 @@ func recordReleaseResult(
 		metrics["scrape_p50_ms"] = MetricEntry{Value: scrapes.P50MS, Unit: "ms", Direction: dirLowerIsBetter}
 		metrics["scrape_p95_ms"] = MetricEntry{Value: scrapes.P95MS, Unit: "ms", Direction: dirLowerIsBetter}
 		metrics["scrape_p99_ms"] = MetricEntry{Value: scrapes.P99MS, Unit: "ms", Direction: dirLowerIsBetter}
+	}
+	recordResult(t, metrics)
+}
+
+func recordSoakReleaseResult(
+	t *testing.T,
+	result loadResult,
+	business map[string]float64,
+	growth soakWorkingSetGrowth,
+) {
+	t.Helper()
+	metrics := resourceMetricEntries(result.Resources)
+	metrics["generator_cps"] = MetricEntry{Value: result.Generator.ActualRate, Unit: "cps", Direction: dirHigherIsBetter}
+	metrics["system_errors"] = MetricEntry{Value: result.ErrorCount, Unit: "count", Direction: dirLowerIsBetter}
+	for name, value := range business {
+		metrics[name] = releaseBusinessMetricEntry(name, value)
+	}
+	metrics["working_set_first_minute_median_mb"] = MetricEntry{
+		Value: growth.FirstMinuteMedianMB, Unit: "MiB", Direction: dirLowerIsBetter,
+	}
+	metrics["working_set_last_minute_median_mb"] = MetricEntry{
+		Value: growth.LastMinuteMedianMB, Unit: "MiB", Direction: dirLowerIsBetter,
+	}
+	metrics["working_set_growth_mb"] = MetricEntry{
+		Value: growth.GrowthMB, Unit: "MiB", Direction: dirLowerIsBetter,
 	}
 	recordResult(t, metrics)
 }

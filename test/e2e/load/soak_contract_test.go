@@ -139,6 +139,21 @@ func TestNewSoakWorkingSetGrowthRejectsNonFiniteValues(t *testing.T) {
 	}
 }
 
+func TestReleaseSoakWorkingSetUsesRawLoadSamples(t *testing.T) {
+	start := time.Date(2026, time.August, 18, 10, 0, 0, 0, time.UTC)
+	result := loadResult{ResourceSamples: ResourceSamplesV2{Resources: []resourceSample{
+		{At: start, WorkingSetBytes: 64 << 20},
+		{At: start.Add(9*time.Minute + 30*time.Second), WorkingSetBytes: 72 << 20},
+	}}}
+
+	growth, err := summarizeSoakWorkingSet(result.ResourceSamples.Resources, start, start.Add(10*time.Minute))
+
+	require.NoError(t, err)
+	require.Equal(t, soakWorkingSetGrowth{
+		FirstMinuteMedianMB: 64, LastMinuteMedianMB: 72, GrowthMB: 8, AllowedGrowthMB: 8,
+	}, growth)
+}
+
 func TestParsePostDrainSnapshot(t *testing.T) {
 	body := []byte("sip_exporter_channel_length 0\n" +
 		"sip_exporter_active_dialogs 0\n" +

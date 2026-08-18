@@ -429,6 +429,9 @@ func TestThresholdPolicyClassifiesCanonicalResourceMetrics(t *testing.T) {
 	}{
 		{name: "CPU", scenario: "TestLoad/row", metric: "cpu_p95_percent", want: 10},
 		{name: "working set", scenario: "TestLoad/row", metric: "working_set_p99_mb", want: 10},
+		{name: "soak first minute working set", scenario: "TestReleaseSoak", metric: "working_set_first_minute_median_mb", want: 10},
+		{name: "soak last minute working set", scenario: "TestReleaseSoak", metric: "working_set_last_minute_median_mb", want: 10},
+		{name: "soak working set growth", scenario: "TestReleaseSoak", metric: "working_set_growth_mb", want: 10},
 		{name: "throttling", scenario: "TestLoad/row", metric: "throttling_percent"},
 		{name: "channel", scenario: "TestLoad/row", metric: "channel_peak"},
 		{name: "socket drops", scenario: "TestLoad/row", metric: "socket_drops"},
@@ -782,6 +785,47 @@ func TestClassifyMetricV2ThresholdBoundaries(t *testing.T) {
 			require.Equal(t, tt.want, classifyMetricV2(100, tt.current, tt.tolerance, tt.direction))
 		})
 	}
+}
+
+func TestClassifyMetricV2NegativeLowerBaselineThresholdBoundaries(t *testing.T) {
+	tests := []struct {
+		name    string
+		current float64
+		want    ComparisonStatus
+	}{
+		{name: "identical", current: -10, want: StatusOK},
+		{name: "upper boundary", current: -9, want: StatusOK},
+		{name: "above upper boundary", current: math.Nextafter(-9, math.Inf(1)), want: StatusRegression},
+		{name: "lower boundary", current: -11, want: StatusOK},
+		{name: "below lower boundary", current: math.Nextafter(-11, math.Inf(-1)), want: StatusImprovement},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, classifyMetricV2(-10, tt.current, 10, dirLowerIsBetter))
+		})
+	}
+}
+
+func TestCompareReleaseAcceptsIdenticalNegativeWorkingSetGrowth(t *testing.T) {
+	baseline, current := validReleaseComparisonPair(t)
+	baseline.Results[0].Metrics = append(baseline.Results[0].Metrics, BaselineMetricV2{
+		Name: "working_set_growth_mb", Median: -10, Unit: "MiB", Direction: dirLowerIsBetter, TolerancePct: 10,
+	})
+	current.Results[0].Metrics = append(current.Results[0].Metrics, AggregatedMetricV2{
+		Name: "working_set_growth_mb", Median: -10, Unit: "MiB", Direction: dirLowerIsBetter,
+	})
+
+	report, err := compareRelease(baseline, current)
+
+	require.NoError(t, err)
+	for _, entry := range report.Entries {
+		if entry.Metric == "working_set_growth_mb" {
+			require.Equal(t, StatusOK, entry.Status)
+			return
+		}
+	}
+	t.Fatal("working_set_growth_mb is missing from comparison report")
 }
 
 func TestClassifyMetricV2ZeroBaselineFailsClosed(t *testing.T) {

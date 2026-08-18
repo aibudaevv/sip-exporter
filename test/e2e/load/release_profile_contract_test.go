@@ -38,6 +38,14 @@ func TestReleaseProfileSpecs(t *testing.T) {
 			wantBusiness: map[string]float64{"invites": 54000, "ser": 100},
 		},
 		{
+			name:         "ten minute soak",
+			profile:      releaseSoakProfile(),
+			wantCalls:    300000,
+			wantRate:     500,
+			wantLimits:   nominalLimits,
+			wantBusiness: map[string]float64{"invites": 300000, "ser": 100},
+		},
+		{
 			name:         "invite flood",
 			profile:      releaseINVITEFloodProfile(),
 			wantCalls:    150000,
@@ -171,6 +179,25 @@ func TestReleaseProfileBusinessEvidence(t *testing.T) {
 			name:    "full call peak",
 			profile: releaseFullCallPeakProfile(),
 			actual:  map[string]float64{"invites": 54000, "ser": 100},
+		},
+		{
+			name:    "ten minute soak",
+			profile: releaseSoakProfile(),
+			actual:  map[string]float64{"invites": 300000, "ser": 100},
+		},
+		{
+			name:    "ten minute soak invite mutation",
+			profile: releaseSoakProfile(),
+			actual:  map[string]float64{"invites": 300000, "ser": 100},
+			mutate:  func(actual map[string]float64) { actual["invites"] = 299999 },
+			wantErr: true,
+		},
+		{
+			name:    "ten minute soak ser mutation",
+			profile: releaseSoakProfile(),
+			actual:  map[string]float64{"invites": 300000, "ser": 100},
+			mutate:  func(actual map[string]float64) { actual["ser"] = 99 },
+			wantErr: true,
 		},
 		{
 			name:    "full call peak invite mutation",
@@ -565,6 +592,37 @@ func TestRecordReleaseResultIncludesSystemErrors(t *testing.T) {
 	run := recorder.Snapshot()
 	require.Equal(t, MetricEntry{Value: 0, Unit: "count", Direction: dirLowerIsBetter},
 		run.Results[0].Metrics["system_errors"])
+}
+
+func TestRecordSoakReleaseResultIncludesWorkingSetGrowth(t *testing.T) {
+	recorder, err := newRunRecorderV2(runModeTargeted, t.TempDir(),
+		validRunArtifactV2().Environment, "3addda1", time.Now())
+	require.NoError(t, err)
+	previous := activeRunRecorder
+	activeRunRecorder = recorder
+	t.Cleanup(func() { activeRunRecorder = previous })
+
+	t.Run("row", func(t *testing.T) {
+		beginScenario(t)
+		profile := releaseSoakProfile()
+		recordScenarioLimits(t, profile.Limits)
+		result := validReleaseLoadResult(profile)
+		recordLoadResultEvidence(t, result)
+		recordSoakReleaseResult(t, result, profile.Business, soakWorkingSetGrowth{
+			FirstMinuteMedianMB: 64, LastMinuteMedianMB: 72, GrowthMB: 8, AllowedGrowthMB: 8,
+		})
+	})
+
+	run := recorder.Snapshot()
+	require.Equal(t, map[string]MetricEntry{
+		"working_set_first_minute_median_mb": {Value: 64, Unit: "MiB", Direction: dirLowerIsBetter},
+		"working_set_last_minute_median_mb":  {Value: 72, Unit: "MiB", Direction: dirLowerIsBetter},
+		"working_set_growth_mb":              {Value: 8, Unit: "MiB", Direction: dirLowerIsBetter},
+	}, map[string]MetricEntry{
+		"working_set_first_minute_median_mb": run.Results[0].Metrics["working_set_first_minute_median_mb"],
+		"working_set_last_minute_median_mb":  run.Results[0].Metrics["working_set_last_minute_median_mb"],
+		"working_set_growth_mb":              run.Results[0].Metrics["working_set_growth_mb"],
+	})
 }
 
 func validReleaseLoadResult(profile releaseProfileSpec) loadResult {
