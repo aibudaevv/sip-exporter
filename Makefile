@@ -69,6 +69,8 @@ test-load-helper: docker_build
 		SIP_EXPORTER_LOAD_FINALIZE_MODE="$(SIP_EXPORTER_LOAD_FINALIZE_MODE)" \
 		SIP_EXPORTER_LOAD_FINALIZE_ARTIFACT_DIR="$(ARTIFACT_DIR)" \
 		SIP_EXPORTER_LOAD_FINALIZE_BASELINE="$(BASELINE)" \
+		SIP_EXPORTER_LOAD_PREFLIGHT_MODE="$(SIP_EXPORTER_LOAD_PREFLIGHT_MODE)" \
+		SIP_EXPORTER_LOAD_PREFLIGHT_BASELINE="$(BASELINE)" \
 		go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run "$(TEST)" ./test/e2e/load/...
 
 test-load-targeted: docker_build
@@ -83,6 +85,8 @@ test-load-targeted: docker_build
 test-load-release: docker_build
 	@test -n "$(ARTIFACT_DIR)" || (echo "ARTIFACT_DIR is required"; exit 2)
 	@test -n "$(BASELINE)" || (echo "BASELINE is required"; exit 2)
+	SIP_EXPORTER_LOAD_PREFLIGHT_MODE=release $(MAKE) test-load-helper \
+		TEST='^TestPreflightLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" version="$(version)"
 	@for run in 1 2 3; do \
 		SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
 		TESTCONTAINERS_VERBOSE=false \
@@ -96,6 +100,8 @@ test-load-release: docker_build
 test-load-candidate: docker_build
 	@test -n "$(ARTIFACT_DIR)" || (echo "ARTIFACT_DIR is required"; exit 2)
 	@test -z "$(BASELINE)" || (echo "BASELINE is not accepted for candidate mode"; exit 2)
+	SIP_EXPORTER_LOAD_PREFLIGHT_MODE=candidate $(MAKE) test-load-helper \
+		TEST='^TestPreflightLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" version="$(version)"
 	@for run in 1 2 3 4 5; do \
 		SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
 		TESTCONTAINERS_VERBOSE=false \

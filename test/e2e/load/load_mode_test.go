@@ -3,6 +3,7 @@
 package load
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,10 +15,69 @@ import (
 )
 
 const (
-	loadFinalizeModeEnv         = "SIP_EXPORTER_LOAD_FINALIZE_MODE"
-	loadFinalizeArtifactDirEnv  = "SIP_EXPORTER_LOAD_FINALIZE_ARTIFACT_DIR"
-	loadFinalizeBaselinePathEnv = "SIP_EXPORTER_LOAD_FINALIZE_BASELINE"
+	loadFinalizeModeEnv          = "SIP_EXPORTER_LOAD_FINALIZE_MODE"
+	loadFinalizeArtifactDirEnv   = "SIP_EXPORTER_LOAD_FINALIZE_ARTIFACT_DIR"
+	loadFinalizeBaselinePathEnv  = "SIP_EXPORTER_LOAD_FINALIZE_BASELINE"
+	loadPreflightModeEnv         = "SIP_EXPORTER_LOAD_PREFLIGHT_MODE"
+	loadPreflightBaselinePathEnv = "SIP_EXPORTER_LOAD_PREFLIGHT_BASELINE"
 )
+
+func validateLoadPreflight(mode runMode, baseline *BaselineV2, current BenchmarkFingerprint) error {
+	if err := current.validate(); err != nil {
+		return fmt.Errorf("validate current fingerprint: %w", err)
+	}
+	switch mode {
+	case runModeCandidate:
+		if baseline != nil {
+			return fmt.Errorf("candidate preflight does not accept a baseline")
+		}
+		return nil
+	case runModeRelease:
+		if baseline == nil {
+			return fmt.Errorf("release preflight requires an accepted baseline")
+		}
+		if err := baseline.Validate(); err != nil {
+			return fmt.Errorf("validate release baseline: %w", err)
+		}
+		if baseline.Kind != baselineKindAccepted {
+			return fmt.Errorf("baseline kind %q is not accepted", baseline.Kind)
+		}
+		if !baseline.Fingerprint.compatible(current) {
+			return fmt.Errorf("release fingerprint does not match accepted baseline")
+		}
+		return nil
+	default:
+		return fmt.Errorf("run mode %q cannot be preflighted", mode)
+	}
+}
+
+func runLoadPreflight(ctx context.Context, mode runMode, baselinePath string) error {
+	if mode != runModeCandidate && mode != runModeRelease {
+		return fmt.Errorf("run mode %q cannot be preflighted", mode)
+	}
+
+	var baseline *BaselineV2
+	if mode == runModeRelease {
+		if baselinePath == "" {
+			return fmt.Errorf("release preflight requires an accepted baseline")
+		}
+		data, err := os.ReadFile(baselinePath)
+		if err != nil {
+			return fmt.Errorf("read release preflight baseline: %w", err)
+		}
+		decoded, err := decodeBaselineV2(data)
+		if err != nil {
+			return fmt.Errorf("decode release preflight baseline: %w", err)
+		}
+		baseline = &decoded
+	}
+
+	environment, err := collectEnvironmentFingerprint(ctx)
+	if err != nil {
+		return fmt.Errorf("collect preflight environment fingerprint: %w", err)
+	}
+	return validateLoadPreflight(mode, baseline, benchmarkFingerprint(environment))
+}
 
 func finalizeLoadMode(root string, mode runMode, baselinePath string) error {
 	runs, err := readLoadModeRuns(root, mode)
@@ -112,6 +172,17 @@ func TestFinalizeLoadMode(t *testing.T) {
 	require.Nil(t, activeRunRecorder)
 }
 
+func TestPreflightLoadMode(t *testing.T) {
+	mode, baselinePath, enabled, err := loadPreflightFromEnvironment()
+	require.NoError(t, err)
+	if !enabled {
+		t.Skip("load mode preflight is disabled")
+	}
+	require.Nil(t, activeRunRecorder)
+	require.NoError(t, runLoadPreflight(t.Context(), mode, baselinePath))
+	require.Nil(t, activeRunRecorder)
+}
+
 func loadFinalizeModeFromEnvironment() (runMode, string, string, bool, error) {
 	mode := runMode(os.Getenv(loadFinalizeModeEnv))
 	root := os.Getenv(loadFinalizeArtifactDirEnv)
@@ -132,4 +203,22 @@ func loadFinalizeModeFromEnvironment() (runMode, string, string, bool, error) {
 		return "", "", "", false, fmt.Errorf("candidate finalize baseline path is not allowed")
 	}
 	return mode, root, baselinePath, true, nil
+}
+
+func loadPreflightFromEnvironment() (runMode, string, bool, error) {
+	mode := runMode(os.Getenv(loadPreflightModeEnv))
+	baselinePath := os.Getenv(loadPreflightBaselinePathEnv)
+	if mode == "" && baselinePath == "" {
+		return "", "", false, nil
+	}
+	if mode != runModeRelease && mode != runModeCandidate {
+		return "", "", false, fmt.Errorf("invalid load preflight mode %q", mode)
+	}
+	if mode == runModeRelease && baselinePath == "" {
+		return "", "", false, fmt.Errorf("release preflight baseline path is empty")
+	}
+	if mode == runModeCandidate && baselinePath != "" {
+		return "", "", false, fmt.Errorf("candidate preflight baseline path is not allowed")
+	}
+	return mode, baselinePath, true, nil
 }

@@ -51,6 +51,140 @@ func TestLoadFinalizeModeFromEnvironment(t *testing.T) {
 	}
 }
 
+func TestValidateLoadPreflight(t *testing.T) {
+	acceptedBaseline := validBaselineV2()
+	validFingerprint := acceptedBaseline.Fingerprint
+	candidateBaseline := acceptedBaseline
+	candidateBaseline.Kind = baselineKindCandidate
+
+	tests := []struct {
+		name     string
+		mode     runMode
+		baseline *BaselineV2
+		current  BenchmarkFingerprint
+		wantErr  string
+	}{
+		{name: "candidate current fingerprint", mode: runModeCandidate, current: validFingerprint},
+		{name: "candidate baseline forbidden", mode: runModeCandidate,
+			baseline: &acceptedBaseline, current: validFingerprint, wantErr: "candidate"},
+		{name: "release accepted baseline", mode: runModeRelease,
+			baseline: &acceptedBaseline, current: validFingerprint},
+		{name: "release baseline missing", mode: runModeRelease,
+			current: validFingerprint, wantErr: "baseline"},
+		{name: "release candidate baseline rejected", mode: runModeRelease,
+			baseline: &candidateBaseline, current: validFingerprint, wantErr: "not accepted"},
+		{name: "targeted mode rejected", mode: runModeTargeted,
+			current: validFingerprint, wantErr: "mode"},
+		{name: "invalid current fingerprint", mode: runModeCandidate,
+			current: BenchmarkFingerprint{}, wantErr: "fingerprint"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateLoadPreflight(tt.mode, tt.baseline, tt.current)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestValidateLoadPreflightRejectsEveryFingerprintMismatch(t *testing.T) {
+	baseline := validBaselineV2()
+	validFingerprint := baseline.Fingerprint
+	tests := []struct {
+		name   string
+		mutate func(*BenchmarkFingerprint)
+	}{
+		{name: "OS", mutate: func(fingerprint *BenchmarkFingerprint) { fingerprint.OS = "darwin" }},
+		{name: "architecture", mutate: func(fingerprint *BenchmarkFingerprint) { fingerprint.Arch = "arm64" }},
+		{name: "Go version", mutate: func(fingerprint *BenchmarkFingerprint) { fingerprint.GoVersion = "go1.26.7" }},
+		{name: "kernel version", mutate: func(fingerprint *BenchmarkFingerprint) { fingerprint.KernelVersion = "6.13.0" }},
+		{name: "Docker version", mutate: func(fingerprint *BenchmarkFingerprint) { fingerprint.DockerVersion = "29.0.0" }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			current := validFingerprint
+			tt.mutate(&current)
+			require.ErrorContains(t,
+				validateLoadPreflight(runModeRelease, &baseline, current), "fingerprint")
+		})
+	}
+}
+
+func TestLoadPreflightFromEnvironment(t *testing.T) {
+	tests := []struct {
+		name        string
+		mode        string
+		baseline    string
+		wantEnabled bool
+		wantMode    runMode
+		wantErr     string
+	}{
+		{name: "unset"},
+		{name: "release", mode: "release", baseline: "/tmp/baseline-v2.json", wantEnabled: true, wantMode: runModeRelease},
+		{name: "candidate", mode: "candidate", wantEnabled: true, wantMode: runModeCandidate},
+		{name: "missing release baseline", mode: "release", wantErr: "baseline"},
+		{name: "candidate baseline", mode: "candidate", baseline: "/tmp/baseline-v2.json", wantErr: "candidate"},
+		{name: "targeted mode", mode: "targeted", wantErr: "mode"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(loadPreflightModeEnv, tt.mode)
+			t.Setenv(loadPreflightBaselinePathEnv, tt.baseline)
+
+			mode, baselinePath, enabled, err := loadPreflightFromEnvironment()
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.wantMode, mode)
+			require.Equal(t, tt.baseline, baselinePath)
+			require.Equal(t, tt.wantEnabled, enabled)
+		})
+	}
+}
+
+func TestRunLoadPreflight(t *testing.T) {
+	fingerprint, err := collectEnvironmentFingerprint(t.Context())
+	require.NoError(t, err)
+	baseline := validBaselineV2()
+	baseline.Fingerprint = benchmarkFingerprint(fingerprint)
+	baselinePath := filepath.Join(t.TempDir(), "baseline-v2.json")
+	writeLoadModeBaseline(t, baselinePath, baseline)
+
+	require.NoError(t, runLoadPreflight(t.Context(), runModeCandidate, ""))
+	require.NoError(t, runLoadPreflight(t.Context(), runModeRelease, baselinePath))
+}
+
+func TestRunLoadPreflightRejectsUnreadableOrInvalidBaseline(t *testing.T) {
+	tests := []struct {
+		name     string
+		contents []byte
+		wantErr  string
+	}{
+		{name: "missing", wantErr: "read release preflight baseline"},
+		{name: "invalid JSON", contents: []byte("{"), wantErr: "decode release preflight baseline"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			baselinePath := filepath.Join(t.TempDir(), "baseline-v2.json")
+			if tt.contents != nil {
+				require.NoError(t, os.WriteFile(baselinePath, tt.contents, 0o644))
+			}
+
+			require.ErrorContains(t,
+				runLoadPreflight(t.Context(), runModeRelease, baselinePath), tt.wantErr)
+		})
+	}
+}
+
 func writeLoadModeRuns(t *testing.T, root string, mode runMode, count int) []RunArtifactV2 {
 	t.Helper()
 	runs := runArtifactsForAggregation(mode, count)
