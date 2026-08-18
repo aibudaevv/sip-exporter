@@ -29,7 +29,11 @@ const (
 	multiNICRatePerInterface  = 500
 	multiNICCallsPerInterface = multiNICRatePerInterface *
 		int(releaseDuration/time.Second)
-	multiNICStartSkewLimit = 600 * time.Millisecond
+	multiNICStartSkewLimit   = 600 * time.Millisecond
+	vqMixedGeneratorCount    = 3
+	vqMixedCallsPerGenerator = 10000
+	vqMixedGeneratorRate     = 1000.0 / vqMixedGeneratorCount
+	vqMixedStartSkewLimit    = 600 * time.Millisecond
 )
 
 type releaseProfileSpec struct {
@@ -105,6 +109,24 @@ func releaseMultiNICProfile() releaseProfileSpec {
 	}
 }
 
+func releaseVQMixedProfile() releaseProfileSpec {
+	return releaseProfileSpec{
+		Workload: WorkloadSpec{
+			Calls: vqMixedGeneratorCount * vqMixedCallsPerGenerator,
+			Rate:  1000,
+		},
+		PacketsPerCall: vqFloodPacketsPerCall,
+		Limits:         peakLimits,
+		Business: map[string]float64{
+			"vq_reports":      20000,
+			"vq_nlr_count":    10000,
+			"vq_mos_lq_count": 20000,
+			"vq_rlq_count":    20000,
+			"vq_parse_errors": 10000,
+		},
+	}
+}
+
 func releaseMultiNICRowFromLoad(
 	profile releaseProfileSpec,
 	result loadResult,
@@ -113,6 +135,21 @@ func releaseMultiNICRowFromLoad(
 ) releaseRowEvidence {
 	evidence := releaseRowFromLoad(profile, result, actualBusiness, nil)
 	generatorSpec := WorkloadSpec{Calls: multiNICCallsPerInterface, Rate: multiNICRatePerInterface}
+	evidence.Generators = make([]releaseGeneratorEvidence, len(generators))
+	for i, generator := range generators {
+		evidence.Generators[i] = releaseGeneratorEvidence{Spec: generatorSpec, Result: generator}
+	}
+	return evidence
+}
+
+func releaseVQMixedRowFromLoad(
+	profile releaseProfileSpec,
+	result loadResult,
+	generators [vqMixedGeneratorCount]GeneratorResult,
+	actualBusiness map[string]float64,
+) releaseRowEvidence {
+	evidence := releaseRowFromLoad(profile, result, actualBusiness, nil)
+	generatorSpec := WorkloadSpec{Calls: vqMixedCallsPerGenerator, Rate: vqMixedGeneratorRate}
 	evidence.Generators = make([]releaseGeneratorEvidence, len(generators))
 	for i, generator := range generators {
 		evidence.Generators[i] = releaseGeneratorEvidence{Spec: generatorSpec, Result: generator}
@@ -144,6 +181,27 @@ func validateMultiNICGeneratorOverlap(generators []GeneratorResult) error {
 	}
 	if !latestMeasureStart.Before(earliestEnd) {
 		return fmt.Errorf("multi-NIC generator intervals do not overlap")
+	}
+	return nil
+}
+
+func validateVQMixedGeneratorOverlap(generators [vqMixedGeneratorCount]GeneratorResult) error {
+	earliestStart := generators[0].Phases.MeasureStart
+	latestStart := earliestStart
+	earliestEnd := generators[0].Phases.MeasureEnd
+	for _, generator := range generators {
+		if generator.Phases.MeasureStart.IsZero() || generator.Phases.MeasureEnd.IsZero() {
+			return fmt.Errorf("VQ mixed generator interval is missing")
+		}
+		earliestStart = earlierTime(earliestStart, generator.Phases.MeasureStart)
+		latestStart = laterTime(latestStart, generator.Phases.MeasureStart)
+		earliestEnd = earlierTime(earliestEnd, generator.Phases.MeasureEnd)
+	}
+	if startSkew := latestStart.Sub(earliestStart); startSkew > vqMixedStartSkewLimit {
+		return fmt.Errorf("VQ mixed generator start skew %v exceeds %v", startSkew, vqMixedStartSkewLimit)
+	}
+	if !latestStart.Before(earliestEnd) {
+		return fmt.Errorf("VQ mixed generator intervals do not overlap")
 	}
 	return nil
 }

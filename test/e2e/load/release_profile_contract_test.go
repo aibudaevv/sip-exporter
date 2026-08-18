@@ -78,6 +78,68 @@ func TestReleaseProfileSpecs(t *testing.T) {
 	}
 }
 
+func TestReleaseVQMixedProfile(t *testing.T) {
+	profile := releaseVQMixedProfile()
+
+	require.Equal(t, WorkloadSpec{Calls: 30000, Rate: 1000}, profile.Workload)
+	require.Equal(t, 1.0, profile.PacketsPerCall)
+	require.Equal(t, peakLimits, profile.Limits)
+	require.Equal(t, map[string]float64{
+		"vq_reports":      20000,
+		"vq_nlr_count":    10000,
+		"vq_mos_lq_count": 20000,
+		"vq_rlq_count":    20000,
+		"vq_parse_errors": 10000,
+	}, profile.Business)
+}
+
+func TestValidateVQMixedGeneratorOverlap(t *testing.T) {
+	started := time.Date(2026, time.August, 18, 9, 0, 0, 0, time.UTC)
+	valid := func() [vqMixedGeneratorCount]GeneratorResult {
+		return [vqMixedGeneratorCount]GeneratorResult{
+			{Phases: phaseInterval(started, started.Add(releaseDuration))},
+			{Phases: phaseInterval(started.Add(300*time.Millisecond), started.Add(releaseDuration))},
+			{Phases: phaseInterval(started.Add(vqMixedStartSkewLimit), started.Add(releaseDuration))},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func(*[vqMixedGeneratorCount]GeneratorResult)
+		wantErr string
+	}{
+		{name: "valid"},
+		{name: "start skew", mutate: func(generators *[vqMixedGeneratorCount]GeneratorResult) {
+			generators[2].Phases.MeasureStart = started.Add(vqMixedStartSkewLimit + time.Nanosecond)
+		}, wantErr: "start skew"},
+		{name: "zero measure start", mutate: func(generators *[vqMixedGeneratorCount]GeneratorResult) {
+			generators[1].Phases.MeasureStart = time.Time{}
+		}, wantErr: "interval is missing"},
+		{name: "zero measure end", mutate: func(generators *[vqMixedGeneratorCount]GeneratorResult) {
+			generators[1].Phases.MeasureEnd = time.Time{}
+		}, wantErr: "interval is missing"},
+		{name: "non-overlap", mutate: func(generators *[vqMixedGeneratorCount]GeneratorResult) {
+			generators[0].Phases.MeasureEnd = started.Add(500 * time.Millisecond)
+			generators[1].Phases.MeasureEnd = started.Add(500 * time.Millisecond)
+		}, wantErr: "intervals do not overlap"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			generators := valid()
+			if tt.mutate != nil {
+				tt.mutate(&generators)
+			}
+			err := validateVQMixedGeneratorOverlap(generators)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
 func TestReleaseProfileBusinessEvidence(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -605,6 +667,13 @@ func TestValidateReleaseRow(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+}
+
+func TestValidateReleaseRowAllowsExpectedSystemErrors(t *testing.T) {
+	evidence := validReleaseRowEvidence()
+	evidence.ErrorCount = 10000
+
+	require.NoError(t, validateReleaseRow(releaseRowSpec{ExpectedSystemErrors: 10000}, evidence))
 }
 
 func validReleaseRowEvidence() releaseRowEvidence {

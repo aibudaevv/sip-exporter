@@ -30,7 +30,8 @@ type (
 	}
 
 	releaseRowSpec struct {
-		RequireScrapes bool
+		RequireScrapes       bool
+		ExpectedSystemErrors float64
 	}
 )
 
@@ -55,8 +56,8 @@ func validateReleaseRow(spec releaseRowSpec, evidence releaseRowEvidence) error 
 	if math.IsNaN(evidence.ErrorCount) || math.IsInf(evidence.ErrorCount, 0) || evidence.ErrorCount < 0 {
 		return fmt.Errorf("invalid system error count: %v", evidence.ErrorCount)
 	}
-	if evidence.ErrorCount != 0 {
-		return fmt.Errorf("system errors: %.0f", evidence.ErrorCount)
+	if evidence.ErrorCount != spec.ExpectedSystemErrors {
+		return fmt.Errorf("system errors: got %.0f, want %.0f", evidence.ErrorCount, spec.ExpectedSystemErrors)
 	}
 	if evidence.Protocols.SocketDropped != 0 {
 		return fmt.Errorf("protocol socket drops: %.0f", evidence.Protocols.SocketDropped)
