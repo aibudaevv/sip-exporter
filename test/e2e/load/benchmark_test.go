@@ -354,9 +354,12 @@ func TestReleaseSoak(t *testing.T) {
 	growth, err := summarizeSoakWorkingSet(result.ResourceSamples.Resources,
 		result.Generator.Phases.MeasureStart, result.Generator.Phases.MeasureEnd)
 	require.NoError(t, err)
+	postDrain, postDrainBody, err := waitForPostDrainSnapshot(t.Context(), env.endpoint)
+	require.NoError(t, err)
+	recordScenarioArtifact(t, "metrics-post-drain.prom", postDrainBody)
 	require.NoError(t, validateReleaseRow(releaseRowSpec{}, releaseRowFromLoad(profile, result,
 		map[string]float64{"invites": invites, "ser": ser}, nil)))
-	recordSoakReleaseResult(t, result, map[string]float64{"invites": invites, "ser": ser}, growth)
+	recordSoakReleaseResult(t, result, map[string]float64{"invites": invites, "ser": ser}, growth, postDrain)
 }
 
 func TestReleaseINVITEFlood(t *testing.T) {
@@ -411,6 +414,7 @@ func recordSoakReleaseResult(
 	result loadResult,
 	business map[string]float64,
 	growth soakWorkingSetGrowth,
+	postDrain postDrainSnapshot,
 ) {
 	t.Helper()
 	metrics := resourceMetricEntries(result.Resources)
@@ -427,6 +431,15 @@ func recordSoakReleaseResult(
 	}
 	metrics["working_set_growth_mb"] = MetricEntry{
 		Value: growth.GrowthMB, Unit: "MiB", Direction: dirLowerIsBetter,
+	}
+	metrics["post_drain_channel_length"] = MetricEntry{
+		Value: postDrain.ChannelLength, Unit: "count", Direction: dirLowerIsBetter,
+	}
+	metrics["post_drain_active_dialogs"] = MetricEntry{
+		Value: postDrain.ActiveDialogs, Unit: "count", Direction: dirLowerIsBetter,
+	}
+	metrics["post_drain_active_trackers"] = MetricEntry{
+		Value: postDrain.ActiveTrackers, Unit: "count", Direction: dirLowerIsBetter,
 	}
 	recordResult(t, metrics)
 }

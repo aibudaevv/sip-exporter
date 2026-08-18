@@ -608,9 +608,11 @@ func TestRecordSoakReleaseResultIncludesWorkingSetGrowth(t *testing.T) {
 		recordScenarioLimits(t, profile.Limits)
 		result := validReleaseLoadResult(profile)
 		recordLoadResultEvidence(t, result)
+		postDrainBody := []byte("sip_exporter_channel_length 0\n")
+		recordScenarioArtifact(t, "metrics-post-drain.prom", postDrainBody)
 		recordSoakReleaseResult(t, result, profile.Business, soakWorkingSetGrowth{
 			FirstMinuteMedianMB: 64, LastMinuteMedianMB: 72, GrowthMB: 8, AllowedGrowthMB: 8,
-		})
+		}, postDrainSnapshot{})
 	})
 
 	run := recorder.Snapshot()
@@ -618,11 +620,18 @@ func TestRecordSoakReleaseResultIncludesWorkingSetGrowth(t *testing.T) {
 		"working_set_first_minute_median_mb": {Value: 64, Unit: "MiB", Direction: dirLowerIsBetter},
 		"working_set_last_minute_median_mb":  {Value: 72, Unit: "MiB", Direction: dirLowerIsBetter},
 		"working_set_growth_mb":              {Value: 8, Unit: "MiB", Direction: dirLowerIsBetter},
+		"post_drain_channel_length":          {Value: 0, Unit: "count", Direction: dirLowerIsBetter},
+		"post_drain_active_dialogs":          {Value: 0, Unit: "count", Direction: dirLowerIsBetter},
+		"post_drain_active_trackers":         {Value: 0, Unit: "count", Direction: dirLowerIsBetter},
 	}, map[string]MetricEntry{
 		"working_set_first_minute_median_mb": run.Results[0].Metrics["working_set_first_minute_median_mb"],
 		"working_set_last_minute_median_mb":  run.Results[0].Metrics["working_set_last_minute_median_mb"],
 		"working_set_growth_mb":              run.Results[0].Metrics["working_set_growth_mb"],
+		"post_drain_channel_length":          run.Results[0].Metrics["post_drain_channel_length"],
+		"post_drain_active_dialogs":          run.Results[0].Metrics["post_drain_active_dialogs"],
+		"post_drain_active_trackers":         run.Results[0].Metrics["post_drain_active_trackers"],
 	})
+	require.Contains(t, run.Results[0].Artifacts, "scenarios/000/metrics-post-drain.prom")
 }
 
 func validReleaseLoadResult(profile releaseProfileSpec) loadResult {

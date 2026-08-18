@@ -3,15 +3,19 @@
 package load
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
 
 const (
-	soakWindowDuration  = time.Minute
-	soakMinimumInterval = 2 * soakWindowDuration
-	soakMinimumGrowthMB = 8.0
-	soakGrowthFraction  = 0.10
+	soakWindowDuration     = time.Minute
+	soakMinimumInterval    = 2 * soakWindowDuration
+	soakMinimumGrowthMB    = 8.0
+	soakGrowthFraction     = 0.10
+	postDrainWaitLimit     = 10 * time.Second
+	postDrainPollInterval  = 100 * time.Millisecond
+	postDrainStableScrapes = 2
 )
 
 type (
@@ -136,4 +140,46 @@ func (s postDrainSnapshot) Validate() error {
 		return fmt.Errorf("post-drain active_trackers: got %v, want 0", s.ActiveTrackers)
 	}
 	return nil
+}
+
+func waitForPostDrainSnapshot(
+	ctx context.Context,
+	endpoint string,
+) (postDrainSnapshot, []byte, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, postDrainWaitLimit)
+	defer cancel()
+	ticker := time.NewTicker(postDrainPollInterval)
+	defer ticker.Stop()
+
+	stableScrapes := 0
+	var lastErr error
+	for {
+		body, err := fetchMetricsBodyContext(waitCtx, endpoint)
+		if err != nil {
+			stableScrapes = 0
+			lastErr = err
+		} else {
+			snapshot, parseErr := parsePostDrainSnapshot(body)
+			if parseErr != nil {
+				return postDrainSnapshot{}, nil, parseErr
+			}
+			if validateErr := snapshot.Validate(); validateErr != nil {
+				stableScrapes = 0
+				lastErr = validateErr
+			} else {
+				stableScrapes++
+				if stableScrapes == postDrainStableScrapes {
+					return snapshot, body, nil
+				}
+			}
+		}
+
+		select {
+		case <-waitCtx.Done():
+			return postDrainSnapshot{}, nil, fmt.Errorf(
+				"wait for stable post-drain snapshot: %v: %w", lastErr, waitCtx.Err(),
+			)
+		case <-ticker.C:
+		}
+	}
 }

@@ -3,13 +3,54 @@
 package load
 
 import (
+	"context"
+	"fmt"
+	"io"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+type postDrainHTTPResponse struct {
+	status int
+	body   string
+}
+
+func newPostDrainSequenceServer(
+	t *testing.T,
+	responses []postDrainHTTPResponse,
+) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	require.NotEmpty(t, responses)
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		index := int(requests.Add(1)) - 1
+		if index >= len(responses) {
+			index = len(responses) - 1
+		}
+		response := responses[index]
+		if response.status != 0 {
+			w.WriteHeader(response.status)
+		}
+		_, err := io.WriteString(w, response.body)
+		require.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+	return server, &requests
+}
+
+func postDrainMetrics(channelLength, activeDialogs, activeTrackers float64, marker string) string {
+	return fmt.Sprintf("# %s\nsip_exporter_channel_length %v\n"+
+		"sip_exporter_active_dialogs %v\n"+
+		"sip_exporter_active_trackers{type=\"invite\"} %v\n",
+		marker, channelLength, activeDialogs, activeTrackers)
+}
 
 func TestSummarizeSoakWorkingSetUsesHalfOpenMinuteWindows(t *testing.T) {
 	start := time.Date(2026, time.August, 18, 10, 0, 0, 0, time.UTC)
@@ -210,4 +251,122 @@ func TestParsePostDrainSnapshotRejectsMissingAndNonFiniteGauges(t *testing.T) {
 			require.ErrorContains(t, err, tt.wantErr)
 		})
 	}
+}
+
+func TestWaitForPostDrainSnapshotRequiresConsecutiveZeroScrapes(t *testing.T) {
+	zero := postDrainMetrics(0, 0, 0, "zero")
+	stable := postDrainMetrics(0, 0, 0, "stable")
+	tests := []struct {
+		name      string
+		responses []postDrainHTTPResponse
+		requests  int32
+	}{
+		{
+			name: "nonzero then two zeros",
+			responses: []postDrainHTTPResponse{
+				{body: postDrainMetrics(1, 0, 0, "busy")}, {body: zero}, {body: stable},
+			},
+			requests: 3,
+		},
+		{
+			name: "nonzero resets zero streak",
+			responses: []postDrainHTTPResponse{
+				{body: zero}, {body: postDrainMetrics(0, 1, 0, "busy")}, {body: zero}, {body: stable},
+			},
+			requests: 4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server, requests := newPostDrainSequenceServer(t, tt.responses)
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+			defer cancel()
+
+			snapshot, body, err := waitForPostDrainSnapshot(ctx, server.URL)
+
+			require.NoError(t, err)
+			require.Equal(t, postDrainSnapshot{}, snapshot)
+			require.Contains(t, string(body), "# stable")
+			require.Equal(t, tt.requests, requests.Load())
+		})
+	}
+}
+
+func TestWaitForPostDrainSnapshotRetriesTransportErrors(t *testing.T) {
+	server, requests := newPostDrainSequenceServer(t, []postDrainHTTPResponse{
+		{body: postDrainMetrics(0, 0, 0, "zero-before-error")},
+		{status: http.StatusServiceUnavailable, body: "unavailable"},
+		{body: postDrainMetrics(0, 0, 0, "zero")},
+		{body: postDrainMetrics(0, 0, 0, "stable")},
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+
+	_, body, err := waitForPostDrainSnapshot(ctx, server.URL)
+
+	require.NoError(t, err)
+	require.Contains(t, string(body), "# stable")
+	require.Equal(t, int32(4), requests.Load())
+}
+
+func TestWaitForPostDrainSnapshotFailsClosedOnMalformedSnapshot(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			name:    "missing gauge",
+			body:    "sip_exporter_channel_length 0\nsip_exporter_active_dialogs 0\n",
+			wantErr: "active_trackers",
+		},
+		{
+			name:    "non-finite gauge",
+			body:    postDrainMetrics(math.NaN(), 0, 0, "invalid"),
+			wantErr: "finite",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server, requests := newPostDrainSequenceServer(t, []postDrainHTTPResponse{{body: tt.body}})
+
+			_, _, err := waitForPostDrainSnapshot(t.Context(), server.URL)
+
+			require.ErrorContains(t, err, tt.wantErr)
+			require.Equal(t, int32(1), requests.Load())
+		})
+	}
+}
+
+func TestWaitForPostDrainSnapshotTimesOutOnEachNonZeroGauge(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{name: "channel length", body: postDrainMetrics(1, 0, 0, "busy"), wantErr: "channel_length"},
+		{name: "active dialogs", body: postDrainMetrics(0, 1, 0, "busy"), wantErr: "active_dialogs"},
+		{name: "active trackers", body: postDrainMetrics(0, 0, 1, "busy"), wantErr: "active_trackers"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server, _ := newPostDrainSequenceServer(t, []postDrainHTTPResponse{{body: tt.body}})
+			ctx, cancel := context.WithTimeout(t.Context(), 150*time.Millisecond)
+			defer cancel()
+
+			_, _, err := waitForPostDrainSnapshot(ctx, server.URL)
+
+			require.ErrorContains(t, err, tt.wantErr)
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+		})
+	}
+}
+
+func TestPostDrainWaitContract(t *testing.T) {
+	require.Equal(t, 2, postDrainStableScrapes)
+	require.Equal(t, 100*time.Millisecond, postDrainPollInterval)
+	require.LessOrEqual(t, postDrainWaitLimit, 10*time.Second)
 }

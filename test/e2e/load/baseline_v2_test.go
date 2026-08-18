@@ -388,6 +388,11 @@ func thresholdPolicy(scenario string, metric AggregatedMetricV2) (float64, error
 			return 0, fmt.Errorf("metric %q must be lower-is-better", metric.Name)
 		}
 		return 0, nil
+	case "post_drain_channel_length", "post_drain_active_dialogs", "post_drain_active_trackers":
+		if metric.Direction != dirLowerIsBetter {
+			return 0, fmt.Errorf("metric %q must be lower-is-better", metric.Name)
+		}
+		return 0, nil
 	case "gc_max_stw_ms", "scrape_p50_ms", "scrape_p95_ms", "scrape_p99_ms":
 		if metric.Direction != dirLowerIsBetter {
 			return 0, fmt.Errorf("latency metric %q must be lower-is-better", metric.Name)
