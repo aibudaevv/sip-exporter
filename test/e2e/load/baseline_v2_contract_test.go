@@ -181,6 +181,25 @@ func TestAggregateRunArtifactsRequiresExactModeAndCount(t *testing.T) {
 	}
 }
 
+func TestAggregateRunArtifactsRejectsFailedScenario(t *testing.T) {
+	runs := runArtifactsForAggregation(runModeRelease, 3)
+	row := &runs[1].Results[0]
+	row.Status = scenarioStatusFailed
+	row.Failure = "working-set growth exceeded"
+	generator := GeneratorResult{SuccessfulCalls: 1, ActualRate: 1}
+	capture := CaptureResult{Expected: 1, Captured: 1}
+	protocols := ProtocolCounters{SIPPackets: 1, SocketReceived: 1}
+	row.Generator = &generator
+	row.Capture = &capture
+	row.Protocols = &protocols
+	row.Artifacts = []string{"scenarios/000/metrics-after.prom"}
+	require.NoError(t, runs[1].Validate())
+
+	_, err := aggregateRunArtifacts(runModeRelease, runs)
+
+	require.ErrorContains(t, err, "failed")
+}
+
 func TestAggregateRunArtifactsRejectsMixedMode(t *testing.T) {
 	runs := runArtifactsForAggregation(runModeRelease, 3)
 	runs[1].Mode = runModeCandidate

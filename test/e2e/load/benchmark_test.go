@@ -3,6 +3,7 @@
 package load
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -18,6 +19,7 @@ const (
 	subtestTimeout            = 20 * time.Second
 	releaseDuration           = 30 * time.Second
 	releaseSoakDuration       = 10 * time.Minute
+	releaseSoakWarmupDuration = time.Minute
 	releaseSoakRate           = 500
 	nominalFullCallRate       = 1000
 	peakFullCallRate          = 1800
@@ -46,6 +48,13 @@ type releaseProfileSpec struct {
 	Business       map[string]float64
 }
 
+type soakWarmupEvidence struct {
+	Generator  GeneratorResult
+	Capture    CaptureResult
+	Protocols  ProtocolCounters
+	ErrorCount float64
+}
+
 func releaseFullCallNominalProfile() releaseProfileSpec {
 	return releaseProfileSpec{
 		Workload:       WorkloadSpec{Calls: nominalFullCallRate * int(releaseDuration/time.Second), Rate: nominalFullCallRate},
@@ -72,6 +81,40 @@ func releaseSoakProfile() releaseProfileSpec {
 		Limits:         nominalLimits,
 		Business:       map[string]float64{"invites": float64(releaseSoakRate * int(releaseSoakDuration/time.Second)), "ser": 100},
 	}
+}
+
+func releaseSoakWarmupProfile() releaseProfileSpec {
+	return releaseProfileSpec{
+		Workload: WorkloadSpec{
+			Calls: releaseSoakRate * int(releaseSoakWarmupDuration/time.Second),
+			Rate:  releaseSoakRate,
+		},
+		PacketsPerCall: fullCallPacketsPerCall,
+	}
+}
+
+func validateReleaseSoakWarmup(profile releaseProfileSpec, evidence soakWarmupEvidence) error {
+	if err := evidence.Generator.Validate(profile.Workload); err != nil {
+		return fmt.Errorf("warmup generator: %w", err)
+	}
+	expected := float64(profile.Workload.Calls) * profile.PacketsPerCall
+	if evidence.Capture.Expected != expected {
+		return fmt.Errorf("warmup expected capture: got %.0f, want %.0f", evidence.Capture.Expected, expected)
+	}
+	if err := validateReleaseCapture(evidence.Capture); err != nil {
+		return fmt.Errorf("warmup capture: %w", err)
+	}
+	if err := validateReleaseProtocolCounters(evidence.Protocols); err != nil {
+		return fmt.Errorf("warmup protocols: %w", err)
+	}
+	wantProtocols := ProtocolCounters{SIPPackets: expected, SocketReceived: expected}
+	if evidence.Protocols != wantProtocols {
+		return fmt.Errorf("warmup protocols: got %+v, want %+v", evidence.Protocols, wantProtocols)
+	}
+	if evidence.ErrorCount != 0 {
+		return fmt.Errorf("warmup system errors: %.0f", evidence.ErrorCount)
+	}
+	return nil
 }
 
 func releaseINVITEFloodProfile() releaseProfileSpec {
@@ -345,21 +388,29 @@ func TestReleaseSoak(t *testing.T) {
 	profile := releaseSoakProfile()
 	beginScenario(t)
 	env := newTestEnvWithLimits(t.Context(), t, profile.Limits)
+	runSippWarmup(t.Context(), t, "call_highrate_uas.xml", "call_highrate_uac.xml",
+		releaseSoakWarmupProfile(), env)
+	require.True(t, metricExists(t, env.endpoint, "sip_exporter_invite_total"))
+	invitesBefore := getMetric(t, env.endpoint, "sip_exporter_invite_total")
 	result := runSippLoad(t.Context(), t, "call_highrate_uas.xml", "call_highrate_uac.xml",
 		profile.Workload.Calls, int(profile.Workload.Rate), profile.PacketsPerCall, env)
 	require.True(t, metricExists(t, env.endpoint, "sip_exporter_invite_total"))
 	require.True(t, metricExists(t, env.endpoint, "sip_exporter_ser"))
-	invites := getMetric(t, env.endpoint, "sip_exporter_invite_total")
+	invites := getMetric(t, env.endpoint, "sip_exporter_invite_total") - invitesBefore
 	ser := getMetric(t, env.endpoint, "sip_exporter_ser")
 	growth, err := summarizeSoakWorkingSet(result.ResourceSamples.Resources,
 		result.Generator.Phases.MeasureStart, result.Generator.Phases.MeasureEnd)
-	require.NoError(t, err)
+	if err != nil && !errors.Is(err, errSoakWorkingSetGrowth) {
+		require.NoError(t, err)
+	}
+	growthErr := err
 	postDrain, postDrainBody, err := waitForPostDrainSnapshot(t.Context(), env.endpoint)
 	require.NoError(t, err)
 	recordScenarioArtifact(t, "metrics-post-drain.prom", postDrainBody)
 	require.NoError(t, validateReleaseRow(releaseRowSpec{}, releaseRowFromLoad(profile, result,
 		map[string]float64{"invites": invites, "ser": ser}, nil)))
-	recordSoakReleaseResult(t, result, map[string]float64{"invites": invites, "ser": ser}, growth, postDrain)
+	require.NoError(t, recordSoakReleaseOutcome(t, result,
+		map[string]float64{"invites": invites, "ser": ser}, growth, postDrain, growthErr))
 }
 
 func TestReleaseINVITEFlood(t *testing.T) {
@@ -442,6 +493,24 @@ func recordSoakReleaseResult(
 		Value: postDrain.ActiveTrackers, Unit: "count", Direction: dirLowerIsBetter,
 	}
 	recordResult(t, metrics)
+}
+
+func recordSoakReleaseOutcome(
+	t *testing.T,
+	result loadResult,
+	business map[string]float64,
+	growth soakWorkingSetGrowth,
+	postDrain postDrainSnapshot,
+	gateErr error,
+) error {
+	t.Helper()
+	recordSoakReleaseResult(t, result, business, growth, postDrain)
+	if gateErr != nil && activeRunRecorder != nil {
+		if err := activeRunRecorder.Fail(t.Name(), gateErr.Error()); err != nil {
+			return fmt.Errorf("record soak failure: %w", err)
+		}
+	}
+	return gateErr
 }
 
 func releaseBusinessMetricEntry(name string, value float64) MetricEntry {

@@ -4,9 +4,12 @@ package load
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
+
+var errSoakWorkingSetGrowth = errors.New("working-set growth exceeds allowed limit")
 
 const (
 	soakWindowDuration     = time.Minute
@@ -97,7 +100,8 @@ func newSoakWorkingSetGrowth(firstMedian, lastMedian float64) (soakWorkingSetGro
 	}
 	if growth > allowedGrowth {
 		return result, fmt.Errorf(
-			"working-set growth %.3f MiB exceeds allowed %.3f MiB", growth, allowedGrowth,
+			"%w: %.3f MiB exceeds allowed %.3f MiB",
+			errSoakWorkingSetGrowth, growth, allowedGrowth,
 		)
 	}
 	return result, nil

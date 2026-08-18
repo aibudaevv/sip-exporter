@@ -3,12 +3,71 @@
 package load
 
 import (
+	"errors"
 	"math"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestReleaseSoakWarmupProfile(t *testing.T) {
+	profile := releaseSoakWarmupProfile()
+
+	require.Equal(t, WorkloadSpec{Calls: 30000, Rate: 500}, profile.Workload)
+	require.Equal(t, 7.0, profile.PacketsPerCall)
+	require.Equal(t, time.Minute, releaseSoakWarmupDuration)
+}
+
+func TestValidateReleaseSoakWarmupRejectsEachFailure(t *testing.T) {
+	started := time.Date(2026, time.August, 18, 14, 0, 0, 0, time.UTC)
+	profile := releaseSoakWarmupProfile()
+	valid := func() soakWarmupEvidence {
+		return soakWarmupEvidence{
+			Generator: GeneratorResult{
+				SuccessfulCalls: 30000, ActualRate: 500,
+				Phases: phaseInterval(started, started.Add(time.Minute)),
+			},
+			Capture:   CaptureResult{Expected: 210000, Captured: 210000},
+			Protocols: ProtocolCounters{SIPPackets: 210000, SocketReceived: 210000},
+		}
+	}
+	tests := []struct {
+		name   string
+		mutate func(*soakWarmupEvidence)
+	}{
+		{name: "valid"},
+		{name: "failed call", mutate: func(e *soakWarmupEvidence) { e.Generator.FailedCalls = 1 }},
+		{name: "retransmission", mutate: func(e *soakWarmupEvidence) { e.Generator.Retransmissions = 1 }},
+		{name: "capture missing", mutate: func(e *soakWarmupEvidence) { e.Capture = newCaptureResult(210000, 209999) }},
+		{name: "capture excess", mutate: func(e *soakWarmupEvidence) { e.Capture = newCaptureResult(210000, 210001) }},
+		{name: "capture inconsistent", mutate: func(e *soakWarmupEvidence) { e.Capture.Captured = 209999 }},
+		{name: "capture non-finite", mutate: func(e *soakWarmupEvidence) { e.Capture.Captured = math.NaN() }},
+		{name: "protocol mismatch", mutate: func(e *soakWarmupEvidence) { e.Protocols.SIPPackets = 209999 }},
+		{name: "socket receive mismatch", mutate: func(e *soakWarmupEvidence) { e.Protocols.SocketReceived = 209999 }},
+		{name: "unexpected RTP", mutate: func(e *soakWarmupEvidence) { e.Protocols.RTPPackets = 1 }},
+		{name: "unexpected RTCP", mutate: func(e *soakWarmupEvidence) { e.Protocols.RTCPReports = 1 }},
+		{name: "unexpected VQ", mutate: func(e *soakWarmupEvidence) { e.Protocols.VQReports = 1 }},
+		{name: "invalid protocol counter", mutate: func(e *soakWarmupEvidence) { e.Protocols.RTPPackets = math.NaN() }},
+		{name: "socket drop", mutate: func(e *soakWarmupEvidence) { e.Protocols.SocketDropped = 1 }},
+		{name: "system error", mutate: func(e *soakWarmupEvidence) { e.ErrorCount = 1 }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			evidence := valid()
+			if tt.mutate != nil {
+				tt.mutate(&evidence)
+			}
+			err := validateReleaseSoakWarmup(profile, evidence)
+			if tt.mutate == nil {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+		})
+	}
+}
 
 func TestReleaseProfileSpecs(t *testing.T) {
 	tests := []struct {
@@ -632,6 +691,34 @@ func TestRecordSoakReleaseResultIncludesWorkingSetGrowth(t *testing.T) {
 		"post_drain_active_trackers":         run.Results[0].Metrics["post_drain_active_trackers"],
 	})
 	require.Contains(t, run.Results[0].Artifacts, "scenarios/000/metrics-post-drain.prom")
+}
+
+func TestRecordSoakReleaseOutcomeRecordsBeforeReturningGateError(t *testing.T) {
+	recorder, err := newRunRecorderV2(runModeTargeted, t.TempDir(),
+		validRunArtifactV2().Environment, "3addda1", time.Now())
+	require.NoError(t, err)
+	previous := activeRunRecorder
+	activeRunRecorder = recorder
+	t.Cleanup(func() { activeRunRecorder = previous })
+	profile := releaseSoakProfile()
+	gateErr := errors.New("working-set growth exceeded")
+	var outcomeErr error
+
+	t.Run("row", func(t *testing.T) {
+		beginScenario(t)
+		recordScenarioLimits(t, profile.Limits)
+		result := validReleaseLoadResult(profile)
+		recordLoadResultEvidence(t, result)
+		outcomeErr = recordSoakReleaseOutcome(t, result, profile.Business,
+			soakWorkingSetGrowth{FirstMinuteMedianMB: 64, LastMinuteMedianMB: 80, GrowthMB: 16, AllowedGrowthMB: 8},
+			postDrainSnapshot{}, gateErr)
+	})
+
+	require.ErrorIs(t, outcomeErr, gateErr)
+	row := recorder.Snapshot().Results[0]
+	require.Equal(t, scenarioStatusFailed, row.Status)
+	require.ErrorContains(t, errors.New(row.Failure), gateErr.Error())
+	require.Equal(t, 16.0, row.Metrics["working_set_growth_mb"].Value)
 }
 
 func validReleaseLoadResult(profile releaseProfileSpec) loadResult {

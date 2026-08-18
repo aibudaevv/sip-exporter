@@ -167,8 +167,22 @@ func (f EnvironmentFingerprint) validate() error {
 }
 
 func (r ScenarioResultV2) validate() error {
-	if r.Status != scenarioStatusComplete {
+	if r.Status != scenarioStatusComplete && r.Status != scenarioStatusFailed {
 		return fmt.Errorf("status is %q", r.Status)
+	}
+	if r.Status == scenarioStatusFailed {
+		switch {
+		case r.Failure == "":
+			return fmt.Errorf("failed scenario has no failure")
+		case r.Generator == nil:
+			return fmt.Errorf("failed scenario has no generator evidence")
+		case r.Capture == nil:
+			return fmt.Errorf("failed scenario has no capture evidence")
+		case r.Protocols == nil:
+			return fmt.Errorf("failed scenario has no protocol evidence")
+		case len(r.Artifacts) == 0:
+			return fmt.Errorf("failed scenario has no artifacts")
+		}
 	}
 	if r.StartedAt.IsZero() || r.FinishedAt.IsZero() || r.FinishedAt.Before(r.StartedAt) {
 		return fmt.Errorf("invalid timestamps")
@@ -335,6 +349,25 @@ func (r *runRecorderV2) Complete(
 	return nil
 }
 
+func (r *runRecorderV2) Fail(name, failure string) error {
+	if failure == "" {
+		return fmt.Errorf("scenario failure is empty")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	index, ok := r.rows[name]
+	if !ok {
+		return fmt.Errorf("scenario %q was not started", name)
+	}
+	row := &r.run.Results[index]
+	if row.Status != scenarioStatusComplete {
+		return fmt.Errorf("scenario %q has status %q", name, row.Status)
+	}
+	row.Status = scenarioStatusFailed
+	row.Failure = failure
+	return nil
+}
+
 func validateMetricEntries(metrics map[string]MetricEntry) error {
 	for name, metric := range metrics {
 		if math.IsNaN(metric.Value) || math.IsInf(metric.Value, 0) {
@@ -352,6 +385,9 @@ func (r *runRecorderV2) Finalize(name string, failed bool, finished time.Time) {
 		return
 	}
 	row := &r.run.Results[index]
+	if row.Status == scenarioStatusFailed {
+		return
+	}
 	if failed {
 		row.FinishedAt = finished
 		if row.Status == scenarioStatusComplete {

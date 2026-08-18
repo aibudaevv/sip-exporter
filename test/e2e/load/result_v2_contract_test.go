@@ -337,16 +337,55 @@ func TestRunRecorderV2FailedCleanupOverridesCompletedStatus(t *testing.T) {
 		validRunArtifactV2().Environment, "a104fd2", started)
 	require.NoError(t, err)
 	require.NoError(t, recorder.Begin("failed-after-result", started))
-	require.NoError(t, recorder.Complete("failed-after-result", map[string]MetricEntry{
-		"actual_cps": {Value: 100, Unit: "cps", Direction: dirHigherIsBetter},
-	}, started.Add(time.Second)))
+	profile := releaseFullCallPeakProfile()
+	result := validReleaseLoadResult(profile)
+	require.NoError(t, recorder.AttachLimits("failed-after-result", profile.Limits))
+	require.NoError(t, recorder.AttachLoadResult("failed-after-result", result))
+	require.NoError(t, recorder.RecordArtifact("failed-after-result", "metrics-after.prom", []byte("evidence")))
+	metrics := resourceMetricEntries(result.Resources)
+	metrics["actual_cps"] = MetricEntry{Value: 100, Unit: "cps", Direction: dirHigherIsBetter}
+	require.NoError(t, recorder.Complete("failed-after-result", metrics, started.Add(time.Second)))
 
 	recorder.Finalize("failed-after-result", true, started.Add(2*time.Second))
 
 	run := recorder.Snapshot()
+	run.FinishedAt = started.Add(2 * time.Second)
 	require.Equal(t, scenarioStatusFailed, run.Results[0].Status)
 	require.NotEmpty(t, run.Results[0].Failure)
-	require.Error(t, run.Validate())
+	require.NoError(t, run.Validate())
+}
+
+func TestRunArtifactV2RejectsFailedScenarioWithoutCompleteEvidence(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*ScenarioResultV2)
+	}{
+		{name: "missing failure", mutate: func(row *ScenarioResultV2) { row.Failure = "" }},
+		{name: "missing metrics", mutate: func(row *ScenarioResultV2) { row.Metrics = nil }},
+		{name: "missing resources", mutate: func(row *ScenarioResultV2) { row.Resources = nil }},
+		{name: "missing generator", mutate: func(row *ScenarioResultV2) { row.Generator = nil }},
+		{name: "missing capture", mutate: func(row *ScenarioResultV2) { row.Capture = nil }},
+		{name: "missing protocols", mutate: func(row *ScenarioResultV2) { row.Protocols = nil }},
+		{name: "missing artifacts", mutate: func(row *ScenarioResultV2) { row.Artifacts = nil }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			run := validRunArtifactV2()
+			row := &run.Results[0]
+			row.Status = scenarioStatusFailed
+			row.Failure = "working-set growth exceeded"
+			generator := GeneratorResult{SuccessfulCalls: 1, ActualRate: 1}
+			capture := CaptureResult{Expected: 1, Captured: 1}
+			protocols := ProtocolCounters{SIPPackets: 1, SocketReceived: 1}
+			row.Generator = &generator
+			row.Capture = &capture
+			row.Protocols = &protocols
+			row.Artifacts = []string{"scenarios/000/metrics-after.prom"}
+			tt.mutate(row)
+			require.Error(t, run.Validate())
+		})
+	}
 }
 
 func TestRunRecorderV2AttachesTypedLoadEvidence(t *testing.T) {

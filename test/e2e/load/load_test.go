@@ -987,8 +987,18 @@ func runSippGenerator(
 	sippVol string,
 	phases PhaseTimestamps,
 ) (*startedSippContainer, PhaseTimestamps) {
+	return runNamedSippGenerator(ctx, t, args, sippVol, "generator", phases)
+}
+
+func runNamedSippGenerator(
+	ctx context.Context,
+	t *testing.T,
+	args []string,
+	sippVol, evidencePrefix string,
+	phases PhaseTimestamps,
+) (*startedSippContainer, PhaseTimestamps) {
 	t.Helper()
-	c := startSippContainer(ctx, t, args, sippVol, "generator", true)
+	c := startSippContainer(ctx, t, args, sippVol, evidencePrefix, true)
 	phases.MeasureEnd = time.Now()
 	return c, phases
 }
@@ -1343,6 +1353,56 @@ func finishSteadyMeasurementWithSamples(
 	require.NoError(t, validateAbsoluteResourceGates(summary))
 	recordRawResourceSamples(t, samples)
 	return summary, samples
+}
+
+func runSippWarmup(
+	ctx context.Context,
+	t *testing.T,
+	uasScenario, uacScenario string,
+	profile releaseProfileSpec,
+	env *testEnv,
+) {
+	t.Helper()
+	recordMetricsSnapshot(t, "metrics-warmup-before.prom", env.endpoint)
+	protocolsBefore := readProtocolCounters(t, env.endpoint)
+	errorsBefore := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
+	expected := float64(profile.Workload.Calls) * profile.PacketsPerCall
+
+	uasPath := absScenarioPath(t, uasScenario)
+	sippVol := filepath.Dir(uasPath)
+	uas := startSippContainer(ctx, t,
+		[]string{"-sf", "/scenarios/" + filepath.Base(uasScenario), "-i", "127.0.0.1", "-p", env.sippPort,
+			"-m", strconv.Itoa(profile.Workload.Calls), "-nr", "-nostdin"},
+		sippVol, "", false,
+	)
+	waitForSIPpUDPReady(ctx, t, uas, env.sippPort)
+
+	phases := PhaseTimestamps{WarmupStart: time.Now(), Ready: time.Now(), MeasureStart: time.Now()}
+	uacPath := absScenarioPath(t, uacScenario)
+	generator, phases := runNamedSippGenerator(ctx, t,
+		[]string{"-sf", "/scenarios/" + filepath.Base(uacScenario), "-i", "127.0.0.1", "-p", env.sippClientPort,
+			"-m", strconv.Itoa(profile.Workload.Calls), "-r", strconv.Itoa(int(profile.Workload.Rate)), "-nr",
+			"127.0.0.1:" + env.sippPort},
+		filepath.Dir(uacPath), "warmup-generator", phases,
+	)
+	waitForContainerExit(ctx, t, uas)
+	waitForExactSIPCapture(ctx, t, env.endpoint, protocolsBefore.SIPPackets, expected)
+	phases.DrainEnd = time.Now()
+	postDrain, postDrainBody, err := waitForPostDrainSnapshot(ctx, env.endpoint)
+	require.NoError(t, err)
+	require.NoError(t, postDrain.Validate())
+	recordScenarioArtifact(t, "metrics-warmup-post-drain.prom", postDrainBody)
+	generatorResult, err := generator.readGeneratorEvidence(ctx, t, phases)
+	require.NoError(t, err)
+	protocolsAfter := readProtocolCounters(t, env.endpoint)
+	evidence := soakWarmupEvidence{
+		Generator:  generatorResult,
+		Capture:    newCaptureResult(expected, protocolsAfter.SIPPackets-protocolsBefore.SIPPackets),
+		Protocols:  protocolsAfter.delta(protocolsBefore),
+		ErrorCount: getMetric(t, env.endpoint, "sip_exporter_system_error_total") - errorsBefore,
+	}
+	require.NoError(t, validateReleaseSoakWarmup(profile, evidence))
+	recordMetricsSnapshot(t, "metrics-warmup-after.prom", env.endpoint)
 }
 
 func measureSteadySnapshot(

@@ -220,6 +220,11 @@ func aggregateRunArtifacts(mode runMode, runs []RunArtifactV2) (AggregatedRunV2,
 		if err := runs[i].Validate(); err != nil {
 			return AggregatedRunV2{}, fmt.Errorf("run %d: %w", i, err)
 		}
+		for _, scenario := range runs[i].Results {
+			if scenario.Status == scenarioStatusFailed {
+				return AggregatedRunV2{}, fmt.Errorf("run %d scenario %q failed", i, scenario.Name)
+			}
+		}
 		if runs[i].Mode != mode {
 			return AggregatedRunV2{}, fmt.Errorf("run %d mode: got %q, want %q", i, runs[i].Mode, mode)
 		}
