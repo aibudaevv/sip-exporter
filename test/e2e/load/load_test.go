@@ -1024,6 +1024,25 @@ func waitForSIPpUDPReady(
 	}, contextTimeout(t, ctx), 25*time.Millisecond, "SIPp UAS did not bind UDP port %s", port)
 }
 
+func waitForSIPpUDPPortFree(ctx context.Context, address string) error {
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		conn, err := net.ListenPacket("udp", address)
+		if err == nil {
+			return conn.Close()
+		}
+		if !errors.Is(err, syscall.EADDRINUSE) {
+			return fmt.Errorf("check SIPp UDP port %s: %w", address, err)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for SIPp UDP port %s: %w", address, ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
 func waitForContainerExit(ctx context.Context, t *testing.T, c testcontainers.Container) {
 	t.Helper()
 	require.Eventually(t, func() bool {
@@ -1386,6 +1405,10 @@ func runSippWarmup(
 		filepath.Dir(uacPath), "warmup-generator", phases,
 	)
 	waitForContainerExit(ctx, t, uas)
+	portCtx, cancelPortWait := context.WithTimeout(ctx, 10*time.Second)
+	portErr := waitForSIPpUDPPortFree(portCtx, net.JoinHostPort("127.0.0.1", env.sippPort))
+	cancelPortWait()
+	require.NoError(t, portErr)
 	waitForExactSIPCapture(ctx, t, env.endpoint, protocolsBefore.SIPPackets, expected)
 	phases.DrainEnd = time.Now()
 	postDrain, postDrainBody, err := waitForPostDrainSnapshot(ctx, env.endpoint)
