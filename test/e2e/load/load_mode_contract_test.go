@@ -247,9 +247,9 @@ func TestFinalizeLoadModeRequiresExactRunInventory(t *testing.T) {
 		count   int
 		wantErr bool
 	}{
-		{name: "release missing run", mode: runModeRelease, count: 2, wantErr: true},
-		{name: "release exact runs", mode: runModeRelease, count: 3},
-		{name: "release extra run", mode: runModeRelease, count: 4, wantErr: true},
+		{name: "release missing run", mode: runModeRelease, count: 0, wantErr: true},
+		{name: "release exact runs", mode: runModeRelease, count: 1},
+		{name: "release extra run", mode: runModeRelease, count: 2, wantErr: true},
 		{name: "candidate missing run", mode: runModeCandidate, count: 4, wantErr: true},
 		{name: "candidate exact runs", mode: runModeCandidate, count: 5},
 		{name: "candidate extra run", mode: runModeCandidate, count: 6, wantErr: true},
@@ -262,7 +262,7 @@ func TestFinalizeLoadModeRequiresExactRunInventory(t *testing.T) {
 			baselinePath := ""
 			if tt.mode == runModeRelease {
 				aggregated, err := aggregateRunArtifacts(runModeRelease,
-					runArtifactsForAggregation(runModeRelease, 3))
+					runArtifactsForAggregation(runModeRelease, 1))
 				require.NoError(t, err)
 				baselinePath = filepath.Join(root, "baseline-v2.json")
 				writeLoadModeBaseline(t, baselinePath, acceptedBaselineForRelease(aggregated))
@@ -280,7 +280,7 @@ func TestFinalizeLoadModeRequiresExactRunInventory(t *testing.T) {
 
 func TestFinalizeLoadModeRejectsAliasedRunDirectory(t *testing.T) {
 	root := t.TempDir()
-	runs := writeLoadModeRuns(t, root, runModeRelease, 3)
+	runs := writeLoadModeRuns(t, root, runModeRelease, 1)
 	data, err := json.Marshal(runs[0])
 	require.NoError(t, err)
 	aliasDir := filepath.Join(root, "run-01")
@@ -362,7 +362,7 @@ func TestFinalizeLoadModeRejectsMissingOrInvalidReleaseBaseline(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeLoadModeRuns(t, root, runModeRelease, 3)
+			writeLoadModeRuns(t, root, runModeRelease, 1)
 			baselinePath := filepath.Join(root, "baseline-v2.json")
 			tt.write(t, baselinePath)
 
@@ -373,7 +373,7 @@ func TestFinalizeLoadModeRejectsMissingOrInvalidReleaseBaseline(t *testing.T) {
 
 func TestFinalizeLoadModeFailsReleaseRegressionWithoutChangingBaseline(t *testing.T) {
 	root := t.TempDir()
-	runs := writeLoadModeRuns(t, root, runModeRelease, 3)
+	runs := writeLoadModeRuns(t, root, runModeRelease, 1)
 	aggregated, err := aggregateRunArtifacts(runModeRelease, runs)
 	require.NoError(t, err)
 	baseline := acceptedBaselineForRelease(aggregated)

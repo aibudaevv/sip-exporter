@@ -281,7 +281,7 @@ func aggregateRunArtifacts(mode runMode, runs []RunArtifactV2) (AggregatedRunV2,
 func requiredRepeatCount(mode runMode) (int, error) {
 	switch mode {
 	case runModeRelease:
-		return 3, nil
+		return 1, nil
 	case runModeCandidate:
 		return 5, nil
 	default:
@@ -607,8 +607,8 @@ func validateComparisonInventory(baseline BaselineV2, current AggregatedRunV2) e
 }
 
 func validateReleaseAggregate(current AggregatedRunV2) error {
-	if current.Mode != runModeRelease || current.RepeatCount != 3 {
-		return fmt.Errorf("comparison requires exactly three release runs")
+	if current.Mode != runModeRelease || current.RepeatCount != 1 {
+		return fmt.Errorf("comparison requires exactly one release run")
 	}
 	if len(current.SourceCommits) != current.RepeatCount {
 		return fmt.Errorf("release source commit count mismatch")

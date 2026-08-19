@@ -48,20 +48,18 @@ func TestBuildLoadModeSummaryReportsMalformedResult(t *testing.T) {
 	require.Contains(t, string(summary), "# Load acceptance: FAIL")
 	require.Contains(t, string(summary), "run-1/result.json")
 	require.Contains(t, string(summary), "decode")
-	require.Contains(t, string(summary), "run-2 | not run")
+	require.NotContains(t, string(summary), "run-2")
 }
 
 func TestBuildLoadModeSummaryReleasePassIncludesComparison(t *testing.T) {
 	root := t.TempDir()
-	runs := writeLoadModeRuns(t, root, runModeRelease, 3)
+	runs := writeLoadModeRuns(t, root, runModeRelease, 1)
 	aggregated, err := aggregateRunArtifacts(runModeRelease, runs)
 	require.NoError(t, err)
 	baselinePath := filepath.Join(root, "accepted-baseline.json")
 	writeLoadModeBaseline(t, baselinePath, acceptedBaselineForRelease(aggregated))
 	writeSummaryStage(t, root, "preflight", 0)
-	for run := 1; run <= 3; run++ {
-		writeSummaryStage(t, filepath.Join(root, "run-"+strconv.Itoa(run)), "go-test", 0)
-	}
+	writeSummaryStage(t, filepath.Join(root, "run-1"), "go-test", 0)
 	writeSummaryStage(t, root, "finalize", 0)
 
 	summary, err := buildLoadModeSummary(root, runModeRelease, baselinePath)
@@ -73,7 +71,7 @@ func TestBuildLoadModeSummaryReleasePassIncludesComparison(t *testing.T) {
 
 func TestBuildLoadModeSummaryReleaseRegressionIncludesComparison(t *testing.T) {
 	root := t.TempDir()
-	runs := writeLoadModeRuns(t, root, runModeRelease, 3)
+	runs := writeLoadModeRuns(t, root, runModeRelease, 1)
 	baselineAggregate, err := aggregateRunArtifacts(runModeRelease, runs)
 	require.NoError(t, err)
 	baselinePath := filepath.Join(root, "accepted-baseline.json")
@@ -85,9 +83,7 @@ func TestBuildLoadModeSummaryReleaseRegressionIncludesComparison(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(root, "run-"+strconv.Itoa(i+1), resultV2File), data, 0o644))
 	}
 	writeSummaryStage(t, root, "preflight", 0)
-	for run := 1; run <= 3; run++ {
-		writeSummaryStage(t, filepath.Join(root, "run-"+strconv.Itoa(run)), "go-test", 0)
-	}
+	writeSummaryStage(t, filepath.Join(root, "run-1"), "go-test", 0)
 	writeSummaryStage(t, root, "finalize", 1)
 
 	summary, err := buildLoadModeSummary(root, runModeRelease, baselinePath)

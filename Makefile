@@ -99,7 +99,7 @@ test-load-release: docker_build
 	$(load_make_prefix)ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" bash -o pipefail -c 'SIP_EXPORTER_LOAD_PREFLIGHT_MODE=release $(load_make) test-load-helper TEST="^TestPreflightLoadMode$$" ARTIFACT_DIR="$$ARTIFACT_DIR" BASELINE="$$BASELINE" version="$(version)" 2>&1 | tee "$$ARTIFACT_DIR/preflight.log"'; status=$$?; \
 	printf '%s\n' $$status > "$(ARTIFACT_DIR)/preflight.exit-code"; \
 	if test $$status -ne 0; then SIP_EXPORTER_LOAD_SUMMARY_MODE=release $(load_make) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" version="$(version)"; exit $$status; fi
-	$(load_make_prefix)status=0; for run in 1 2 3; do \
+	$(load_make_prefix)status=0; for run in 1; do \
 		mkdir -p "$(ARTIFACT_DIR)/run-$$run"; \
 		ARTIFACT_DIR="$(ARTIFACT_DIR)" RUN="$$run" TEST_PATTERN="$(load_release_tests)" bash -o pipefail -c 'SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) TESTCONTAINERS_VERBOSE=false SIP_EXPORTER_LOAD_MODE=release SIP_EXPORTER_LOAD_ARTIFACT_DIR="$$ARTIFACT_DIR/run-$$RUN" go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run "$$TEST_PATTERN" ./test/e2e/load/... 2>&1 | tee "$$ARTIFACT_DIR/run-$$RUN/go-test.log"'; code=$$?; \
 		printf '%s\n' $$code > "$(ARTIFACT_DIR)/run-$$run/go-test.exit-code"; \

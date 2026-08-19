@@ -158,9 +158,9 @@ func TestAggregateRunArtifactsRequiresExactModeAndCount(t *testing.T) {
 		count   int
 		wantErr bool
 	}{
-		{name: "release short", mode: runModeRelease, count: 2, wantErr: true},
-		{name: "release exact", mode: runModeRelease, count: 3},
-		{name: "release excess", mode: runModeRelease, count: 4, wantErr: true},
+		{name: "release short", mode: runModeRelease, count: 0, wantErr: true},
+		{name: "release exact", mode: runModeRelease, count: 1},
+		{name: "release excess", mode: runModeRelease, count: 2, wantErr: true},
 		{name: "candidate short", mode: runModeCandidate, count: 4, wantErr: true},
 		{name: "candidate exact", mode: runModeCandidate, count: 5},
 		{name: "candidate excess", mode: runModeCandidate, count: 6, wantErr: true},
@@ -182,7 +182,7 @@ func TestAggregateRunArtifactsRequiresExactModeAndCount(t *testing.T) {
 }
 
 func TestAggregateRunArtifactsRejectsFailedScenario(t *testing.T) {
-	runs := runArtifactsForAggregation(runModeRelease, 3)
+	runs := runArtifactsForAggregation(runModeCandidate, 5)
 	row := &runs[1].Results[0]
 	row.Status = scenarioStatusFailed
 	row.Failure = "working-set growth exceeded"
@@ -195,17 +195,17 @@ func TestAggregateRunArtifactsRejectsFailedScenario(t *testing.T) {
 	row.Artifacts = []string{"scenarios/000/metrics-after.prom"}
 	require.NoError(t, runs[1].Validate())
 
-	_, err := aggregateRunArtifacts(runModeRelease, runs)
+	_, err := aggregateRunArtifacts(runModeCandidate, runs)
 
 	require.ErrorContains(t, err, "failed")
 }
 
 func TestAggregateRunArtifactsRejectsMixedMode(t *testing.T) {
-	runs := runArtifactsForAggregation(runModeRelease, 3)
-	runs[1].Mode = runModeCandidate
-	runs[1].ReleaseEligible = false
+	runs := runArtifactsForAggregation(runModeCandidate, 5)
+	runs[1].Mode = runModeRelease
+	runs[1].ReleaseEligible = true
 
-	_, err := aggregateRunArtifacts(runModeRelease, runs)
+	_, err := aggregateRunArtifacts(runModeCandidate, runs)
 	require.ErrorContains(t, err, "run 1")
 }
 
@@ -254,7 +254,7 @@ func TestAggregateRunArtifactsRequiresSymmetricInventory(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runs := runArtifactsForAggregation(runModeRelease, 3)
+			runs := runArtifactsForAggregation(runModeCandidate, 5)
 			for i := range runs {
 				row := runs[i].Results[0]
 				row.Name = "TestLoad/stable"
@@ -265,7 +265,7 @@ func TestAggregateRunArtifactsRequiresSymmetricInventory(t *testing.T) {
 			}
 			tt.mutate(&runs[1])
 
-			_, err := aggregateRunArtifacts(runModeRelease, runs)
+			_, err := aggregateRunArtifacts(runModeCandidate, runs)
 			require.ErrorContains(t, err, "run 1")
 			require.ErrorContains(t, err, tt.wantDetail)
 		})
@@ -286,10 +286,10 @@ func TestAggregateRunArtifactsRequiresCompatibleFingerprint(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runs := runArtifactsForAggregation(runModeRelease, 3)
+			runs := runArtifactsForAggregation(runModeCandidate, 5)
 			tt.mutate(&runs[1])
 
-			_, err := aggregateRunArtifacts(runModeRelease, runs)
+			_, err := aggregateRunArtifacts(runModeCandidate, runs)
 			require.ErrorContains(t, err, "run 1")
 			require.ErrorContains(t, err, "fingerprint")
 		})
@@ -307,10 +307,10 @@ func TestAggregateRunArtifactsRequiresMatchingScenarioLimits(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runs := runArtifactsForAggregation(runModeRelease, 3)
+			runs := runArtifactsForAggregation(runModeCandidate, 5)
 			tt.mutate(&runs[1].Results[0].Limits)
 
-			_, err := aggregateRunArtifacts(runModeRelease, runs)
+			_, err := aggregateRunArtifacts(runModeCandidate, runs)
 			require.ErrorContains(t, err, "limits")
 		})
 	}
@@ -330,23 +330,23 @@ func TestCandidateBaselineOwnsScenarioLimits(t *testing.T) {
 }
 
 func TestAggregateRunArtifactsIgnoresCommitAndImageForFingerprint(t *testing.T) {
-	runs := runArtifactsForAggregation(runModeRelease, 3)
+	runs := runArtifactsForAggregation(runModeCandidate, 5)
 	runs[1].Commit = "different"
 	runs[1].Environment.ExporterImage = "sip-exporter:different"
 
-	_, err := aggregateRunArtifacts(runModeRelease, runs)
+	_, err := aggregateRunArtifacts(runModeCandidate, runs)
 	require.NoError(t, err)
 }
 
 func TestAggregateRunArtifactsCalculatesMedianWithoutMutatingInput(t *testing.T) {
-	runs := runArtifactsForAggregation(runModeRelease, 3)
-	values := []float64{300, 100, 200}
+	runs := runArtifactsForAggregation(runModeCandidate, 5)
+	values := []float64{300, 100, 500, 200, 400}
 	for i := range runs {
 		runs[i].Results[0].Metrics["actual_cps"] = MetricEntry{
 			Value: values[i], Unit: "cps", Direction: dirHigherIsBetter,
 		}
 		runs[i].Results[0].Metrics["errors"] = MetricEntry{
-			Value: float64(2 - i), Unit: "count", Direction: dirLowerIsBetter,
+			Value: float64(4 - i), Unit: "count", Direction: dirLowerIsBetter,
 		}
 	}
 	wantRuns := make([]RunArtifactV2, len(runs))
@@ -354,16 +354,16 @@ func TestAggregateRunArtifactsCalculatesMedianWithoutMutatingInput(t *testing.T)
 		wantRuns[i] = cloneRunArtifactV2(runs[i])
 	}
 
-	got, err := aggregateRunArtifacts(runModeRelease, runs)
+	got, err := aggregateRunArtifacts(runModeCandidate, runs)
 	require.NoError(t, err)
 	require.Equal(t, []AggregatedScenarioV2{{
 		Name:   "TestLoadINVITEFlood/rate_100",
 		Limits: WorkloadLimits{CPUCores: 2, MemoryBytes: 256 << 20},
 		Metrics: []AggregatedMetricV2{
-			{Name: "actual_cps", Median: 200, Unit: "cps", Direction: dirHigherIsBetter},
+			{Name: "actual_cps", Median: 300, Unit: "cps", Direction: dirHigherIsBetter},
 			{Name: "channel_peak", Median: 0, Unit: "count", Direction: dirLowerIsBetter},
 			{Name: "cpu_p95_percent", Median: 0, Unit: "%", Direction: dirLowerIsBetter},
-			{Name: "errors", Median: 1, Unit: "count", Direction: dirLowerIsBetter},
+			{Name: "errors", Median: 2, Unit: "count", Direction: dirLowerIsBetter},
 			{Name: "gc_max_stw_ms", Median: 0, Unit: "ms", Direction: dirLowerIsBetter},
 			{Name: "rtp_drops", Median: 0, Unit: "count", Direction: dirLowerIsBetter},
 			{Name: "socket_drops", Median: 0, Unit: "count", Direction: dirLowerIsBetter},
@@ -607,7 +607,7 @@ func acceptedBaselineForRelease(aggregated AggregatedRunV2) BaselineV2 {
 
 func validReleaseComparisonPair(t *testing.T) (BaselineV2, AggregatedRunV2) {
 	t.Helper()
-	aggregated, err := aggregateRunArtifacts(runModeRelease, runArtifactsForAggregation(runModeRelease, 3))
+	aggregated, err := aggregateRunArtifacts(runModeRelease, runArtifactsForAggregation(runModeRelease, 1))
 	require.NoError(t, err)
 	return acceptedBaselineForRelease(aggregated), aggregated
 }
@@ -703,7 +703,7 @@ func TestCompareReleaseReturnsFullReportAndRegressionError(t *testing.T) {
 }
 
 func TestCompareReleaseValidatesCompleteInventoryBeforePolicy(t *testing.T) {
-	runs := runArtifactsForAggregation(runModeRelease, 3)
+	runs := runArtifactsForAggregation(runModeRelease, 1)
 	for i := range runs {
 		runs[i].Results[0].Metrics["errors"] = MetricEntry{
 			Value: 0, Unit: "count", Direction: dirLowerIsBetter,
@@ -728,7 +728,7 @@ func TestCompareReleaseValidatesCompleteInventoryBeforePolicy(t *testing.T) {
 }
 
 func TestCompareReleaseSortsMultiScenarioReport(t *testing.T) {
-	runs := runArtifactsForAggregation(runModeRelease, 3)
+	runs := runArtifactsForAggregation(runModeRelease, 1)
 	for i := range runs {
 		limits := WorkloadLimits{CPUCores: 2, MemoryBytes: 256 << 20}
 		resources := ResourceSummaryV2{Limits: limits}

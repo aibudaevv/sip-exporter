@@ -721,6 +721,36 @@ func TestRecordSoakReleaseOutcomeRecordsBeforeReturningGateError(t *testing.T) {
 	require.Equal(t, 16.0, row.Metrics["working_set_growth_mb"].Value)
 }
 
+func TestRecordSoakReleaseOutcomeRecordsBusinessFailure(t *testing.T) {
+	recorder, err := newRunRecorderV2(runModeTargeted, t.TempDir(),
+		validRunArtifactV2().Environment, "3addda1", time.Now())
+	require.NoError(t, err)
+	previous := activeRunRecorder
+	activeRunRecorder = recorder
+	t.Cleanup(func() { activeRunRecorder = previous })
+	profile := releaseSoakProfile()
+	business := map[string]float64{"invites": 300000, "ser": 98.11}
+	var outcomeErr error
+
+	t.Run("row", func(t *testing.T) {
+		beginScenario(t)
+		recordScenarioLimits(t, profile.Limits)
+		result := validReleaseLoadResult(profile)
+		recordLoadResultEvidence(t, result)
+		recordScenarioArtifact(t, "metrics-post-drain.prom", []byte("sip_exporter_channel_length 0\n"))
+		outcomeErr = recordSoakReleaseOutcome(t, result, business,
+			soakWorkingSetGrowth{FirstMinuteMedianMB: 64, LastMinuteMedianMB: 64, AllowedGrowthMB: 8},
+			postDrainSnapshot{}, nil)
+	})
+
+	require.ErrorContains(t, outcomeErr, `business "ser": got 98.11, want 100`)
+	row := recorder.Snapshot().Results[0]
+	require.Equal(t, scenarioStatusFailed, row.Status)
+	require.NoError(t, row.validate())
+	require.ErrorContains(t, errors.New(row.Failure), `business "ser": got 98.11, want 100`)
+	require.Equal(t, 98.11, row.Metrics["ser"].Value)
+}
+
 func validReleaseLoadResult(profile releaseProfileSpec) loadResult {
 	expectedPackets := float64(profile.Workload.Calls) * profile.PacketsPerCall
 	return loadResult{

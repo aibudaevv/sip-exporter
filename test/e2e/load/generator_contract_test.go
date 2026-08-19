@@ -35,6 +35,31 @@ func TestSIPpGeneratorRequestIsPinnedAndWritesStatistics(t *testing.T) {
 	require.True(t, strings.Contains(req.Image, "pbertera/sipp"))
 }
 
+func TestSIPpGeneratorArgsUseUniqueCallIDs(t *testing.T) {
+	first := sippGeneratorArgs("call_highrate_uac.xml", "30002", 30000, 500, "30001")
+	second := sippGeneratorArgs("call_highrate_uac.xml", "30002", 30000, 500, "30001")
+
+	callIDs := make([]string, 0, 2)
+	for _, args := range [][]string{first, second} {
+		index := slices.Index(args, "-cid_str")
+		var callIDFlags int
+		for _, arg := range args {
+			if arg == "-cid_str" {
+				callIDFlags++
+			}
+		}
+		require.NotEqual(t, -1, index)
+		require.Equal(t, 1, callIDFlags)
+		require.Less(t, index+1, len(args))
+		require.Contains(t, args[index+1], "%u")
+		require.Contains(t, args[index+1], "%p")
+		require.Contains(t, args[index+1], "%s")
+		require.Equal(t, "127.0.0.1:30001", args[len(args)-1])
+		callIDs = append(callIDs, args[index+1])
+	}
+	require.NotEqual(t, callIDs[0], callIDs[1])
+}
+
 func TestParseSIPpStatsUsesFinalCumulativeRow(t *testing.T) {
 	stats := []byte("StartTime;CurrentTime;TotalCallCreated;SuccessfulCall(C);FailedCall(C);Retransmissions(C);CallRate(C);\n" +
 		"2026-08-19\t10:05:27.760190\t1787133927.760190;2026-08-19\t10:05:28.260190\t1787133928.260190;40;40;0;0;80.0;\n" +

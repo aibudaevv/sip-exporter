@@ -990,6 +990,19 @@ func runSippGenerator(
 	return runNamedSippGenerator(ctx, t, args, sippVol, "generator", phases)
 }
 
+func sippGeneratorArgs(scenario, localPort string, calls, rate int, remotePort string) []string {
+	return []string{
+		"-sf", "/scenarios/" + scenario,
+		"-i", "127.0.0.1",
+		"-p", localPort,
+		"-m", strconv.Itoa(calls),
+		"-r", strconv.Itoa(rate),
+		"-cid_str", nextSippCallIDFormat(),
+		"-nr",
+		net.JoinHostPort("127.0.0.1", remotePort),
+	}
+}
+
 func runNamedSippGenerator(
 	ctx context.Context,
 	t *testing.T,
@@ -1399,9 +1412,8 @@ func runSippWarmup(
 	phases := PhaseTimestamps{WarmupStart: time.Now(), Ready: time.Now(), MeasureStart: time.Now()}
 	uacPath := absScenarioPath(t, uacScenario)
 	generator, phases := runNamedSippGenerator(ctx, t,
-		[]string{"-sf", "/scenarios/" + filepath.Base(uacScenario), "-i", "127.0.0.1", "-p", env.sippClientPort,
-			"-m", strconv.Itoa(profile.Workload.Calls), "-r", strconv.Itoa(int(profile.Workload.Rate)), "-nr",
-			"127.0.0.1:" + env.sippPort},
+		sippGeneratorArgs(filepath.Base(uacScenario), env.sippClientPort,
+			profile.Workload.Calls, int(profile.Workload.Rate), env.sippPort),
 		filepath.Dir(uacPath), "warmup-generator", phases,
 	)
 	waitForContainerExit(ctx, t, uas)
@@ -1488,10 +1500,7 @@ func runSippLoad(
 		phases.MeasureStart = time.Now()
 		require.NoError(t, measurement.Begin(ctx, phases.MeasureStart))
 		generatorContainer, phases = runSippGenerator(ctx, t,
-			[]string{"-sf", "/scenarios/" + uacFile, "-i", "127.0.0.1", "-p", env.sippClientPort,
-				"-m", strconv.Itoa(callCount), "-r", strconv.Itoa(rate),
-				"-nr",
-				"127.0.0.1:" + env.sippPort},
+			sippGeneratorArgs(uacFile, env.sippClientPort, callCount, rate, env.sippPort),
 			sippVol, phases,
 		)
 	} else {
@@ -1503,10 +1512,7 @@ func runSippLoad(
 		phases.MeasureStart = time.Now()
 		require.NoError(t, measurement.Begin(ctx, phases.MeasureStart))
 		generatorContainer, phases = runSippGenerator(ctx, t,
-			[]string{"-sf", "/scenarios/" + uacFile, "-i", "127.0.0.1", "-p", env.sippClientPort,
-				"-m", strconv.Itoa(callCount), "-r", strconv.Itoa(rate),
-				"-nr",
-				"127.0.0.1:" + env.sippPort},
+			sippGeneratorArgs(uacFile, env.sippClientPort, callCount, rate, env.sippPort),
 			sippVol, phases,
 		)
 	}

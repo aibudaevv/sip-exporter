@@ -407,8 +407,6 @@ func TestReleaseSoak(t *testing.T) {
 	postDrain, postDrainBody, err := waitForPostDrainSnapshot(t.Context(), env.endpoint)
 	require.NoError(t, err)
 	recordScenarioArtifact(t, "metrics-post-drain.prom", postDrainBody)
-	require.NoError(t, validateReleaseRow(releaseRowSpec{}, releaseRowFromLoad(profile, result,
-		map[string]float64{"invites": invites, "ser": ser}, nil)))
 	require.NoError(t, recordSoakReleaseOutcome(t, result,
 		map[string]float64{"invites": invites, "ser": ser}, growth, postDrain, growthErr))
 }
@@ -505,6 +503,8 @@ func recordSoakReleaseOutcome(
 ) error {
 	t.Helper()
 	recordSoakReleaseResult(t, result, business, growth, postDrain)
+	gateErr = errors.Join(validateReleaseRow(releaseRowSpec{},
+		releaseRowFromLoad(releaseSoakProfile(), result, business, nil)), gateErr)
 	if gateErr != nil && activeRunRecorder != nil {
 		if err := activeRunRecorder.Fail(t.Name(), gateErr.Error()); err != nil {
 			return fmt.Errorf("record soak failure: %w", err)
