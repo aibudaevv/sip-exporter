@@ -82,20 +82,13 @@ SIP + RTP Traffic → NIC → eBPF socket filter → AF_PACKET socket → Go pol
 
 ## Performance
 
-The published benchmark tables are historical observations, not a current release-verification
-contract. Their capacity, sizing, scrape-latency, and multi-interface claims are being revalidated
-with stricter generator, capture-integrity, resource, and baseline checks. Do not use the historical
-figures for release acceptance or production sizing until that verification is complete.
+The release-verified envelope includes full-call traffic at 1,000 CPS under 1 CPU / 128 MiB,
+full-call traffic with concurrent Prometheus scrapes at 1,800 CPS under 2 CPU / 256 MiB, and a
+ten-minute soak at 500 CPS under 1 CPU / 128 MiB. These are profile-specific acceptance results,
+not universal production sizing guarantees.
 
-Go micro-benchmarks:
-
-| Operation | Latency | Memory |
-|-----------|---------|--------|
-| Parse BYE packet (L2→SIP) | ~860 ns | 712 B/op |
-| Parse INVITE packet (L2→SIP) | ~1.1 μs | 808 B/op |
-| Parse 200 OK packet (L2→SIP) | ~2.0 μs | 1176 B/op |
-
-Historical results and their current verification status: [docs/BENCHMARK.md](./docs/BENCHMARK.md).
+See the measured scenarios, integrity gates, environment and reproduction commands in
+[docs/BENCHMARK.md](./docs/BENCHMARK.md).
 
 ## Install
 
@@ -392,10 +385,8 @@ Test suite:
 
 ## Benchmark
 
-The published load-testing results are historical and are not currently release-verified or suitable
-for production sizing.
-
-See [BENCHMARK.md](./docs/BENCHMARK.md) for the historical results and their verification status.
+See [BENCHMARK.md](./docs/BENCHMARK.md) for the release-verified load envelope, methodology,
+acceptance gates and scope limitations.
 
 ## Alerting
 
