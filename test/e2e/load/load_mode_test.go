@@ -20,6 +20,9 @@ const (
 	loadFinalizeBaselinePathEnv  = "SIP_EXPORTER_LOAD_FINALIZE_BASELINE"
 	loadPreflightModeEnv         = "SIP_EXPORTER_LOAD_PREFLIGHT_MODE"
 	loadPreflightBaselinePathEnv = "SIP_EXPORTER_LOAD_PREFLIGHT_BASELINE"
+	loadSummaryModeEnv           = "SIP_EXPORTER_LOAD_SUMMARY_MODE"
+	loadSummaryArtifactDirEnv    = "SIP_EXPORTER_LOAD_SUMMARY_ARTIFACT_DIR"
+	loadSummaryBaselinePathEnv   = "SIP_EXPORTER_LOAD_SUMMARY_BASELINE"
 )
 
 func validateLoadPreflight(mode runMode, baseline *BaselineV2, current BenchmarkFingerprint) error {
@@ -183,6 +186,17 @@ func TestPreflightLoadMode(t *testing.T) {
 	require.Nil(t, activeRunRecorder)
 }
 
+func TestSummarizeLoadMode(t *testing.T) {
+	mode, root, baselinePath, enabled, err := loadSummaryModeFromEnvironment()
+	require.NoError(t, err)
+	if !enabled {
+		t.Skip("load mode summary is disabled")
+	}
+	require.Nil(t, activeRunRecorder)
+	require.NoError(t, writeLoadModeSummary(root, mode, baselinePath))
+	require.Nil(t, activeRunRecorder)
+}
+
 func loadFinalizeModeFromEnvironment() (runMode, string, string, bool, error) {
 	mode := runMode(os.Getenv(loadFinalizeModeEnv))
 	root := os.Getenv(loadFinalizeArtifactDirEnv)
@@ -221,4 +235,26 @@ func loadPreflightFromEnvironment() (runMode, string, bool, error) {
 		return "", "", false, fmt.Errorf("candidate preflight baseline path is not allowed")
 	}
 	return mode, baselinePath, true, nil
+}
+
+func loadSummaryModeFromEnvironment() (runMode, string, string, bool, error) {
+	mode := runMode(os.Getenv(loadSummaryModeEnv))
+	root := os.Getenv(loadSummaryArtifactDirEnv)
+	baselinePath := os.Getenv(loadSummaryBaselinePathEnv)
+	if mode == "" && root == "" && baselinePath == "" {
+		return "", "", "", false, nil
+	}
+	if mode != runModeRelease && mode != runModeCandidate {
+		return "", "", "", false, fmt.Errorf("invalid load summary mode %q", mode)
+	}
+	if root == "" {
+		return "", "", "", false, fmt.Errorf("load summary artifact directory is empty")
+	}
+	if mode == runModeRelease && baselinePath == "" {
+		return "", "", "", false, fmt.Errorf("release summary baseline path is empty")
+	}
+	if mode == runModeCandidate && baselinePath != "" {
+		return "", "", "", false, fmt.Errorf("candidate summary baseline path is not allowed")
+	}
+	return mode, root, baselinePath, true, nil
 }

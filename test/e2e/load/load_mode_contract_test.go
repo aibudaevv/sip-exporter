@@ -150,6 +150,40 @@ func TestLoadPreflightFromEnvironment(t *testing.T) {
 	}
 }
 
+func TestLoadSummaryModeFromEnvironment(t *testing.T) {
+	tests := []struct {
+		name        string
+		mode        string
+		root        string
+		baseline    string
+		wantEnabled bool
+		wantErr     string
+	}{
+		{name: "unset"},
+		{name: "release", mode: "release", root: "/tmp/release", baseline: "/tmp/baseline.json", wantEnabled: true},
+		{name: "candidate", mode: "candidate", root: "/tmp/candidate", wantEnabled: true},
+		{name: "missing root", mode: "candidate", wantErr: "directory"},
+		{name: "missing release baseline", mode: "release", root: "/tmp/release", wantErr: "baseline"},
+		{name: "candidate baseline", mode: "candidate", root: "/tmp/candidate", baseline: "/tmp/baseline.json", wantErr: "candidate"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(loadSummaryModeEnv, tt.mode)
+			t.Setenv(loadSummaryArtifactDirEnv, tt.root)
+			t.Setenv(loadSummaryBaselinePathEnv, tt.baseline)
+
+			_, _, _, enabled, err := loadSummaryModeFromEnvironment()
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.wantEnabled, enabled)
+		})
+	}
+}
+
 func TestRunLoadPreflight(t *testing.T) {
 	fingerprint, err := collectEnvironmentFingerprint(t.Context())
 	require.NoError(t, err)
