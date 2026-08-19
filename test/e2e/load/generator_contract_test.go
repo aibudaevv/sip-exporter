@@ -36,9 +36,10 @@ func TestSIPpGeneratorRequestIsPinnedAndWritesStatistics(t *testing.T) {
 }
 
 func TestParseSIPpStatsUsesFinalCumulativeRow(t *testing.T) {
-	stats := []byte("SuccessfulCall(C);FailedCall(C);Retransmissions(C);CallRate(C);\n" +
-		"40;0;0;80.0;\n" +
-		"100;0;0;100.0;\n")
+	stats := []byte("StartTime;CurrentTime;TotalCallCreated;SuccessfulCall(C);FailedCall(C);Retransmissions(C);CallRate(C);\n" +
+		"2026-08-19\t10:05:27.760190\t1787133927.760190;2026-08-19\t10:05:28.260190\t1787133928.260190;40;40;0;0;80.0;\n" +
+		"2026-08-19\t10:05:27.760190\t1787133927.760190;2026-08-19\t10:05:28.760190\t1787133928.760190;100;100;0;0;100.0;\n" +
+		"2026-08-19\t10:05:27.760190\t1787133927.760190;2026-08-19\t10:06:17.781922\t1787133977.781922;100;100;0;0;39.9;\n")
 
 	result, err := parseSIPpStats(stats, 0, validPhaseTimestamps())
 
@@ -46,7 +47,9 @@ func TestParseSIPpStatsUsesFinalCumulativeRow(t *testing.T) {
 	require.Equal(t, 100, result.SuccessfulCalls)
 	require.Zero(t, result.FailedCalls)
 	require.Zero(t, result.Retransmissions)
-	require.Equal(t, 100.0, result.ActualRate)
+	require.Equal(t, 39.9, result.ActualRate)
+	require.Equal(t, time.Unix(1787133927, 760190000), result.startedAt)
+	require.Equal(t, time.Unix(1787133928, 760190000), result.rampEndAt)
 }
 
 func TestParseSIPpStatsRejectsIncompleteInput(t *testing.T) {
@@ -61,6 +64,9 @@ func TestParseSIPpStatsRejectsIncompleteInput(t *testing.T) {
 		{name: "not-a-number rate", stats: "SuccessfulCall(C);FailedCall(C);Retransmissions(C);CallRate(C);\n100;0;0;NaN;\n"},
 		{name: "positive infinite rate", stats: "SuccessfulCall(C);FailedCall(C);Retransmissions(C);CallRate(C);\n100;0;0;+Inf;\n"},
 		{name: "negative infinite rate", stats: "SuccessfulCall(C);FailedCall(C);Retransmissions(C);CallRate(C);\n100;0;0;-Inf;\n"},
+		{name: "missing start time", stats: "SuccessfulCall(C);FailedCall(C);Retransmissions(C);CallRate(C);\n100;0;0;100.0;\n"},
+		{name: "malformed start time", stats: "StartTime;SuccessfulCall(C);FailedCall(C);Retransmissions(C);CallRate(C);\nbad;100;0;0;100.0;\n"},
+		{name: "non-finite start time", stats: "StartTime;SuccessfulCall(C);FailedCall(C);Retransmissions(C);CallRate(C);\n+Inf;100;0;0;100.0;\n"},
 	}
 
 	for _, tt := range tests {
@@ -78,6 +84,88 @@ func TestParseSIPpStatsPreservesKnownStateOnMalformedStatistics(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, 97, result.ExitCode)
 	require.Equal(t, phases, result.Phases)
+}
+
+func TestParseSIPpRampEndRejectsInvalidEvidence(t *testing.T) {
+	columns := map[string]int{"CurrentTime": 0, "TotalCallCreated": 1}
+	validRows := [][]string{{"100.100000", "99"}, {"100.200000", "100"}, {"100.300000", "100"}}
+	tests := []struct {
+		name    string
+		columns map[string]int
+		rows    [][]string
+		want    time.Time
+		wantErr string
+	}{
+		{name: "first completed ramp row", columns: columns, rows: validRows, want: time.Unix(100, 200000000)},
+		{name: "missing created column", columns: map[string]int{"CurrentTime": 0}, rows: validRows, wantErr: "TotalCallCreated"},
+		{name: "malformed created count", columns: columns, rows: [][]string{{"100.100000", "bad"}}, wantErr: "TotalCallCreated"},
+		{name: "target never reached", columns: columns, rows: [][]string{{"100.100000", "99"}}, wantErr: "never reached"},
+		{name: "missing current time", columns: map[string]int{"TotalCallCreated": 0}, rows: [][]string{{"100"}}, wantErr: "CurrentTime"},
+		{name: "malformed current time", columns: columns, rows: [][]string{{"bad", "100"}}, wantErr: "CurrentTime"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseSIPpRampEnd(tt.columns, tt.rows, 100)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestSIPpRampRate(t *testing.T) {
+	start := time.Unix(100, 0)
+	tests := []struct {
+		name    string
+		calls   int
+		start   time.Time
+		end     time.Time
+		want    float64
+		wantErr string
+	}{
+		{name: "valid", calls: 2000, start: start, end: start.Add(20 * time.Second), want: 100},
+		{name: "missing calls", start: start, end: start.Add(time.Second), wantErr: "positive"},
+		{name: "missing start", calls: 1, end: start.Add(time.Second), wantErr: "invalid"},
+		{name: "missing end", calls: 1, start: start, wantErr: "invalid"},
+		{name: "empty interval", calls: 1, start: start, end: start, wantErr: "after"},
+		{name: "reversed interval", calls: 1, start: start, end: start.Add(-time.Nanosecond), wantErr: "after"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := sippRampRate(tt.calls, tt.start, tt.end)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestParseSIPpTimestampRejectsInvalidFraction(t *testing.T) {
+	columns := map[string]int{"CurrentTime": 0}
+	tests := []struct {
+		name    string
+		value   string
+		wantErr string
+	}{
+		{name: "empty", wantErr: "CurrentTime"},
+		{name: "excess precision", value: "100.1234567890", wantErr: "precision"},
+		{name: "non-numeric fraction", value: "100.bad", wantErr: "CurrentTime"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseSIPpTimestamp(columns, []string{tt.value}, "CurrentTime")
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
 }
 
 func TestGeneratorResultValidateFailsClosed(t *testing.T) {

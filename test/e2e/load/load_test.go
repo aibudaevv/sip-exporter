@@ -1582,20 +1582,19 @@ func runConcurrentLoad(
 	uacFile := filepath.Base(uacScenario)
 
 	phases := PhaseTimestamps{WarmupStart: time.Now(), Ready: time.Now()}
-	measureStart := time.Now()
-	phases.MeasureStart = measureStart
-	require.NoError(t, measurement.Begin(ctx, measureStart))
-	uacContainer := startSippContainer(ctx, t,
+	uacContainer := prepareSippContainer(ctx, t,
 		[]string{"-sf", "/scenarios/" + uacFile, "-i", "127.0.0.1", "-p", env.sippClientPort,
 			"-m", strconv.Itoa(callCount), "-r", strconv.Itoa(rate),
+			"-fd", "100ms",
 			"-nr",
 			"-l", strconv.Itoa(limit),
 			"127.0.0.1:" + env.sippPort},
-		sippVol, "generator", false,
+		sippVol, "generator",
 	)
+	require.NoError(t, measurement.Begin(ctx, time.Now()))
+	phases.MeasureStart = startPreparedSippContainers(ctx, t, uacContainer)
 
 	var peakSessions float64
-	var peakReachedAt time.Time
 	require.Eventually(t, func() bool {
 		if metricExists(t, env.endpoint, "sip_exporter_sessions") {
 			sessions := getMetric(t, env.endpoint, "sip_exporter_sessions")
@@ -1603,7 +1602,6 @@ func runConcurrentLoad(
 				peakSessions = sessions
 			}
 			if sessions == float64(limit) {
-				peakReachedAt = time.Now()
 				return true
 			}
 		}
@@ -1616,10 +1614,10 @@ func runConcurrentLoad(
 	waitForContainerExit(ctx, t, uacContainer)
 	measureEnd := time.Now()
 	phases.MeasureEnd = measureEnd
-	sippDuration := measureEnd.Sub(measureStart)
 	resourceSummary := finishSteadyMeasurement(ctx, t, measurement, measureEnd)
 	generator, generatorErr := uacContainer.readGeneratorEvidence(ctx, t, phases)
 	require.NoError(t, generatorErr)
+	sippDuration := measureEnd.Sub(generator.Phases.MeasureStart)
 	evidenceAt := time.Now()
 
 	waitForContainerExit(ctx, t, uasContainer)
@@ -1631,7 +1629,8 @@ func runConcurrentLoad(
 	require.NoError(t, validatePostPhaseOrdering(measureEnd, evidenceAt, uasExitAt, stableTime))
 	drainTime := stableTime.Sub(measureEnd)
 	generator.Phases.DrainEnd = stableTime
-	generator.ActualRate = float64(callCount) / peakReachedAt.Sub(measureStart).Seconds()
+	generator.ActualRate, generatorErr = sippRampRate(callCount, generator.startedAt, generator.rampEndAt)
+	require.NoError(t, generatorErr)
 	require.NoError(t, generator.Validate(WorkloadSpec{Calls: callCount, Rate: float64(rate)}))
 
 	recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)

@@ -38,6 +38,8 @@ type (
 		Retransmissions int
 		ActualRate      float64
 		Phases          PhaseTimestamps
+		startedAt       time.Time
+		rampEndAt       time.Time
 	}
 )
 
@@ -120,8 +122,73 @@ func parseSIPpStats(data []byte, exitCode int, phases PhaseTimestamps) (Generato
 		return result, err
 	}
 	result.ActualRate = actualRate
+	startedAt, err := parseSIPpStartTime(columns, row)
+	if err != nil {
+		return result, err
+	}
+	result.startedAt = startedAt
+	rampEndAt, err := parseSIPpRampEnd(columns, rows[1:], result.SuccessfulCalls)
+	if err != nil {
+		return result, err
+	}
+	result.rampEndAt = rampEndAt
 
 	return result, nil
+}
+
+func parseSIPpStartTime(columns map[string]int, row []string) (time.Time, error) {
+	return parseSIPpTimestamp(columns, row, "StartTime")
+}
+
+func parseSIPpRampEnd(columns map[string]int, rows [][]string, targetCalls int) (time.Time, error) {
+	for _, row := range rows {
+		created, err := parseSIPpInt(columns, row, "TotalCallCreated")
+		if err != nil {
+			return time.Time{}, err
+		}
+		if created >= targetCalls {
+			return parseSIPpTimestamp(columns, row, "CurrentTime")
+		}
+	}
+	return time.Time{}, fmt.Errorf("SIPp statistics never reached %d created calls", targetCalls)
+}
+
+func sippRampRate(calls int, start, end time.Time) (float64, error) {
+	if calls <= 0 {
+		return 0, fmt.Errorf("SIPp ramp calls must be positive: %d", calls)
+	}
+	if start.IsZero() || end.IsZero() {
+		return 0, fmt.Errorf("invalid SIPp ramp interval")
+	}
+	if !end.After(start) {
+		return 0, fmt.Errorf("SIPp ramp end must be after start")
+	}
+	return float64(calls) / end.Sub(start).Seconds(), nil
+}
+
+func parseSIPpTimestamp(columns map[string]int, row []string, name string) (time.Time, error) {
+	value, err := sippField(columns, row, name)
+	if err != nil {
+		return time.Time{}, err
+	}
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return time.Time{}, fmt.Errorf("parse SIPp %s=%q", name, value)
+	}
+	secondsText, fractionText, _ := strings.Cut(fields[len(fields)-1], ".")
+	seconds, err := strconv.ParseInt(secondsText, 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse SIPp %s=%q: %w", name, value, err)
+	}
+	if len(fractionText) > 9 {
+		return time.Time{}, fmt.Errorf("parse SIPp %s=%q: fractional precision exceeds nanoseconds", name, value)
+	}
+	fractionText += strings.Repeat("0", 9-len(fractionText))
+	nanoseconds, err := strconv.ParseInt(fractionText, 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse SIPp %s=%q: %w", name, value, err)
+	}
+	return time.Unix(seconds, nanoseconds), nil
 }
 
 func parseSIPpInt(columns map[string]int, row []string, name string) (int, error) {
