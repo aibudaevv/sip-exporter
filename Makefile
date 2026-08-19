@@ -5,6 +5,13 @@ GOLANGCI_LINT_VERSION := v2.9.0
 .PHONY: build docker_build ebpf_compile go_build clean ebpf_log lint lint-deps vet imports test test-e2e test-e2e-run test-rtp test-rtp-run test-load test-load-run test-load-rtp test-load-helper test-load-targeted test-load-release test-load-candidate test-all vulncheck trivy-fs trivy-image security
 
 load_release_tests := ^(TestReleaseFullCallNominal|TestReleaseSoak|TestReleaseINVITEFlood|TestReleaseConcurrentDialogs|TestReleaseCarrierUA|TestReleaseMultiInterface|TestReleaseFullCallPeak|TestReleaseVQMixed)$$
+load_make := $(MAKE)
+load_make_prefix := +@
+load_make_short_flags := $(filter-out --%,$(firstword $(MAKEFLAGS)))
+
+ifneq (,$(findstring n,$(load_make_short_flags)))
+load_make_prefix :=
+endif
 
 build: ebpf_compile go_build
 docker_build:
@@ -89,38 +96,38 @@ test-load-release: docker_build
 	@test -n "$(ARTIFACT_DIR)" || (echo "ARTIFACT_DIR is required"; exit 2)
 	@test -n "$(BASELINE)" || (echo "BASELINE is required"; exit 2)
 	@mkdir -p "$(ARTIFACT_DIR)"
-	@ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" bash -o pipefail -c 'SIP_EXPORTER_LOAD_PREFLIGHT_MODE=release $(MAKE) test-load-helper TEST="^TestPreflightLoadMode$$" ARTIFACT_DIR="$$ARTIFACT_DIR" BASELINE="$$BASELINE" version="$(version)" 2>&1 | tee "$$ARTIFACT_DIR/preflight.log"'; status=$$?; \
+	$(load_make_prefix)ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" bash -o pipefail -c 'SIP_EXPORTER_LOAD_PREFLIGHT_MODE=release $(load_make) test-load-helper TEST="^TestPreflightLoadMode$$" ARTIFACT_DIR="$$ARTIFACT_DIR" BASELINE="$$BASELINE" version="$(version)" 2>&1 | tee "$$ARTIFACT_DIR/preflight.log"'; status=$$?; \
 	printf '%s\n' $$status > "$(ARTIFACT_DIR)/preflight.exit-code"; \
-	if test $$status -ne 0; then SIP_EXPORTER_LOAD_SUMMARY_MODE=release $(MAKE) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" version="$(version)"; exit $$status; fi
-	@status=0; for run in 1 2 3; do \
+	if test $$status -ne 0; then SIP_EXPORTER_LOAD_SUMMARY_MODE=release $(load_make) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" version="$(version)"; exit $$status; fi
+	$(load_make_prefix)status=0; for run in 1 2 3; do \
 		mkdir -p "$(ARTIFACT_DIR)/run-$$run"; \
 		ARTIFACT_DIR="$(ARTIFACT_DIR)" RUN="$$run" TEST_PATTERN="$(load_release_tests)" bash -o pipefail -c 'SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) TESTCONTAINERS_VERBOSE=false SIP_EXPORTER_LOAD_MODE=release SIP_EXPORTER_LOAD_ARTIFACT_DIR="$$ARTIFACT_DIR/run-$$RUN" go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run "$$TEST_PATTERN" ./test/e2e/load/... 2>&1 | tee "$$ARTIFACT_DIR/run-$$RUN/go-test.log"'; code=$$?; \
 		printf '%s\n' $$code > "$(ARTIFACT_DIR)/run-$$run/go-test.exit-code"; \
 		if test $$code -ne 0; then status=$$code; break; fi; \
 	done; \
-	if test $$status -ne 0; then SIP_EXPORTER_LOAD_SUMMARY_MODE=release $(MAKE) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" version="$(version)"; exit $$status; fi
-	@ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" bash -o pipefail -c 'SIP_EXPORTER_LOAD_FINALIZE_MODE=release $(MAKE) test-load-helper TEST="^TestFinalizeLoadMode$$" ARTIFACT_DIR="$$ARTIFACT_DIR" BASELINE="$$BASELINE" version="$(version)" 2>&1 | tee "$$ARTIFACT_DIR/finalize.log"'; status=$$?; \
+	if test $$status -ne 0; then SIP_EXPORTER_LOAD_SUMMARY_MODE=release $(load_make) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" version="$(version)"; exit $$status; fi
+	$(load_make_prefix)ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" bash -o pipefail -c 'SIP_EXPORTER_LOAD_FINALIZE_MODE=release $(load_make) test-load-helper TEST="^TestFinalizeLoadMode$$" ARTIFACT_DIR="$$ARTIFACT_DIR" BASELINE="$$BASELINE" version="$(version)" 2>&1 | tee "$$ARTIFACT_DIR/finalize.log"'; status=$$?; \
 	printf '%s\n' $$status > "$(ARTIFACT_DIR)/finalize.exit-code"; \
-	SIP_EXPORTER_LOAD_SUMMARY_MODE=release $(MAKE) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" version="$(version)"; summary_status=$$?; \
+	SIP_EXPORTER_LOAD_SUMMARY_MODE=release $(load_make) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" version="$(version)"; summary_status=$$?; \
 	if test $$status -eq 0 && test $$summary_status -ne 0; then exit $$summary_status; fi; exit $$status
 
 test-load-candidate: docker_build
 	@test -n "$(ARTIFACT_DIR)" || (echo "ARTIFACT_DIR is required"; exit 2)
 	@test -z "$(BASELINE)" || (echo "BASELINE is not accepted for candidate mode"; exit 2)
 	@mkdir -p "$(ARTIFACT_DIR)"
-	@ARTIFACT_DIR="$(ARTIFACT_DIR)" bash -o pipefail -c 'SIP_EXPORTER_LOAD_PREFLIGHT_MODE=candidate $(MAKE) test-load-helper TEST="^TestPreflightLoadMode$$" ARTIFACT_DIR="$$ARTIFACT_DIR" version="$(version)" 2>&1 | tee "$$ARTIFACT_DIR/preflight.log"'; status=$$?; \
+	$(load_make_prefix)ARTIFACT_DIR="$(ARTIFACT_DIR)" bash -o pipefail -c 'SIP_EXPORTER_LOAD_PREFLIGHT_MODE=candidate $(load_make) test-load-helper TEST="^TestPreflightLoadMode$$" ARTIFACT_DIR="$$ARTIFACT_DIR" version="$(version)" 2>&1 | tee "$$ARTIFACT_DIR/preflight.log"'; status=$$?; \
 	printf '%s\n' $$status > "$(ARTIFACT_DIR)/preflight.exit-code"; \
-	if test $$status -ne 0; then SIP_EXPORTER_LOAD_SUMMARY_MODE=candidate $(MAKE) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" version="$(version)"; exit $$status; fi
-	@status=0; for run in 1 2 3 4 5; do \
+	if test $$status -ne 0; then SIP_EXPORTER_LOAD_SUMMARY_MODE=candidate $(load_make) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" version="$(version)"; exit $$status; fi
+	$(load_make_prefix)status=0; for run in 1 2 3 4 5; do \
 		mkdir -p "$(ARTIFACT_DIR)/run-$$run"; \
 		ARTIFACT_DIR="$(ARTIFACT_DIR)" RUN="$$run" TEST_PATTERN="$(load_release_tests)" bash -o pipefail -c 'SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) TESTCONTAINERS_VERBOSE=false SIP_EXPORTER_LOAD_MODE=candidate SIP_EXPORTER_LOAD_ARTIFACT_DIR="$$ARTIFACT_DIR/run-$$RUN" go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run "$$TEST_PATTERN" ./test/e2e/load/... 2>&1 | tee "$$ARTIFACT_DIR/run-$$RUN/go-test.log"'; code=$$?; \
 		printf '%s\n' $$code > "$(ARTIFACT_DIR)/run-$$run/go-test.exit-code"; \
 		if test $$code -ne 0; then status=$$code; break; fi; \
 	done; \
-	if test $$status -ne 0; then SIP_EXPORTER_LOAD_SUMMARY_MODE=candidate $(MAKE) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" version="$(version)"; exit $$status; fi
-	@ARTIFACT_DIR="$(ARTIFACT_DIR)" bash -o pipefail -c 'SIP_EXPORTER_LOAD_FINALIZE_MODE=candidate $(MAKE) test-load-helper TEST="^TestFinalizeLoadMode$$" ARTIFACT_DIR="$$ARTIFACT_DIR" version="$(version)" 2>&1 | tee "$$ARTIFACT_DIR/finalize.log"'; status=$$?; \
+	if test $$status -ne 0; then SIP_EXPORTER_LOAD_SUMMARY_MODE=candidate $(load_make) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" version="$(version)"; exit $$status; fi
+	$(load_make_prefix)ARTIFACT_DIR="$(ARTIFACT_DIR)" bash -o pipefail -c 'SIP_EXPORTER_LOAD_FINALIZE_MODE=candidate $(load_make) test-load-helper TEST="^TestFinalizeLoadMode$$" ARTIFACT_DIR="$$ARTIFACT_DIR" version="$(version)" 2>&1 | tee "$$ARTIFACT_DIR/finalize.log"'; status=$$?; \
 	printf '%s\n' $$status > "$(ARTIFACT_DIR)/finalize.exit-code"; \
-	SIP_EXPORTER_LOAD_SUMMARY_MODE=candidate $(MAKE) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" version="$(version)"; summary_status=$$?; \
+	SIP_EXPORTER_LOAD_SUMMARY_MODE=candidate $(load_make) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" version="$(version)"; summary_status=$$?; \
 	if test $$status -eq 0 && test $$summary_status -ne 0; then exit $$summary_status; fi; exit $$status
 
 test-load-rtp: docker_build
