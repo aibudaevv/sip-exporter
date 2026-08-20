@@ -567,13 +567,13 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "100 - (100 * (sum(rate(sip_exporter_408_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_500_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_503_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_504_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])))",
+              "expr": "100 - (100 * (sum(rate(sip_exporter_iss_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) or 0 * sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])))",
               "legendFormat": "NER",
               "refId": "A"
             }
           ],
           "title": "NER (Network Effectiveness Ratio)",
-          "description": "Network Effectiveness Ratio for the current interval. Interface and Destination Country filters do not apply because failure counters do not carry those labels.",
+          "description": "INVITE-only Network Effectiveness Ratio for the current interval. Interface and Destination Country filters do not apply because the ISS counter does not carry those labels.",
           "type": "stat"
         },
         {
@@ -948,7 +948,7 @@
                   }
                 ]
               },
-              "unit": "short"
+              "unit": "ops"
             },
             "overrides": []
           },
@@ -978,8 +978,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_invite_total{instance=~\"$instance\",iface=~\"$iface\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\",destination_country=~\"$destination_country\"}[$__rate_interval])",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - INVITE",
+              "expr": "sum by (instance, carrier, direction, ua_type, source_country) (rate(sip_exporter_invite_total{instance=~\"$instance\",iface=~\"$iface\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\",destination_country=~\"$destination_country\"}[$__rate_interval]))",
+              "legendFormat": "{{instance}} / {{direction}} / {{carrier}} / {{ua_type}} / {{source_country}} - INVITE",
               "refId": "A"
             },
             {
@@ -987,8 +987,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_ack_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - ACK",
+              "expr": "sum by (instance, carrier, direction, ua_type, source_country) (rate(sip_exporter_ack_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "legendFormat": "{{instance}} / {{direction}} / {{carrier}} / {{ua_type}} / {{source_country}} - ACK",
               "refId": "B"
             },
             {
@@ -996,8 +996,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_bye_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - BYE",
+              "expr": "sum by (instance, carrier, direction, ua_type, source_country) (rate(sip_exporter_bye_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "legendFormat": "{{instance}} / {{direction}} / {{carrier}} / {{ua_type}} / {{source_country}} - BYE",
               "refId": "C"
             },
             {
@@ -1005,8 +1005,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_cancel_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - CANCEL",
+              "expr": "sum by (instance, carrier, direction, ua_type, source_country) (rate(sip_exporter_cancel_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "legendFormat": "{{instance}} / {{direction}} / {{carrier}} / {{ua_type}} / {{source_country}} - CANCEL",
               "refId": "D"
             },
             {
@@ -1014,8 +1014,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_register_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - REGISTER",
+              "expr": "sum by (instance, carrier, direction, ua_type, source_country) (rate(sip_exporter_register_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "legendFormat": "{{instance}} / {{direction}} / {{carrier}} / {{ua_type}} / {{source_country}} - REGISTER",
               "refId": "E"
             },
             {
@@ -1023,8 +1023,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_options_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - OPTIONS",
+              "expr": "sum by (instance, carrier, direction, ua_type, source_country) (rate(sip_exporter_options_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "legendFormat": "{{instance}} / {{direction}} / {{carrier}} / {{ua_type}} / {{source_country}} - OPTIONS",
               "refId": "F"
             },
             {
@@ -1032,8 +1032,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_update_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - UPDATE",
+              "expr": "sum by (instance, carrier, direction, ua_type, source_country) (rate(sip_exporter_update_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "legendFormat": "{{instance}} / {{direction}} / {{carrier}} / {{ua_type}} / {{source_country}} - UPDATE",
               "refId": "G"
             },
             {
@@ -1041,8 +1041,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_info_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - INFO",
+              "expr": "sum by (instance, carrier, direction, ua_type, source_country) (rate(sip_exporter_info_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "legendFormat": "{{instance}} / {{direction}} / {{carrier}} / {{ua_type}} / {{source_country}} - INFO",
               "refId": "H"
             },
             {
@@ -1050,8 +1050,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_refer_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - REFER",
+              "expr": "sum by (instance, carrier, direction, ua_type, source_country) (rate(sip_exporter_refer_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "legendFormat": "{{instance}} / {{direction}} / {{carrier}} / {{ua_type}} / {{source_country}} - REFER",
               "refId": "I"
             },
             {
@@ -1059,8 +1059,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_subscribe_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - SUBSCRIBE",
+              "expr": "sum by (instance, carrier, direction, ua_type, source_country) (rate(sip_exporter_subscribe_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "legendFormat": "{{instance}} / {{direction}} / {{carrier}} / {{ua_type}} / {{source_country}} - SUBSCRIBE",
               "refId": "J"
             },
             {
@@ -1068,8 +1068,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_notify_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - NOTIFY",
+              "expr": "sum by (instance, carrier, direction, ua_type, source_country) (rate(sip_exporter_notify_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "legendFormat": "{{instance}} / {{direction}} / {{carrier}} / {{ua_type}} / {{source_country}} - NOTIFY",
               "refId": "K"
             },
             {
@@ -1077,8 +1077,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_prack_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - PRACK",
+              "expr": "sum by (instance, carrier, direction, ua_type, source_country) (rate(sip_exporter_prack_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "legendFormat": "{{instance}} / {{direction}} / {{carrier}} / {{ua_type}} / {{source_country}} - PRACK",
               "refId": "L"
             },
             {
@@ -1086,8 +1086,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_publish_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - PUBLISH",
+              "expr": "sum by (instance, carrier, direction, ua_type, source_country) (rate(sip_exporter_publish_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "legendFormat": "{{instance}} / {{direction}} / {{carrier}} / {{ua_type}} / {{source_country}} - PUBLISH",
               "refId": "M"
             },
             {
@@ -1095,8 +1095,8 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "rate(sip_exporter_message_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])",
-              "legendFormat": "{{carrier}} / {{ua_type}} / {{source_country}} - MESSAGE",
+              "expr": "sum by (instance, carrier, direction, ua_type, source_country) (rate(sip_exporter_message_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "legendFormat": "{{instance}} / {{direction}} / {{carrier}} / {{ua_type}} / {{source_country}} - MESSAGE",
               "refId": "N"
             }
           ],
@@ -1186,7 +1186,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(sip_exporter_100_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "expr": "sum(rate({__name__=~\"sip_exporter_100_total|sip_exporter_180_total|sip_exporter_181_total|sip_exporter_182_total|sip_exporter_183_total\",instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "1xx Provisional",
               "refId": "A"
             },
@@ -1195,7 +1195,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(sip_exporter_200_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "expr": "sum(rate({__name__=~\"sip_exporter_200_total|sip_exporter_202_total\",instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "2xx Success",
               "refId": "B"
             },
@@ -1204,7 +1204,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(sip_exporter_300_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_302_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "expr": "sum(rate({__name__=~\"sip_exporter_300_total|sip_exporter_302_total\",instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "3xx Redirection",
               "refId": "C"
             },
@@ -1213,7 +1213,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(sip_exporter_400_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_401_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_403_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_404_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_405_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_408_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_480_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_481_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_486_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_487_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_488_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "expr": "sum(rate({__name__=~\"sip_exporter_400_total|sip_exporter_401_total|sip_exporter_403_total|sip_exporter_404_total|sip_exporter_405_total|sip_exporter_proxy_authentication_required_total|sip_exporter_408_total|sip_exporter_480_total|sip_exporter_481_total|sip_exporter_486_total|sip_exporter_487_total|sip_exporter_488_total\",instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "4xx Client Error",
               "refId": "D"
             },
@@ -1222,7 +1222,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(sip_exporter_500_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_501_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_502_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_503_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_504_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "expr": "sum(rate({__name__=~\"sip_exporter_500_total|sip_exporter_501_total|sip_exporter_502_total|sip_exporter_503_total|sip_exporter_504_total\",instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "5xx Server Error",
               "refId": "E"
             },
@@ -1231,13 +1231,13 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(sip_exporter_600_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_603_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_604_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_606_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "expr": "sum(rate({__name__=~\"sip_exporter_600_total|sip_exporter_603_total|sip_exporter_604_total|sip_exporter_606_total\",instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "6xx Global Failure",
               "refId": "F"
             }
           ],
           "title": "SIP Response Classes (grouped)",
-          "description": "Observed SIP signalling rates for the current interval. Interface filter applies only to INVITE-labelled series and capture panels.",
+          "description": "Complete response-class rates across all observed SIP methods for the current interval, including normal authentication challenges.",
           "type": "timeseries"
         },
         {
@@ -1384,10 +1384,28 @@
               "expr": "sum(rate(sip_exporter_504_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "504 Server Time-out",
               "refId": "J"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(rate(sip_exporter_481_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "legendFormat": "481 Call/Transaction Does Not Exist",
+              "refId": "K"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(rate(sip_exporter_502_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "legendFormat": "502 Bad Gateway",
+              "refId": "L"
             }
           ],
-          "title": "Top Failure Codes (4xx / 5xx)",
-          "description": "Observed SIP signalling rates for the current interval. Interface filter applies only to INVITE-labelled series and capture panels.",
+          "title": "Selected SIP Failure Codes",
+          "description": "Selected actionable SIP failure rates. Authentication challenges are excluded; use response-class panels for the complete observed response mix.",
           "type": "bargauge"
         },
         {
@@ -1440,7 +1458,7 @@
                   }
                 ]
               },
-              "unit": "ms"
+              "unit": "ops"
             },
             "overrides": []
           },
@@ -1531,7 +1549,7 @@
                   }
                 ]
               },
-              "unit": "short"
+              "unit": "ops"
             },
             "overrides": []
           },
@@ -1706,7 +1724,7 @@
           "gridPos": {
             "x": 0,
             "y": 63,
-            "w": 8,
+            "w": 4,
             "h": 5
           },
           "id": 100,
@@ -1765,9 +1783,9 @@
             "overrides": []
           },
           "gridPos": {
-            "x": 8,
+            "x": 4,
             "y": 63,
-            "w": 8,
+            "w": 4,
             "h": 5
           },
           "id": 101,
@@ -1834,9 +1852,9 @@
             "overrides": []
           },
           "gridPos": {
-            "x": 16,
+            "x": 8,
             "y": 63,
-            "w": 8,
+            "w": 4,
             "h": 5
           },
           "id": 102,
@@ -1868,6 +1886,128 @@
           ],
           "title": "RTP Packet Loss %",
           "description": "Wire-observed RTP for SDP-correlated media at the capture point. Check Socket Drop % and exporter drops before using it for network diagnosis; No data means no correlated RTP.",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 63,
+            "w": 6,
+            "h": 5
+          },
+          "id": 337,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "(sum(rate(sip_exporter_rtp_oneway_calls_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) or 0 * sum(rate(sip_exporter_sdc_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])))",
+              "legendFormat": "one-way calls/s",
+              "refId": "A"
+            }
+          ],
+          "title": "One-Way Audio Calls/s",
+          "description": "Completed dialogs with two registered media endpoints but RTP observed in only one direction. Validate capture drops and SDP visibility before assigning the fault to an endpoint or carrier.",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "x": 18,
+            "y": 63,
+            "w": 6,
+            "h": 5
+          },
+          "id": 338,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "100 * (sum(rate(sip_exporter_rtp_oneway_calls_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) or 0 * sum(rate(sip_exporter_sdc_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))) / sum(rate(sip_exporter_sdc_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "legendFormat": "one-way / completed",
+              "refId": "A"
+            }
+          ],
+          "title": "One-Way Audio Calls %",
+          "description": "Completed dialogs with two registered media endpoints but RTP observed in only one direction. Validate capture drops and SDP visibility before assigning the fault to an endpoint or carrier.",
           "type": "stat"
         },
         {
@@ -2256,7 +2396,7 @@
                   }
                 ]
               },
-              "unit": "short"
+              "unit": "percent"
             },
             "overrides": []
           },
@@ -3160,7 +3300,7 @@
                   }
                 ]
               },
-              "unit": "short"
+              "unit": "ops"
             },
             "overrides": []
           },
@@ -3249,7 +3389,7 @@
                   }
                 ]
               },
-              "unit": "short"
+              "unit": "ops"
             },
             "overrides": []
           },
@@ -3410,7 +3550,7 @@
                   }
                 ]
               },
-              "unit": "ms"
+              "unit": "ops"
             },
             "overrides": []
           },
@@ -3595,7 +3735,7 @@
           "gridPos": {
             "x": 0,
             "y": 165,
-            "w": 4,
+            "w": 5,
             "h": 5
           },
           "id": 11,
@@ -3644,75 +3784,6 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "red",
-                    "value": null
-                  },
-                  {
-                    "color": "yellow",
-                    "value": 50
-                  },
-                  {
-                    "color": "green",
-                    "value": 80
-                  }
-                ]
-              },
-              "unit": "percent"
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "x": 4,
-            "y": 165,
-            "w": 4,
-            "h": 5
-          },
-          "id": 12,
-          "options": {
-            "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
-            "orientation": "auto",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "textMode": "auto"
-          },
-          "pluginVersion": "10.0.0",
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "expr": "100 * (sum(rate(sip_exporter_invite_200_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + (sum(rate(sip_exporter_480_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_486_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_600_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_603_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])))) / (sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) - (sum(rate(sip_exporter_300_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_302_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))))",
-              "legendFormat": "SEER",
-              "refId": "A"
-            }
-          ],
-          "title": "SEER (Current Window)",
-          "description": "RFC/telephony ratios calculated from counters in the current interval. No data means no eligible INVITE attempts were observed.",
-          "type": "stat"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "thresholds"
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
                     "color": "green",
                     "value": null
                   },
@@ -3731,9 +3802,9 @@
             "overrides": []
           },
           "gridPos": {
-            "x": 8,
+            "x": 5,
             "y": 165,
-            "w": 4,
+            "w": 5,
             "h": 5
           },
           "id": 13,
@@ -3758,13 +3829,13 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "100 * (sum(rate(sip_exporter_408_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_500_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_503_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_504_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "expr": "100 * (sum(rate(sip_exporter_iss_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) or 0 * sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "ISA",
               "refId": "A"
             }
           ],
           "title": "ISA (Current Window)",
-          "description": "RFC/telephony ratios calculated from counters in the current interval. No data means no eligible INVITE attempts were observed.",
+          "description": "INVITE-only ineffective session attempts in the current interval. No data means no eligible INVITE attempts were observed.",
           "type": "stat"
         },
         {
@@ -3800,9 +3871,9 @@
             "overrides": []
           },
           "gridPos": {
-            "x": 12,
+            "x": 10,
             "y": 165,
-            "w": 4,
+            "w": 5,
             "h": 5
           },
           "id": 14,
@@ -3869,9 +3940,9 @@
             "overrides": []
           },
           "gridPos": {
-            "x": 16,
+            "x": 15,
             "y": 165,
-            "w": 4,
+            "w": 5,
             "h": 5
           },
           "id": 15,
@@ -3965,13 +4036,13 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "100 - (100 * (sum(rate(sip_exporter_408_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_500_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_503_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_504_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])))",
+              "expr": "100 - (100 * (sum(rate(sip_exporter_iss_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) or 0 * sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])))",
               "legendFormat": "NER",
               "refId": "A"
             }
           ],
           "title": "NER (Current Window)",
-          "description": "RFC/telephony ratios calculated from counters in the current interval. No data means no eligible INVITE attempts were observed.",
+          "description": "INVITE-only Network Effectiveness Ratio in the current interval. No data means no eligible INVITE attempts were observed.",
           "type": "stat"
         },
         {
@@ -4067,18 +4138,9 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "100 * (sum(rate(sip_exporter_invite_200_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + (sum(rate(sip_exporter_480_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_486_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_600_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_603_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])))) / (sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) - (sum(rate(sip_exporter_300_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_302_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))))",
-              "legendFormat": "SEER",
-              "refId": "B"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "expr": "100 * (sum(rate(sip_exporter_408_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_500_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_503_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_504_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "expr": "100 * (sum(rate(sip_exporter_iss_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) or 0 * sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "ISA",
-              "refId": "C"
+              "refId": "B"
             },
             {
               "datasource": {
@@ -4087,7 +4149,7 @@
               },
               "expr": "100 * sum(rate(sip_exporter_sdc_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "SCR",
-              "refId": "D"
+              "refId": "C"
             },
             {
               "datasource": {
@@ -4096,20 +4158,20 @@
               },
               "expr": "100 * sum(rate(sip_exporter_invite_200_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "ASR",
-              "refId": "E"
+              "refId": "D"
             },
             {
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "100 - (100 * (sum(rate(sip_exporter_408_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_500_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_503_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_504_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])))",
+              "expr": "100 - (100 * (sum(rate(sip_exporter_iss_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) or 0 * sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])))",
               "legendFormat": "NER",
-              "refId": "F"
+              "refId": "E"
             }
           ],
           "title": "RFC/Telephony Ratios — Current Window",
-          "description": "RFC/telephony ratios calculated from counters in the current interval. No data means no eligible INVITE attempts were observed.",
+          "description": "RFC/telephony ratios calculated from INVITE-only counters in the current interval. Windowed SEER is unavailable from the current counter schema. No data means no eligible INVITE attempts were observed.",
           "type": "timeseries"
         }
       ],
@@ -4333,8 +4395,8 @@
               "refId": "A"
             }
           ],
-          "title": "SPD p95 (Session Duration / ACD)",
-          "description": "SIP transaction latency distribution for the current interval. PDD is exporter-observed INVITE to 180 Ringing, not first media.",
+          "title": "SPD p95 (Session Duration)",
+          "description": "95th percentile of completed-session duration in the current interval; it is not an arithmetic mean.",
           "type": "stat"
         },
         {
@@ -4907,8 +4969,8 @@
               "refId": "C"
             }
           ],
-          "title": "SPD (Session Duration / ACD)",
-          "description": "SIP transaction latency distribution for the current interval. PDD is exporter-observed INVITE to 180 Ringing, not first media.",
+          "title": "SPD (Session Duration Percentiles)",
+          "description": "Completed-session duration percentiles in the current interval; they are not an arithmetic mean.",
           "type": "timeseries"
         },
         {
@@ -6650,7 +6712,7 @@
                   }
                 ]
               },
-              "unit": "none"
+              "unit": "m"
             },
             "overrides": []
           },
@@ -6662,18 +6724,20 @@
           },
           "id": 91,
           "options": {
-            "legend": {
+            "displayMode": "gradient",
+            "minVizHeight": 16,
+            "minVizWidth": 8,
+            "orientation": "horizontal",
+            "reduceOptions": {
               "calcs": [
                 "lastNotNull"
               ],
-              "displayMode": "table",
-              "placement": "bottom",
-              "showLegend": true
+              "fields": "",
+              "values": false
             },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
+            "showUnfilled": true,
+            "sizing": "auto",
+            "valueMode": "color"
           },
           "pluginVersion": "10.0.0",
           "targets": [
@@ -6682,14 +6746,16 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "topk(10, sum by (destination_country) (increase(sip_exporter_billable_seconds_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",destination_country=~\"$destination_country\"}[$__rate_interval]) / 60))",
+              "expr": "topk(10, sum by (destination_country) (increase(sip_exporter_billable_seconds_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",destination_country=~\"$destination_country\"}[$__range]) / 60))",
+              "instant": true,
               "legendFormat": "{{destination_country}}",
+              "range": false,
               "refId": "A"
             }
           ],
           "title": "Traffic Minutes by Destination",
-          "description": "Billable traffic duration derived from completed dialogs during the selected interval.",
-          "type": "timeseries"
+          "description": "Completed-dialog traffic minutes accumulated over the selected dashboard range.",
+          "type": "bargauge"
         },
         {
           "datasource": {
@@ -6741,7 +6807,7 @@
                   }
                 ]
               },
-              "unit": "m"
+              "unit": "suffix:Erlang"
             },
             "overrides": []
           },
@@ -6773,13 +6839,13 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum by (carrier) (rate(sip_exporter_billable_seconds_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",destination_country=~\"$destination_country\"}[$__rate_interval])) / 60",
+              "expr": "sum by (carrier) (rate(sip_exporter_billable_seconds_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",destination_country=~\"$destination_country\"}[$__rate_interval]))",
               "legendFormat": "{{carrier}}",
               "refId": "A"
             }
           ],
-          "title": "Traffic Minutes/min by Carrier",
-          "description": "Billable traffic duration derived from completed dialogs during the selected interval.",
+          "title": "Completed Traffic Intensity by Carrier",
+          "description": "Completed traffic intensity in Erlangs: holding seconds divided by observation seconds, attributed to the carrier at dialog teardown.",
           "type": "timeseries"
         }
       ],
