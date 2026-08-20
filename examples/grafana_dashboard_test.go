@@ -47,6 +47,7 @@ type (
 	}
 	target struct {
 		Expr         string `json:"expr"`
+		Instant      bool   `json:"instant"`
 		LegendFormat string `json:"legendFormat"`
 		RefID        string `json:"refId"`
 	}
@@ -305,9 +306,249 @@ func TestGrafanaDashboardOverviewRatioFilterScope(t *testing.T) {
 	}
 }
 
+func TestGrafanaDashboardTrafficAccountingSemantics(t *testing.T) {
+	d := readDashboard(t)
+
+	total := panelByID(t, d, 91)
+	if total.Type != "bargauge" || total.FieldConfig.Defaults.Unit != "m" || !total.Targets[0].Instant {
+		t.Errorf("traffic total = type %q/unit %q/instant %t, want bargauge/m/true",
+			total.Type, total.FieldConfig.Defaults.Unit, total.Targets[0].Instant)
+	}
+	if !strings.Contains(total.Targets[0].Expr, "increase(") ||
+		!strings.Contains(total.Targets[0].Expr, "[$__range]") ||
+		strings.Contains(total.Targets[0].Expr, "$__rate_interval") {
+		t.Errorf("traffic total does not use selected range: %s", total.Targets[0].Expr)
+	}
+
+	intensity := panelByID(t, d, 92)
+	if intensity.Title != "Completed Traffic Intensity by Carrier" ||
+		intensity.FieldConfig.Defaults.Unit != "suffix:Erlang" {
+		t.Errorf("traffic intensity = %q/%q, want Completed Traffic Intensity by Carrier/suffix:Erlang",
+			intensity.Title, intensity.FieldConfig.Defaults.Unit)
+	}
+	if !strings.Contains(intensity.Targets[0].Expr, "rate(") ||
+		strings.Contains(intensity.Targets[0].Expr, "/ 60") {
+		t.Errorf("traffic intensity has wrong dimensional conversion: %s", intensity.Targets[0].Expr)
+	}
+	for _, part := range []string{"Erlang", "at dialog teardown"} {
+		if !strings.Contains(intensity.Description, part) {
+			t.Errorf("traffic intensity description lacks %q: %s", part, intensity.Description)
+		}
+	}
+}
+
+func TestGrafanaDashboardOneWayAudioPanels(t *testing.T) {
+	d := readDashboard(t)
+
+	ratePanel := panelByID(t, d, 337)
+	assertPanel(t, d, 337, "One-Way Audio Calls/s", "ops",
+		"rtp_oneway_calls_total", "$__rate_interval")
+	ratioPanel := panelByID(t, d, 338)
+	assertPanel(t, d, 338, "One-Way Audio Calls %", "percent",
+		"100 *", "rtp_oneway_calls_total", "sdc_total", "$__rate_interval")
+
+	for _, p := range []panel{ratePanel, ratioPanel} {
+		for _, part := range []string{"two registered media endpoints", "one direction"} {
+			if !strings.Contains(p.Description, part) {
+				t.Errorf("panel %q description lacks %q: %s", p.Title, part, p.Description)
+			}
+		}
+	}
+
+	positions := map[int]gridPos{
+		100: {X: 0, Y: 63, W: 4, H: 5},
+		101: {X: 4, Y: 63, W: 4, H: 5},
+		102: {X: 8, Y: 63, W: 4, H: 5},
+		337: {X: 12, Y: 63, W: 6, H: 5},
+		338: {X: 18, Y: 63, W: 6, H: 5},
+	}
+	for id, want := range positions {
+		if got := panelByID(t, d, id).GridPos; got != want {
+			t.Errorf("panel %d grid position = %+v, want %+v", id, got, want)
+		}
+	}
+}
+
+func TestGrafanaDashboardSelectedFailureCodes(t *testing.T) {
+	p := panelByID(t, readDashboard(t), 33)
+	if p.Title != "Selected SIP Failure Codes" {
+		t.Errorf("failure panel title = %q, want Selected SIP Failure Codes", p.Title)
+	}
+	for _, metric := range []string{"sip_exporter_481_total", "sip_exporter_502_total"} {
+		if !slices.ContainsFunc(p.Targets, func(target target) bool {
+			return strings.Contains(target.Expr, metric)
+		}) {
+			t.Errorf("failure panel lacks %s", metric)
+		}
+	}
+	if !strings.Contains(p.Description, "Authentication challenges are excluded") {
+		t.Errorf("failure panel scope is unclear: %s", p.Description)
+	}
+}
+
+func TestGrafanaDashboardOperationalUnits(t *testing.T) {
+	d := readDashboard(t)
+	tests := []struct {
+		id   int
+		unit string
+	}{
+		{id: 31, unit: "ops"},
+		{id: 41, unit: "ops"},
+		{id: 42, unit: "ops"},
+		{id: 44, unit: "ops"},
+		{id: 312, unit: "ops"},
+		{id: 315, unit: "ops"},
+		{id: 322, unit: "percent"},
+	}
+	for _, tt := range tests {
+		p := panelByID(t, d, tt.id)
+		if p.FieldConfig.Defaults.Unit != tt.unit {
+			t.Errorf("panel %q unit = %q, want %q", p.Title, p.FieldConfig.Defaults.Unit, tt.unit)
+		}
+	}
+}
+
+func TestGrafanaDashboardSIPRequestSeriesIdentity(t *testing.T) {
+	p := panelByID(t, readDashboard(t), 31)
+	if len(p.Targets) != 14 {
+		t.Fatalf("SIP request target count = %d, want 14", len(p.Targets))
+	}
+	for _, target := range p.Targets {
+		for _, part := range []string{
+			"sum by (instance, carrier, direction, ua_type, source_country)",
+			"{{instance}}", "{{direction}}", "{{carrier}}", "{{ua_type}}", "{{source_country}}",
+		} {
+			if !strings.Contains(target.Expr+target.LegendFormat, part) {
+				t.Errorf("target %s lacks series identity %q: %s | %s",
+					target.RefID, part, target.Expr, target.LegendFormat)
+			}
+		}
+	}
+}
+
+func TestGrafanaDashboardInviteOnlyRFCFailureRatios(t *testing.T) {
+	d := readDashboard(t)
+	targets := []target{
+		panelByID(t, d, 9).Targets[0],
+		panelByID(t, d, 13).Targets[0],
+		panelByID(t, d, 16).Targets[0],
+	}
+	ratioTrend := panelByID(t, d, 17)
+	for _, legend := range []string{"ISA", "NER"} {
+		index := slices.IndexFunc(ratioTrend.Targets, func(target target) bool {
+			return target.LegendFormat == legend
+		})
+		if index < 0 {
+			t.Fatalf("ratio trend lacks %s target", legend)
+		}
+		targets = append(targets, ratioTrend.Targets[index])
+	}
+
+	for _, target := range targets {
+		if !strings.Contains(target.Expr, "sip_exporter_iss_total") ||
+			!strings.Contains(target.Expr, "$__rate_interval") {
+			t.Errorf("target %s is not windowed INVITE-only ISS: %s", target.RefID, target.Expr)
+		}
+		for _, generic := range []string{"408_total", "500_total", "503_total", "504_total"} {
+			if strings.Contains(target.Expr, generic) {
+				t.Errorf("target %s mixes generic SIP responses via %s: %s",
+					target.RefID, generic, target.Expr)
+			}
+		}
+	}
+}
+
+func TestGrafanaDashboardOmitsWindowedSEER(t *testing.T) {
+	d := readDashboard(t)
+	if slices.ContainsFunc(childPanels(d), func(p panel) bool { return p.ID == 12 }) {
+		t.Error("dashboard still contains windowed SEER panel 12")
+	}
+	for _, p := range childPanels(d) {
+		for _, target := range p.Targets {
+			if target.LegendFormat == "SEER" || strings.Contains(target.Expr, "sip_exporter_seer{") {
+				t.Errorf("panel %q still exposes unrepresentable windowed SEER: %s", p.Title, target.Expr)
+			}
+		}
+	}
+
+	positions := map[int]gridPos{
+		11: {X: 0, Y: 165, W: 5, H: 5},
+		13: {X: 5, Y: 165, W: 5, H: 5},
+		14: {X: 10, Y: 165, W: 5, H: 5},
+		15: {X: 15, Y: 165, W: 5, H: 5},
+		16: {X: 20, Y: 165, W: 4, H: 5},
+	}
+	for id, want := range positions {
+		if got := panelByID(t, d, id).GridPos; got != want {
+			t.Errorf("panel %d grid position = %+v, want %+v", id, got, want)
+		}
+	}
+	if !strings.Contains(panelByID(t, d, 17).Description, "Windowed SEER is unavailable") {
+		t.Errorf("ratio trend does not explain SEER omission: %s", panelByID(t, d, 17).Description)
+	}
+}
+
+func TestGrafanaDashboardCompleteResponseClasses(t *testing.T) {
+	p := panelByID(t, readDashboard(t), 32)
+	tests := []struct {
+		legend  string
+		metrics []string
+	}{
+		{legend: "1xx Provisional", metrics: []string{"100_total", "180_total", "181_total", "182_total", "183_total"}},
+		{legend: "2xx Success", metrics: []string{"200_total", "202_total"}},
+		{legend: "4xx Client Error", metrics: []string{
+			"400_total", "401_total", "403_total", "404_total", "405_total",
+			"proxy_authentication_required_total", "408_total", "480_total", "481_total",
+			"486_total", "487_total", "488_total",
+		}},
+	}
+	for _, tt := range tests {
+		index := slices.IndexFunc(p.Targets, func(target target) bool {
+			return target.LegendFormat == tt.legend
+		})
+		if index < 0 {
+			t.Fatalf("response-class panel lacks %q", tt.legend)
+		}
+		for _, metric := range tt.metrics {
+			if !strings.Contains(p.Targets[index].Expr, "sip_exporter_"+metric) {
+				t.Errorf("%s response class lacks %s: %s", tt.legend, metric, p.Targets[index].Expr)
+			}
+		}
+	}
+	if !strings.Contains(p.Description, "all observed SIP methods") {
+		t.Errorf("response-class scope is unclear: %s", p.Description)
+	}
+}
+
+func TestGrafanaDashboardSPDIsNotLabelledACD(t *testing.T) {
+	d := readDashboard(t)
+	tests := []struct {
+		id    int
+		title string
+	}{
+		{id: 23, title: "SPD p95 (Session Duration)"},
+		{id: 27, title: "SPD (Session Duration Percentiles)"},
+	}
+	for _, tt := range tests {
+		p := panelByID(t, d, tt.id)
+		if p.Title != tt.title {
+			t.Errorf("panel %d title = %q, want %q", tt.id, p.Title, tt.title)
+		}
+		if strings.Contains(p.Title, "ACD") {
+			t.Errorf("percentile panel %d is incorrectly labelled ACD: %s", tt.id, p.Title)
+		}
+		description := strings.ToLower(p.Description)
+		for _, part := range []string{"completed-session duration", "not an arithmetic mean"} {
+			if !strings.Contains(description, part) {
+				t.Errorf("panel %d description lacks %q: %s", tt.id, part, p.Description)
+			}
+		}
+	}
+}
+
 func TestGrafanaDashboardWindowedRatios(t *testing.T) {
 	d := readDashboard(t)
-	for id := 11; id <= 17; id++ {
+	for _, id := range []int{11, 13, 14, 15, 16, 17} {
 		p := panelByID(t, d, id)
 		for _, target := range p.Targets {
 			if usesLifetimeRatio(target.Expr) {
