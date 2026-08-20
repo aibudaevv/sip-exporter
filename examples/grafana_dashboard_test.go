@@ -316,6 +316,7 @@ func TestGrafanaDashboardTrafficAccountingSemantics(t *testing.T) {
 	}
 	if !strings.Contains(total.Targets[0].Expr, "increase(") ||
 		!strings.Contains(total.Targets[0].Expr, "[$__range]") ||
+		!strings.Contains(total.Targets[0].Expr, "/ 60") ||
 		strings.Contains(total.Targets[0].Expr, "$__rate_interval") {
 		t.Errorf("traffic total does not use selected range: %s", total.Targets[0].Expr)
 	}
@@ -366,6 +367,48 @@ func TestGrafanaDashboardOneWayAudioPanels(t *testing.T) {
 		if got := panelByID(t, d, id).GridPos; got != want {
 			t.Errorf("panel %d grid position = %+v, want %+v", id, got, want)
 		}
+	}
+}
+
+func TestGrafanaDashboardZeroEventCountersUseTrafficBaseline(t *testing.T) {
+	d := readDashboard(t)
+	tests := []struct {
+		id             int
+		legend         string
+		eventMetric    string
+		baselineMetric string
+	}{
+		{id: 9, eventMetric: "sip_exporter_iss_total", baselineMetric: "sip_exporter_invite_total"},
+		{id: 13, eventMetric: "sip_exporter_iss_total", baselineMetric: "sip_exporter_invite_total"},
+		{id: 16, eventMetric: "sip_exporter_iss_total", baselineMetric: "sip_exporter_invite_total"},
+		{id: 17, legend: "ISA", eventMetric: "sip_exporter_iss_total", baselineMetric: "sip_exporter_invite_total"},
+		{id: 17, legend: "NER", eventMetric: "sip_exporter_iss_total", baselineMetric: "sip_exporter_invite_total"},
+		{id: 337, eventMetric: "sip_exporter_rtp_oneway_calls_total", baselineMetric: "sip_exporter_sdc_total"},
+		{id: 338, eventMetric: "sip_exporter_rtp_oneway_calls_total", baselineMetric: "sip_exporter_sdc_total"},
+	}
+
+	for _, tt := range tests {
+		p := panelByID(t, d, tt.id)
+		targetIndex := 0
+		if tt.legend != "" {
+			targetIndex = slices.IndexFunc(p.Targets, func(target target) bool {
+				return target.LegendFormat == tt.legend
+			})
+			if targetIndex < 0 {
+				t.Fatalf("panel %d lacks %s target", tt.id, tt.legend)
+			}
+		}
+		expr := p.Targets[targetIndex].Expr
+		fallback := ")) or 0 * sum(rate(" + tt.baselineMetric
+		if !strings.Contains(expr, "(sum(rate("+tt.eventMetric) || !strings.Contains(expr, fallback) {
+			t.Errorf("panel %d target %q lacks traffic-backed zero fallback: %s",
+				tt.id, tt.legend, expr)
+		}
+	}
+
+	ratioExpr := panelByID(t, d, 338).Targets[0].Expr
+	if strings.LastIndex(ratioExpr, "/ sum(rate(sip_exporter_sdc_total") < strings.Index(ratioExpr, "or 0 *") {
+		t.Errorf("one-way ratio does not divide the zero-safe numerator by completed sessions: %s", ratioExpr)
 	}
 }
 
@@ -496,10 +539,17 @@ func TestGrafanaDashboardCompleteResponseClasses(t *testing.T) {
 	}{
 		{legend: "1xx Provisional", metrics: []string{"100_total", "180_total", "181_total", "182_total", "183_total"}},
 		{legend: "2xx Success", metrics: []string{"200_total", "202_total"}},
+		{legend: "3xx Redirection", metrics: []string{"300_total", "302_total"}},
 		{legend: "4xx Client Error", metrics: []string{
 			"400_total", "401_total", "403_total", "404_total", "405_total",
 			"proxy_authentication_required_total", "408_total", "480_total", "481_total",
 			"486_total", "487_total", "488_total",
+		}},
+		{legend: "5xx Server Error", metrics: []string{
+			"500_total", "501_total", "502_total", "503_total", "504_total",
+		}},
+		{legend: "6xx Global Failure", metrics: []string{
+			"600_total", "603_total", "604_total", "606_total",
 		}},
 	}
 	for _, tt := range tests {
@@ -509,9 +559,13 @@ func TestGrafanaDashboardCompleteResponseClasses(t *testing.T) {
 		if index < 0 {
 			t.Fatalf("response-class panel lacks %q", tt.legend)
 		}
+		expr := p.Targets[index].Expr
+		if !strings.Contains(expr, `{__name__=~"`) || strings.Contains(expr, " + sum(rate(") {
+			t.Errorf("%s response class is not resilient to absent status series: %s", tt.legend, expr)
+		}
 		for _, metric := range tt.metrics {
-			if !strings.Contains(p.Targets[index].Expr, "sip_exporter_"+metric) {
-				t.Errorf("%s response class lacks %s: %s", tt.legend, metric, p.Targets[index].Expr)
+			if !strings.Contains(expr, "sip_exporter_"+metric) {
+				t.Errorf("%s response class lacks %s: %s", tt.legend, metric, expr)
 			}
 		}
 	}

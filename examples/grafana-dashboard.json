@@ -567,7 +567,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "100 - (100 * sum(rate(sip_exporter_iss_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])))",
+              "expr": "100 - (100 * (sum(rate(sip_exporter_iss_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) or 0 * sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])))",
               "legendFormat": "NER",
               "refId": "A"
             }
@@ -1186,7 +1186,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(sip_exporter_100_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_180_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_181_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_182_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_183_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "expr": "sum(rate({__name__=~\"sip_exporter_100_total|sip_exporter_180_total|sip_exporter_181_total|sip_exporter_182_total|sip_exporter_183_total\",instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "1xx Provisional",
               "refId": "A"
             },
@@ -1195,7 +1195,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(sip_exporter_200_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_202_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "expr": "sum(rate({__name__=~\"sip_exporter_200_total|sip_exporter_202_total\",instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "2xx Success",
               "refId": "B"
             },
@@ -1204,7 +1204,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(sip_exporter_300_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_302_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "expr": "sum(rate({__name__=~\"sip_exporter_300_total|sip_exporter_302_total\",instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "3xx Redirection",
               "refId": "C"
             },
@@ -1213,7 +1213,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(sip_exporter_400_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_401_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_403_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_404_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_405_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_proxy_authentication_required_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_408_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_480_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_481_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_486_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_487_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_488_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "expr": "sum(rate({__name__=~\"sip_exporter_400_total|sip_exporter_401_total|sip_exporter_403_total|sip_exporter_404_total|sip_exporter_405_total|sip_exporter_proxy_authentication_required_total|sip_exporter_408_total|sip_exporter_480_total|sip_exporter_481_total|sip_exporter_486_total|sip_exporter_487_total|sip_exporter_488_total\",instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "4xx Client Error",
               "refId": "D"
             },
@@ -1222,7 +1222,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(sip_exporter_500_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_501_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_502_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_503_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_504_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "expr": "sum(rate({__name__=~\"sip_exporter_500_total|sip_exporter_501_total|sip_exporter_502_total|sip_exporter_503_total|sip_exporter_504_total\",instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "5xx Server Error",
               "refId": "E"
             },
@@ -1231,7 +1231,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(sip_exporter_600_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_603_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_604_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) + sum(rate(sip_exporter_606_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "expr": "sum(rate({__name__=~\"sip_exporter_600_total|sip_exporter_603_total|sip_exporter_604_total|sip_exporter_606_total\",instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "6xx Global Failure",
               "refId": "F"
             }
@@ -1940,7 +1940,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(sip_exporter_rtp_oneway_calls_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "expr": "(sum(rate(sip_exporter_rtp_oneway_calls_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) or 0 * sum(rate(sip_exporter_sdc_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])))",
               "legendFormat": "one-way calls/s",
               "refId": "A"
             }
@@ -2001,7 +2001,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "100 * sum(rate(sip_exporter_rtp_oneway_calls_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) / sum(rate(sip_exporter_sdc_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "expr": "100 * (sum(rate(sip_exporter_rtp_oneway_calls_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) or 0 * sum(rate(sip_exporter_sdc_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))) / sum(rate(sip_exporter_sdc_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "one-way / completed",
               "refId": "A"
             }
@@ -3829,7 +3829,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "100 * sum(rate(sip_exporter_iss_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "expr": "100 * (sum(rate(sip_exporter_iss_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) or 0 * sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "ISA",
               "refId": "A"
             }
@@ -4036,7 +4036,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "100 - (100 * sum(rate(sip_exporter_iss_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])))",
+              "expr": "100 - (100 * (sum(rate(sip_exporter_iss_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) or 0 * sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])))",
               "legendFormat": "NER",
               "refId": "A"
             }
@@ -4138,7 +4138,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "100 * sum(rate(sip_exporter_iss_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
+              "expr": "100 * (sum(rate(sip_exporter_iss_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) or 0 * sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))",
               "legendFormat": "ISA",
               "refId": "B"
             },
@@ -4165,7 +4165,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "100 - (100 * sum(rate(sip_exporter_iss_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])))",
+              "expr": "100 - (100 * (sum(rate(sip_exporter_iss_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])) or 0 * sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval]))) / sum(rate(sip_exporter_invite_total{instance=~\"$instance\",carrier=~\"$carrier\",direction=~\"$direction\",ua_type=~\"$ua_type\",source_country=~\"$source_country\"}[$__rate_interval])))",
               "legendFormat": "NER",
               "refId": "E"
             }
