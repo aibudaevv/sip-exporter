@@ -22,6 +22,7 @@ a Linux host into Prometheus metrics and Grafana dashboards, without storing pac
 ## Table of Contents
 
 - [Key Features](#key-features)
+- [Grafana Dashboard](#grafana-dashboard)
 - [Quick Start](#quick-start)
 - [Installation Verification](docs/INSTALLATION.md)
 - [Core Technology](#core-technology)
@@ -55,6 +56,14 @@ a Linux host into Prometheus metrics and Grafana dashboards, without storing pac
 - 🎧 **RTP media analysis** — jitter, packet loss, MOS (E-model G.107), and per-packet Packet Delay Variation (PDV) from RTP streams correlated with SIP dialogs
 - 📊 **RTCP endpoint-reported quality** — loss, jitter, and round-trip time (RTT) from RTCP SR/RR (RFC 3550), correlated by SSRC; supports rtcp-mux (RFC 5761), explicit `a=rtcp` (RFC 3605), and legacy port+1
 - 🛡️ **Fraud detection** — registration scan, INVITE burst, account-takeover (country change), and False Answer Supervision (FAS) signals ([docs/fraud-detection.md](docs/fraud-detection.md))
+
+## Grafana Dashboard
+
+Real dashboard output from deterministic SIP/RTP lab traffic. Select a preview to open it full size.
+
+| Overview | SIP health | RTP quality |
+|----------|------------|-------------|
+| [![Grafana overview](docs/assets/promotion/sip-exporter-overview.png)](docs/assets/promotion/sip-exporter-overview.png) | [![SIP health](docs/assets/promotion/sip-exporter-sip-health.png)](docs/assets/promotion/sip-exporter-sip-health.png) | [![RTP quality](docs/assets/promotion/sip-exporter-rtp-quality.png)](docs/assets/promotion/sip-exporter-rtp-quality.png) |
 
 ## Quick Start
 
