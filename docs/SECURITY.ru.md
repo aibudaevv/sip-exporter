@@ -36,7 +36,7 @@ SIP-exporter использует **eBPF** (extended Berkeley Packet Filter), п
 - **Не** отправляет SIP-трафик — исключительно пассивный слушатель
 - **Не** сохраняет данные пакетов. Production Compose-пример пишет только анонимный telemetry-ID в volume `sip-exporter-state`; конфигурационные mounts подключаются как `:ro` (только чтение)
 - **Не** обращается к другим контейнерам, процессам или системным ресурсам
-- **Не** открывает входящие порты, кроме `/metrics` на настроенном HTTP-порту (по умолчанию 2112)
+- **Не** открывает входящие порты, кроме эндпоинтов `/metrics` и `/health` на настроенном HTTP-порту (по умолчанию 2112)
 - **Не** устанавливает исходящие сетевые соединения **кроме** опционального telemetry-маяка (см. [Телеметрия](#телеметрия))
 
 ## Телеметрия
@@ -61,12 +61,12 @@ SIP-exporter использует **eBPF** (extended Berkeley Packet Filter), п
 
 | Лейбл | Источник | Область | Пример |
 |---|---|---|---|
-| `carrier` | CIDR-матч source IP по `carriers.yaml` | Все SIP + RTP метрики | `telecom-alpha` |
-| `ua_type` | Классификация User-Agent (`user_agents.yaml`) | Все SIP + RTP метрики | `yealink` |
-| `source_country` | `carrier.country` → MaxMind GeoIP(src IP) → `unknown` | Все SIP + RTP метрики | `RU` |
+| `carrier` | CIDR-матч source IP по `carriers.yaml` | Большинство SIP-, RTP- и скоррелированных RTCP-метрик | `telecom-alpha` |
+| `ua_type` | Классификация User-Agent (`user_agents.yaml`) | Базовые/call-level SIP-, RTP- и скоррелированные RTCP-метрики | `yealink` |
+| `source_country` | `carrier.country` → MaxMind GeoIP(src IP) → `unknown` | Базовые/call-level SIP-, RTP- и скоррелированные RTCP-метрики | `RU` |
 | `destination_country` | E.164-префикс вызываемого номера (встроенная таблица) | Только INVITE-метрики | `US` |
 | `caller_host`, `called_host` | Host-часть SIP-URI из From/To | Только INVITE-метрики (**opt-in**, по умолчанию выкл.) | `10.0.0.5`, `sip.example.com` |
-| `codec` | RTP payload type / SDP `a=rtpmap` | Только RTP-метрики | `G.711` |
+| `codec` | RTP payload type / SDP `a=rtpmap` | RTP- и скоррелированные RTCP-метрики качества | `G.711` |
 | `direction` | Тип пакета от ядра | SIP- и RTP-метрики трафика | `inbound` |
 | `iface` | Имя настроенного capture-интерфейса | Raw INVITE и socket-метрики самомониторинга | `ens3` |
 
@@ -79,7 +79,7 @@ SIP-exporter использует **eBPF** (extended Berkeley Packet Filter), п
 | Слой | Детали |
 |---|---|
 | Базовый образ | `alpine:3.22` — минимальный (~5 МБ) |
-| Runtime-зависимости | `libelf` (для eBPF), `bash` (для healthcheck), `libssl3` + `libcrypto3` (TLS-библиотеки) |
+| Runtime-пакеты | `libelf`, `bash`, `libssl3` и `libcrypto3`; healthcheck выполняет BusyBox `wget` |
 | Приложение | Один статически слинкованный бинарник на Go и eBPF object-файл |
 | Volumes | Writable `sip-exporter-state:/var/lib/sip-exporter` для telemetry-ID; опциональные конфигурационные и timezone mounts — только для чтения |
 | Сеть | Входящие HTTP-эндпоинты `/metrics` и `/health` (порт 2112 по умолчанию); опциональная исходящая телеметрия |

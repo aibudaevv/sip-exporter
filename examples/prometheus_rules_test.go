@@ -90,6 +90,14 @@ func TestRecordingRules(t *testing.T) {
 		t.Fatalf("SER recording rule clamps a rate denominator and distorts low traffic: %s",
 			got["sip_exporter:ser_percent:5m"])
 	}
+	rtpLossExpr := got["sip_exporter:rtp_loss_percent:5m"]
+	if strings.Count(rtpLossExpr, "sip_exporter_rtp_packets_lost_total") < 2 {
+		t.Fatalf("RTP loss denominator excludes inferred losses: %s", rtpLossExpr)
+	}
+	if strings.Contains(rtpLossExpr, "clamp_min") {
+		t.Fatalf("RTP loss recording rule clamps a rate denominator and distorts low traffic: %s",
+			rtpLossExpr)
+	}
 }
 
 func TestAlertRules(t *testing.T) {

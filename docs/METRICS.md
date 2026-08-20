@@ -40,14 +40,14 @@ All metrics are exposed at `/metrics` endpoint in Prometheus exposition format.
 
 ## Labels
 
-SIP metrics use a multi-layer label model. Most metrics include **three base labels**; INVITE-related raw counters add **three more**:
+SIP metrics use a multi-layer label model. Most SIP metrics include **four base labels**; INVITE-related raw counters add **four more**:
 
 | Label | Scope | Value | Description |
 |-------|-------|-------|-------------|
-| `carrier` | Base (all SIP) | Carrier name from config | Source IP → CIDR mapping, resolved at request time |
-| `ua_type` | Base (all SIP) | UA type from config | `User-Agent` header → regex mapping, resolved at request time |
-| `source_country` | Base (all SIP) | ISO 3166-1 alpha-2 | Country of the calling device. See [Geo-Enrichment Labels](#geo-enrichment-labels) |
-| `direction` | Base (all SIP) | `inbound` or `outbound` | Traffic direction from the server's perspective. See [Direction Label](#direction-label) |
+| `carrier` | Base SIP tier | Carrier name from config | Source IP → CIDR mapping, resolved at request time |
+| `ua_type` | Base SIP tier | UA type from config | `User-Agent` header → regex mapping, resolved at request time |
+| `source_country` | Base SIP tier | ISO 3166-1 alpha-2 | Country of the calling device. See [Geo-Enrichment Labels](#geo-enrichment-labels) |
+| `direction` | Base SIP tier | `inbound` or `outbound` | Traffic direction from the server's perspective. See [Direction Label](#direction-label) |
 | `destination_country` | INVITE raw only | ISO alpha-2 or `"unknown"` | Destination country from E.164 phone-number prefix. See [Geo-Enrichment Labels](#geo-enrichment-labels) |
 | `caller_host` | INVITE raw only (**opt-in**) | IP or domain | Host part of the `From` SIP URI |
 | `called_host` | INVITE raw only (**opt-in**) | IP or domain | Host part of the `To` SIP URI |
@@ -56,15 +56,19 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 >
 > | Tier | Metrics | Full label set |
 > |------|---------|----------------|
-> | **System / label-free self-monitoring** | `packets_total`, `system_error_total`, `rtp_dropped_total`, `rtp_kernel_timestamp_missing_total`, `channel_length`, `channel_capacity`, `active_dialogs` | *(none)* |
+> | **System / label-free self-monitoring** | `packets_total`, `system_error_total`, `rtp_dropped_total`, `rtp_kernel_timestamp_missing_total`, `rtcp_orphan_reports_total`, `channel_length`, `channel_capacity`, `active_dialogs` | *(none)* |
 > | **Socket self-monitoring** | `socket_packets_received_total`, `socket_packets_dropped_total` | `iface` |
 > | **Typed self-monitoring** | `parse_errors_total`, `active_trackers` | `type` |
 > | **Build self-monitoring** | `build_info` | `version` |
-> | **Base** | All SIP requests, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD/PBD, VQ reports, sessions, `reinvite_total`, registration health (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country, direction` |
+> | **Base SIP** | SIP requests and status responses, SER/SEER/ISA/SCR/ASR/NER, SDC/ISS, RRD/SPD/TTR/PDD/ORD/LRD/PBD, VQ reports, sessions, registration health (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country, direction` |
 > | **Reg failure** | `register_failure_total` | `carrier, ua_type, source_country, direction, code` |
 > | **Retransmission** | `sip_retransmission_total` | `carrier, ua_type, source_country, direction, method` |
 > | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_out_of_order_total`, `rtp_jitter_milliseconds`, `rtp_pdv_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country, direction` |
 > | **RTP dialog** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country, direction` |
+> | **RTP alias learned** | `rtp_endpoint_mismatch_total` | `carrier, direction, type` |
+> | **RTP alias active** | `rtp_alias_active` | `carrier, direction` |
+> | **RTCP quality** | `rtcp_jitter_milliseconds`, `rtcp_loss_fraction_percent`, `rtcp_cumulative_loss_total`, `rtcp_rtt_milliseconds` | `carrier, ua_type, codec, source_country, direction` |
+> | **RTCP reports** | `rtcp_reports_total` | `carrier, ua_type, source_country, direction, type` |
 > | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, direction, destination_country, caller_host, called_host, iface` |
 > | **INVITE redirects** | `invite_3xx_total` | `carrier, ua_type, source_country, direction` |
 > | **Fraud** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country, direction` |
@@ -91,8 +95,8 @@ The following metrics are system-level and do not include either label:
 
 ### Default behavior
 
-- If no carriers config is provided (`SIP_EXPORTER_CARRIERS_CONFIG` not set), all SIP metrics use `carrier="other"`.
-- If no user-agents config is provided (`SIP_EXPORTER_USER_AGENTS_CONFIG` not set), all SIP metrics use `ua_type="other"`.
+- If no carriers config is provided (`SIP_EXPORTER_CARRIERS_CONFIG` not set), metrics carrying `carrier` use `carrier="other"`.
+- If no user-agents config is provided (`SIP_EXPORTER_USER_AGENTS_CONFIG` not set), metrics carrying `ua_type` use `ua_type="other"`.
 
 ### Carrier Label
 
@@ -226,7 +230,7 @@ The `ua_type` label identifies the **type of SIP device** that sent the request,
 
 ### Default behavior
 
-If no user-agents config is provided (`SIP_EXPORTER_USER_AGENTS_CONFIG` not set), all SIP metrics use `ua_type="other"`.
+If no user-agents config is provided (`SIP_EXPORTER_USER_AGENTS_CONFIG` not set), metrics carrying `ua_type` use `ua_type="other"`.
 
 ### Configuration
 
@@ -403,7 +407,7 @@ GeoIP for source IP, phone-number prefix for destination — two independent met
 |----------|---------|-------------|
 | `SIP_EXPORTER_GEOIP_COUNTRY_DB` | (empty = disabled) | Path to `GeoLite2-Country.mmdb` |
 
-**Cardinality impact:** ~250 ISO alpha-2 codes. With GeoIP disabled and no `carrier.country`, every metric has `source_country="unknown"` — the same cardinality as without the label.
+**Cardinality impact:** ~250 ISO alpha-2 codes. With GeoIP disabled and no `carrier.country`, metrics carrying `source_country` use `source_country="unknown"` — the same cardinality as without the label.
 
 ### destination_country
 

@@ -33,10 +33,9 @@ groups:
       - record: sip_exporter:rtp_loss_percent:5m
         expr: |
           100 * sum by (instance, carrier, direction) (rate(sip_exporter_rtp_packets_lost_total[5m]))
-          / clamp_min(
+          / (
             sum by (instance, carrier, direction) (rate(sip_exporter_rtp_packets_total[5m]))
-            + sum by (instance, carrier, direction) (rate(sip_exporter_rtp_packets_lost_total[5m])),
-            1
+            + sum by (instance, carrier, direction) (rate(sip_exporter_rtp_packets_lost_total[5m]))
           )
 
       - record: sip_exporter:missing_rtp_rate:5m

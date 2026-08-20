@@ -41,8 +41,8 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - 🐳 **Single container deployment** — no external dependencies
 - 🔧 **Configurable SIP ports** — monitor custom ports via environment variables
 - 📈 **Prometheus native** — standard `/metrics` endpoint for scraping
-- 🏷️ **Per-carrier metrics** — CIDR-based carrier resolution for all SIP metrics
-- 🏷️ **Per-device-type metrics** — User-Agent classification for all SIP metrics
+- 🏷️ **Per-carrier metrics** — CIDR-based carrier resolution for SIP metric families with carrier context
+- 🏷️ **Per-device-type metrics** — User-Agent classification for SIP metric families with device context
 - 🌍 **Geo-enrichment** — `source_country` (GeoIP) and `destination_country` (E.164 prefix) labels on SIP metrics
 - 🔀 **Traffic direction** — `inbound`/`outbound` label on SIP and RTP traffic metrics via kernel `pkttype`, zero-config
 - 📞 **Voice quality (RFC 6035)** — MOS scores, jitter, packet loss from SIP PUBLISH/NOTIFY
@@ -145,14 +145,14 @@ Coverage depends on what the host actually sees:
 
 ## Metrics
 
-All metrics are exposed at `/metrics` in Prometheus exposition format. Most SIP metrics include `carrier`, `ua_type`, and `source_country` labels for multi-dimensional analysis (exceptions: `sip_exporter_sessions_limit` carries only `carrier`; `sip_exporter_billable_seconds_total` carries `carrier`, `destination_country`, `direction`). INVITE metrics additionally carry an `iface` label identifying the network interface that captured the traffic. The exporter provides:
+All metrics are exposed at `/metrics` in Prometheus exposition format. Most SIP metrics include `carrier`, `ua_type`, `source_country`, and `direction`; specialized fraud, capacity, traffic, RTP/RTCP, and self-monitoring families use the exact schemas documented in the [metrics label matrix](docs/METRICS.md#labels). Raw INVITE metrics additionally carry `destination_country`, opt-in `caller_host`/`called_host`, and the capture-interface `iface`. The exporter provides:
 
 - **Traffic counters** — SIP request types (INVITE, re-INVITE, BYE, REGISTER, etc.) and response status codes (100–606)
 - **Active sessions** — real-time count of active SIP dialogs
 - **RFC 6076 performance metrics** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, PDD, PBD
 - **RFC 6035 voice quality metrics** — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
 - **RTP media metrics** — `sip_exporter_rtp_packets_total`, `sip_exporter_rtp_packets_lost_total`, `sip_exporter_rtp_jitter_milliseconds`, `sip_exporter_rtp_pdv_milliseconds` (per-packet Packet Delay Variation), `sip_exporter_rtp_mos_score`, `sip_exporter_rtp_active_streams` (labels: `carrier,ua_type,codec,source_country,direction`)
-- **RTCP quality metrics** — `sip_exporter_rtcp_reports_total`, `sip_exporter_rtcp_loss_fraction_percent`, `sip_exporter_rtcp_cumulative_loss_total`, `sip_exporter_rtcp_jitter_milliseconds`, `sip_exporter_rtcp_rtt_milliseconds`, `sip_exporter_rtcp_orphan_reports_total` (labels: `carrier,ua_type,codec,source_country,direction`)
+- **RTCP quality metrics** — quality histograms and cumulative loss use `carrier,ua_type,codec,source_country,direction`; `sip_exporter_rtcp_reports_total` replaces `codec` with `type`, and `sip_exporter_rtcp_orphan_reports_total` has no labels
 - **Fraud signals** — `sip_exporter_fas_calls_total` (False Answer Supervision: 200 OK with no RTP within threshold), `sip_exporter_register_scan_total`, `sip_exporter_invite_burst_total`, `sip_exporter_register_country_change_total`
 - **Diagnostics** — `sip_exporter_sip_retransmission_total` (SIP Timer A retransmissions), `sip_exporter_rtp_out_of_order_total` (out-of-sequence RTP packets), `sip_exporter_short_calls_total` (calls shorter than 20/60/180 seconds)
 
@@ -162,7 +162,7 @@ Full reference with formulas, examples, and RFC section mapping: [docs/METRICS.m
 
 If your SIP infrastructure handles traffic from multiple operators (telecom providers, SIP trunks, PBX clusters), you need to see metrics **per operator**, not in aggregate.
 
-The carrier feature solves this by mapping IP subnets to operator names. Every metric — INVITE count, SER, active sessions, RRD latency — gets a `carrier` label, so you can build separate Grafana dashboards and alerts for each operator.
+The carrier feature solves this by mapping IP subnets to operator names. Call metrics such as INVITE count, SER, active sessions, and RRD latency get a `carrier` label, so you can build separate Grafana dashboards and alerts for each operator.
 
 **How it works:**
 
@@ -204,7 +204,7 @@ sip_exporter_ser{carrier="other",ua_type="other"}                     0.0
 - Carrier is determined at **request time** (INVITE/REGISTER/OPTIONS), not response time. If carrier-A sends INVITE and carrier-B answers 200 OK, all metrics still go to carrier-A — the operator who initiated the call
 - If source IP doesn't match any CIDR, destination IP is tried. If neither matches → `carrier="other"`
 - When CIDRs overlap, **first match wins** — list specific subnets before broad ones
-- Without the config file, all metrics get `carrier="other"` — nothing breaks
+- Without the config file, metrics carrying `carrier` use `carrier="other"` — nothing breaks
 - Each carrier can have multiple CIDRs, and multiple carriers can be defined
 - CIDR notation is required — plain IPs without `/` are rejected. Use `/32` for a single host, e.g. `"10.226.97.5/32"` instead of `"10.226.97.5"`
 
@@ -212,9 +212,9 @@ Full config reference with examples: [`examples/carriers.yaml`](examples/carrier
 
 ### Per-Device-Type Metrics (User-Agent Classification)
 
-If you need to see metrics **per SIP device type** — IP phones vs softphones vs SBCs — the User-Agent classification feature adds a `ua_type` label to every metric.
+If you need to see metrics **per SIP device type** — IP phones vs softphones vs SBCs — the User-Agent classification feature adds `ua_type` to metric families with device context.
 
-The exporter reads the `User-Agent` SIP header from each request and matches it against regex patterns in a YAML config. Every metric — INVITE count, SER, active sessions, SPD duration — gets a `ua_type` label, so you can build separate Grafana dashboards and alerts for each device family.
+The exporter reads the `User-Agent` SIP header from each request and matches it against regex patterns in a YAML config. Call metrics such as INVITE count, SER, active sessions, and SPD duration get a `ua_type` label, so you can build separate Grafana dashboards and alerts for each device family.
 
 **How it works:**
 
@@ -260,9 +260,9 @@ sip_exporter_ser{carrier="telecom-alpha",ua_type="other"}                  0.0
 - The `User-Agent` header is extracted from all SIP packets, but SIP responses typically use the `Server` header, so in practice only requests provide meaningful classification
 - If no pattern matches → `ua_type="other"`
 - When patterns overlap, **first match wins** — list specific patterns before broad ones
-- Without the config file, all metrics get `ua_type="other"` — nothing breaks
+- Without the config file, metrics carrying `ua_type` use `ua_type="other"` — nothing breaks
 - Patterns are case-insensitive when using `(?i)` prefix
-- Works **together with carrier** — every metric has both `carrier` and `ua_type` labels for two-dimensional analysis
+- Works **together with carrier** — base and call-level SIP metrics carry both labels for two-dimensional analysis
 
 **Combined carrier + ua_type queries:**
 
@@ -285,7 +285,7 @@ The exporter adds geographic context to SIP metrics via two labels:
 
 | Label | Method | Scope |
 |-------|--------|-------|
-| `source_country` | GeoIP lookup of source IP (MaxMind GeoLite2-Country) | All SIP + RTP metrics |
+| `source_country` | GeoIP lookup of source IP (MaxMind GeoLite2-Country) | Base/call-level SIP, RTP, and correlated RTCP metrics |
 | `destination_country` | E.164 phone-number prefix (embedded, no DB needed) | INVITE metrics only |
 
 **source_country resolution:**
@@ -370,13 +370,8 @@ Full setup, metrics reference, and alerting guidance: [docs/fraud-detection.md](
 
 ### Test Coverage
 
-| Package | Coverage |
-|---------|----------|
-| `internal/config` | 100.0% |
-| `pkg/log` | 95.5% |
-| `internal/server` | 90.5% |
-| `internal/service` | 75.4% |
-| `internal/exporter` | 64.0% |
+Coverage changes with the test suite and is not pinned in this document. Generate current package
+coverage with `go test -cover ./internal/... ./pkg/...`.
 
 Test suite:
 - **Unit tests** — MC/DC-oriented coverage of business logic

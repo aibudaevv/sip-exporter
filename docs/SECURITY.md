@@ -36,7 +36,7 @@ That's it. No packet modification, no packet injection, no network redirection, 
 - Does **not** send any SIP traffic — purely passive listener
 - Does **not** persist packet data. The production Compose example writes only the anonymous telemetry ID to the `sip-exporter-state` volume; configuration mounts are `:ro` (read-only)
 - Does **not** access other containers, processes, or system resources
-- Does **not** open any inbound ports except `/metrics` on the configured HTTP port (default 2112)
+- Does **not** open any inbound ports except the `/metrics` and `/health` endpoints on the configured HTTP port (default 2112)
 - Does **not** make outbound network connections **except** the optional telemetry beacon (see [Telemetry](#telemetry))
 
 ## Telemetry
@@ -61,12 +61,12 @@ No **phone numbers** ever reach Prometheus labels. The privacy-relevant packet a
 
 | Label | Derived from | Scope | Example |
 |---|---|---|---|
-| `carrier` | CIDR match of source IP against `carriers.yaml` | All SIP + RTP metrics | `telecom-alpha` |
-| `ua_type` | User-Agent classification (`user_agents.yaml`) | All SIP + RTP metrics | `yealink` |
-| `source_country` | `carrier.country` → MaxMind GeoIP(src IP) → `unknown` | All SIP + RTP metrics | `RU` |
+| `carrier` | CIDR match of source IP against `carriers.yaml` | Most SIP, RTP, and correlated RTCP metrics | `telecom-alpha` |
+| `ua_type` | User-Agent classification (`user_agents.yaml`) | Base/call-level SIP, RTP, and correlated RTCP metrics | `yealink` |
+| `source_country` | `carrier.country` → MaxMind GeoIP(src IP) → `unknown` | Base/call-level SIP, RTP, and correlated RTCP metrics | `RU` |
 | `destination_country` | E.164 prefix of the called number (embedded table) | INVITE metrics only | `US` |
 | `caller_host`, `called_host` | Host part of the From/To SIP URI | INVITE metrics only (**opt-in**, default off) | `10.0.0.5`, `sip.example.com` |
-| `codec` | RTP payload type / SDP `a=rtpmap` | RTP metrics only | `G.711` |
+| `codec` | RTP payload type / SDP `a=rtpmap` | RTP and correlated RTCP quality metrics | `G.711` |
 | `direction` | Kernel packet type | SIP and RTP traffic metrics | `inbound` |
 | `iface` | Configured capture-interface name | Raw INVITE and socket self-monitoring metrics | `ens3` |
 
@@ -79,7 +79,7 @@ No **phone numbers** ever reach Prometheus labels. The privacy-relevant packet a
 | Layer | Details |
 |---|---|
 | Base image | `alpine:3.22` — minimal (~5 MB) |
-| Runtime dependencies | `libelf` (for eBPF), `bash` (for healthcheck), `libssl3` + `libcrypto3` (TLS libraries) |
+| Runtime packages | `libelf`, `bash`, `libssl3`, and `libcrypto3`; the healthcheck executes BusyBox `wget` |
 | Application | Single statically linked Go binary plus the eBPF object file |
 | Volumes | Writable `sip-exporter-state:/var/lib/sip-exporter` for the telemetry ID; optional configuration and timezone mounts are read-only |
 | Network | Inbound `/metrics` and `/health` HTTP endpoints (default port 2112); optional outbound telemetry |

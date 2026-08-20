@@ -331,7 +331,10 @@ These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) mea
       - alert: RTPPacketLossHigh
         expr: |
           sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
-          / sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m])) * 100 > 5
+          / (
+              sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m]))
+              + sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
+            ) * 100 > 5
         for: 5m
         labels:
           severity: warning
@@ -342,7 +345,10 @@ These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) mea
       - alert: RTPPacketLossCritical
         expr: |
           sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
-          / sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m])) * 100 > 10
+          / (
+              sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m]))
+              + sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
+            ) * 100 > 10
         for: 3m
         labels:
           severity: critical

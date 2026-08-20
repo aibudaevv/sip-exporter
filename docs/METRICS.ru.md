@@ -40,14 +40,14 @@
 
 ## Лейблы
 
-SIP-метрики используют многоуровневую модель лейблов. Большинство метрик включают **три базовых лейбла**; счётчики INVITE добавляют ещё **три**:
+SIP-метрики используют многоуровневую модель лейблов. Большинство SIP-метрик включают **четыре базовых лейбла**; raw-счётчики INVITE добавляют ещё **четыре**:
 
 | Лейбл | Область | Значение | Описание |
 |-------|---------|----------|----------|
-| `carrier` | Базовый (все SIP) | Имя оператора из конфига | Source IP → CIDR-маппинг, разрешается при запросе |
-| `ua_type` | Базовый (все SIP) | Тип UA из конфига | `User-Agent` → regex-маппинг, разрешается при запросе |
-| `source_country` | Базовый (все SIP) | ISO 3166-1 alpha-2 | Страна вызывающего устройства. См. [Лейблы геообогащения](#лейблы-геообогащения) |
-| `direction` | Базовый (все SIP) | `inbound` или `outbound` | Направление трафика с точки зрения сервера. См. [Лейбл direction](#лейбл-direction) |
+| `carrier` | Базовый SIP-tier | Имя оператора из конфига | Source IP → CIDR-маппинг, разрешается при запросе |
+| `ua_type` | Базовый SIP-tier | Тип UA из конфига | `User-Agent` → regex-маппинг, разрешается при запросе |
+| `source_country` | Базовый SIP-tier | ISO 3166-1 alpha-2 | Страна вызывающего устройства. См. [Лейблы геообогащения](#лейблы-геообогащения) |
+| `direction` | Базовый SIP-tier | `inbound` или `outbound` | Направление трафика с точки зрения сервера. См. [Лейбл direction](#лейбл-direction) |
 | `destination_country` | Только INVITE | ISO alpha-2 или `"unknown"` | Страна назначения по префиксу номера E.164. См. [Лейблы геообогащения](#лейблы-геообогащения) |
 | `caller_host` | Только INVITE (**opt-in**) | IP или домен | Хост-часть SIP URI из заголовка `From` |
 | `called_host` | Только INVITE (**opt-in**) | IP или домен | Хост-часть SIP URI из заголовка `To` |
@@ -56,15 +56,19 @@ SIP-метрики используют многоуровневую модел�
 >
 > | Уровень | Метрики | Полный набор лейблов |
 > |---------|---------|----------------------|
-> | **Системные / самомониторинг без лейблов** | `packets_total`, `system_error_total`, `rtp_dropped_total`, `rtp_kernel_timestamp_missing_total`, `channel_length`, `channel_capacity`, `active_dialogs` | *(нет)* |
+> | **Системные / самомониторинг без лейблов** | `packets_total`, `system_error_total`, `rtp_dropped_total`, `rtp_kernel_timestamp_missing_total`, `rtcp_orphan_reports_total`, `channel_length`, `channel_capacity`, `active_dialogs` | *(нет)* |
 > | **Socket-самомониторинг** | `socket_packets_received_total`, `socket_packets_dropped_total` | `iface` |
 > | **Типизированный самомониторинг** | `parse_errors_total`, `active_trackers` | `type` |
 > | **Build-самомониторинг** | `build_info` | `version` |
-> | **Базовый** | Все SIP-запросы, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD/PBD, VQ-отчёты, sessions, `reinvite_total`, здоровье регистраций (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country, direction` |
+> | **Базовый SIP** | SIP-запросы и status-ответы, SER/SEER/ISA/SCR/ASR/NER, SDC/ISS, RRD/SPD/TTR/PDD/ORD/LRD/PBD, VQ-отчёты, sessions, здоровье регистраций (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country, direction` |
 > | **Ошибки рег.** | `register_failure_total` | `carrier, ua_type, source_country, direction, code` |
 > | **Ретрансляции** | `sip_retransmission_total` | `carrier, ua_type, source_country, direction, method` |
 > | **RTP** | `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_duplicate_packets_total`, `rtp_out_of_order_total`, `rtp_jitter_milliseconds`, `rtp_pdv_milliseconds`, `rtp_mos_score`, `rtp_mos_f1`, `rtp_mos_f2`, `rtp_mos_adaptive`, `rtp_r_factor`, `rtp_burst_loss_density`, `rtp_gap_loss_density`, `rtp_active_streams` | `carrier, ua_type, codec, source_country, direction` |
 > | **RTP dialog** | `rtp_oneway_calls_total`, `sessions_missing_rtp_total` | `carrier, ua_type, source_country, direction` |
+> | **Обучение RTP alias** | `rtp_endpoint_mismatch_total` | `carrier, direction, type` |
+> | **Активные RTP alias** | `rtp_alias_active` | `carrier, direction` |
+> | **Качество RTCP** | `rtcp_jitter_milliseconds`, `rtcp_loss_fraction_percent`, `rtcp_cumulative_loss_total`, `rtcp_rtt_milliseconds` | `carrier, ua_type, codec, source_country, direction` |
+> | **RTCP-отчёты** | `rtcp_reports_total` | `carrier, ua_type, source_country, direction, type` |
 > | **INVITE raw** | `invite_total`, `invite_200_total` | `carrier, ua_type, source_country, direction, destination_country, caller_host, called_host, iface` |
 > | **INVITE redirects** | `invite_3xx_total` | `carrier, ua_type, source_country, direction` |
 > | **Фрод** | `register_country_change_total`, `register_scan_total`, `invite_burst_total` | `carrier, source_country, direction` |
@@ -91,8 +95,8 @@ sip_exporter_ser{carrier="carrier-a",ua_type="yealink",source_country="RU",direc
 
 ### Поведение по умолчанию
 
-- Если конфиг операторов не предоставлен (`SIP_EXPORTER_CARRIERS_CONFIG` не задан), все SIP-метрики используют `carrier="other"`.
-- Если конфиг user-agents не предоставлен (`SIP_EXPORTER_USER_AGENTS_CONFIG` не задан), все SIP-метрики используют `ua_type="other"`.
+- Если конфиг операторов не предоставлен (`SIP_EXPORTER_CARRIERS_CONFIG` не задан), метрики с `carrier` используют `carrier="other"`.
+- Если конфиг user-agents не предоставлен (`SIP_EXPORTER_USER_AGENTS_CONFIG` не задан), метрики с `ua_type` используют `ua_type="other"`.
 
 ### Лейбл carrier
 
@@ -226,7 +230,7 @@ BYE                     | 10.0.1.5   | carrier-A         | IP (запрос)
 
 ### Поведение по умолчанию
 
-Если конфиг user-agents не предоставлен (`SIP_EXPORTER_USER_AGENTS_CONFIG` не задан), все SIP-метрики используют `ua_type="other"`.
+Если конфиг user-agents не предоставлен (`SIP_EXPORTER_USER_AGENTS_CONFIG` не задан), метрики с `ua_type` используют `ua_type="other"`.
 
 ### Конфигурация
 
@@ -403,7 +407,7 @@ GeoIP для IP источника, префикс номера для назн�
 |------------|--------------|----------|
 | `SIP_EXPORTER_GEOIP_COUNTRY_DB` | (пусто = выключено) | Путь к `GeoLite2-Country.mmdb` |
 
-**Влияние на кардинальность:** ~250 ISO alpha-2 кодов. С выключенным GeoIP и без `carrier.country` каждая метрика имеет `source_country="unknown"` — та же кардинальность, что и без лейбла.
+**Влияние на кардинальность:** ~250 ISO alpha-2 кодов. С выключенным GeoIP и без `carrier.country` метрики с `source_country` используют `source_country="unknown"` — та же кардинальность, что и без лейбла.
 
 ### destination_country
 
