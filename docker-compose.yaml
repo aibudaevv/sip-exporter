@@ -1,14 +1,20 @@
 services:
   sip-exporter:
-    image: frzq/sip-exporter:1.10.0
+    image: frzq/sip-exporter:1.11.0
     container_name: sip-exporter
     restart: unless-stopped
     environment:
       - SIP_EXPORTER_INTERFACE=eth0  # Required: one or more comma-separated (eth0, eth1,eth2)
-      - SIP_EXPORTER_HTTP_PORT=2112
+      - SIP_EXPORTER_HTTP_PORT=10047
       - SIP_EXPORTER_SIP_PORTS=5060
     privileged: true # Required for eBPF and packet socket — see docs/SECURITY.md
     volumes:
       - '/etc/localtime:/etc/localtime:ro'
       - '/etc/timezone:/etc/timezone:ro'
     network_mode: "host"  # Required for capturing network packets
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:10047/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

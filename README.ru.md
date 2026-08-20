@@ -57,13 +57,16 @@
 ```bash
 cp examples/docker-compose.production.yml docker-compose.yml
 SIP_EXPORTER_INTERFACE=eth0 docker compose up -d
-curl http://localhost:2112/metrics
+curl http://localhost:10047/metrics
 ```
 
 Пример содержит pinned image, политику перезапуска, healthcheck, read-only filesystem и все
 перечисленные ниже runtime-параметры с их значениями по умолчанию.
 
-Метрики доступны на `http://localhost:2112/metrics`.
+Метрики доступны на `http://localhost:10047/metrics`.
+
+**Миграция порта:** новые установки используют `10047`. Существующие установки могут сохранить
+предыдущий порт через `SIP_EXPORTER_HTTP_PORT=2112`, согласовав с ним scrape URL и healthcheck.
 
 **Первый полезный дашборд:** пройдите [runbook проверки установки](docs/INSTALLATION.ru.md):
 он последовательно проверяет health, scrape status, SIP, видимость SDP/RTP и drops до импорта Grafana.
@@ -97,7 +100,7 @@ docker pull frzq/sip-exporter:latest
 
 Переменные окружения:
 * `SIP_EXPORTER_INTERFACE` — один или несколько сетевых интерфейсов через запятую (обязательно). Примеры: `eth0`, `eth0,eth1,eth2`.
-* `SIP_EXPORTER_HTTP_PORT` — HTTP-порт для Prometheus (по умолчанию 2112)
+* `SIP_EXPORTER_HTTP_PORT` — HTTP-порт для Prometheus (по умолчанию 10047)
 * `SIP_EXPORTER_LOGGER_LEVEL` — уровень логирования: `error`, `info` или `debug` (по умолчанию `info`). Debug-логи содержат raw SIP payload; используйте их только в контролируемой среде. Любое другое значение сейчас включает debug-логирование.
 * `SIP_EXPORTER_SIP_PORTS` — один или несколько SIP-портов через запятую (по умолчанию 5060; до 3 на интерфейс). Через `;` — наборы для каждого интерфейса: `5060,5062;5060,5061`.
 * `SIP_EXPORTER_OBJECT_FILE_PATH` — путь к eBPF-объектному файлу (по умолчанию /usr/local/bin/sip.o)

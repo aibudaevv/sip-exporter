@@ -58,13 +58,16 @@ Set `SIP_EXPORTER_INTERFACE` to the host interface that carries both SIP signali
 ```bash
 cp examples/docker-compose.production.yml docker-compose.yml
 SIP_EXPORTER_INTERFACE=eth0 docker compose up -d
-curl http://localhost:2112/metrics
+curl http://localhost:10047/metrics
 ```
 
 The example includes a pinned release image, restart policy, healthcheck, read-only filesystem, and
 every runtime setting listed below with its default value.
 
-Access metrics at `http://localhost:2112/metrics`. A `/health` endpoint is also exposed (returns `200 OK` when alive, `503` otherwise) — used by the Dockerfile `HEALTHCHECK` and suitable for orchestrator liveness/readiness probes.
+Access metrics at `http://localhost:10047/metrics`. A `/health` endpoint is also exposed (returns `200 OK` when alive, `503` otherwise) — used by the Dockerfile `HEALTHCHECK` and suitable for orchestrator liveness/readiness probes.
+
+**Port migration:** new installations use `10047`. Existing deployments may keep the previous
+port by setting `SIP_EXPORTER_HTTP_PORT=2112` and keeping their scrape and healthcheck URLs aligned.
 
 **First useful dashboard:** follow the [installation verification runbook](docs/INSTALLATION.md)
 to check health, scrape status, SIP, SDP/RTP visibility and drops before importing Grafana.
@@ -99,7 +102,7 @@ docker pull frzq/sip-exporter:latest
 ### Configure
 Environment variables:
 * `SIP_EXPORTER_INTERFACE` - one or more network interfaces, comma-separated (required). Examples: `eth0`, `eth0,eth1,eth2`.
-* `SIP_EXPORTER_HTTP_PORT` - http port for prometheus (default 2112)
+* `SIP_EXPORTER_HTTP_PORT` - http port for prometheus (default 10047)
 * `SIP_EXPORTER_LOGGER_LEVEL` - log level: `error`, `info`, or `debug` (default `info`). Debug logs include raw SIP payloads; use only in controlled environments. Any other value currently enables debug logging.
 * `SIP_EXPORTER_SIP_PORTS` - one or more SIP ports, comma-separated (default 5060; up to 3 per interface). Use `;` for per-interface sets: `5060,5062;5060,5061`.
 * `SIP_EXPORTER_OBJECT_FILE_PATH` - path to eBPF object file (default /usr/local/bin/sip.o)

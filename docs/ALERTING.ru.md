@@ -634,7 +634,7 @@ receivers:
     - job_name: 'sip-exporter'
       scrape_interval: 10s
       static_configs:
-        - targets: ['localhost:2112']
+        - targets: ['localhost:10047']
   ```
 
 ### Хранение данных
@@ -679,8 +679,8 @@ scrape_configs:
   - job_name: 'sip-exporter'
     static_configs:
       - targets:
-          - 'sip-exporter-1:2112'
-          - 'sip-exporter-2:2112'
+          - 'sip-exporter-1:10047'
+          - 'sip-exporter-2:10047'
 ```
 
 ### Кардинальность метрик
