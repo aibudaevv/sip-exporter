@@ -66,6 +66,8 @@ sip-exporter — это eBPF-сенсор с открытым исходным �
 |-------|---------------|--------------|
 | [![Обзор Grafana](docs/assets/promotion/sip-exporter-overview.png)](docs/assets/promotion/sip-exporter-overview.png) | [![Состояние SIP](docs/assets/promotion/sip-exporter-sip-health.png)](docs/assets/promotion/sip-exporter-sip-health.png) | [![Качество RTP](docs/assets/promotion/sip-exporter-rtp-quality.png)](docs/assets/promotion/sip-exporter-rtp-quality.png) |
 
+[Посмотреть все 11 разделов дашборда](docs/GRAFANA_GALLERY.ru.md).
+
 ## Быстрый старт
 
 Скопируйте [production Compose-пример с закреплённой версией](examples/docker-compose.production.yml)

@@ -65,6 +65,8 @@ Real dashboard output from deterministic SIP/RTP lab traffic. Select a preview t
 |----------|------------|-------------|
 | [![Grafana overview](docs/assets/promotion/sip-exporter-overview.png)](docs/assets/promotion/sip-exporter-overview.png) | [![SIP health](docs/assets/promotion/sip-exporter-sip-health.png)](docs/assets/promotion/sip-exporter-sip-health.png) | [![RTP quality](docs/assets/promotion/sip-exporter-rtp-quality.png)](docs/assets/promotion/sip-exporter-rtp-quality.png) |
 
+[View all 11 dashboard sections](docs/GRAFANA_GALLERY.md).
+
 ## Quick Start
 
 Copy the [pinned production Compose example](examples/docker-compose.production.yml) to your host.
