@@ -278,6 +278,33 @@ func TestGrafanaDashboardInterfaceScope(t *testing.T) {
 	}
 }
 
+func TestGrafanaDashboardOverviewRatioFilterScope(t *testing.T) {
+	d := readDashboard(t)
+
+	t.Run("ASR applies interface to both operands", func(t *testing.T) {
+		asr := panelByID(t, d, 8)
+		if got := strings.Count(asr.Targets[0].Expr, `iface=~"$iface"`); got != 2 {
+			t.Fatalf("interface selector count = %d, want 2: %s", got, asr.Targets[0].Expr)
+		}
+	})
+
+	ner := panelByID(t, d, 9)
+	for _, unsupported := range []string{`iface=~"$iface"`, `destination_country=~"$destination_country"`} {
+		t.Run("NER excludes "+unsupported, func(t *testing.T) {
+			if strings.Contains(ner.Targets[0].Expr, unsupported) {
+				t.Fatalf("query applies unsupported filter %q: %s", unsupported, ner.Targets[0].Expr)
+			}
+		})
+	}
+	for _, label := range []string{"Interface", "Destination Country", "do not apply"} {
+		t.Run("NER describes "+label, func(t *testing.T) {
+			if !strings.Contains(ner.Description, label) {
+				t.Fatalf("description lacks %q: %s", label, ner.Description)
+			}
+		})
+	}
+}
+
 func TestGrafanaDashboardWindowedRatios(t *testing.T) {
 	d := readDashboard(t)
 	for id := 11; id <= 17; id++ {
