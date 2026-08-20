@@ -3351,7 +3351,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(sip_exporter_socket_packets_dropped_total{instance=~\"$instance\",iface=~\"$iface\"}[$__rate_interval])) / clamp_min(sum(rate(sip_exporter_socket_packets_received_total{instance=~\"$instance\",iface=~\"$iface\"}[$__rate_interval])), 1) * 100",
+              "expr": "sum(rate(sip_exporter_socket_packets_dropped_total{instance=~\"$instance\",iface=~\"$iface\"}[$__rate_interval])) / sum(rate(sip_exporter_socket_packets_received_total{instance=~\"$instance\",iface=~\"$iface\"}[$__rate_interval])) * 100",
               "legendFormat": "drop rate %",
               "refId": "A"
             }

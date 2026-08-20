@@ -75,7 +75,11 @@ groups:
           runbook_url: "https://wiki.example.com/runbooks/sip-high-server-error-rate"
 
       - alert: SIPSessionEstablishmentCritical
-        expr: avg(sip_exporter_ser) < 20
+        expr: |
+          sip_exporter_ser < 20
+          and on (instance, carrier, ua_type, source_country, direction)
+            sum by (instance, carrier, ua_type, source_country, direction)
+              (rate(sip_exporter_invite_total[5m])) >= 0.1
         for: 2m
         labels:
           severity: critical
@@ -109,7 +113,11 @@ groups:
           description: "95th percentile registration delay is {{ $value | printf \"%.0f\" }}ms. Network or registrar performance issues."
 
       - alert: SIPSessionEstablishmentLow
-        expr: avg(sip_exporter_ser) < 50 and avg(sip_exporter_ser) >= 20
+        expr: |
+          (sip_exporter_ser < 50 and sip_exporter_ser >= 20)
+          and on (instance, carrier, ua_type, source_country, direction)
+            sum by (instance, carrier, ua_type, source_country, direction)
+              (rate(sip_exporter_invite_total[5m])) >= 0.1
         for: 5m
         labels:
           severity: warning
@@ -140,7 +148,7 @@ groups:
           (
             sum by (carrier) (sip_exporter_sessions)
             / on (carrier)
-              clamp_min(sum by (carrier) (increase(sip_exporter_invite_200_total[30m])), 1)
+              sum by (carrier) (increase(sip_exporter_invite_200_total[30m]))
           ) * 100 > 50
         for: 10m
         labels:
@@ -153,7 +161,7 @@ groups:
         expr: |
           sum by (carrier) (rate(sip_exporter_sip_retransmission_total[5m]))
           / on (carrier)
-            clamp_min(sum by (carrier) (rate(sip_exporter_invite_total[5m])), 1)
+            sum by (carrier) (rate(sip_exporter_invite_total[5m]))
           * 100 > 10
         for: 5m
         labels:
@@ -166,7 +174,7 @@ groups:
         expr: |
           sum by (carrier) (rate(sip_exporter_short_calls_total{threshold="20"}[5m]))
           / on (carrier)
-            clamp_min(sum by (carrier) (rate(sip_exporter_sdc_total[5m])), 1)
+            sum by (carrier) (rate(sip_exporter_sdc_total[5m]))
           * 100 > 30
         for: 10m
         labels:
@@ -498,7 +506,7 @@ These alerts monitor the SIP Exporter's own health — kernel socket buffer drop
 
       - alert: SIPACDLowByDestination
         expr: (sum by (destination_country) (rate(sip_exporter_billable_seconds_total[15m])) / 60)
-              / clamp_min(sum by (destination_country) (rate(sip_exporter_invite_200_total[15m])), 1) < 0.5
+              / sum by (destination_country) (rate(sip_exporter_invite_200_total[15m])) < 0.5
         for: 15m
         labels:
           severity: warning

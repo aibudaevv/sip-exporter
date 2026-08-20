@@ -51,6 +51,7 @@ SIP metrics use a multi-layer label model. Most SIP metrics include **four base 
 | `destination_country` | INVITE raw only | ISO alpha-2 or `"unknown"` | Destination country from E.164 phone-number prefix. See [Geo-Enrichment Labels](#geo-enrichment-labels) |
 | `caller_host` | INVITE raw only (**opt-in**) | IP or domain | Host part of the `From` SIP URI |
 | `called_host` | INVITE raw only (**opt-in**) | IP or domain | Host part of the `To` SIP URI |
+| `iface` | INVITE raw and socket self-monitoring | Interface name | Configured capture interface, for example `ens3` |
 
 > **Note:** Individual metric signatures below show `{carrier="...",ua_type="..."}` for brevity. Use this table to determine the full label set for any metric:
 >
@@ -432,7 +433,7 @@ GeoIP for source IP, phone-number prefix for destination — two independent met
 **Example:**
 ```
 # INVITE to +74951234567 (Moscow) with GeoIP enabled
-sip_exporter_invite_total{carrier="carrier-a",ua_type="yealink",source_country="RU",destination_country="RU",caller_host="10.1.5.20",called_host="sip.operator.com"} 100
+sip_exporter_invite_total{carrier="carrier-a",ua_type="yealink",source_country="RU",direction="inbound",destination_country="RU",caller_host="10.1.5.20",called_host="sip.operator.com",iface="ens3"} 100
 
 # INVITE to +442071838750 (London)
 sip_exporter_invite_total{...,destination_country="GB"} 50
@@ -573,7 +574,7 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 
 `sip_exporter_sip_retransmission_total{carrier="...",ua_type="...",direction="...",method="INVITE"}` *(counter)*: total number of retransmitted SIP requests detected via Timer A (RFC 3261 §17.1.1.2). A retransmission is identified when a duplicate INVITE with the same Call-ID arrives within the invite tracker TTL window (60s) without an active dialog. Currently INVITE-only; the `method` label is reserved for future generalization to REGISTER/OPTIONS.
 
-`sip_exporter_invite_200_total{carrier,ua_type,source_country,destination_country,caller_host,called_host,iface}`: total number of `200 OK` responses to INVITE requests (successful call establishments). This is the numerator for [SER-by-destination](#ser-by-destination-promql) PromQL calculations. Carries the full 8-label set — same as `invite_total`, including `iface`.
+`sip_exporter_invite_200_total{carrier,ua_type,source_country,direction,destination_country,caller_host,called_host,iface}`: total number of `200 OK` responses to INVITE requests (successful call establishments). This is the numerator for [SER-by-destination](#ser-by-destination-promql) PromQL calculations. Carries the full 8-label set — same as `invite_total`, including `iface`.
 
 `sip_exporter_invite_3xx_total{carrier,ua_type,source_country,direction}`: total number of accepted first-final `3xx` responses to initial INVITE transactions. Retransmitted/forked final responses, re-INVITEs, and responses to other SIP methods are excluded. Use this counter with `invite_total` and `invite_200_total` to calculate windowed SER with the same redirect semantics as `sip_exporter_ser`.
 
@@ -774,7 +775,7 @@ sip_exporter_sessions_utilization > 90
 
 ## Short call counters
 
-`sip_exporter_short_calls_total{carrier="...",ua_type="...",direction="...",threshold="20|60|180"}` *(counter)*: completed sessions with duration shorter than the threshold (20, 60, or 180 seconds). A single session can increment multiple thresholds (e.g., a 15-second call increments `threshold="20"`, `"60"`, and `"180"`). Short calls indicate abandoned calls, poor quality, or potential toll fraud.
+`sip_exporter_short_calls_total{carrier="...",ua_type="...",source_country="...",direction="...",threshold="20|60|180"}` *(counter)*: completed sessions with duration shorter than the threshold (20, 60, or 180 seconds). A single session can increment multiple thresholds (e.g., a 15-second call increments `threshold="20"`, `"60"`, and `"180"`). Short calls indicate abandoned calls, poor quality, or potential toll fraud.
 
 **PromQL examples:**
 ```promql
@@ -787,7 +788,7 @@ sum by (carrier) (rate(sip_exporter_short_calls_total{threshold="60"}[1h]))
 
 ## Traffic Minutes by Destination
 
-`sip_exporter_billable_seconds_total{carrier="...",destination_country="..."}` *(counter)*: total seconds of completed sessions by destination country, accumulated at session teardown (BYE 200 OK or Session-Expires expiry). Only sessions with `Duration > 0` contribute; clock-skew dialogs (instant teardown) are skipped. `destination_country` is resolved from the called number (E.164 prefix matching) at INVITE 200 OK and stored for the lifetime of the dialog.
+`sip_exporter_billable_seconds_total{carrier="...",destination_country="...",direction="..."}` *(counter)*: total seconds of completed sessions by destination country, accumulated at session teardown (BYE 200 OK or Session-Expires expiry). Only sessions with `Duration > 0` contribute; clock-skew dialogs (instant teardown) are skipped. `destination_country` is resolved from the called number (E.164 prefix matching) at INVITE 200 OK and stored for the lifetime of the dialog.
 
 **Cardinality:** ~50 carriers × ~250 countries ≈ 12.5K series (same tier as INVITE-raw).
 
@@ -798,7 +799,7 @@ topk(10, sum by (destination_country) (rate(sip_exporter_billable_seconds_total[
 
 # ACD (average call duration) by destination in minutes
 sum by (destination_country) (rate(sip_exporter_billable_seconds_total[15m])) / 60
-  / clamp_min(sum by (destination_country) (rate(sip_exporter_invite_200_total[15m])), 1)
+  / sum by (destination_country) (rate(sip_exporter_invite_200_total[15m]))
 
 # Traffic minutes per carrier per hour
 sum by (carrier) (increase(sip_exporter_billable_seconds_total[1h])) / 3600
@@ -886,9 +887,9 @@ the call ends, or the dialog expires.
 
 These counters are evaluated at dialog teardown (BYE 200 OK or Session-Expires expiry) and carry `carrier, ua_type, source_country, direction` (no `codec` label — they describe the dialog, not a single stream).
 
-`sip_exporter_rtp_oneway_calls_total{carrier,ua_type,source_country}` *(counter)*: dialogs where 2+ media endpoints were registered (SDP from both parties) but RTP was observed in only one direction.
+`sip_exporter_rtp_oneway_calls_total{carrier,ua_type,source_country,direction}` *(counter)*: dialogs where 2+ media endpoints were registered (SDP from both parties) but RTP was observed in only one direction.
 
-`sip_exporter_sessions_missing_rtp_total{carrier,ua_type,source_country}` *(counter)*: dialogs with SDP media endpoints but no RTP observed at all.
+`sip_exporter_sessions_missing_rtp_total{carrier,ua_type,source_country,direction}` *(counter)*: dialogs with SDP media endpoints but no RTP observed at all.
 
 > Both metrics rely on a persistent per-dialog RTP record that survives stream TTL expiry,
 > ensuring accurate detection even when RTP streams were cleaned up before dialog teardown.
@@ -1020,7 +1021,9 @@ sip_exporter_active_dialogs > 10000
 
 ## RFC 6076 Performance Metrics
 
-All RFC 6076 metrics are **scoped per carrier, ua_type, and source_country** — each ratio/histogram is computed independently for each label combination. This allows comparing SER, SEER, ISA, SCR, ASR, NER across carriers, device types, and source countries in a single Prometheus query.
+All RFC 6076 metrics are **scoped per carrier, ua_type, source_country, and direction** — each ratio/histogram is computed independently for each label combination. This allows comparing SER, SEER, ISA, SCR, ASR, NER across carriers, device types, source countries, and traffic directions in a single Prometheus query.
+
+For an existing label set, cumulative ratio gauges emit `0` when their denominator is zero. If no traffic has created that label set, its time series is absent. Gate ratio alerts on matching INVITE traffic so an emitted zero is not interpreted as active failure during idle periods.
 
 **Example:**
 ```promql
@@ -1079,8 +1082,8 @@ SER = (INVITE → 200 OK) / (Total INVITE - INVITE → 3xx) × 100
 - **Re-INVITEs are excluded** from both numerator and denominator — they are not new session attempts and are tracked separately in `reinvite_total`
 - 3xx responses (redirects) are **excluded from the denominator** — they are neither success nor failure, but a routing instruction
 - A session is counted as established only when the originating UA receives `200 OK` for its INVITE
-- Undefined when no INVITE requests have been received
-- Undefined when all INVITEs received 3xx responses (denominator = 0)
+- Emits `0` for an existing label set when no INVITE requests have been received
+- Emits `0` when all INVITEs received 3xx responses (denominator = 0)
 
 **Important:** SER is a cumulative metric calculated over the entire runtime.
 
@@ -1103,8 +1106,8 @@ SEER = (INVITE → 200, 480, 486, 600, 603) / (Total INVITE - INVITE → 3xx) ×
   - `600 Busy Everywhere` — user busy everywhere
   - `603 Decline` — user declined the call
 - Responses like `400`, `404`, `500`, `503` are **not** counted as effective — they indicate infrastructure or routing problems
-- Undefined when no INVITE requests have been received
-- Undefined when all INVITEs received 3xx responses (denominator = 0)
+- Emits `0` for an existing label set when no INVITE requests have been received
+- Emits `0` when all INVITEs received 3xx responses (denominator = 0)
 
 **Important:** Like SER, SEER is cumulative.
 
@@ -1113,7 +1116,7 @@ SEER = (INVITE → 200, 480, 486, 600, 603) / (Total INVITE - INVITE → 3xx) ×
 **Example values:**
 - `100` — all non-redirect INVITEs received a clear outcome (success or explicit decline)
 - `0` — all non-redirect INVITEs received infrastructure errors
-- `undefined` — no INVITEs received or all were 3xx redirects
+- `0` — no INVITEs received for an existing label set, all were 3xx redirects, or all non-redirect INVITEs received infrastructure errors
 
 ---
 
@@ -1133,7 +1136,7 @@ ISA % = (INVITE → 408, 500, 503, 504) / Total INVITE × 100
   - `503 Service Unavailable` — service temporarily unavailable (overload)
   - `504 Server Time-out` — server gateway timeout
 - Responses like `400`, `401`, `403`, `404` are **not** counted — they indicate client-side issues, not server failures
-- Undefined when no INVITE requests have been received
+- Emits `0` for an existing label set when no INVITE requests have been received
 
 **Important:** ISA is cumulative over the entire runtime.
 
@@ -1173,7 +1176,7 @@ SCR = (Completed Sessions) / Total INVITE × 100
   2. Dialog expired via Session-Expires timeout (RFC 4028)
 - Expired dialogs are counted as completed to prevent SCR inflation from "hanging" sessions
 - Default Session-Expires: 1800 seconds (30 minutes), configurable via SIP `Session-Expires` header
-- Undefined when no INVITE requests have been received
+- Emits `0` for an existing label set when no INVITE requests have been received
 
 **Important:** SCR is cumulative over the entire runtime.
 
@@ -1360,7 +1363,7 @@ ASR = (INVITE → 200 OK) / Total INVITE × 100
 
 - Classic telephony metric defined in ITU-T E.411; related to (but distinct from) SER defined in RFC 6076 §4.6
 - Unlike SER, 3xx responses are **NOT excluded from the denominator**
-- Undefined when no INVITE requests have been received
+- Emits `0` for an existing label set when no INVITE requests have been received
 
 **Relationship with SER:** ASR is always <= SER. When 3xx responses are present, SER excludes them from the denominator, making SER higher. ASR keeps all INVITEs in the denominator.
 
@@ -1425,7 +1428,7 @@ NER = 100 - ISA
 - Defined in GSMA IR.42 (not RFC 6076), widely used in mobile operator networks
 - 3xx responses are **NOT excluded from the denominator**
 - Measures network quality including call termination — higher NER means fewer infrastructure failures
-- Undefined when no INVITE requests have been received
+- Emits `0` for an existing label set when no INVITE requests have been received
 
 **Relationship with ISA:** NER = 100 − ISA. Always use together: ISA for failure percentage, NER for success percentage.
 

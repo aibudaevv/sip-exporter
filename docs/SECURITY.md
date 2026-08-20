@@ -34,7 +34,7 @@ That's it. No packet modification, no packet injection, no network redirection, 
 
 - Does **not** modify or drop packets — the eBPF filter is *passive* (read-only)
 - Does **not** send any SIP traffic — purely passive listener
-- Does **not** persist packet data. The production Compose example writes only the anonymous telemetry ID to the `sip-exporter-state` volume; configuration mounts are `:ro` (read-only)
+- Does **not** persist packet data in application-managed files. The production Compose example writes only the anonymous telemetry ID to the `sip-exporter-state` volume; configuration mounts are `:ro` (read-only). Container logging can persist sensitive diagnostics; see [Logging and Sensitive Identifiers](#logging-and-sensitive-identifiers)
 - Does **not** access other containers, processes, or system resources
 - Does **not** open any inbound ports except the `/metrics` and `/health` endpoints on the configured HTTP port (default 2112)
 - Does **not** make outbound network connections **except** the optional telemetry beacon (see [Telemetry](#telemetry))
@@ -54,6 +54,12 @@ By default, SIP-exporter sends an **anonymous telemetry beacon** to the project 
 - **Persistent ID file:** the anonymous ID is stored at `/var/lib/sip-exporter/anon_id` (`SIP_EXPORTER_TELEMETRY_ID_FILE`), mode `0600`, and reused across restarts. The file contains only the UUID plus a short explanatory comment; deleting it regenerates a new random ID. No phone numbers, IPs, hostnames, or SIP/RTP data are ever sent.
 
 **To disable telemetry entirely:** `SIP_EXPORTER_TELEMETRY=false`. To redirect beacons to your own endpoint (e.g. for air-gapped auditing), set `SIP_EXPORTER_TELEMETRY_URL`. To change the ID file location, set `SIP_EXPORTER_TELEMETRY_ID_FILE`.
+
+## Logging and Sensitive Identifiers
+
+The default `info` level does not log raw packet payloads, but FAS warnings include the SIP Call-ID. At `debug`, diagnostic records include raw SIP message data and may include Call-IDs and media endpoint IP addresses and ports. These records go to stdout/stderr rather than the `sip-exporter-state` volume, but Docker or an orchestrator logging driver may retain them.
+
+In production, use `SIP_EXPORTER_LOGGER_LEVEL=info` (the default) or `error`, restrict access to collected logs, and apply an appropriate retention policy. Enable `debug` only in a controlled troubleshooting window. The accepted values are `error`, `info`, and `debug`; any other value currently selects debug logging.
 
 ## Data Exposed in Prometheus Labels
 
@@ -83,7 +89,7 @@ No **phone numbers** ever reach Prometheus labels. The privacy-relevant packet a
 | Application | Single statically linked Go binary plus the eBPF object file |
 | Volumes | Writable `sip-exporter-state:/var/lib/sip-exporter` for the telemetry ID; optional configuration and timezone mounts are read-only |
 | Network | Inbound `/metrics` and `/health` HTTP endpoints (default port 2112); optional outbound telemetry |
-| Processes | Single process, no shell, no daemon |
+| Processes | A single application process; no shell or daemon process is started |
 
 > **Security note — unauthenticated endpoints:** `/metrics` and `/health` are registered without any authentication or authorization middleware (`internal/server/server.go:102-103`). Anyone who can reach port `2112` can read all exported metrics. The current service listens on all interfaces and does not provide a bind-address setting; on untrusted networks, firewall port `2112` or place a reverse proxy with authentication in front of it.
 

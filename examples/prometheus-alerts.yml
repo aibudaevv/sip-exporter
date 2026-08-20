@@ -55,7 +55,7 @@ groups:
       - alert: SIPExporterMissingRTPHigh
         expr: |
           100 * sum by (instance, carrier, direction) (rate(sip_exporter_sessions_missing_rtp_total[5m]))
-          / clamp_min(sum by (instance, carrier, direction) (rate(sip_exporter_invite_total[5m])), 1) > 5
+          / sum by (instance, carrier, direction) (rate(sip_exporter_invite_total[5m])) > 5
           and on (instance, carrier, direction) sum by (instance, carrier, direction) (rate(sip_exporter_invite_total[5m])) >= 0.1
         for: 10m
         labels:
@@ -68,7 +68,7 @@ groups:
       - alert: SIPExporterOneWayRTPHigh
         expr: |
           100 * sum by (instance, carrier, direction) (rate(sip_exporter_rtp_oneway_calls_total[5m]))
-          / clamp_min(sum by (instance, carrier, direction) (rate(sip_exporter_invite_total[5m])), 1) > 5
+          / sum by (instance, carrier, direction) (rate(sip_exporter_invite_total[5m])) > 5
           and on (instance, carrier, direction) sum by (instance, carrier, direction) (rate(sip_exporter_invite_total[5m])) >= 0.1
         for: 10m
         labels:

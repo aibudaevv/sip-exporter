@@ -100,7 +100,7 @@ docker pull frzq/sip-exporter:latest
 Environment variables:
 * `SIP_EXPORTER_INTERFACE` - one or more network interfaces, comma-separated (required). Examples: `eth0`, `eth0,eth1,eth2`.
 * `SIP_EXPORTER_HTTP_PORT` - http port for prometheus (default 2112)
-* `SIP_EXPORTER_LOGGER_LEVEL` - log level (default info)
+* `SIP_EXPORTER_LOGGER_LEVEL` - log level: `error`, `info`, or `debug` (default `info`). Debug logs include raw SIP payloads; use only in controlled environments. Any other value currently enables debug logging.
 * `SIP_EXPORTER_SIP_PORTS` - one or more SIP ports, comma-separated (default 5060; up to 3 per interface). Use `;` for per-interface sets: `5060,5062;5060,5061`.
 * `SIP_EXPORTER_OBJECT_FILE_PATH` - path to eBPF object file (default /usr/local/bin/sip.o)
 * `SIP_EXPORTER_CARRIERS_CONFIG` - path to carriers YAML config (optional, see [`examples/carriers.yaml`](examples/carriers.yaml))
@@ -193,10 +193,10 @@ carriers:
 After that, metrics look like:
 
 ```
-sip_exporter_invite_total{carrier="telecom-alpha",ua_type="other"}  1523
-sip_exporter_ser{carrier="telecom-alpha",ua_type="other"}            95.2
-sip_exporter_ser{carrier="telecom-beta",ua_type="other"}             87.4
-sip_exporter_ser{carrier="other",ua_type="other"}                     0.0
+sip_exporter_invite_total{carrier="telecom-alpha",ua_type="other",source_country="unknown",direction="inbound",destination_country="unknown",caller_host="",called_host="",iface="ens3"} 1523
+sip_exporter_ser{carrier="telecom-alpha",ua_type="other",source_country="unknown",direction="inbound"} 95.2
+sip_exporter_ser{carrier="telecom-beta",ua_type="other",source_country="unknown",direction="inbound"} 87.4
+sip_exporter_ser{carrier="other",ua_type="other",source_country="unknown",direction="inbound"} 0.0
 ```
 
 **Things to know:**
@@ -248,10 +248,10 @@ user_agents:
 After that, metrics look like:
 
 ```
-sip_exporter_invite_total{carrier="telecom-alpha",ua_type="yealink"}     1523
-sip_exporter_ser{carrier="telecom-alpha",ua_type="yealink"}               95.2
-sip_exporter_ser{carrier="telecom-alpha",ua_type="grandstream"}           87.4
-sip_exporter_ser{carrier="telecom-alpha",ua_type="other"}                  0.0
+sip_exporter_invite_total{carrier="telecom-alpha",ua_type="yealink",source_country="unknown",direction="inbound",destination_country="unknown",caller_host="",called_host="",iface="ens3"} 1523
+sip_exporter_ser{carrier="telecom-alpha",ua_type="yealink",source_country="unknown",direction="inbound"} 95.2
+sip_exporter_ser{carrier="telecom-alpha",ua_type="grandstream",source_country="unknown",direction="inbound"} 87.4
+sip_exporter_ser{carrier="telecom-alpha",ua_type="other",source_country="unknown",direction="inbound"} 0.0
 ```
 
 **Things to know:**
@@ -317,7 +317,7 @@ sum by (destination_country) (rate(sip_exporter_invite_total[5m]))
 
 ### RTP Media Analysis
 
-In addition to SIP signaling, the exporter captures RTP media streams to estimate transport quality at the **capture point** (jitter, sequence gaps, and E-model MOS). RTP streams are **correlated with SIP dialogs**: when a `200 OK` to INVITE carries SDP, the exporter registers the negotiated media endpoints and tracks the matching RTP flows until BYE (or Session-Expires expiry). This means RTP metrics inherit the dialog's `carrier`, `ua_type`, and the negotiated `codec` labels.
+In addition to SIP signaling, the exporter captures RTP media streams to estimate transport quality at the **capture point** (jitter, sequence gaps, and E-model MOS). RTP streams are **correlated with SIP dialogs**: when a `200 OK` to INVITE carries SDP, the exporter registers the negotiated media endpoints and tracks the matching RTP flows until BYE (or Session-Expires expiry). This means RTP metrics inherit the dialog's `carrier`, `ua_type`, `source_country`, and `direction` labels, plus the negotiated `codec`.
 
 Metrics produced:
 
@@ -344,7 +344,10 @@ sum by (codec) (rate(sip_exporter_rtp_mos_score_sum[5m]))
 
 # Packet loss ratio by carrier
 sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
-  / sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m]))
+  / (
+      sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m]))
+      + sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
+    )
 ```
 
 See [docs/METRICS.md](docs/METRICS.md) for the full RTP reference, formulas, and label resolution.
@@ -355,7 +358,7 @@ The exporter emits signals for common toll-fraud patterns, exposed as Prometheus
 
 - **Registration scan** — many unique accounts (AoR) registered (200 OK) from one source IP in a short window (tunable via `SIP_EXPORTER_FRAUD_REGISTER_SCAN_THRESHOLD` / `_WINDOW`)
 - **INVITE burst** — abnormal INVITE rate from one source (tunable via `SIP_EXPORTER_FRAUD_INVITE_BURST_THRESHOLD` / `_WINDOW`)
-- **Account takeover** — a subscriber places calls from a country different from previously observed
+- **Account takeover** — the same AOR successfully re-registers from a country different from its active registration
 
 Full setup, metrics reference, and alerting guidance: [docs/fraud-detection.md](docs/fraud-detection.md)
 

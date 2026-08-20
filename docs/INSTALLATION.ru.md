@@ -108,7 +108,7 @@ sum(sip_exporter_rtp_active_streams)
 ```promql
 sum(rate(sip_exporter_socket_packets_dropped_total[5m]))
 sum(rate(sip_exporter_rtp_dropped_total[5m]))
-100 * sum(rate(sip_exporter_socket_packets_dropped_total[5m])) / clamp_min(sum(rate(sip_exporter_socket_packets_received_total[5m])), 1)
+100 * sum(rate(sip_exporter_socket_packets_dropped_total[5m])) / sum(rate(sip_exporter_socket_packets_received_total[5m]))
 sip_exporter_channel_length / clamp_min(sip_exporter_channel_capacity, 1)
 ```
 

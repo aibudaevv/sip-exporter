@@ -77,8 +77,13 @@ type gridPos struct {
 
 func readDashboard(t *testing.T) dashboard {
 	t.Helper()
+	return readDashboardFile(t, "grafana-dashboard.json")
+}
 
-	b, readErr := os.ReadFile("grafana-dashboard.json")
+func readDashboardFile(t *testing.T, path string) dashboard {
+	t.Helper()
+
+	b, readErr := os.ReadFile(path)
 	if readErr != nil {
 		t.Fatal(readErr)
 	}
@@ -89,6 +94,24 @@ func readDashboard(t *testing.T) dashboard {
 	}
 
 	return d
+}
+
+func TestGrafanaDashboardLowTrafficRatios(t *testing.T) {
+	d := readDashboard(t)
+	for _, id := range []int{331, 43} {
+		p := panelByID(t, d, id)
+		if strings.Contains(p.Targets[0].Expr, "clamp_min") {
+			t.Fatalf("panel %q clamps a rate denominator and distorts low traffic: %s",
+				p.Title, p.Targets[0].Expr)
+		}
+	}
+
+	billable := readDashboardFile(t, "grafana-dashboard-billable-demo.json")
+	p := panelByID(t, billable, 20)
+	if strings.Contains(p.Targets[0].Expr, "clamp_min") {
+		t.Fatalf("panel %q clamps a rate denominator and distorts low traffic: %s",
+			p.Title, p.Targets[0].Expr)
+	}
 }
 
 func TestGrafanaDashboardUniqueIDs(t *testing.T) {
@@ -369,6 +392,11 @@ func rowByTitle(d dashboard, title string) (panel, bool) {
 
 func panelByID(t *testing.T, d dashboard, id int) panel {
 	t.Helper()
+	for _, p := range d.Panels {
+		if p.ID == id {
+			return p
+		}
+	}
 	for _, p := range childPanels(d) {
 		if p.ID == id {
 			return p

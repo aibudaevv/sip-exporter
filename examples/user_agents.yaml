@@ -1,7 +1,9 @@
 # SIP Exporter — User-Agent Classification Configuration
 #
 # Maps SIP User-Agent header values to labels using regex patterns.
-# All Prometheus SIP metrics will include a "ua_type" label.
+# Metrics with User-Agent context include a "ua_type" label. Specialized
+# fraud, capacity, traffic, and self-monitoring families use the exact schemas
+# documented in docs/METRICS.md.
 #
 # Usage:
 #   SIP_EXPORTER_USER_AGENTS_CONFIG=/etc/sip-exporter/user_agents.yaml

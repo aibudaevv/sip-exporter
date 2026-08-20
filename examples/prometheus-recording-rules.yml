@@ -28,7 +28,7 @@ groups:
       - record: sip_exporter:asr_percent:5m
         expr: |
           100 * sum by (instance, carrier, direction) (rate(sip_exporter_invite_200_total[5m]))
-          / clamp_min(sum by (instance, carrier, direction) (rate(sip_exporter_invite_total[5m])), 1)
+          / sum by (instance, carrier, direction) (rate(sip_exporter_invite_total[5m]))
 
       - record: sip_exporter:rtp_loss_percent:5m
         expr: |
@@ -44,4 +44,4 @@ groups:
       - record: sip_exporter:socket_drop_percent:5m
         expr: |
           100 * sum by (instance, iface) (rate(sip_exporter_socket_packets_dropped_total[5m]))
-          / clamp_min(sum by (instance, iface) (rate(sip_exporter_socket_packets_received_total[5m])), 1)
+          / sum by (instance, iface) (rate(sip_exporter_socket_packets_received_total[5m]))

@@ -98,7 +98,7 @@ docker pull frzq/sip-exporter:latest
 Переменные окружения:
 * `SIP_EXPORTER_INTERFACE` — один или несколько сетевых интерфейсов через запятую (обязательно). Примеры: `eth0`, `eth0,eth1,eth2`.
 * `SIP_EXPORTER_HTTP_PORT` — HTTP-порт для Prometheus (по умолчанию 2112)
-* `SIP_EXPORTER_LOGGER_LEVEL` — уровень логирования (по умолчанию info)
+* `SIP_EXPORTER_LOGGER_LEVEL` — уровень логирования: `error`, `info` или `debug` (по умолчанию `info`). Debug-логи содержат raw SIP payload; используйте их только в контролируемой среде. Любое другое значение сейчас включает debug-логирование.
 * `SIP_EXPORTER_SIP_PORTS` — один или несколько SIP-портов через запятую (по умолчанию 5060; до 3 на интерфейс). Через `;` — наборы для каждого интерфейса: `5060,5062;5060,5061`.
 * `SIP_EXPORTER_OBJECT_FILE_PATH` — путь к eBPF-объектному файлу (по умолчанию /usr/local/bin/sip.o)
 * `SIP_EXPORTER_CARRIERS_CONFIG` — путь к YAML-конфигурации carriers (опционально, см. [`examples/carriers.yaml`](examples/carriers.yaml))
@@ -191,10 +191,10 @@ carriers:
 После настройки метрики выглядят так:
 
 ```
-sip_exporter_invite_total{carrier="telecom-alpha",ua_type="other"}  1523
-sip_exporter_ser{carrier="telecom-alpha",ua_type="other"}            95.2
-sip_exporter_ser{carrier="telecom-beta",ua_type="other"}             87.4
-sip_exporter_ser{carrier="other",ua_type="other"}                     0.0
+sip_exporter_invite_total{carrier="telecom-alpha",ua_type="other",source_country="unknown",direction="inbound",destination_country="unknown",caller_host="",called_host="",iface="ens3"} 1523
+sip_exporter_ser{carrier="telecom-alpha",ua_type="other",source_country="unknown",direction="inbound"} 95.2
+sip_exporter_ser{carrier="telecom-beta",ua_type="other",source_country="unknown",direction="inbound"} 87.4
+sip_exporter_ser{carrier="other",ua_type="other",source_country="unknown",direction="inbound"} 0.0
 ```
 
 **Важно знать:**
@@ -246,10 +246,10 @@ user_agents:
 После настройки метрики выглядят так:
 
 ```
-sip_exporter_invite_total{carrier="telecom-alpha",ua_type="yealink"}     1523
-sip_exporter_ser{carrier="telecom-alpha",ua_type="yealink"}               95.2
-sip_exporter_ser{carrier="telecom-alpha",ua_type="grandstream"}           87.4
-sip_exporter_ser{carrier="telecom-alpha",ua_type="other"}                  0.0
+sip_exporter_invite_total{carrier="telecom-alpha",ua_type="yealink",source_country="unknown",direction="inbound",destination_country="unknown",caller_host="",called_host="",iface="ens3"} 1523
+sip_exporter_ser{carrier="telecom-alpha",ua_type="yealink",source_country="unknown",direction="inbound"} 95.2
+sip_exporter_ser{carrier="telecom-alpha",ua_type="grandstream",source_country="unknown",direction="inbound"} 87.4
+sip_exporter_ser{carrier="telecom-alpha",ua_type="other",source_country="unknown",direction="inbound"} 0.0
 ```
 
 **Важно знать:**
@@ -315,7 +315,7 @@ sum by (destination_country) (rate(sip_exporter_invite_total[5m]))
 
 ### Анализ RTP-медиа
 
-Помимо сигналинга SIP, экспортер захватывает RTP-потоки для оценки transport quality в **точке захвата** (джиттер, разрывы sequence number и E-model MOS). RTP-потоки **скоррелированы с SIP-диалогами**: когда `200 OK` на INVITE несёт SDP, экспортер регистрирует согласованные media-endpoint'ы и отслеживает соответствующие RTP-потоки до BYE (или истечения Session-Expires). Поэтому RTP-метрики наследуют лейблы диалога `carrier`, `ua_type` и согласованный `codec`.
+Помимо сигналинга SIP, экспортер захватывает RTP-потоки для оценки transport quality в **точке захвата** (джиттер, разрывы sequence number и E-model MOS). RTP-потоки **скоррелированы с SIP-диалогами**: когда `200 OK` на INVITE несёт SDP, экспортер регистрирует согласованные media-endpoint'ы и отслеживает соответствующие RTP-потоки до BYE (или истечения Session-Expires). Поэтому RTP-метрики наследуют лейблы диалога `carrier`, `ua_type`, `source_country` и `direction`, а также согласованный `codec`.
 
 Производимые метрики:
 
@@ -342,7 +342,10 @@ sum by (codec) (rate(sip_exporter_rtp_mos_score_sum[5m]))
 
 # Доля потерь по операторам
 sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
-  / sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m]))
+  / (
+      sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m]))
+      + sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
+    )
 ```
 
 Полный справочник по RTP-метрикам, формулы и разрешение лейблов — в [docs/METRICS.ru.md](docs/METRICS.ru.md).
@@ -353,7 +356,7 @@ sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
 
 - **Сканирование регистраций** — много уникальных аккаунтов (AoR), зарегистрированных с одного IP за короткое окно
 - **Всплеск INVITE** — аномальная частота INVITE с одного источника
-- **Перехват аккаунта** — абонент совершает вызовы из страны, отличной от ранее наблюдавшейся
+- **Перехват аккаунта** — тот же AOR успешно перерегистрируется из страны, отличной от его активной регистрации
 
 Полная настройка, метрики и алерты: [docs/fraud-detection.ru.md](docs/fraud-detection.ru.md)
 
