@@ -23,6 +23,7 @@ sip-exporter — это eBPF-сенсор с открытым исходным �
 ## Содержание
 
 - [Возможности](#возможности)
+- [Панель Grafana](#панель-grafana)
 - [Быстрый старт](#быстрый-старт)
 - [Проверка установки](docs/INSTALLATION.ru.md)
 - [Технология](#технология)
@@ -56,6 +57,16 @@ sip-exporter — это eBPF-сенсор с открытым исходным �
 - 🎧 **Анализ RTP-медиа** — джиттер, потери, MOS (E-model G.107) и Packet Delay Variation (PDV, per-packet) из RTP-потоков, скоррелированных с SIP-диалогами
 - 📊 **RTCP-качество от эндпоинтов** — потери, джиттер и round-trip time (RTT) из RTCP SR/RR (RFC 3550), корреляция по SSRC; поддерживает rtcp-mux (RFC 5761), явный `a=rtcp` (RFC 3605) и legacy port+1
 - 🛡️ **Детекция фрода** — сигналы сканирования регистраций, всплесков INVITE, перехвата аккаунтов (смена страны) и False Answer Supervision (FAS)
+
+## Панель Grafana
+
+Реальный результат работы панели на детерминированном лабораторном SIP/RTP-трафике. Нажмите на превью, чтобы открыть его в полном размере.
+
+| Обзор | Состояние SIP | Качество RTP |
+|-------|---------------|--------------|
+| [![Обзор Grafana](docs/assets/promotion/sip-exporter-overview.png)](docs/assets/promotion/sip-exporter-overview.png) | [![Состояние SIP](docs/assets/promotion/sip-exporter-sip-health.png)](docs/assets/promotion/sip-exporter-sip-health.png) | [![Качество RTP](docs/assets/promotion/sip-exporter-rtp-quality.png)](docs/assets/promotion/sip-exporter-rtp-quality.png) |
+
+[Посмотреть все 11 разделов дашборда](docs/GRAFANA_GALLERY.ru.md).
 
 ## Быстрый старт
 
