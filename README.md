@@ -11,7 +11,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 [![Go Report Card](https://goreportcard.com/badge/github.com/aibudaevv/sip-exporter)](https://goreportcard.com/report/github.com/aibudaevv/sip-exporter)
 [![Docker Pulls](https://img.shields.io/docker/pulls/frzq/sip-exporter)](https://hub.docker.com/r/frzq/sip-exporter)
 [![GitHub Release](https://img.shields.io/github/v/release/aibudaevv/sip-exporter)](https://github.com/aibudaevv/sip-exporter/releases)
-[![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](https://github.com/aibudaevv/sip-exporter/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](https://github.com/aibudaevv/sip-exporter/blob/master/LICENSE)
 [![Issues](https://img.shields.io/github/issues/aibudaevv/sip-exporter)](https://github.com/aibudaevv/sip-exporter/issues)
 
 ## Table of Contents
@@ -31,6 +31,7 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 - [Benchmark](#benchmark)
 - [Alerting](#alerting)
 - [Metrics Storage Compatibility](#metrics-storage-compatibility)
+- [Support](#support)
 - [License](#license)
 - [Changelog](#changelog)
 
@@ -411,6 +412,10 @@ SIP-Exporter exports metrics in Prometheus exposition format, compatible with:
 - **VictoriaMetrics** — high-performance time-series database
 - **Grafana Cloud** — cloud-based observability
 - **Any Prometheus-compatible scraper** — the `/metrics` endpoint follows the standard format
+
+## Support
+
+For support, bug reports, and feature requests, use [GitHub Issues](https://github.com/aibudaevv/sip-exporter/issues).
 
 ## License
 This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.

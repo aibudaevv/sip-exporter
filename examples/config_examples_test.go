@@ -103,3 +103,62 @@ func TestProductionCompose(t *testing.T) {
 		})
 	}
 }
+
+func TestPublicRepositoryLinks(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+	}{
+		{"README English", "../README.md"},
+		{"README Russian", "../README.ru.md"},
+		{"Prometheus alerts", "prometheus-alerts.yml"},
+		{"Grafana dashboard", "grafana-dashboard.json"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, err := os.ReadFile(tt.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, branch := range []string{"main", "develop"} {
+				if strings.Contains(string(b), "blob/"+branch) {
+					t.Errorf("%s contains mutable or nonexistent branch link blob/%s", tt.path, branch)
+				}
+			}
+		})
+	}
+}
+
+func TestCanonicalSupportLinks(t *testing.T) {
+	const issuesURL = "https://github.com/aibudaevv/sip-exporter/issues"
+	tests := []struct {
+		name    string
+		path    string
+		heading string
+	}{
+		{"English", "../README.md", "## Support"},
+		{"Russian", "../README.ru.md", "## Поддержка"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, err := os.ReadFile(tt.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			content := string(b)
+			start := strings.Index(content, tt.heading)
+			if start < 0 {
+				t.Fatalf("%s is missing %q section", tt.path, tt.heading)
+			}
+			section := content[start+len(tt.heading):]
+			if end := strings.Index(section, "\n## "); end >= 0 {
+				section = section[:end]
+			}
+			if strings.Count(section, issuesURL) != 1 || strings.Count(section, "https://") != 1 {
+				t.Errorf("%s support section must link only to %s", tt.path, issuesURL)
+			}
+		})
+	}
+}

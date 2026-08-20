@@ -48,7 +48,7 @@
           },
           "id": 335,
           "options": {
-            "content": "### Verify dashboard data\n\nIf a KPI is empty or looks incomplete, check the capture path in order: [scrape target](https://github.com/aibudaevv/sip-exporter/blob/develop/docs/INSTALLATION.md#verify-scrape) → [SIP capture](https://github.com/aibudaevv/sip-exporter/blob/develop/docs/INSTALLATION.md#verify-sip) → [dialog, SDP, and RTP visibility](https://github.com/aibudaevv/sip-exporter/blob/develop/docs/INSTALLATION.md#verify-dialog-sdp) → [socket and userspace drops](https://github.com/aibudaevv/sip-exporter/blob/develop/docs/INSTALLATION.md#verify-drops). Do not diagnose QoE until the preceding checks are healthy.",
+            "content": "### Verify dashboard data\n\nIf a KPI is empty or looks incomplete, check the capture path in order: [scrape target](https://github.com/aibudaevv/sip-exporter/blob/master/docs/INSTALLATION.md#verify-scrape) → [SIP capture](https://github.com/aibudaevv/sip-exporter/blob/master/docs/INSTALLATION.md#verify-sip) → [dialog, SDP, and RTP visibility](https://github.com/aibudaevv/sip-exporter/blob/master/docs/INSTALLATION.md#verify-dialog-sdp) → [socket and userspace drops](https://github.com/aibudaevv/sip-exporter/blob/master/docs/INSTALLATION.md#verify-drops). Do not diagnose QoE until the preceding checks are healthy.",
             "mode": "markdown"
           },
           "pluginVersion": "10.0.0",

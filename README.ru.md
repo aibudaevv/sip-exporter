@@ -10,7 +10,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/aibudaevv/sip-exporter)](https://goreportcard.com/report/github.com/aibudaevv/sip-exporter)
 [![Docker Pulls](https://img.shields.io/docker/pulls/frzq/sip-exporter)](https://hub.docker.com/r/frzq/sip-exporter)
 [![GitHub Release](https://img.shields.io/github/v/release/aibudaevv/sip-exporter)](https://github.com/aibudaevv/sip-exporter/releases)
-[![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](https://github.com/aibudaevv/sip-exporter/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](https://github.com/aibudaevv/sip-exporter/blob/master/LICENSE)
 [![Issues](https://img.shields.io/github/issues/aibudaevv/sip-exporter)](https://github.com/aibudaevv/sip-exporter/issues)
 
 ## Содержание
@@ -30,6 +30,7 @@
 - [Нагрузочное тестирование](#нагрузочное-тестирование)
 - [Алертинг](#алертинг)
 - [Совместимость с хранилищами метрик](#совместимость-с-хранилищами-метрик)
+- [Поддержка](#поддержка)
 - [Лицензия](#лицензия)
 - [Changelog](#changelog)
 
@@ -408,6 +409,10 @@ SIP-Exporter экспортирует метрики в формате Prometheu
 - **VictoriaMetrics** — высокопроизводительная TSDB
 - **Grafana Cloud** — облачная наблюдаемость
 - **Любой Prometheus-совместимый скрейпер** — эндпоинт `/metrics` следует стандартному формату
+
+## Поддержка
+
+Для поддержки, сообщений об ошибках и запросов функций используйте [GitHub Issues](https://github.com/aibudaevv/sip-exporter/issues).
 
 ## Лицензия
 
