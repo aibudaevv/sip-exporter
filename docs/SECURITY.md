@@ -36,7 +36,7 @@ That's it. No packet modification, no packet injection, no network redirection, 
 - Does **not** send any SIP traffic — purely passive listener
 - Does **not** persist packet data in application-managed files. The production Compose example writes only the anonymous telemetry ID to the `sip-exporter-state` volume; configuration mounts are `:ro` (read-only). Container logging can persist sensitive diagnostics; see [Logging and Sensitive Identifiers](#logging-and-sensitive-identifiers)
 - Does **not** access other containers, processes, or system resources
-- Does **not** open any inbound ports except the `/metrics` and `/health` endpoints on the configured HTTP port (default 2112)
+- Does **not** open any inbound ports except the `/metrics` and `/health` endpoints on the configured HTTP port (default 10047)
 - Does **not** make outbound network connections **except** the optional telemetry beacon (see [Telemetry](#telemetry))
 
 ## Telemetry
@@ -88,10 +88,10 @@ No **phone numbers** ever reach Prometheus labels. The privacy-relevant packet a
 | Runtime packages | `libelf`, `bash`, `libssl3`, and `libcrypto3`; the healthcheck executes BusyBox `wget` |
 | Application | Single statically linked Go binary plus the eBPF object file |
 | Volumes | Writable `sip-exporter-state:/var/lib/sip-exporter` for the telemetry ID; optional configuration and timezone mounts are read-only |
-| Network | Inbound `/metrics` and `/health` HTTP endpoints (default port 2112); optional outbound telemetry |
+| Network | Inbound `/metrics` and `/health` HTTP endpoints (default port 10047); optional outbound telemetry |
 | Processes | A single application process; no shell or daemon process is started |
 
-> **Security note — unauthenticated endpoints:** `/metrics` and `/health` are registered without any authentication or authorization middleware (`internal/server/server.go:102-103`). Anyone who can reach port `2112` can read all exported metrics. The current service listens on all interfaces and does not provide a bind-address setting; on untrusted networks, firewall port `2112` or place a reverse proxy with authentication in front of it.
+> **Security note — unauthenticated endpoints:** `/metrics` and `/health` are registered without any authentication or authorization middleware (`internal/server/server.go:102-103`). Anyone who can reach port `10047` can read all exported metrics. The current service listens on all interfaces and does not provide a bind-address setting; on untrusted networks, firewall port `10047` or place a reverse proxy with authentication in front of it.
 
 ## eBPF Code Audit
 

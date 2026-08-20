@@ -49,7 +49,7 @@ func TestProductionCompose(t *testing.T) {
 	}
 	_, stateVolumeExists := compose.Volumes["sip-exporter-state"]
 	wantEnvironment := map[string]string{
-		"SIP_EXPORTER_HTTP_PORT":                     "2112",
+		"SIP_EXPORTER_HTTP_PORT":                     "10047",
 		"SIP_EXPORTER_LOGGER_LEVEL":                  "info",
 		"SIP_EXPORTER_SIP_PORTS":                     "5060",
 		"SIP_EXPORTER_OBJECT_FILE_PATH":              "/usr/local/bin/sip.o",
@@ -83,7 +83,7 @@ func TestProductionCompose(t *testing.T) {
 		{"required interface", strings.Contains(service.Environment["SIP_EXPORTER_INTERFACE"], ":?")},
 		{
 			"health endpoint",
-			strings.Contains(strings.Join(service.Healthcheck.Test, " "), "http://127.0.0.1:2112/health"),
+			strings.Contains(strings.Join(service.Healthcheck.Test, " "), "http://127.0.0.1:10047/health"),
 		},
 		{"telemetry identity mount", slices.Contains(service.Volumes, "sip-exporter-state:/var/lib/sip-exporter")},
 		{"telemetry identity volume", stateVolumeExists},

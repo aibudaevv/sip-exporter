@@ -18,7 +18,7 @@ type (
 	// App holds all configuration values sourced from SIP_EXPORTER_* env vars.
 	App struct {
 		LogLevel                  string        `env:"SIP_EXPORTER_LOGGER_LEVEL"                  env-default:"info"`
-		Port                      string        `env:"SIP_EXPORTER_HTTP_PORT"                     env-default:"2112"`
+		Port                      string        `env:"SIP_EXPORTER_HTTP_PORT"                     env-default:"10047"`
 		Interfaces                string        `env:"SIP_EXPORTER_INTERFACE"                                                                                env-required:"true"`
 		BPFBinaryPath             string        `env:"SIP_EXPORTER_OBJECT_FILE_PATH"              env-default:"/usr/local/bin/sip.o"`
 		SIPPorts                  string        `env:"SIP_EXPORTER_SIP_PORTS"                     env-default:"5060"`

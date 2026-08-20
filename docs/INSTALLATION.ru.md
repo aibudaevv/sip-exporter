@@ -6,11 +6,14 @@
 
 1. Запустите экспортёр на хосте, который видит и SIP-сигнализацию, и RTP-медиа.
 2. Проверьте контейнер и его endpoint `/health`.
-3. Настройте любой Prometheus-совместимый scraper на `http://<host>:2112/metrics`.
+3. Настройте любой Prometheus-совместимый scraper на `http://<host>:10047/metrics`.
 4. Убедитесь, что target имеет статус `UP`, затем совершите один тестовый вызов по наблюдаемому пути.
 5. Импортируйте [`examples/grafana-dashboard.json`](../examples/grafana-dashboard.json) и выберите datasource scraper'а.
 
 Экспортёр поддерживает SIP и RTP по IPv4/UDP. SIP по TCP/TLS, IPv6, фрагментированный UDP, QoE через SPAN/TAP и RTP без видимого SDP не входят в контракт захвата; см. [топологию развёртывания](../README.ru.md#топология-развёртывания).
+
+> **Миграция порта:** новые установки используют `10047`. Существующая установка может сохранить
+> предыдущий порт через `SIP_EXPORTER_HTTP_PORT=2112`, согласовав с ним scrape URL и healthcheck.
 
 ## Матрица поддержки
 
@@ -29,8 +32,8 @@
 
 ```bash
 docker compose ps
-curl -fsS http://127.0.0.1:2112/health
-curl -fsS http://127.0.0.1:2112/metrics | grep '^sip_exporter_build_info'
+curl -fsS http://127.0.0.1:10047/health
+curl -fsS http://127.0.0.1:10047/metrics | grep '^sip_exporter_build_info'
 ```
 
 Ожидаемый результат: сервис запущен, `/health` отвечает успешно, последняя команда выводит build-info метрику. Если проверка не прошла, посмотрите только эксплуатационные логи:
@@ -47,7 +50,7 @@ docker compose logs --tail=100 sip-exporter
 Настройте scraper на:
 
 ```text
-http://<exporter-host>:2112/metrics
+http://<exporter-host>:10047/metrics
 ```
 
 В представлении статуса targets scraper'а он должен быть `UP`. В Grafana Explore выберите тот же datasource и выполните запрос:
@@ -56,7 +59,7 @@ http://<exporter-host>:2112/metrics
 up{job="sip-exporter"}
 ```
 
-Если в scrape-конфигурации другое имя job, замените `sip-exporter`. Успешный локальный `curl` при target down означает, что scraper не достигает хоста: проверьте адрес, порт `2112`, firewall и network namespace. Не диагностируйте SIP-захват, пока target не станет `UP`.
+Если в scrape-конфигурации другое имя job, замените `sip-exporter`. Успешный локальный `curl` при target down означает, что scraper не достигает хоста: проверьте адрес, порт `10047`, firewall и network namespace. Не диагностируйте SIP-захват, пока target не станет `UP`.
 
 <a id="verify-sip"></a>
 ## 3. Проверка захвата SIP

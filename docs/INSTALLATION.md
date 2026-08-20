@@ -6,11 +6,15 @@ Use this runbook after deploying the [production Compose example](../examples/do
 
 1. Start the exporter on a host that sees both SIP signalling and RTP media.
 2. Confirm the container and its `/health` endpoint.
-3. Configure any Prometheus-compatible scraper to collect `http://<host>:2112/metrics`.
+3. Configure any Prometheus-compatible scraper to collect `http://<host>:10047/metrics`.
 4. Confirm the target is `UP`, then make one test call through the monitored path.
 5. Import [`examples/grafana-dashboard.json`](../examples/grafana-dashboard.json) and select the scraper datasource.
 
 The exporter supports IPv4 UDP SIP and RTP. SIP over TCP/TLS, IPv6, fragmented UDP, SPAN/TAP QoE and RTP without visible SDP are outside this capture contract; see the [deployment topology](../README.md#deployment-topology).
+
+> **Port migration:** new installations use `10047`. An existing deployment may retain the
+> previous port by setting `SIP_EXPORTER_HTTP_PORT=2112` and updating its scrape and healthcheck
+> URLs consistently.
 
 ## Support Matrix
 
@@ -29,8 +33,8 @@ Run from the directory containing `docker-compose.yml`:
 
 ```bash
 docker compose ps
-curl -fsS http://127.0.0.1:2112/health
-curl -fsS http://127.0.0.1:2112/metrics | grep '^sip_exporter_build_info'
+curl -fsS http://127.0.0.1:10047/health
+curl -fsS http://127.0.0.1:10047/metrics | grep '^sip_exporter_build_info'
 ```
 
 Expected result: the service is running, `/health` returns successfully, and the last command prints the build-info metric. If a check fails, inspect operational logs only:
@@ -47,7 +51,7 @@ Confirm that `SIP_EXPORTER_INTERFACE` names the NIC carrying production traffic.
 Configure the scraper to collect:
 
 ```text
-http://<exporter-host>:2112/metrics
+http://<exporter-host>:10047/metrics
 ```
 
 In its target-status view, the target must be `UP`. In Grafana Explore, select the same datasource and query:
@@ -56,7 +60,7 @@ In its target-status view, the target must be `UP`. In Grafana Explore, select t
 up{job="sip-exporter"}
 ```
 
-If your scrape configuration uses another job name, replace `sip-exporter`. A successful local `curl` with a target still down means the scraper cannot reach the host: check address, port `2112`, firewall and network namespace. Do not diagnose SIP capture until the target is `UP`.
+If your scrape configuration uses another job name, replace `sip-exporter`. A successful local `curl` with a target still down means the scraper cannot reach the host: check address, port `10047`, firewall and network namespace. Do not diagnose SIP capture until the target is `UP`.
 
 <a id="verify-sip"></a>
 ## 3. Verify SIP Capture

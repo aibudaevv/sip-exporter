@@ -47,7 +47,7 @@ func TestGetConfigDefaults(t *testing.T) {
 		want any
 	}{
 		{"log level", cfg.LogLevel, "info"},
-		{"http port", cfg.Port, "2112"},
+		{"http port", cfg.Port, "10047"},
 		{"interfaces", cfg.Interfaces, "eth0"},
 		{"bpf binary path", cfg.BPFBinaryPath, "/usr/local/bin/sip.o"},
 		{"sip ports", cfg.SIPPorts, "5060"},

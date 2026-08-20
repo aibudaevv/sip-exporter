@@ -1,6 +1,6 @@
 services:
   sip-exporter:
-    image: frzq/sip-exporter:1.10.0
+    image: frzq/sip-exporter:1.11.0
     restart: unless-stopped
     privileged: true # Required to load eBPF and open AF_PACKET sockets.
     network_mode: host # Required to capture traffic from the host interface.
@@ -8,7 +8,7 @@ services:
     environment:
       # Required capture settings.
       SIP_EXPORTER_INTERFACE: "${SIP_EXPORTER_INTERFACE:?set SIP_EXPORTER_INTERFACE to the capture NIC}"
-      SIP_EXPORTER_HTTP_PORT: "2112"
+      SIP_EXPORTER_HTTP_PORT: "10047"
       SIP_EXPORTER_LOGGER_LEVEL: "info"
       SIP_EXPORTER_SIP_PORTS: "5060"
       SIP_EXPORTER_OBJECT_FILE_PATH: "/usr/local/bin/sip.o"
@@ -43,7 +43,7 @@ services:
       # - ./GeoLite2-Country.mmdb:/data/GeoLite2-Country.mmdb:ro
       # - ./sessions_limits.yaml:/etc/sip-exporter/sessions_limits.yaml:ro
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2112/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:10047/health"]
       interval: 30s
       timeout: 5s
       retries: 3
