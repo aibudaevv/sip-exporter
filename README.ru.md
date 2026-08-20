@@ -2,7 +2,14 @@
 
 **[EN](README.md)** | **[RU](README.ru.md)**
 
-Высокопроизводительный мониторинг SIP-телефонии на базе eBPF. Захватывает пакеты напрямую в ядре Linux и экспортирует метрики в Prometheus-совместимые системы (Prometheus, VictoriaMetrics и др.).
+sip-exporter — это eBPF-сенсор с открытым исходным кодом, который преобразует SIP-сигнализацию и
+связанный RTP, наблюдаемые на Linux-хосте, в метрики Prometheus и панели Grafana, не сохраняя
+содержимое пакетов.
+
+> **Область действия и ограничения:** Требуется привилегированное развёртывание на Linux-хосте,
+> который видит SIP-сигнализацию по IPv4/UDP и связанный RTP/RTCP-трафик. Сервис не сохраняет пакеты
+> или аудио и не предоставляет интерфейс поиска пакетов. Метрики QoE описывают только трафик,
+> видимый сенсору, и не гарантируют сквозное качество для абонента.
 
 [![Go Test](https://github.com/aibudaevv/sip-exporter/actions/workflows/go.yml/badge.svg)](https://github.com/aibudaevv/sip-exporter/actions/workflows/go.yml)
 [![Go Vulncheck](https://github.com/aibudaevv/sip-exporter/actions/workflows/vulncheck.yml/badge.svg)](https://github.com/aibudaevv/sip-exporter/actions/workflows/vulncheck.yml)
@@ -37,16 +44,16 @@
 ## Возможности
 
 - 🌐 **Мониторинг нескольких интерфейсов** — захват SIP/RTP с нескольких NIC одновременно, каждый помечается лейблом `iface`
-- ⚡ **Минимальная нагрузка** — фильтрация пакетов через eBPF в пространстве ядра
+- ⚡ **Фильтрация в ядре** — eBPF socket filter отбирает нужный трафик до разбора в userspace
 - 🐳 **Один контейнер** — никаких внешних зависимостей
 - 🔧 **Настраиваемые SIP-порты** — мониторинг нестандартных портов через переменные окружения
 - 📈 **Нативный Prometheus** — стандартный эндпоинт `/metrics`
 - 🏷️ **Метрики по операторам** — CIDR-разрешение carrier для SIP-семейств с carrier-контекстом
 - 🏷️ **Метрики по типам устройств** — классификация User-Agent для SIP-семейств с контекстом устройства
 - 🌍 **Гео-обогащение** — лейблы `source_country` (GeoIP) и `destination_country` (E.164 prefix) в SIP-метриках
-- 🔀 **Направление трафика** — лейбл `inbound`/`outbound` в SIP- и RTP-метриках трафика через kernel `pkttype`, без настройки
+- 🔀 **Направление трафика** — лейбл `inbound`/`outbound` в SIP- и RTP-метриках трафика определяется через kernel `pkttype`
 - 📞 **Качество голоса (RFC 6035)** — MOS, джиттер, потери пакетов из SIP PUBLISH/NOTIFY
-- 🎧 **Анализ RTP-медиа** — джиттер, потери, MOS (E-model G.107) и Packet Delay Variation (PDV, per-packet, VoIPMonitor-parity) из RTP-потоков, скоррелированных с SIP-диалогами
+- 🎧 **Анализ RTP-медиа** — джиттер, потери, MOS (E-model G.107) и Packet Delay Variation (PDV, per-packet) из RTP-потоков, скоррелированных с SIP-диалогами
 - 📊 **RTCP-качество от эндпоинтов** — потери, джиттер и round-trip time (RTT) из RTCP SR/RR (RFC 3550), корреляция по SSRC; поддерживает rtcp-mux (RFC 5761), явный `a=rtcp` (RFC 3605) и legacy port+1
 - 🛡️ **Детекция фрода** — сигналы сканирования регистраций, всплесков INVITE, перехвата аккаунтов (смена страны) и False Answer Supervision (FAS)
 
@@ -74,7 +81,7 @@ curl http://localhost:10047/metrics
 
 ## Технология
 
-Сервис использует eBPF (extended Berkeley Packet Filter), подключённый к сокетам `AF_PACKET` для перехвата IPv4 SIP-пакетов по UDP (по умолчанию порт 5060) на L4 без накладных расходов iptables/nftables или userspace-демонов вроде tcpdump. SIP по TCP или TLS не захватывается. Отфильтрованные пакеты передаются в userspace через сокет для эффективной обработки на Go.
+Сервис использует eBPF (extended Berkeley Packet Filter), подключённый к сокетам `AF_PACKET` для отбора IPv4 SIP-пакетов по UDP (по умолчанию порт 5060) на L4. SIP по TCP или TLS не захватывается. Отобранные пакеты передаются в userspace через сокет для обработки на Go.
 
 ## Архитектура
 ```
@@ -340,7 +347,7 @@ eBPF-фильтр использует **SDP-driven RTP-детекцию**: medi
 **Как интерпретировать QoE:** RTP loss, jitter, PDV и MOS — это наблюдение пакетов, дошедших до данного сенсора; они не являются субъективной оценкой абонента и не доказывают end-to-end деградацию. RTCP SR/RR добавляет собственную RTP-статистику приёмника для коррелированного SSRC, но охватывает только репорты и медиа, видимые сенсору. Перед реакцией на QoE-алерты проверьте `sip_exporter_socket_packets_dropped_total`, `sip_exporter_rtp_dropped_total` и топологию захвата выше.
 
 ```PromQL
-# Средний MOS за 5 минут (по кодекам)
+# Средний MOS за окно 5m (по кодекам)
 sum by (codec) (rate(sip_exporter_rtp_mos_score_sum[5m]))
   / sum by (codec) (rate(sip_exporter_rtp_mos_score_count[5m]))
 
@@ -406,7 +413,7 @@ sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
 SIP-Exporter экспортирует метрики в формате Prometheus exposition, совместимом с:
 
 - **Prometheus** — pull-based мониторинг
-- **VictoriaMetrics** — высокопроизводительная TSDB
+- **VictoriaMetrics** — Prometheus-совместимая TSDB
 - **Grafana Cloud** — облачная наблюдаемость
 - **Любой Prometheus-совместимый скрейпер** — эндпоинт `/metrics` следует стандартному формату
 

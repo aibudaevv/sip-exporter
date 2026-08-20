@@ -2,8 +2,13 @@
 
 **[EN](README.md)** | **[RU](README.ru.md)**
 
-High-performance eBPF-based SIP monitoring service that captures and exports telephony metrics to Prometheus-compatible systems (Prometheus, VictoriaMetrics, etc.).
-Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspace processing overhead.
+sip-exporter is an open-source eBPF sensor that turns SIP signaling and correlated RTP observed on
+a Linux host into Prometheus metrics and Grafana dashboards, without storing packet payloads.
+
+> **Scope and limitations:** Requires a privileged Linux deployment on a host that observes
+> IPv4/UDP SIP signaling and the correlated RTP/RTCP path. It does not store packets or audio and is
+> not a packet-search UI. QoE metrics describe traffic visible at the sensor, not guaranteed
+> end-to-end subscriber quality.
 
 [![Go Test](https://github.com/aibudaevv/sip-exporter/actions/workflows/go.yml/badge.svg)](https://github.com/aibudaevv/sip-exporter/actions/workflows/go.yml)
 [![Go Vulncheck](https://github.com/aibudaevv/sip-exporter/actions/workflows/vulncheck.yml/badge.svg)](https://github.com/aibudaevv/sip-exporter/actions/workflows/vulncheck.yml)
@@ -38,16 +43,16 @@ Captures SIP packets directly in the Linux kernel using eBPF, minimizing userspa
 ## Key Features
 
 - 🌐 **Multi-interface monitoring** — capture SIP/RTP from multiple NICs simultaneously, each tagged with an `iface` label
-- ⚡ **Low overhead** — eBPF packet filtering in kernel space
+- ⚡ **Kernel filtering** — an eBPF socket filter selects relevant traffic before userspace parsing
 - 🐳 **Single container deployment** — no external dependencies
 - 🔧 **Configurable SIP ports** — monitor custom ports via environment variables
 - 📈 **Prometheus native** — standard `/metrics` endpoint for scraping
 - 🏷️ **Per-carrier metrics** — CIDR-based carrier resolution for SIP metric families with carrier context
 - 🏷️ **Per-device-type metrics** — User-Agent classification for SIP metric families with device context
 - 🌍 **Geo-enrichment** — `source_country` (GeoIP) and `destination_country` (E.164 prefix) labels on SIP metrics
-- 🔀 **Traffic direction** — `inbound`/`outbound` label on SIP and RTP traffic metrics via kernel `pkttype`, zero-config
+- 🔀 **Traffic direction** — `inbound`/`outbound` label on SIP and RTP traffic metrics derived from kernel `pkttype`
 - 📞 **Voice quality (RFC 6035)** — MOS scores, jitter, packet loss from SIP PUBLISH/NOTIFY
-- 🎧 **RTP media analysis** — jitter, packet loss, MOS (E-model G.107), and Packet Delay Variation (PDV, per-packet, VoIPMonitor-parity) from RTP streams correlated with SIP dialogs
+- 🎧 **RTP media analysis** — jitter, packet loss, MOS (E-model G.107), and per-packet Packet Delay Variation (PDV) from RTP streams correlated with SIP dialogs
 - 📊 **RTCP endpoint-reported quality** — loss, jitter, and round-trip time (RTT) from RTCP SR/RR (RFC 3550), correlated by SSRC; supports rtcp-mux (RFC 5761), explicit `a=rtcp` (RFC 3605), and legacy port+1
 - 🛡️ **Fraud detection** — registration scan, INVITE burst, account-takeover (country change), and False Answer Supervision (FAS) signals ([docs/fraud-detection.md](docs/fraud-detection.md))
 
@@ -76,8 +81,8 @@ to check health, scrape status, SIP, SDP/RTP visibility and drops before importi
 ## Core Technology
 
 This service uses eBPF (extended Berkeley Packet Filter) attached to `AF_PACKET` sockets to
-intercept IPv4 SIP packets over UDP (default port 5060) at L4 without overhead of iptables/nftables or userspace daemons like tcpdump. SIP over TCP or TLS is not captured.
-Filtered packets are delivered to userspace via the socket for efficient Go processing.
+select IPv4 SIP packets over UDP (default port 5060) at L4. SIP over TCP or TLS is not captured.
+Selected packets are delivered to userspace via the socket for Go processing.
 
 ## Architecture
 ```
@@ -409,7 +414,7 @@ Full alerting guide with Prometheus rules, Alertmanager configs (Slack/PagerDuty
 SIP-Exporter exports metrics in Prometheus exposition format, compatible with:
 
 - **Prometheus** — pull-based monitoring
-- **VictoriaMetrics** — high-performance time-series database
+- **VictoriaMetrics** — Prometheus-compatible time-series database
 - **Grafana Cloud** — cloud-based observability
 - **Any Prometheus-compatible scraper** — the `/metrics` endpoint follows the standard format
 
