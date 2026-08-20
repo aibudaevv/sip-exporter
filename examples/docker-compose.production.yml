@@ -1,6 +1,6 @@
 services:
   sip-exporter:
-    image: frzq/sip-exporter:1.8.0
+    image: frzq/sip-exporter:1.9.0
     restart: unless-stopped
     privileged: true # Required to load eBPF and open AF_PACKET sockets.
     network_mode: host # Required to capture traffic from the host interface.

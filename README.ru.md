@@ -108,6 +108,12 @@ docker pull frzq/sip-exporter:latest
 * `SIP_EXPORTER_GEOIP_COUNTRY_DB` — путь к MaxMind GeoLite2-Country.mmdb для лейбла `source_country` (опционально)
 * `SIP_EXPORTER_LOCAL_COUNTRY_CODE` — код страны ISO alpha-2 для локальных номеров без международного префикса в `destination_country` (опционально, напр. `RU`)
 * `SIP_EXPORTER_HOST_LABELS` — включить лейблы `caller_host`/`called_host` в INVITE-метриках (по умолчанию `false`; opt-in — неограниченная кардинальность, включайте только в доверенных деплоях с ограниченным числом узлов)
+* `SIP_EXPORTER_SESSIONS_LIMITS` — путь к YAML-конфигурации лимитов сессий (опционально, per-carrier лимиты параллельных сессий и метрики утилизации)
+* `SIP_EXPORTER_FRAUD_REGISTER_SCAN_THRESHOLD` — сканирование регистраций: количество уникальных аккаунтов (AoR), успешно зарегистрированных (200 OK) с одного source IP, для срабатывания сигнала (по умолчанию 10)
+* `SIP_EXPORTER_FRAUD_REGISTER_SCAN_WINDOW` — скользящее окно сканирования регистраций (по умолчанию 60s)
+* `SIP_EXPORTER_FRAUD_INVITE_BURST_THRESHOLD` — INVITE burst: количество INVITE с одного источника для срабатывания сигнала (по умолчанию 100)
+* `SIP_EXPORTER_FRAUD_INVITE_BURST_WINDOW` — скользящее окно INVITE burst (по умолчанию 60s)
+* `SIP_EXPORTER_FRAUD_FAS_THRESHOLD` — False Answer Supervision: базовое ожидание sweep-path после 200 OK без answer-side RTP (по умолчанию 10s; BYE-path использует независимый floor 3s)
 * `SIP_EXPORTER_TELEMETRY` — анонимная телеметрия использования, отключается значением `false` (по умолчанию true)
 
 Контейнер должен запускаться с `--privileged` и `--network host` (eBPF требует `CAP_BPF` и доступ к сетевому интерфейсу). Подробнее о безопасности — в [Безопасность](docs/SECURITY.ru.md).

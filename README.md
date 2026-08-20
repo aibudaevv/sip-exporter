@@ -115,7 +115,7 @@ Environment variables:
 * `SIP_EXPORTER_FRAUD_REGISTER_SCAN_WINDOW` - registration scan rolling window (default 60s)
 * `SIP_EXPORTER_FRAUD_INVITE_BURST_THRESHOLD` - INVITE burst fraud: INVITEs from one source to trigger the signal (default 100)
 * `SIP_EXPORTER_FRAUD_INVITE_BURST_WINDOW` - INVITE burst rolling window (default 60s)
-* `SIP_EXPORTER_FRAUD_FAS_THRESHOLD` - False Answer Supervision: seconds after a 200 OK with no observed RTP to trigger the signal (default 10s)
+* `SIP_EXPORTER_FRAUD_FAS_THRESHOLD` - False Answer Supervision: base sweep-path wait after a 200 OK without answer-side RTP (default 10s; the BYE path uses an independent 3s floor)
 * `SIP_EXPORTER_TELEMETRY` - anonymous usage telemetry, opt-out with `false` (default true)
 
 The container must run with `--privileged` and `--network host` (eBPF requires `CAP_BPF` and access to the network interface). See [Security](docs/SECURITY.md) for details on why this is safe.

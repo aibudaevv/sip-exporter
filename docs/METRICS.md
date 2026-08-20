@@ -56,7 +56,10 @@ SIP metrics use a multi-layer label model. Most metrics include **three base lab
 >
 > | Tier | Metrics | Full label set |
 > |------|---------|----------------|
-> | **System** | `packets_total`, `system_error_total`, self-monitoring | *(none)* |
+> | **System / label-free self-monitoring** | `packets_total`, `system_error_total`, `rtp_dropped_total`, `rtp_kernel_timestamp_missing_total`, `channel_length`, `channel_capacity`, `active_dialogs` | *(none)* |
+> | **Socket self-monitoring** | `socket_packets_received_total`, `socket_packets_dropped_total` | `iface` |
+> | **Typed self-monitoring** | `parse_errors_total`, `active_trackers` | `type` |
+> | **Build self-monitoring** | `build_info` | `version` |
 > | **Base** | All SIP requests, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD/PBD, VQ reports, sessions, `reinvite_total`, registration health (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country, direction` |
 > | **Reg failure** | `register_failure_total` | `carrier, ua_type, source_country, direction, code` |
 > | **Retransmission** | `sip_retransmission_total` | `carrier, ua_type, source_country, direction, method` |
@@ -666,7 +669,10 @@ Incremented when a successful REGISTER 200 OK arrives from a **different source 
 
 ```promql
 # Account-takeover spikes
-sip_exporter_register_country_change_total > 0 unless on (carrier, source_country) (sip_exporter_register_country_change_total offset 5m > 0)
+increase(sip_exporter_register_country_change_total[5m]) > 0
+or
+(sip_exporter_register_country_change_total > 0
+  unless sip_exporter_register_country_change_total offset 5m)
 ```
 
 ### register_scan_total
@@ -699,17 +705,17 @@ rate(sip_exporter_invite_burst_total[5m])
 
 ### fas_calls_total
 
-Incremented when a call is **answered** (non-re-INVITE 200 OK on a dialog that registered media endpoints from SDP) but **no RTP is observed within the threshold window** — a real-time False Answer Supervision signal. The answering side starts billing without delivering media.
+Incremented when a call is **answered** (non-re-INVITE 200 OK on a dialog that registered media endpoints from SDP) but **no answer-side RTP is observed** — a False Answer Supervision signal. The answering side starts billing without delivering media.
 
-This is distinct from `sessions_missing_rtp_total` (a **teardown** metric, evaluated at BYE/expiry and may arrive much later): FAS is an **early, real-time** signal `threshold` seconds after answer.
+This is distinct from `sessions_missing_rtp_total`, which is evaluated at dialog teardown. FAS reports either from the periodic sweep after the configured threshold (plus the DTLS-SRTP grace where applicable), or at BYE after an independent 3s floor.
 
 - Pending entry is created at the 200 OK (only when SDP registered ≥1 media endpoint; held SDP `c=0.0.0.0` is excluded — no media is expected).
 - It is cleared once **≥2 forward RTP packets** reach the dialog's media endpoint (a single stray/spoofed packet must not mask a media-less call).
-- It is also cleared at dialog teardown (BYE / Session-Expires expiry), so a short call that never had media is not misreported.
+- At BYE, a media-less call is reported when answer→BYE is at least 3s; shorter calls are cleared without a signal. Session-Expires expiry clears the pending entry.
 
 | Config | Env var | Default |
 |--------|---------|---------|
-| Threshold | `SIP_EXPORTER_FRAUD_FAS_THRESHOLD` | `10s` |
+| Sweep threshold | `SIP_EXPORTER_FRAUD_FAS_THRESHOLD` | `10s` |
 
 ```promql
 # False Answer Supervision — answered calls that never carried media
@@ -984,7 +990,7 @@ sip_exporter_channel_length / sip_exporter_channel_capacity > 0.8
 
 ### Active Trackers
 
-`sip_exporter_active_trackers{type="register|invite|options|bye|rtp"}` shows the number of entries in each tracker map. The `register`/`invite`/`options`/`bye` trackers store timestamps for measuring round-trip delays (RRD, TTR, ORD, LRD, PBD) and are cleaned up after 60 seconds. The `rtp` tracker holds active RTP media streams (correlated with SIP dialogs) and expires idle streams after 30 seconds.
+`sip_exporter_active_trackers{type="register|invite|options|bye|fas|rtp"}` shows the number of entries in each tracker map. The `register`/`invite`/`options`/`bye` trackers store timestamps for measuring round-trip delays (RRD, TTR, ORD, LRD, PBD) and are cleaned up after 60 seconds. The `fas` tracker holds answered calls awaiting answer-side media or FAS evaluation. The `rtp` tracker holds active RTP media streams (correlated with SIP dialogs) and expires idle streams after 30 seconds.
 
 **PromQL examples:**
 ```promql
@@ -1780,7 +1786,7 @@ The repository includes pre-configured alert rules and dashboards so monitoring 
 |-------|--------|---------|----------|
 | `SIPRegistrationScan` | `register_scan_total` | rate > 0 (one IP registering many accounts) | critical |
 | `SIPInviteBurst` | `invite_burst_total` | rate > 0 (one IP flooding INVITEs) | critical |
-| `SIPRegistrationCountryChange` | `register_country_change_total` | counter > 0 and was 0/absent 5m ago | warning |
+| `SIPRegistrationCountryChange` | `register_country_change_total` | increase > 0, or a positive series newly appeared within 5m | warning |
 | `SIPSessionCapacityExhaustion` | `sessions_utilization` | > 90% for 5m | warning |
 
 #### SIP Health

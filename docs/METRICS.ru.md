@@ -56,7 +56,10 @@ SIP-метрики используют многоуровневую модел�
 >
 > | Уровень | Метрики | Полный набор лейблов |
 > |---------|---------|----------------------|
-> | **Системные** | `packets_total`, `system_error_total`, самомониторинг | *(нет)* |
+> | **Системные / самомониторинг без лейблов** | `packets_total`, `system_error_total`, `rtp_dropped_total`, `rtp_kernel_timestamp_missing_total`, `channel_length`, `channel_capacity`, `active_dialogs` | *(нет)* |
+> | **Socket-самомониторинг** | `socket_packets_received_total`, `socket_packets_dropped_total` | `iface` |
+> | **Типизированный самомониторинг** | `parse_errors_total`, `active_trackers` | `type` |
+> | **Build-самомониторинг** | `build_info` | `version` |
 > | **Базовый** | Все SIP-запросы, SER/SEER/ISA/SCR/ASR/NER, RRD/SPD/TTR/PDD/ORD/LRD/PBD, VQ-отчёты, sessions, `reinvite_total`, здоровье регистраций (`register_success_total`, `register_success_ratio`, `active_registrations`) | `carrier, ua_type, source_country, direction` |
 > | **Ошибки рег.** | `register_failure_total` | `carrier, ua_type, source_country, direction, code` |
 > | **Ретрансляции** | `sip_retransmission_total` | `carrier, ua_type, source_country, direction, method` |
@@ -664,7 +667,10 @@ topk(5, sum by (code) (rate(sip_exporter_register_failure_total[5m])))
 
 ```promql
 # Всплески перехвата аккаунтов
-sip_exporter_register_country_change_total > 0 unless on (carrier, source_country) (sip_exporter_register_country_change_total offset 5m > 0)
+increase(sip_exporter_register_country_change_total[5m]) > 0
+or
+(sip_exporter_register_country_change_total > 0
+  unless sip_exporter_register_country_change_total offset 5m)
 ```
 
 ### register_scan_total
@@ -697,17 +703,17 @@ rate(sip_exporter_invite_burst_total[5m])
 
 ### fas_calls_total
 
-Инкрементируется, когда вызов **ответил** (не-re-INVITE 200 OK на диалоге, зарегистрировавшем media-эндпоинты из SDP), но **нет RTP в течение threshold** — сигнал real-time False Answer Supervision. Отвечающая сторона стартует биллинг, не доставляя медиа.
+Инкрементируется, когда вызов **ответил** (не-re-INVITE 200 OK на диалоге, зарегистрировавшем media-энпоинты из SDP), но **нет answer-side RTP** — сигнал False Answer Supervision. Отвечающая сторона стартует биллинг, не доставляя медиа.
 
-Отличается от `sessions_missing_rtp_total` (метрика **teardown**, вычисляется на BYE/expiry и может прийти сильно позже): FAS — **ранний real-time** сигнал через `threshold` секунд после ответа.
+Отличается от `sessions_missing_rtp_total`, которая вычисляется на teardown диалога. FAS срабатывает либо в periodic sweep после настроенного threshold (и grace DTLS-SRTP, если применимо), либо на BYE после независимого floor 3s.
 
 - Pending-запись создаётся на 200 OK (только если SDP зарегистрировал ≥1 media-эндпоинт; held SDP `c=0.0.0.0` исключён — медиа не ожидается).
 - Сбрасывается, как только **≥2 forward RTP-пакетов** достигли media-эндпоинта диалога (один случайный/spoofed пакет не должен маскировать вызов без медиа).
-- Также сбрасывается на teardown диалога (BYE / истечение Session-Expires), поэтому короткий вызов без медиа не ложно детектируется.
+- На BYE вызов без медиа репортится, если answer→BYE не менее 3s; более короткие вызовы сбрасываются без сигнала. Истечение Session-Expires сбрасывает pending-запись.
 
 | Конфиг | Env var | По умолчанию |
 |--------|---------|--------------|
-| Threshold | `SIP_EXPORTER_FRAUD_FAS_THRESHOLD` | `10s` |
+| Sweep threshold | `SIP_EXPORTER_FRAUD_FAS_THRESHOLD` | `10s` |
 
 ```promql
 # False Answer Supervision — ответившие вызовы, не понёсшие медиа
@@ -908,8 +914,8 @@ RTP без коррелированного диалога отбрасывае�
 
 | Метрика | Тип | Описание |
 |---------|-----|----------|
-| `sip_exporter_socket_packets_received_total` | Counter | Всего пакетов, полученных от kernel AF_PACKET-сокета |
-| `sip_exporter_socket_packets_dropped_total` | Counter | Всего пакетов, отброшенных ядром из-за переполнения receive-буфера сокета |
+| `sip_exporter_socket_packets_received_total{iface}` | CounterVec | Всего пакетов, полученных от kernel AF_PACKET-сокета, по интерфейсам |
+| `sip_exporter_socket_packets_dropped_total{iface}` | CounterVec | Всего пакетов, отброшенных ядром из-за переполнения receive-буфера сокета, по интерфейсам |
 | `sip_exporter_rtp_dropped_total` | Counter | Всего RTP-пакетов, отброшенных в userspace при переполнении внутреннего канала сообщений |
 | `sip_exporter_rtp_kernel_timestamp_missing_total` | Counter | RTP-пакеты, у которых отсутствовал kernel `SO_TIMESTAMPNS` и PDV деградировал до времени обработки (растущий rate означает ненадёжные PDV-замеры) |
 | `sip_exporter_channel_length` | Gauge | Текущее количество пакетов во внутреннем буфере канала сообщений |
@@ -921,16 +927,19 @@ RTP без коррелированного диалога отбрасывае�
 
 ### Статистика AF_PACKET-сокета
 
-`sip_exporter_socket_packets_received_total` и `sip_exporter_socket_packets_dropped_total` читаются из kernel `PACKET_STATISTICS` через `getsockopt()` каждую секунду. Ядро сбрасывает счётчики после каждого чтения, поэтому значения накапливаются в экспортёре.
+`sip_exporter_socket_packets_received_total` и `sip_exporter_socket_packets_dropped_total` читаются из kernel `PACKET_STATISTICS` через `getsockopt()` каждую секунду. Ядро сбрасывает счётчики после каждого чтения, поэтому значения накапливаются в экспортёре. Обе метрики несут лейбл `iface` с именем сетевого интерфейса.
 
 **Примеры PromQL:**
 ```promql
-# Rate отброса пакетов (пакетов/с)
-rate(sip_exporter_socket_packets_dropped_total[5m])
+# Rate отброса пакетов на интерфейсе (пакетов/с)
+rate(sip_exporter_socket_packets_dropped_total{iface="ens3"}[5m])
 
-# Доля отброса (процент от полученных)
-rate(sip_exporter_socket_packets_dropped_total[5m])
-  / rate(sip_exporter_socket_packets_received_total[5m]) * 100
+# Доля отброса по всем интерфейсам (процент от полученных)
+sum(rate(sip_exporter_socket_packets_dropped_total[5m]))
+  / sum(rate(sip_exporter_socket_packets_received_total[5m])) * 100
+
+# Полученные пакеты по интерфейсам
+sum by (iface) (rate(sip_exporter_socket_packets_received_total[5m]))
 ```
 
 ### Ошибки разбора
@@ -970,7 +979,7 @@ sip_exporter_channel_length / sip_exporter_channel_capacity > 0.8
 
 ### Активные трекеры
 
-`sip_exporter_active_trackers{type="register|invite|options|bye|rtp"}` показывает количество записей в каждой карте трекеров. Трекеры `register`/`invite`/`options`/`bye` хранят временные метки для измерения round-trip задержек (RRD, TTR, ORD, LRD, PBD) и очищаются через 60 секунд. Трекер `rtp` содержит активные RTP-медиапотоки (коррелированные с SIP-диалогами) и истекает простаивающие потоки через 30 секунд.
+`sip_exporter_active_trackers{type="register|invite|options|bye|fas|rtp"}` показывает количество записей в каждой карте трекеров. Трекеры `register`/`invite`/`options`/`bye` хранят временные метки для измерения round-trip задержек (RRD, TTR, ORD, LRD, PBD) и очищаются через 60 секунд. Трекер `fas` содержит ответившие вызовы, ожидающие answer-side media или FAS-проверку. Трекер `rtp` содержит активные RTP-медиапотоки (коррелированные с SIP-диалогами) и истекает простаивающие потоки через 30 секунд.
 
 **Примеры PromQL:**
 ```promql
@@ -1766,7 +1775,7 @@ RERL=55.0
 |-------|---------|---------|----------|
 | `SIPRegistrationScan` | `register_scan_total` | rate > 0 (один IP регистрирует много аккаунтов) | critical |
 | `SIPInviteBurst` | `invite_burst_total` | rate > 0 (один IP флудит INVITE) | critical |
-| `SIPRegistrationCountryChange` | `register_country_change_total` | счётчик > 0 и был 0/отсутствовал 5м назад | warning |
+| `SIPRegistrationCountryChange` | `register_country_change_total` | increase > 0 или positive series впервые появилась за 5м | warning |
 | `SIPSessionCapacityExhaustion` | `sessions_utilization` | > 90% в течение 5м | warning |
 
 #### Здоровье SIP

@@ -215,7 +215,11 @@ These alerts detect suspicious SIP patterns: account takeover, registration enum
 
 ```yaml
       - alert: SIPRegistrationCountryChange
-        expr: sip_exporter_register_country_change_total > 0 unless on (carrier, source_country) (sip_exporter_register_country_change_total offset 5m > 0)
+        expr: |
+          increase(sip_exporter_register_country_change_total[5m]) > 0
+          or
+          (sip_exporter_register_country_change_total > 0
+            unless sip_exporter_register_country_change_total offset 5m)
         for: 0m
         labels:
           severity: warning
