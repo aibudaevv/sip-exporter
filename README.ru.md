@@ -101,7 +101,7 @@ full-call трафик с параллельными Prometheus scrape на 1 80
 ## Установка
 
 ```bash
-docker pull frzq/sip-exporter:latest
+docker pull frzq/sip-exporter:1.11.0
 ```
 
 ### Конфигурация

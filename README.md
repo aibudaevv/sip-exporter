@@ -102,7 +102,7 @@ See the measured scenarios, integrity gates, environment and reproduction comman
 ## Install
 
 ```bash
-docker pull frzq/sip-exporter:latest
+docker pull frzq/sip-exporter:1.11.0
 ```
 
 ### Configure
