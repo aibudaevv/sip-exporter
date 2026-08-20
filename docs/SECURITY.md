@@ -1,5 +1,14 @@
 # Security
 
+## Scope and Data Boundaries
+
+sip-exporter is an open-source eBPF sensor that turns SIP signaling and correlated RTP observed on
+a Linux host into Prometheus metrics and Grafana dashboards, without storing packet payloads.
+
+It requires a privileged Linux deployment on a host that observes IPv4/UDP SIP signaling and the
+correlated RTP/RTCP path. It does not store packets or audio and is not a packet-search UI. QoE
+metrics describe traffic visible at the sensor, not guaranteed end-to-end subscriber quality.
+
 ## Why `--privileged` Is Required
 
 SIP-exporter uses **eBPF** (extended Berkeley Packet Filter) attached to `AF_PACKET` sockets to capture SIP traffic directly in the Linux kernel. This requires three specific capabilities:

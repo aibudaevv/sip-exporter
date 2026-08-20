@@ -10,7 +10,7 @@ groups:
         annotations:
           summary: "SIP Exporter scrape is down"
           description: "The exporter is not being scraped. Check the container, /health endpoint, and Prometheus target configuration."
-          runbook_url: "https://github.com/aibudaevv/sip-exporter/blob/develop/docs/ALERTING.md#production-alert-pack"
+          runbook_url: "https://github.com/aibudaevv/sip-exporter/blob/master/docs/ALERTING.md#production-alert-pack"
 
       - alert: SIPExporterSocketDropsHigh
         expr: sip_exporter:socket_drop_percent:5m > 1
@@ -20,7 +20,7 @@ groups:
         annotations:
           summary: "SIP Exporter kernel socket drops are high"
           description: "More than 1% of captured packets are dropped by the kernel socket. The exporter or host may not keep up with capture traffic."
-          runbook_url: "https://github.com/aibudaevv/sip-exporter/blob/develop/docs/ALERTING.md#production-alert-pack"
+          runbook_url: "https://github.com/aibudaevv/sip-exporter/blob/master/docs/ALERTING.md#production-alert-pack"
 
       - alert: SIPExporterChannelSaturation
         expr: sip_exporter_channel_length / clamp_min(sip_exporter_channel_capacity, 1) > 0.8
@@ -30,7 +30,7 @@ groups:
         annotations:
           summary: "SIP Exporter processing channel is saturated"
           description: "The internal packet channel is over 80% full. Sustained capture load can cause RTP packets to be dropped in userspace."
-          runbook_url: "https://github.com/aibudaevv/sip-exporter/blob/develop/docs/ALERTING.md#production-alert-pack"
+          runbook_url: "https://github.com/aibudaevv/sip-exporter/blob/master/docs/ALERTING.md#production-alert-pack"
 
       - alert: SIPExporterSERDegraded
         expr: sip_exporter:ser_percent:5m < 90 and on (instance, carrier, direction) sip_exporter:invite_rate:5m >= 0.1
@@ -40,7 +40,7 @@ groups:
         annotations:
           summary: "SIP session establishment ratio is degraded"
           description: "SER is below 90% during meaningful call traffic. Check SIP response codes, downstream reachability, and recent routing changes."
-          runbook_url: "https://github.com/aibudaevv/sip-exporter/blob/develop/docs/ALERTING.md#production-alert-pack"
+          runbook_url: "https://github.com/aibudaevv/sip-exporter/blob/master/docs/ALERTING.md#production-alert-pack"
 
       - alert: SIPExporterRTPLossHigh
         expr: sip_exporter:rtp_loss_percent:5m > 5
@@ -50,7 +50,7 @@ groups:
         annotations:
           summary: "RTP packet loss is high"
           description: "RTP loss exceeds 5% while media is captured. Check network congestion, QoS policy, and the capture point."
-          runbook_url: "https://github.com/aibudaevv/sip-exporter/blob/develop/docs/ALERTING.md#production-alert-pack"
+          runbook_url: "https://github.com/aibudaevv/sip-exporter/blob/master/docs/ALERTING.md#production-alert-pack"
 
       - alert: SIPExporterMissingRTPHigh
         expr: |
@@ -63,7 +63,7 @@ groups:
         annotations:
           summary: "Completed SIP dialogs frequently have no RTP"
           description: "More than 5% of dialogs with SDP end without observed RTP. Check SDP reachability, RTP filtering, and capture topology."
-          runbook_url: "https://github.com/aibudaevv/sip-exporter/blob/develop/docs/ALERTING.md#production-alert-pack"
+          runbook_url: "https://github.com/aibudaevv/sip-exporter/blob/master/docs/ALERTING.md#production-alert-pack"
 
       - alert: SIPExporterOneWayRTPHigh
         expr: |
@@ -76,4 +76,4 @@ groups:
         annotations:
           summary: "Completed SIP dialogs frequently have one-way RTP"
           description: "More than 5% of dialogs have RTP in only one direction. Check NAT, SDP addresses, and whether both media directions reach the capture point."
-          runbook_url: "https://github.com/aibudaevv/sip-exporter/blob/develop/docs/ALERTING.md#production-alert-pack"
+          runbook_url: "https://github.com/aibudaevv/sip-exporter/blob/master/docs/ALERTING.md#production-alert-pack"
