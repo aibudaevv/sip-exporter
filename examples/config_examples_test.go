@@ -30,6 +30,10 @@ func TestProductionCompose(t *testing.T) {
 	if readErr != nil {
 		t.Fatal(readErr)
 	}
+	versionBytes, readErr := os.ReadFile("../VERSION")
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
 
 	var compose productionCompose
 	if unmarshalErr := yaml.Unmarshal(b, &compose); unmarshalErr != nil {
@@ -38,6 +42,10 @@ func TestProductionCompose(t *testing.T) {
 	service, ok := compose.Services["sip-exporter"]
 	if !ok {
 		t.Fatal("missing sip-exporter service")
+	}
+	wantImage := "frzq/sip-exporter:" + strings.TrimSpace(string(versionBytes))
+	if service.Image != wantImage {
+		t.Fatalf("production image = %q, want current release %q", service.Image, wantImage)
 	}
 	_, stateVolumeExists := compose.Volumes["sip-exporter-state"]
 	wantEnvironment := map[string]string{
@@ -68,7 +76,6 @@ func TestProductionCompose(t *testing.T) {
 		ok   bool
 	}{
 		{"single service", len(compose.Services) == 1},
-		{"pinned release image", service.Image == "frzq/sip-exporter:1.8.0"},
 		{"host network", service.NetworkMode == "host"},
 		{"capture privileges", service.Privileged},
 		{"restart policy", service.Restart == "unless-stopped"},

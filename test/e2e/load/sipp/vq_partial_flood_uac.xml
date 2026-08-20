@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<scenario name="Partial VQ PUBLISH Flood">
+    <send retrans="500">
+        <![CDATA[
+        PUBLISH sip:collector@[remote_ip]:[remote_port] SIP/2.0
+        Via: SIP/2.0/UDP [local_ip]:[local_port];branch=[branch]
+        From: sipp <sip:sipp@[local_ip]>;tag=[call_number]
+        To: collector <sip:collector@[remote_ip]:[remote_port]>
+        Call-ID: [call_id]
+        CSeq: 1 PUBLISH
+        Max-Forwards: 70
+        Event: vq-rtcpxr
+        Content-Type: application/vq-rtcpxr
+        Content-Length: [len]
+
+        VQSessionReport: CallTerm
+        CallID: [call_id]@[local_ip]
+        LocalID: sip:user1@[local_ip]
+        RemoteID: sip:user2@[remote_ip]
+        MOSLQ=4.1 RLQ=85.0
+
+        ]]>
+    </send>
+</scenario>

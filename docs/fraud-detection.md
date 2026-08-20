@@ -1,6 +1,6 @@
 # Fraud Detection
 
-> **Version:** sip-exporter v1.6.0
+> **Version:** sip-exporter v1.9.0
 >
 > sip-exporter provides **signal-only** fraud detection. It does not block or
 > intercept traffic. It exports Prometheus counter/gauge metrics that increment
@@ -10,17 +10,19 @@
 ## What It Detects
 
 sip-exporter covers the top VoIP fraud categories — compromised PBX and identity
-theft — with four detection signals:
+theft — with five detection signals:
 
 | Signal | Metric | Type | What it detects |
 |--------|--------|------|-----------------|
 | Registration Scan | `register_scan_total` | counter | Account enumeration / compromised PBX |
 | Registration Country Change | `register_country_change_total` | counter | Account takeover from new geography |
 | INVITE Burst | `invite_burst_total` | counter | Toll-fraud onset / SIP flood DDoS |
+| False Answer Supervision | `fas_calls_total` | counter | Answered, media-bearing call with no answer-side RTP |
 | Sessions Utilization | `sessions_utilization` | gauge | Capacity exhaustion / contract breach |
 
-All counters use `{carrier,source_country,direction}` labels. The source IP is used
-internally for threshold tracking but is **never exposed** as a Prometheus label.
+The three signaling counters use `{carrier,source_country,direction}` labels. FAS is a
+call-level signal and additionally carries `ua_type`. The source IP is used internally
+for threshold tracking but is **never exposed** as a Prometheus label.
 
 ---
 
@@ -68,6 +70,23 @@ separately, don't trigger the detector).
 **Example:** PBX at 198.51.100.10 makes 150 calls/min, threshold=100: INVITEs
 1–99 → no signal; 100th → counter +1; 101–150 → +1 each.
 
+### False Answer Supervision
+
+`sip_exporter_fas_calls_total{carrier,ua_type,source_country,direction}` — counter
+
+Detects an answered, media-bearing call that carries no answer-side RTP. The signal
+has two paths: a periodic sweep after the configured threshold (plus a 15s grace for
+DTLS-SRTP), or BYE teardown after an independent 3s floor. It is distinct from
+`sessions_missing_rtp_total`, which is evaluated when the dialog ends.
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `SIP_EXPORTER_FRAUD_FAS_THRESHOLD` | `10s` | Base wait for the periodic sweep path; does not change the 3s BYE floor |
+
+FAS depends on complete RTP capture. Check `sip_exporter_rtp_dropped_total` before
+acting on the signal. See [Metrics — FAS limitations](METRICS.md#fas-limitations) for
+side detection, short calls, NAT and expected one-way-media false positives.
+
 ### Sessions Utilization
 
 - `sip_exporter_sessions_utilization{carrier}` — gauge (% of limit)
@@ -97,6 +116,8 @@ sessions_limits:
 
 > **Note on `rate()`:** `rate(counter[5m]) > 0` stays true for ~5 minutes after
 > a signal. The `for: 1m` clause reduces noise from transient spikes.
+> The country-change expression combines `increase()` for repeat events with an exact-label
+> new-series branch, so the first event and later increments are both detected per direction.
 
 ```yaml
 # Registration scan → credential stuffing investigation
@@ -121,13 +142,30 @@ sessions_limits:
 
 # Registration country change → account takeover
 - alert: SIPRegistrationCountryChange
-  expr: sip_exporter_register_country_change_total > 0 unless on (carrier, source_country, direction) (sip_exporter_register_country_change_total offset 5m > 0)
+  expr: |
+    increase(sip_exporter_register_country_change_total[5m]) > 0
+    or
+    (sip_exporter_register_country_change_total > 0
+      unless sip_exporter_register_country_change_total offset 5m)
   for: 0m
   labels:
     severity: warning
   annotations:
     summary: "Registration country change detected"
     description: "A user re-registered from a different country on {{ $labels.carrier }}."
+
+# False Answer Supervision → billing-fraud investigation
+- alert: SIPFalseAnswerSupervision
+  expr: |
+    (rate(sip_exporter_fas_calls_total[5m]) > 0)
+    unless on()
+    (rate(sip_exporter_rtp_dropped_total[5m]) > 100)
+  for: 2m
+  labels:
+    severity: warning
+  annotations:
+    summary: "False Answer Supervision suspected"
+    description: "Answered calls on {{ $labels.carrier }} carried no answer-side RTP. Check RTP drops and expected one-way-media endpoints before acting."
 
 # Sessions capacity exhaustion
 - alert: SIPSessionCapacityExhaustion
@@ -156,6 +194,11 @@ sessions_limits:
 
 **INVITE burst:**
 - SBC/gateway multiplexing many subscribers through one IP may exceed threshold=100. Raise threshold for that source.
+
+**False Answer Supervision:**
+- Incomplete RTP capture can produce false positives; correlate with socket and userspace drop metrics.
+- Voicemail, IVR, paging and announcement endpoints that do not send answer-side RTP trigger the heuristic by design.
+- See the [complete FAS limitations](METRICS.md#fas-limitations) before using this signal for enforcement.
 
 **Sessions utilization:**
 - Capped at 100% — `active=300, limit=100` shows 100%. Monitor `sip_exporter_sessions` (raw gauge) for extreme oversubscription.

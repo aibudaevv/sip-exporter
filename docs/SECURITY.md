@@ -34,9 +34,9 @@ That's it. No packet modification, no packet injection, no network redirection, 
 
 - Does **not** modify or drop packets — the eBPF filter is *passive* (read-only)
 - Does **not** send any SIP traffic — purely passive listener
-- Does **not** write to the host filesystem — volumes are `:ro` (read-only)
+- Does **not** persist packet data in application-managed files. The production Compose example writes only the anonymous telemetry ID to the `sip-exporter-state` volume; configuration mounts are `:ro` (read-only). Container logging can persist sensitive diagnostics; see [Logging and Sensitive Identifiers](#logging-and-sensitive-identifiers)
 - Does **not** access other containers, processes, or system resources
-- Does **not** open any inbound ports except `/metrics` on the configured HTTP port (default 2112)
+- Does **not** open any inbound ports except the `/metrics` and `/health` endpoints on the configured HTTP port (default 2112)
 - Does **not** make outbound network connections **except** the optional telemetry beacon (see [Telemetry](#telemetry))
 
 ## Telemetry
@@ -55,18 +55,26 @@ By default, SIP-exporter sends an **anonymous telemetry beacon** to the project 
 
 **To disable telemetry entirely:** `SIP_EXPORTER_TELEMETRY=false`. To redirect beacons to your own endpoint (e.g. for air-gapped auditing), set `SIP_EXPORTER_TELEMETRY_URL`. To change the ID file location, set `SIP_EXPORTER_TELEMETRY_ID_FILE`.
 
+## Logging and Sensitive Identifiers
+
+The default `info` level does not log raw packet payloads, but FAS warnings include the SIP Call-ID. At `debug`, diagnostic records include raw SIP message data and may include Call-IDs and media endpoint IP addresses and ports. These records go to stdout/stderr rather than the `sip-exporter-state` volume, but Docker or an orchestrator logging driver may retain them.
+
+In production, use `SIP_EXPORTER_LOGGER_LEVEL=info` (the default) or `error`, restrict access to collected logs, and apply an appropriate retention policy. Enable `debug` only in a controlled troubleshooting window. The accepted values are `error`, `info`, and `debug`; any other value currently selects debug logging.
+
 ## Data Exposed in Prometheus Labels
 
-SIP-exporter derives metric labels from packet content, but no **phone numbers** ever reach a label — only aggregated geographic and identity context:
+No **phone numbers** ever reach Prometheus labels. The privacy-relevant packet and infrastructure labels are listed below; see the [Metrics label matrix](METRICS.md#labels) for the complete schema of every metric family.
 
 | Label | Derived from | Scope | Example |
 |---|---|---|---|
-| `carrier` | CIDR match of source IP against `carriers.yaml` | All SIP + RTP metrics | `telecom-alpha` |
-| `ua_type` | User-Agent classification (`user_agents.yaml`) | All SIP + RTP metrics | `yealink` |
-| `source_country` | `carrier.country` → MaxMind GeoIP(src IP) → `unknown` | All SIP + RTP metrics | `RU` |
+| `carrier` | CIDR match of source IP against `carriers.yaml` | Most SIP, RTP, and correlated RTCP metrics | `telecom-alpha` |
+| `ua_type` | User-Agent classification (`user_agents.yaml`) | Base/call-level SIP, RTP, and correlated RTCP metrics | `yealink` |
+| `source_country` | `carrier.country` → MaxMind GeoIP(src IP) → `unknown` | Base/call-level SIP, RTP, and correlated RTCP metrics | `RU` |
 | `destination_country` | E.164 prefix of the called number (embedded table) | INVITE metrics only | `US` |
 | `caller_host`, `called_host` | Host part of the From/To SIP URI | INVITE metrics only (**opt-in**, default off) | `10.0.0.5`, `sip.example.com` |
-| `codec` | RTP payload type / SDP `a=rtpmap` | RTP metrics only | `G.711` |
+| `codec` | RTP payload type / SDP `a=rtpmap` | RTP and correlated RTCP quality metrics | `G.711` |
+| `direction` | Kernel packet type | SIP and RTP traffic metrics | `inbound` |
+| `iface` | Configured capture-interface name | Raw INVITE and socket self-monitoring metrics | `ens3` |
 
 **Infrastructure identifiers, opt-in by default:** `caller_host`/`called_host` are hostnames or IP addresses extracted from the SIP `From`/`To` URI — they identify network endpoints, not subscribers. Because the number of distinct endpoints is unbounded, these labels are **disabled by default** (`SIP_EXPORTER_HOST_LABELS=false`): when off, they collapse to the empty value, so they add **zero cardinality** and leak no endpoint identifiers. Enable them (`SIP_EXPORTER_HOST_LABELS=true`) only on trusted, bounded deployments — otherwise a flood of spoofed `From`/`To` hosts could grow Prometheus memory; if you enable them in a less-trusted environment, monitor `prometheus_tsdb_symbol_table_size`.
 
@@ -77,11 +85,11 @@ SIP-exporter derives metric labels from packet content, but no **phone numbers**
 | Layer | Details |
 |---|---|
 | Base image | `alpine:3.22` — minimal (~5 MB) |
-| Runtime dependencies | `libelf` (for eBPF), `bash` (for healthcheck), `libssl3` + `libcrypto3` (TLS libraries) |
-| Application | Single dynamically-linked Go binary |
-| Volumes | `/etc/localtime:ro`, `/etc/timezone:ro` — read-only timezone files |
+| Runtime packages | `libelf`, `bash`, `libssl3`, and `libcrypto3`; the healthcheck executes BusyBox `wget` |
+| Application | Single statically linked Go binary plus the eBPF object file |
+| Volumes | Writable `sip-exporter-state:/var/lib/sip-exporter` for the telemetry ID; optional configuration and timezone mounts are read-only |
 | Network | Inbound `/metrics` and `/health` HTTP endpoints (default port 2112); optional outbound telemetry |
-| Processes | Single process, no shell, no daemon |
+| Processes | A single application process; no shell or daemon process is started |
 
 > **Security note — unauthenticated endpoints:** `/metrics` and `/health` are registered without any authentication or authorization middleware (`internal/server/server.go:102-103`). Anyone who can reach port `2112` can read all exported metrics. The current service listens on all interfaces and does not provide a bind-address setting; on untrusted networks, firewall port `2112` or place a reverse proxy with authentication in front of it.
 
@@ -100,7 +108,7 @@ The eBPF program is [~166 lines of C](../internal/bpf/sip.c). It does two things
 8. For matching media endpoints, returns up to 64 bytes for RTP and up to 1518 bytes for RTCP compounds; non-matching UDP is not copied to userspace
 9. Returns `skb->len` (SIP pass), a capped media snapshot, or `0` (drop from buffer — the packet still reaches its destination, it's just not copied to userspace)
 
-**RTP privacy:** The application parses only the 12-byte fixed RTP header (version, PT, sequence, timestamp, SSRC), but the 64-byte capture snapshot can include a small payload prefix. It does not inspect or persist audio. RTCP compounds are copied up to 1518 bytes to parse report blocks. RTP metrics expose only `carrier`, `ua_type`, `codec`, `source_country`, and `direction` labels — no phone numbers, raw IPs, or call identifiers appear in RTP metrics. The full label inventory across all metric families is documented in [Data Exposed in Prometheus Labels](#data-exposed-in-prometheus-labels).
+**RTP privacy:** The application parses only the 12-byte fixed RTP header (version, PT, sequence, timestamp, SSRC), but the 64-byte capture snapshot can include a small payload prefix. It does not inspect or persist audio. RTCP compounds are copied up to 1518 bytes to parse report blocks. RTP metrics expose only `carrier`, `ua_type`, `codec`, `source_country`, and `direction` labels — no phone numbers, raw IPs, or call identifiers appear in RTP metrics. Privacy-relevant labels are documented in [Data Exposed in Prometheus Labels](#data-exposed-in-prometheus-labels); the complete per-family schema is in the [Metrics label matrix](METRICS.md#labels).
 
 **Critical point:** The eBPF filter is a *socket filter*, not a *tc/XDP filter*. It only controls which packets are copied to the application's socket buffer. Dropped packets are **not** lost — they continue through the normal network stack to their destination. The filter cannot modify or block traffic.
 

@@ -5,9 +5,11 @@ package load
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -18,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -29,8 +32,9 @@ import (
 )
 
 const (
-	sippImage     = "pbertera/sipp:latest"
-	testInterface = "lo"
+	sippImage                = "pbertera/sipp@sha256:063e8e9c8ecf54552e8efc3c363007afbfd3cae5a0f3f037db1c2e7fa4cd0349"
+	testInterface            = "lo"
+	selfMetricSampleInterval = 2 * time.Second
 )
 
 var sippRunID atomic.Uint64
@@ -61,38 +65,38 @@ type (
 		uasMediaPort      string
 		uacMediaPort      string
 		exporterContainer testcontainers.Container
+		limits            WorkloadLimits
 	}
 
 	loadResult struct {
-		Duration      time.Duration
-		PacketsBefore float64
-		PacketsAfter  float64
-		ActualPPS     float64
-		ExpectedPPS   float64
-		LossRate      float64
-		ErrorCount    float64
-		DrainTime     time.Duration
-		CPUAvg        float64
-		CPUPeak       float64
-		MemMaxMB      float64
-		PeakSessions  float64
+		Duration        time.Duration
+		Generator       GeneratorResult
+		Capture         CaptureResult
+		Protocols       ProtocolCounters
+		PacketsBefore   float64
+		PacketsAfter    float64
+		ActualPPS       float64
+		ExpectedPPS     float64
+		LossRate        float64
+		ErrorCount      float64
+		DrainTime       time.Duration
+		PeakSessions    float64
+		Resources       ResourceSummaryV2
+		ResourceSamples ResourceSamplesV2
 	}
 
-	statsCollector struct {
-		mu          sync.Mutex
-		samples     []float64
-		memSamples  []float64
-		cancel      context.CancelFunc
-		done        chan struct{}
-		dockerCli   *client.Client
-		containerID string
-		firstUsage  uint64
-		lastUsage   uint64
-		firstSys    uint64
-		lastSys     uint64
-		numCPU      int
-		firstTime   time.Time
-		lastTime    time.Time
+	steadyMeasurement struct {
+		mu             sync.Mutex
+		env            *testEnv
+		dockerCli      *client.Client
+		cancel         context.CancelFunc
+		done           chan struct{}
+		measuring      bool
+		ending         bool
+		start          time.Time
+		containerStart time.Time
+		samples        ResourceSamplesV2
+		err            error
 	}
 
 	testWriter struct {
@@ -163,8 +167,10 @@ func exporterContainerRequest(
 	ctx context.Context,
 	t *testing.T,
 	iface, httpPort, sipPorts string,
+	limits WorkloadLimits,
 ) testcontainers.ContainerRequest {
 	t.Helper()
+	require.NoError(t, limits.validate())
 	logLevel := "error"
 	if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
 		logLevel = "debug"
@@ -180,9 +186,7 @@ func exporterContainerRequest(
 	if maxProcs := os.Getenv("SIP_EXPORTER_E2E_GOMAXPROCS"); maxProcs != "" {
 		envVars["GOMAXPROCS"] = maxProcs
 	}
-	if goDebug := os.Getenv("SIP_EXPORTER_E2E_GODEBUG"); goDebug != "" {
-		envVars["GODEBUG"] = goDebug
-	}
+	envVars["GODEBUG"] = forceGCTrace(os.Getenv("SIP_EXPORTER_E2E_GODEBUG"))
 	return testcontainers.ContainerRequest{
 		Image:       exporterImage(),
 		Privileged:  true,
@@ -191,14 +195,66 @@ func exporterContainerRequest(
 		WaitingFor: wait.ForHTTP("/metrics").
 			WithPort(httpPort + "/tcp").
 			WithStartupTimeout(contextTimeout(t, ctx)),
+		HostConfigModifier: func(hostConfig *container.HostConfig) {
+			hostConfig.Privileged = true
+			hostConfig.NetworkMode = container.NetworkMode("host")
+			hostConfig.NanoCPUs = int64(limits.CPUCores * 1_000_000_000)
+			hostConfig.Memory = limits.MemoryBytes
+		},
 	}
 }
 
+func forceGCTrace(value string) string {
+	settings := make([]string, 0)
+	for _, setting := range strings.Split(value, ",") {
+		if setting == "" || strings.HasPrefix(setting, "gctrace=") {
+			continue
+		}
+		settings = append(settings, setting)
+	}
+	return strings.Join(append(settings, "gctrace=1"), ",")
+}
+
+func validateContainerLimits(nanoCPUs, memory int64, limits WorkloadLimits) error {
+	if err := limits.validate(); err != nil {
+		return err
+	}
+	wantNanoCPUs := int64(limits.CPUCores * 1_000_000_000)
+	if nanoCPUs != wantNanoCPUs {
+		return fmt.Errorf("container CPU limit: got %d, want %d", nanoCPUs, wantNanoCPUs)
+	}
+	if memory != limits.MemoryBytes {
+		return fmt.Errorf("container memory limit: got %d, want %d", memory, limits.MemoryBytes)
+	}
+	return nil
+}
+
+func verifyContainerLimits(ctx context.Context, containerID string, limits WorkloadLimits) error {
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return fmt.Errorf("docker client: %w", err)
+	}
+	defer cli.Close()
+	inspection, err := cli.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
+	if err != nil {
+		return fmt.Errorf("inspect exporter container: %w", err)
+	}
+	return validateContainerLimits(
+		inspection.Container.HostConfig.NanoCPUs,
+		inspection.Container.HostConfig.Memory,
+		limits,
+	)
+}
+
 func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
+	return newTestEnvWithLimits(ctx, t, peakLimits)
+}
+
+func newTestEnvWithLimits(ctx context.Context, t *testing.T, limits WorkloadLimits) *testEnv {
 	t.Helper()
 	exporterHTTPPort, sippPort, sippClientPort := allocatePorts()
 
-	req := exporterContainerRequest(ctx, t, testInterface, exporterHTTPPort, sippPort)
+	req := exporterContainerRequest(ctx, t, testInterface, exporterHTTPPort, sippPort, limits)
 
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
@@ -214,10 +270,13 @@ func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
 		}
 	}
 	require.NoError(t, err)
+	require.NoError(t, verifyContainerLimits(ctx, c.GetContainerID(), limits))
+	recordScenarioLimits(t, limits)
 
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
+		recordContainerLogs(cleanupCtx, t, "exporter.log", c)
 		if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
 			logs, logErr := c.Logs(cleanupCtx)
 			if logErr == nil {
@@ -243,6 +302,7 @@ func newTestEnv(ctx context.Context, t *testing.T) *testEnv {
 		sippPort:          sippPort,
 		sippClientPort:    sippClientPort,
 		exporterContainer: c,
+		limits:            limits,
 	}
 }
 
@@ -256,7 +316,7 @@ func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML,
 	sippClientPort2 := ports[4]
 
 	req := exporterContainerRequest(
-		ctx, t, testInterface, exporterHTTPPort, sippPort+","+sippPort2,
+		ctx, t, testInterface, exporterHTTPPort, sippPort+","+sippPort2, peakLimits,
 	)
 
 	var mounts testcontainers.ContainerMounts
@@ -301,10 +361,13 @@ func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML,
 		}
 	}
 	require.NoError(t, err)
+	require.NoError(t, verifyContainerLimits(ctx, c.GetContainerID(), peakLimits))
+	recordScenarioLimits(t, peakLimits)
 
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
+		recordContainerLogs(cleanupCtx, t, "exporter.log", c)
 		if os.Getenv("SIP_EXPORTER_E2E_EXPORTER_VERBOSE") == "true" {
 			logs, logErr := c.Logs(cleanupCtx)
 			if logErr == nil {
@@ -332,6 +395,7 @@ func newTestEnvWithCarrierAndUA(ctx context.Context, t *testing.T, carriersYAML,
 		sippPort2:         sippPort2,
 		sippClientPort2:   sippClientPort2,
 		exporterContainer: c,
+		limits:            peakLimits,
 	}
 }
 
@@ -347,6 +411,14 @@ func fetchMetricsBody(t *testing.T, endpoint string) []byte {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	return body
+}
+
+func recordMetricsSnapshot(t *testing.T, filename, endpoint string) {
+	t.Helper()
+	if activeRunRecorder == nil {
+		return
+	}
+	recordScenarioArtifact(t, filename, fetchMetricsBody(t, endpoint))
 }
 
 func metricExists(t *testing.T, endpoint, metricName string) bool {
@@ -385,9 +457,12 @@ func getMetricSum(t *testing.T, endpoint, metricName string) float64 {
 
 func readMetricSamples(t *testing.T, endpoint, metricName string) []metricSample {
 	t.Helper()
+	return parseMetricSamples(fetchMetricsBody(t, endpoint), metricName)
+}
 
+func parseMetricSamples(body []byte, metricName string) []metricSample {
 	var samples []metricSample
-	for _, line := range strings.Split(string(fetchMetricsBody(t, endpoint)), "\n") {
+	for _, line := range strings.Split(string(body), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -431,6 +506,46 @@ func readMetricSamples(t *testing.T, endpoint, metricName string) []metricSample
 		samples = append(samples, metricSample{name: name, labels: labels, value: value})
 	}
 	return samples
+}
+
+func metricSamplePointFromBody(at time.Time, body []byte) (metricSamplePoint, error) {
+	channel, err := singleMetricValue(parseMetricSamples(body, "sip_exporter_channel_length"))
+	if err != nil {
+		return metricSamplePoint{}, fmt.Errorf("channel length: %w", err)
+	}
+	socketDrops, err := requiredMetricSum(body, "sip_exporter_socket_packets_dropped_total")
+	if err != nil {
+		return metricSamplePoint{}, err
+	}
+	rtpDrops, err := requiredMetricSum(body, "sip_exporter_rtp_dropped_total")
+	if err != nil {
+		return metricSamplePoint{}, err
+	}
+	if !finiteFloats(channel, socketDrops, rtpDrops) {
+		return metricSamplePoint{}, fmt.Errorf("self metric is non-finite")
+	}
+	return metricSamplePoint{
+		At: at, ChannelLength: channel, SocketDrops: socketDrops, RTPDrops: rtpDrops,
+	}, nil
+}
+
+func requiredMetricSum(body []byte, name string) (float64, error) {
+	samples := parseMetricSamples(body, name)
+	if len(samples) == 0 {
+		return 0, fmt.Errorf("metric %s is missing", name)
+	}
+	var total float64
+	identities := make([]map[string]string, 0, len(samples))
+	for _, sample := range samples {
+		for _, identity := range identities {
+			if maps.Equal(identity, sample.labels) {
+				return 0, fmt.Errorf("metric %s contains a duplicate series", name)
+			}
+		}
+		identities = append(identities, sample.labels)
+		total += sample.value
+	}
+	return total, nil
 }
 
 func metricSeriesEnd(line string) int {
@@ -560,20 +675,40 @@ func singleMetricValue(samples []metricSample) (float64, error) {
 	return samples[0].value, nil
 }
 
-func waitForMetricStable(ctx context.Context, t *testing.T, endpoint string) {
+func metricSumOrZero(t *testing.T, endpoint, metricName string) float64 {
 	t.Helper()
-	prev := -1.0
-	stableCount := 0
+	var total float64
+	for _, sample := range readMetricSamples(t, endpoint, metricName) {
+		total += sample.value
+	}
+	return total
+}
+
+func readProtocolCounters(t *testing.T, endpoint string) ProtocolCounters {
+	t.Helper()
+	return ProtocolCounters{
+		SIPPackets:     metricSumOrZero(t, endpoint, "sip_exporter_packets_total"),
+		RTPPackets:     metricSumOrZero(t, endpoint, "sip_exporter_rtp_packets_total"),
+		RTCPReports:    metricSumOrZero(t, endpoint, "sip_exporter_rtcp_reports_total"),
+		VQReports:      metricSumOrZero(t, endpoint, "sip_exporter_vq_reports_total"),
+		SocketReceived: metricSumOrZero(t, endpoint, "sip_exporter_socket_packets_received_total"),
+		SocketDropped:  metricSumOrZero(t, endpoint, "sip_exporter_socket_packets_dropped_total"),
+	}
+}
+
+func waitForExactSIPCapture(
+	ctx context.Context,
+	t *testing.T,
+	endpoint string,
+	before, expected float64,
+) {
+	t.Helper()
 	require.Eventually(t, func() bool {
-		cur := getMetric(t, endpoint, "sip_exporter_packets_total")
-		if cur == prev {
-			stableCount++
-			return stableCount >= 2
-		}
-		prev = cur
-		stableCount = 0
-		return false
-	}, contextTimeout(t, ctx), 300*time.Millisecond, "metrics did not stabilize after SIPp scenario")
+		captured := metricSumOrZero(t, endpoint, "sip_exporter_packets_total") - before
+		channelLength := metricSumOrZero(t, endpoint, "sip_exporter_channel_length")
+		return exactCaptureComplete(expected, captured, channelLength)
+	}, contextTimeout(t, ctx), 25*time.Millisecond,
+		"SIP capture did not reach exact drained total %.0f", expected)
 }
 
 func absScenarioPath(t *testing.T, filename string) string {
@@ -590,35 +725,113 @@ func (w *testWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+type startedSippContainer struct {
+	testcontainers.Container
+	statsDir       string
+	evidencePrefix string
+	started        time.Time
+	evidenceSaved  bool
+}
+
+type startBarrier struct {
+	done       chan struct{}
+	once       sync.Once
+	releasedAt time.Time
+}
+
+func newStartBarrier() *startBarrier {
+	return &startBarrier{done: make(chan struct{})}
+}
+
+func (b *startBarrier) wait() time.Time {
+	<-b.done
+	return b.releasedAt
+}
+
+func (b *startBarrier) release(at time.Time) {
+	b.once.Do(func() {
+		b.releasedAt = at
+		close(b.done)
+	})
+}
+
+func validatePostPhaseOrdering(measureEnd time.Time, postPhase ...time.Time) error {
+	for i, at := range postPhase {
+		if !at.After(measureEnd) {
+			return fmt.Errorf("post-phase timestamp %d must be after measurement end", i)
+		}
+	}
+	return nil
+}
+
 func startSippContainer(
 	ctx context.Context,
 	t *testing.T,
 	args []string,
 	sippVol string,
+	evidencePrefix string,
 	waitForExit bool,
-) testcontainers.Container {
+) *startedSippContainer {
+	t.Helper()
+	return newSippContainer(ctx, t, args, sippVol, evidencePrefix, waitForExit, true, "host")
+}
+
+func prepareSippContainer(
+	ctx context.Context,
+	t *testing.T,
+	args []string,
+	sippVol string,
+	evidencePrefix string,
+) *startedSippContainer {
+	t.Helper()
+	return newSippContainer(ctx, t, args, sippVol, evidencePrefix, false, false, "host")
+}
+
+func prepareSippContainerInPeerNetns(
+	ctx context.Context,
+	t *testing.T,
+	args []string,
+	sippVol, evidencePrefix, peerContainerID string,
+) *startedSippContainer {
+	t.Helper()
+	return newSippContainer(
+		ctx, t, args, sippVol, evidencePrefix, false, false, "container:"+peerContainerID,
+	)
+}
+
+func newSippContainer(
+	ctx context.Context,
+	t *testing.T,
+	args []string,
+	sippVol string,
+	evidencePrefix string,
+	waitForExit, start bool,
+	networkMode string,
+) *startedSippContainer {
 	t.Helper()
 
-	req := testcontainers.ContainerRequest{
-		Image:       sippImage,
-		NetworkMode: "host",
-		Cmd:         args,
-		Mounts: testcontainers.Mounts(
-			testcontainers.BindMount(sippVol, "/scenarios"),
-		),
+	started := time.Time{}
+	if start {
+		started = time.Now()
 	}
-
-	if waitForExit {
-		req.WaitingFor = wait.ForExit().WithExitTimeout(contextTimeout(t, ctx))
+	statsDir := ""
+	recordingEvidence := evidencePrefix != "" && activeRunRecorder != nil
+	if evidencePrefix != "" {
+		statsDir = t.TempDir()
 	}
+	req := sippContainerRequest(ctx, t, args, sippVol, statsDir, waitForExit, networkMode)
 
-	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
-		Started:          true,
+		Started:          start,
 		Logger:           log.New(io.Discard, "", 0),
 	})
+	require.NoError(t, err)
+	c := &startedSippContainer{
+		Container: container, statsDir: statsDir, evidencePrefix: evidencePrefix, started: started,
+	}
 
-	if os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
+	if start && os.Getenv("SIP_EXPORTER_E2E_SIPP_VERBOSE") == "true" {
 		logs, logErr := c.Logs(ctx)
 		if logErr == nil {
 			defer logs.Close()
@@ -626,11 +839,221 @@ func startSippContainer(
 			t.Logf("SIPp logs:\n%s", strings.TrimSpace(string(logBytes)))
 		}
 	}
-
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = c.Terminate(ctx) })
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if recordingEvidence && !c.evidenceSaved {
+			state, stateErr := c.State(cleanupCtx)
+			if stateErr != nil {
+				t.Errorf("read %s SIPp state during cleanup: %v", evidencePrefix, stateErr)
+			} else {
+				if state.Running {
+					if stopErr := c.Stop(cleanupCtx, nil); stopErr != nil {
+						t.Errorf("stop %s SIPp during cleanup: %v", evidencePrefix, stopErr)
+					} else {
+						c.recordEvidence(cleanupCtx, t, time.Now())
+					}
+				} else {
+					c.recordEvidence(cleanupCtx, t, time.Now())
+				}
+			}
+		}
+		_ = c.Terminate(cleanupCtx)
+	})
 
 	return c
+}
+
+func startPreparedSippContainers(
+	ctx context.Context,
+	t *testing.T,
+	containers ...*startedSippContainer,
+) time.Time {
+	t.Helper()
+	barrier := newStartBarrier()
+	errs := make(chan error, len(containers))
+	for _, c := range containers {
+		go func() {
+			barrier.wait()
+			errs <- c.Start(ctx)
+		}()
+	}
+	releasedAt := time.Now()
+	barrier.release(releasedAt)
+	for range containers {
+		require.NoError(t, <-errs)
+	}
+	startedAt := time.Time{}
+	for _, c := range containers {
+		inspection, err := c.Inspect(ctx)
+		require.NoError(t, err)
+		c.started, err = time.Parse(time.RFC3339Nano, inspection.State.StartedAt)
+		require.NoError(t, err)
+		if startedAt.IsZero() || c.started.Before(startedAt) {
+			startedAt = c.started
+		}
+	}
+	return startedAt
+}
+
+func (c *startedSippContainer) recordEvidence(
+	ctx context.Context,
+	t *testing.T,
+	finished time.Time,
+) {
+	t.Helper()
+	if c.evidencePrefix == "" || activeRunRecorder == nil || c.evidenceSaved {
+		return
+	}
+	phases := PhaseTimestamps{
+		WarmupStart:  c.started,
+		Ready:        c.started,
+		MeasureStart: c.started,
+		MeasureEnd:   finished,
+		DrainEnd:     finished,
+	}
+	result, err := c.readGeneratorEvidence(ctx, t, phases)
+	if err != nil {
+		t.Errorf("read %s SIPp evidence: %v", c.evidencePrefix, err)
+		return
+	}
+	if err := activeRunRecorder.AttachGenerator(t.Name(), result); err != nil {
+		t.Errorf("attach %s generator evidence: %v", c.evidencePrefix, err)
+	}
+}
+
+func (c *startedSippContainer) readGeneratorEvidence(
+	ctx context.Context,
+	t *testing.T,
+	phases PhaseTimestamps,
+) (GeneratorResult, error) {
+	t.Helper()
+	state, err := c.State(ctx)
+	if err != nil {
+		return GeneratorResult{}, fmt.Errorf("read SIPp state: %w", err)
+	}
+	if state.Running {
+		return GeneratorResult{}, fmt.Errorf("record SIPp evidence before exit")
+	}
+	recordContainerLogs(ctx, t, c.evidencePrefix+".log", c)
+	stats, err := os.ReadFile(filepath.Join(c.statsDir, "stats.csv"))
+	if err != nil {
+		return GeneratorResult{ExitCode: int(state.ExitCode), Phases: phases},
+			fmt.Errorf("read SIPp statistics: %w", err)
+	}
+	recordScenarioArtifact(t, c.evidencePrefix+"-stats.csv", stats)
+	result, err := parseSIPpStats(stats, int(state.ExitCode), phases)
+	if err != nil {
+		return GeneratorResult{}, fmt.Errorf("parse SIPp statistics: %w", err)
+	}
+	c.evidenceSaved = true
+	return result, nil
+}
+
+func sippContainerRequest(
+	ctx context.Context,
+	t *testing.T,
+	args []string,
+	sippVol, statsDir string,
+	waitForExit bool,
+	networkMode string,
+) testcontainers.ContainerRequest {
+	t.Helper()
+	cmd := append([]string(nil), args...)
+	mounts := testcontainers.Mounts(testcontainers.BindMount(sippVol, "/scenarios"))
+	if statsDir != "" {
+		cmd = append(cmd, "-trace_stat", "-stat_delimiter", ";", "-stf", "/artifacts/stats.csv")
+		mounts = append(mounts, testcontainers.BindMount(statsDir, "/artifacts"))
+	}
+
+	req := testcontainers.ContainerRequest{
+		Image:       sippImage,
+		NetworkMode: container.NetworkMode(networkMode),
+		Cmd:         cmd,
+		Mounts:      mounts,
+	}
+
+	if waitForExit {
+		req.WaitingFor = wait.ForExit().WithExitTimeout(contextTimeout(t, ctx))
+	}
+
+	return req
+}
+
+func runSippGenerator(
+	ctx context.Context,
+	t *testing.T,
+	args []string,
+	sippVol string,
+	phases PhaseTimestamps,
+) (*startedSippContainer, PhaseTimestamps) {
+	return runNamedSippGenerator(ctx, t, args, sippVol, "generator", phases)
+}
+
+func sippGeneratorArgs(scenario, localPort string, calls, rate int, remotePort string) []string {
+	return []string{
+		"-sf", "/scenarios/" + scenario,
+		"-i", "127.0.0.1",
+		"-p", localPort,
+		"-m", strconv.Itoa(calls),
+		"-r", strconv.Itoa(rate),
+		"-cid_str", nextSippCallIDFormat(),
+		"-nr",
+		net.JoinHostPort("127.0.0.1", remotePort),
+	}
+}
+
+func runNamedSippGenerator(
+	ctx context.Context,
+	t *testing.T,
+	args []string,
+	sippVol, evidencePrefix string,
+	phases PhaseTimestamps,
+) (*startedSippContainer, PhaseTimestamps) {
+	t.Helper()
+	c := startSippContainer(ctx, t, args, sippVol, evidencePrefix, true)
+	phases.MeasureEnd = time.Now()
+	return c, phases
+}
+
+func waitForSIPpUDPReady(
+	ctx context.Context,
+	t *testing.T,
+	c testcontainers.Container,
+	port string,
+) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		state, err := c.State(ctx)
+		if err != nil || !state.Running {
+			return false
+		}
+		conn, err := net.ListenPacket("udp", net.JoinHostPort("127.0.0.1", port))
+		if err != nil {
+			return errors.Is(err, syscall.EADDRINUSE)
+		}
+		_ = conn.Close()
+		return false
+	}, contextTimeout(t, ctx), 25*time.Millisecond, "SIPp UAS did not bind UDP port %s", port)
+}
+
+func waitForSIPpUDPPortFree(ctx context.Context, address string) error {
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		conn, err := net.ListenPacket("udp", address)
+		if err == nil {
+			return conn.Close()
+		}
+		if !errors.Is(err, syscall.EADDRINUSE) {
+			return fmt.Errorf("check SIPp UDP port %s: %w", address, err)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for SIPp UDP port %s: %w", address, ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func waitForContainerExit(ctx context.Context, t *testing.T, c testcontainers.Container) {
@@ -644,124 +1067,391 @@ func waitForContainerExit(ctx context.Context, t *testing.T, c testcontainers.Co
 	}, contextTimeout(t, ctx), 500*time.Millisecond, "SIPp container did not exit in time")
 }
 
-func newStatsCollector(containerID string) (*statsCollector, error) {
+func newSteadyMeasurement(ctx context.Context, env *testEnv) (*steadyMeasurement, error) {
+	if err := waitForMeasurementMetrics(ctx, env.endpoint); err != nil {
+		return nil, err
+	}
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, fmt.Errorf("docker client: %w", err)
 	}
-	return &statsCollector{
-		samples:    make([]float64, 0),
-		memSamples: make([]float64, 0),
-		done:       make(chan struct{}),
-		dockerCli:  cli,
-		numCPU:     1,
-	}, nil
+	inspection, err := cli.ContainerInspect(ctx, env.exporterContainer.GetContainerID(),
+		client.ContainerInspectOptions{})
+	if err != nil {
+		cli.Close()
+		return nil, fmt.Errorf("inspect exporter container: %w", err)
+	}
+	startedAt, err := time.Parse(time.RFC3339Nano, inspection.Container.State.StartedAt)
+	if err != nil {
+		cli.Close()
+		return nil, fmt.Errorf("parse exporter start time: %w", err)
+	}
+	measurementCtx, cancel := context.WithCancel(ctx)
+	measurement := &steadyMeasurement{
+		env: env, dockerCli: cli, cancel: cancel, done: make(chan struct{}),
+		containerStart: startedAt,
+	}
+	go measurement.collect(measurementCtx)
+	return measurement, nil
 }
 
-func (s *statsCollector) start(ctx context.Context, containerID string) {
-	s.containerID = containerID
-	ctx, s.cancel = context.WithCancel(ctx)
+func waitForMeasurementMetrics(ctx context.Context, endpoint string) error {
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	var lastErr error
+	for {
+		body, err := fetchMetricsBodyContext(ctx, endpoint)
+		if err == nil {
+			_, err = metricSamplePointFromBody(time.Now(), body)
+		}
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for measurement metrics: %v: %w", lastErr, ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func (m *steadyMeasurement) Begin(ctx context.Context, at time.Time) error {
+	if at.IsZero() {
+		return fmt.Errorf("measurement start is zero")
+	}
+	body, err := fetchMetricsBodyContext(ctx, m.env.endpoint)
+	if err != nil {
+		return err
+	}
+	point, err := metricSamplePointFromBody(at, body)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.measuring || !m.start.IsZero() {
+		return fmt.Errorf("measurement already started")
+	}
+	m.start = at
+	m.measuring = true
+	m.samples.Metrics = append(m.samples.Metrics, point)
+	return nil
+}
+
+func (m *steadyMeasurement) WaitForSamples(
+	ctx context.Context,
+	minimumResources, minimumMetrics int,
+) error {
+	if minimumResources <= 0 || minimumMetrics <= 0 {
+		return fmt.Errorf("minimum sample counts must be positive")
+	}
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		m.mu.Lock()
+		resourceCount := len(m.samples.Resources)
+		metricCount := len(m.samples.Metrics)
+		measurementErr := m.err
+		resourcesReady := false
+		if resourceCount >= minimumResources {
+			_, resourceErr := throttlingPercent(
+				m.samples.Resources[0], m.samples.Resources[resourceCount-1],
+			)
+			resourcesReady = resourceErr == nil
+		}
+		m.mu.Unlock()
+		if measurementErr != nil {
+			return measurementErr
+		}
+		if resourcesReady && metricCount >= minimumMetrics {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (m *steadyMeasurement) End(ctx context.Context, at time.Time) (
+	ResourceSummaryV2, ResourceSamplesV2, error,
+) {
+	m.mu.Lock()
+	if !m.measuring || m.ending || !at.After(m.start) {
+		m.mu.Unlock()
+		return ResourceSummaryV2{}, ResourceSamplesV2{}, fmt.Errorf("invalid measurement end")
+	}
+	m.ending = true
+	start := m.start
+	m.mu.Unlock()
+	boundaryPoint, boundaryErr := m.fetchMetricPoint(ctx, at.Add(-time.Nanosecond))
+	m.mu.Lock()
+	if boundaryErr == nil {
+		m.samples.Metrics = append(m.samples.Metrics, boundaryPoint)
+	}
+	m.measuring = false
+	m.mu.Unlock()
+	m.cancel()
+	<-m.done
+
+	logs, err := m.env.exporterContainer.Logs(ctx)
+	if err != nil {
+		return ResourceSummaryV2{}, ResourceSamplesV2{}, fmt.Errorf("read exporter logs: %w", err)
+	}
+	logBytes, readErr := io.ReadAll(logs)
+	closeErr := logs.Close()
+	if readErr != nil {
+		return ResourceSummaryV2{}, ResourceSamplesV2{}, fmt.Errorf("read exporter log body: %w", readErr)
+	}
+	if closeErr != nil {
+		return ResourceSummaryV2{}, ResourceSamplesV2{}, fmt.Errorf("close exporter logs: %w", closeErr)
+	}
+	m.mu.Lock()
+	measurementErr := m.err
+	samples := m.samples
+	m.mu.Unlock()
+	if measurementErr != nil {
+		return ResourceSummaryV2{}, ResourceSamplesV2{}, measurementErr
+	}
+	if boundaryErr != nil {
+		return ResourceSummaryV2{}, ResourceSamplesV2{}, boundaryErr
+	}
+	samples.GCPauses, err = parseGCPauseSamples(string(logBytes), m.containerStart, start, at)
+	if err != nil {
+		return ResourceSummaryV2{}, ResourceSamplesV2{}, err
+	}
+	summary, err := summarizeResources(samples, start, at, m.env.limits)
+	return summary, samples, err
+}
+
+func (m *steadyMeasurement) collect(ctx context.Context) {
+	defer close(m.done)
+	defer m.dockerCli.Close()
+	var wg sync.WaitGroup
+	wg.Add(2)
 	go func() {
-		defer close(s.done)
-		resp, err := s.dockerCli.ContainerStats(ctx, containerID, client.ContainerStatsOptions{Stream: true})
-		if err != nil {
+		defer wg.Done()
+		m.collectDockerStats(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		m.collectSelfMetrics(ctx)
+	}()
+	wg.Wait()
+}
+
+func (m *steadyMeasurement) collectDockerStats(ctx context.Context) {
+	resp, err := m.dockerCli.ContainerStats(ctx, m.env.exporterContainer.GetContainerID(),
+		client.ContainerStatsOptions{Stream: true})
+	if err != nil {
+		m.setMeasurementError(err)
+		return
+	}
+	defer resp.Body.Close()
+	decoder := json.NewDecoder(resp.Body)
+	for {
+		var stats container.StatsResponse
+		if err := decoder.Decode(&stats); err != nil {
+			if ctx.Err() == nil {
+				m.setMeasurementError(fmt.Errorf("decode Docker stats: %w", err))
+			}
 			return
 		}
-		defer resp.Body.Close()
-
-		decoder := json.NewDecoder(resp.Body)
-		firstFrame := true
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			var v container.StatsResponse
-			if err := decoder.Decode(&v); err != nil {
-				if ctx.Err() != nil {
-					return
-				}
-				continue
-			}
-
-			if firstFrame {
-				s.firstUsage = v.CPUStats.CPUUsage.TotalUsage
-				s.firstSys = v.CPUStats.SystemUsage
-				s.firstTime = time.Now()
-				s.numCPU = len(v.CPUStats.CPUUsage.PercpuUsage)
-				if s.numCPU == 0 {
-					s.numCPU = 1
-				}
-				firstFrame = false
-				continue
-			}
-
-			s.lastUsage = v.CPUStats.CPUUsage.TotalUsage
-			s.lastSys = v.CPUStats.SystemUsage
-			s.lastTime = time.Now()
-
-			cpuDelta := float64(v.CPUStats.CPUUsage.TotalUsage - v.PreCPUStats.CPUUsage.TotalUsage)
-			sysDelta := float64(v.CPUStats.SystemUsage - v.PreCPUStats.SystemUsage)
-			cpuPct := 0.0
-			if sysDelta > 0 && cpuDelta > 0 {
-				cpuPct = (cpuDelta / sysDelta) * float64(s.numCPU) * 100.0
-			}
-
-			memMB := float64(v.MemoryStats.Usage) / (1024.0 * 1024.0)
-
-			s.mu.Lock()
-			s.samples = append(s.samples, cpuPct)
-			s.memSamples = append(s.memSamples, memMB)
-			s.mu.Unlock()
+		m.mu.Lock()
+		measuring := m.measuring
+		m.mu.Unlock()
+		if !measuring {
+			continue
 		}
-	}()
+		sample, err := resourceSampleFromStats(stats.Read, stats, m.env.limits)
+		if err != nil {
+			m.setMeasurementError(err)
+			continue
+		}
+		m.mu.Lock()
+		m.samples.Resources = append(m.samples.Resources, sample)
+		m.mu.Unlock()
+	}
 }
 
-func (s *statsCollector) stop() (cpuAvg, cpuPeak, memMaxMB float64) {
-	s.cancel()
-	<-s.done
-	s.dockerCli.Close()
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	memMaxMB = 0
-	for _, m := range s.memSamples {
-		if m > memMaxMB {
-			memMaxMB = m
-		}
-	}
-
-	if len(s.samples) == 0 {
-		return 0, 0, memMaxMB
-	}
-
-	var cpuSum float64
-	cpuPeak = 0
-	for _, pct := range s.samples {
-		cpuSum += pct
-		if pct > cpuPeak {
-			cpuPeak = pct
-		}
-	}
-	perSampleAvg := cpuSum / float64(len(s.samples))
-
-	wallDelta := s.lastTime.Sub(s.firstTime).Seconds()
-	if wallDelta > 0 && s.numCPU > 0 {
-		usageDelta := float64(s.lastUsage - s.firstUsage)
-		sysDelta := float64(s.lastSys - s.firstSys)
-		if sysDelta > 0 {
-			cumulativeAvg := (usageDelta / sysDelta) * float64(s.numCPU) * 100.0
-			if cumulativeAvg > 0 {
-				return cumulativeAvg, cpuPeak, memMaxMB
+func (m *steadyMeasurement) collectSelfMetrics(ctx context.Context) {
+	ticker := time.NewTicker(selfMetricSampleInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case at := <-ticker.C:
+			m.mu.Lock()
+			measuring := m.measuring
+			m.mu.Unlock()
+			if !measuring {
+				continue
+			}
+			if err := m.sampleMetricPoint(ctx, at); err != nil {
+				m.setMeasurementError(err)
 			}
 		}
 	}
+}
 
-	return perSampleAvg, cpuPeak, memMaxMB
+func (m *steadyMeasurement) sampleMetricPoint(ctx context.Context, at time.Time) error {
+	point, err := m.fetchMetricPoint(ctx, at)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.measuring || m.ending {
+		return nil
+	}
+	m.samples.Metrics = append(m.samples.Metrics, point)
+	return nil
+}
+
+func (m *steadyMeasurement) fetchMetricPoint(ctx context.Context, at time.Time) (metricSamplePoint, error) {
+	body, err := fetchMetricsBodyContext(ctx, m.env.endpoint)
+	if err != nil {
+		return metricSamplePoint{}, err
+	}
+	point, err := metricSamplePointFromBody(at, body)
+	if err != nil {
+		return metricSamplePoint{}, err
+	}
+	return point, nil
+}
+
+func (m *steadyMeasurement) setMeasurementError(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if (m.measuring || m.start.IsZero()) && m.err == nil {
+		m.err = err
+	}
+}
+
+func fetchMetricsBodyContext(ctx context.Context, endpoint string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/metrics", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create metrics request: %w", err)
+	}
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch metrics: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("metrics status: got %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read metrics body: %w", err)
+	}
+	return body, nil
+}
+
+func recordRawResourceSamples(t *testing.T, samples ResourceSamplesV2) {
+	t.Helper()
+	if activeRunRecorder == nil {
+		return
+	}
+	data, err := json.MarshalIndent(samples, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal resource samples: %v", err)
+	}
+	recordScenarioArtifact(t, "resource-samples.json", data)
+}
+
+func finishSteadyMeasurement(
+	ctx context.Context,
+	t *testing.T,
+	measurement *steadyMeasurement,
+	end time.Time,
+) ResourceSummaryV2 {
+	summary, _ := finishSteadyMeasurementWithSamples(ctx, t, measurement, end)
+	return summary
+}
+
+func finishSteadyMeasurementWithSamples(
+	ctx context.Context,
+	t *testing.T,
+	measurement *steadyMeasurement,
+	end time.Time,
+) (ResourceSummaryV2, ResourceSamplesV2) {
+	t.Helper()
+	summary, samples, err := measurement.End(ctx, end)
+	require.NoError(t, err)
+	require.NoError(t, validateAbsoluteResourceGates(summary))
+	recordRawResourceSamples(t, samples)
+	return summary, samples
+}
+
+func runSippWarmup(
+	ctx context.Context,
+	t *testing.T,
+	uasScenario, uacScenario string,
+	profile releaseProfileSpec,
+	env *testEnv,
+) {
+	t.Helper()
+	recordMetricsSnapshot(t, "metrics-warmup-before.prom", env.endpoint)
+	protocolsBefore := readProtocolCounters(t, env.endpoint)
+	errorsBefore := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
+	expected := float64(profile.Workload.Calls) * profile.PacketsPerCall
+
+	uasPath := absScenarioPath(t, uasScenario)
+	sippVol := filepath.Dir(uasPath)
+	uas := startSippContainer(ctx, t,
+		[]string{"-sf", "/scenarios/" + filepath.Base(uasScenario), "-i", "127.0.0.1", "-p", env.sippPort,
+			"-m", strconv.Itoa(profile.Workload.Calls), "-nr", "-nostdin"},
+		sippVol, "", false,
+	)
+	waitForSIPpUDPReady(ctx, t, uas, env.sippPort)
+
+	phases := PhaseTimestamps{WarmupStart: time.Now(), Ready: time.Now(), MeasureStart: time.Now()}
+	uacPath := absScenarioPath(t, uacScenario)
+	generator, phases := runNamedSippGenerator(ctx, t,
+		sippGeneratorArgs(filepath.Base(uacScenario), env.sippClientPort,
+			profile.Workload.Calls, int(profile.Workload.Rate), env.sippPort),
+		filepath.Dir(uacPath), "warmup-generator", phases,
+	)
+	waitForContainerExit(ctx, t, uas)
+	portCtx, cancelPortWait := context.WithTimeout(ctx, 10*time.Second)
+	portErr := waitForSIPpUDPPortFree(portCtx, net.JoinHostPort("127.0.0.1", env.sippPort))
+	cancelPortWait()
+	require.NoError(t, portErr)
+	waitForExactSIPCapture(ctx, t, env.endpoint, protocolsBefore.SIPPackets, expected)
+	phases.DrainEnd = time.Now()
+	postDrain, postDrainBody, err := waitForPostDrainSnapshot(ctx, env.endpoint)
+	require.NoError(t, err)
+	require.NoError(t, postDrain.Validate())
+	recordScenarioArtifact(t, "metrics-warmup-post-drain.prom", postDrainBody)
+	generatorResult, err := generator.readGeneratorEvidence(ctx, t, phases)
+	require.NoError(t, err)
+	protocolsAfter := readProtocolCounters(t, env.endpoint)
+	evidence := soakWarmupEvidence{
+		Generator:  generatorResult,
+		Capture:    newCaptureResult(expected, protocolsAfter.SIPPackets-protocolsBefore.SIPPackets),
+		Protocols:  protocolsAfter.delta(protocolsBefore),
+		ErrorCount: getMetric(t, env.endpoint, "sip_exporter_system_error_total") - errorsBefore,
+	}
+	require.NoError(t, validateReleaseSoakWarmup(profile, evidence))
+	recordMetricsSnapshot(t, "metrics-warmup-after.prom", env.endpoint)
+}
+
+func measureSteadySnapshot(
+	ctx context.Context,
+	t *testing.T,
+	env *testEnv,
+) ResourceSummaryV2 {
+	t.Helper()
+	measurement, err := newSteadyMeasurement(ctx, env)
+	require.NoError(t, err)
+	measureStart := time.Now()
+	require.NoError(t, measurement.Begin(ctx, measureStart))
+	require.NoError(t, measurement.WaitForSamples(ctx, 2, 2))
+	return finishSteadyMeasurement(ctx, t, measurement, time.Now())
 }
 
 func runSippLoad(
@@ -774,105 +1464,115 @@ func runSippLoad(
 ) loadResult {
 	t.Helper()
 
-	stats, statsErr := newStatsCollector(env.exporterContainer.GetContainerID())
-	require.NoError(t, statsErr)
+	measurement, measurementErr := newSteadyMeasurement(ctx, env)
+	require.NoError(t, measurementErr)
 
-	statsCtx, statsCancel := context.WithCancel(ctx)
-	stats.start(statsCtx, env.exporterContainer.GetContainerID())
-
-	packetsBefore := getMetric(t, env.endpoint, "sip_exporter_packets_total")
+	recordMetricsSnapshot(t, "metrics-before.prom", env.endpoint)
+	protocolsBefore := readProtocolCounters(t, env.endpoint)
+	packetsBefore := protocolsBefore.SIPPackets
 	errorsBefore := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
+	expectedTotal := float64(callCount) * packetsPerCall
 
-	start := time.Now()
+	phases := PhaseTimestamps{WarmupStart: time.Now()}
+	var generator GeneratorResult
+	var generatorContainer *startedSippContainer
+	var uasContainer *startedSippContainer
+	spec := WorkloadSpec{Calls: callCount, Rate: float64(rate)}
 
 	if uasScenario != "" {
 		uasPath := absScenarioPath(t, uasScenario)
 		sippVol := filepath.Dir(uasPath)
 		uasFile := filepath.Base(uasScenario)
 
-		uasContainer := startSippContainer(ctx, t,
+		uasContainer = startSippContainer(ctx, t,
 			[]string{"-sf", "/scenarios/" + uasFile, "-i", "127.0.0.1", "-p", env.sippPort,
 				"-m", strconv.Itoa(callCount), "-nr", "-nostdin"},
-			sippVol, false,
+			sippVol, "", false,
 		)
 
-		time.Sleep(500 * time.Millisecond)
+		waitForSIPpUDPReady(ctx, t, uasContainer, env.sippPort)
+		phases.Ready = time.Now()
 
 		uacPath := absScenarioPath(t, uacScenario)
 		sippVol = filepath.Dir(uacPath)
 		uacFile := filepath.Base(uacScenario)
 
-		startSippContainer(ctx, t,
-			[]string{"-sf", "/scenarios/" + uacFile, "-i", "127.0.0.1", "-p", env.sippClientPort,
-				"-m", strconv.Itoa(callCount), "-r", strconv.Itoa(rate),
-				"-nr",
-				"127.0.0.1:" + env.sippPort},
-			sippVol, true,
+		phases.MeasureStart = time.Now()
+		require.NoError(t, measurement.Begin(ctx, phases.MeasureStart))
+		generatorContainer, phases = runSippGenerator(ctx, t,
+			sippGeneratorArgs(uacFile, env.sippClientPort, callCount, rate, env.sippPort),
+			sippVol, phases,
 		)
-
-		waitForContainerExit(ctx, t, uasContainer)
 	} else {
 		uacPath := absScenarioPath(t, uacScenario)
 		sippVol := filepath.Dir(uacPath)
 		uacFile := filepath.Base(uacScenario)
 
-		startSippContainer(ctx, t,
-			[]string{"-sf", "/scenarios/" + uacFile, "-i", "127.0.0.1", "-p", env.sippClientPort,
-				"-m", strconv.Itoa(callCount), "-r", strconv.Itoa(rate),
-				"-nr",
-				"127.0.0.1:" + env.sippPort},
-			sippVol, true,
+		phases.Ready = time.Now()
+		phases.MeasureStart = time.Now()
+		require.NoError(t, measurement.Begin(ctx, phases.MeasureStart))
+		generatorContainer, phases = runSippGenerator(ctx, t,
+			sippGeneratorArgs(uacFile, env.sippClientPort, callCount, rate, env.sippPort),
+			sippVol, phases,
 		)
 	}
 
-	sippEnd := time.Now()
-	sippDuration := sippEnd.Sub(start)
+	measureEnd := phases.MeasureEnd
+	resourceSummary, resourceSamples := finishSteadyMeasurementWithSamples(ctx, t, measurement, measureEnd)
+	postPhase := make([]time.Time, 0, 3)
+	if uasContainer != nil {
+		waitForContainerExit(ctx, t, uasContainer)
+		postPhase = append(postPhase, time.Now())
+	}
+	var generatorErr error
+	generator, generatorErr = generatorContainer.readGeneratorEvidence(ctx, t, phases)
+	require.NoError(t, generatorErr)
+	postPhase = append(postPhase, time.Now())
 
-	waitForMetricStable(ctx, t, env.endpoint)
+	waitForExactSIPCapture(ctx, t, env.endpoint, packetsBefore, expectedTotal)
+	generator.Phases.DrainEnd = time.Now()
+	postPhase = append(postPhase, generator.Phases.DrainEnd)
+	require.NoError(t, validatePostPhaseOrdering(measureEnd, postPhase...))
+	require.NoError(t, generator.Validate(spec))
+	sippDuration := generator.Phases.MeasureEnd.Sub(generator.Phases.MeasureStart)
+	drainTime := generator.Phases.DrainEnd.Sub(generator.Phases.MeasureEnd)
 
-	stableTime := time.Now()
-	drainTime := stableTime.Sub(sippEnd)
-
-	statsCancel()
-	cpuAvg, cpuPeak, memMaxMB := stats.stop()
-
-	packetsAfter := getMetric(t, env.endpoint, "sip_exporter_packets_total")
+	recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)
+	protocolsAfter := readProtocolCounters(t, env.endpoint)
+	protocols := protocolsAfter.delta(protocolsBefore)
+	packetsAfter := protocolsAfter.SIPPackets
 	errorsAfter := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
 
-	totalCaptured := packetsAfter - packetsBefore
+	capture := newCaptureResult(expectedTotal, protocols.SIPPackets)
+	require.NoError(t, capture.ValidateExact())
+	totalCaptured := capture.Captured
 	actualPPS := 0.0
 	if sippDuration.Seconds() > 0 {
 		actualPPS = totalCaptured / sippDuration.Seconds()
 	}
-	expectedTotal := float64(callCount) * packetsPerCall
 	expectedPPS := float64(rate) * packetsPerCall
-	lossRate := 0.0
-	if expectedTotal > 0 {
-		lossRate = 1 - totalCaptured/expectedTotal
-		if lossRate < 0 {
-			t.Logf("WARNING: captured %.0f > expected %.0f (%.2f%% extra), possible retransmission or duplicate packets",
-				totalCaptured, expectedTotal, -lossRate*100)
-			lossRate = 0
-		}
-	}
 
 	result := loadResult{
-		Duration:      sippDuration,
-		PacketsBefore: packetsBefore,
-		PacketsAfter:  packetsAfter,
-		ActualPPS:     actualPPS,
-		ExpectedPPS:   expectedPPS,
-		LossRate:      lossRate,
-		ErrorCount:    errorsAfter - errorsBefore,
-		DrainTime:     drainTime,
-		CPUAvg:        cpuAvg,
-		CPUPeak:       cpuPeak,
-		MemMaxMB:      memMaxMB,
+		Duration:        sippDuration,
+		Generator:       generator,
+		Capture:         capture,
+		Protocols:       protocols,
+		PacketsBefore:   packetsBefore,
+		PacketsAfter:    packetsAfter,
+		ActualPPS:       actualPPS,
+		ExpectedPPS:     expectedPPS,
+		LossRate:        capture.LossPct / 100,
+		ErrorCount:      errorsAfter - errorsBefore,
+		DrainTime:       drainTime,
+		Resources:       resourceSummary,
+		ResourceSamples: resourceSamples,
 	}
+	recordLoadResultEvidence(t, result)
 
 	t.Logf("Load result: actual=%.0f PPS, captured=%.0f, expected=%.0f, loss=%.2f%%, drain=%v, cpu=%.2f%%(peak=%.2f%%), mem=%.1fMB, errors=%.0f",
 		result.ActualPPS, totalCaptured, expectedTotal, result.LossRate*100, result.DrainTime,
-		result.CPUAvg, result.CPUPeak, result.MemMaxMB, result.ErrorCount)
+		result.Resources.CPUP95Percent, result.Resources.CPUP95Percent,
+		result.Resources.WorkingSetP99MB, result.ErrorCount)
 
 	return result
 }
@@ -886,15 +1586,14 @@ func runConcurrentLoad(
 ) loadResult {
 	t.Helper()
 
-	stats, statsErr := newStatsCollector(env.exporterContainer.GetContainerID())
-	require.NoError(t, statsErr)
+	measurement, measurementErr := newSteadyMeasurement(ctx, env)
+	require.NoError(t, measurementErr)
 
-	statsCtx, statsCancel := context.WithCancel(ctx)
-	stats.start(statsCtx, env.exporterContainer.GetContainerID())
-
-	packetsBefore := getMetric(t, env.endpoint, "sip_exporter_packets_total")
-
-	start := time.Now()
+	recordMetricsSnapshot(t, "metrics-before.prom", env.endpoint)
+	protocolsBefore := readProtocolCounters(t, env.endpoint)
+	packetsBefore := protocolsBefore.SIPPackets
+	errorsBefore := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
+	expectedTotal := float64(callCount) * fullCallPacketsPerCall
 
 	uasPath := absScenarioPath(t, uasScenario)
 	sippVol := filepath.Dir(uasPath)
@@ -903,23 +1602,26 @@ func runConcurrentLoad(
 	uasContainer := startSippContainer(ctx, t,
 		[]string{"-sf", "/scenarios/" + uasFile, "-i", "127.0.0.1", "-p", env.sippPort,
 			"-m", strconv.Itoa(callCount), "-nr", "-nostdin"},
-		sippVol, false,
+		sippVol, "", false,
 	)
-
-	time.Sleep(1 * time.Second)
+	waitForSIPpUDPReady(ctx, t, uasContainer, env.sippPort)
 
 	uacPath := absScenarioPath(t, uacScenario)
 	sippVol = filepath.Dir(uacPath)
 	uacFile := filepath.Base(uacScenario)
 
-	uacContainer := startSippContainer(ctx, t,
+	phases := PhaseTimestamps{WarmupStart: time.Now(), Ready: time.Now()}
+	uacContainer := prepareSippContainer(ctx, t,
 		[]string{"-sf", "/scenarios/" + uacFile, "-i", "127.0.0.1", "-p", env.sippClientPort,
 			"-m", strconv.Itoa(callCount), "-r", strconv.Itoa(rate),
+			"-fd", "100ms",
 			"-nr",
 			"-l", strconv.Itoa(limit),
 			"127.0.0.1:" + env.sippPort},
-		sippVol, false,
+		sippVol, "generator",
 	)
+	require.NoError(t, measurement.Begin(ctx, time.Now()))
+	phases.MeasureStart = startPreparedSippContainers(ctx, t, uacContainer)
 
 	var peakSessions float64
 	require.Eventually(t, func() bool {
@@ -928,28 +1630,45 @@ func runConcurrentLoad(
 			if sessions > peakSessions {
 				peakSessions = sessions
 			}
+			if sessions == float64(limit) {
+				return true
+			}
 		}
 		state, stateErr := uacContainer.State(ctx)
 		if stateErr != nil {
 			return false
 		}
 		return !state.Running
-	}, contextTimeout(t, ctx), 500*time.Millisecond, "UAC container did not exit in time")
+	}, contextTimeout(t, ctx), 25*time.Millisecond, "concurrent sessions did not reach exactly %d", limit)
+	waitForContainerExit(ctx, t, uacContainer)
+	measureEnd := time.Now()
+	phases.MeasureEnd = measureEnd
+	resourceSummary := finishSteadyMeasurement(ctx, t, measurement, measureEnd)
+	generator, generatorErr := uacContainer.readGeneratorEvidence(ctx, t, phases)
+	require.NoError(t, generatorErr)
+	sippDuration := measureEnd.Sub(generator.Phases.MeasureStart)
+	evidenceAt := time.Now()
 
 	waitForContainerExit(ctx, t, uasContainer)
+	uasExitAt := time.Now()
 
-	sippEnd := time.Now()
-	sippDuration := sippEnd.Sub(start)
-
-	waitForMetricStable(ctx, t, env.endpoint)
+	waitForExactSIPCapture(ctx, t, env.endpoint, packetsBefore, expectedTotal)
 
 	stableTime := time.Now()
-	drainTime := stableTime.Sub(sippEnd)
+	require.NoError(t, validatePostPhaseOrdering(measureEnd, evidenceAt, uasExitAt, stableTime))
+	drainTime := stableTime.Sub(measureEnd)
+	generator.Phases.DrainEnd = stableTime
+	generator.ActualRate, generatorErr = sippRampRate(callCount, generator.startedAt, generator.rampEndAt)
+	require.NoError(t, generatorErr)
+	require.NoError(t, generator.Validate(WorkloadSpec{Calls: callCount, Rate: float64(rate)}))
 
-	statsCancel()
-	cpuAvg, cpuPeak, memMaxMB := stats.stop()
-
-	packetsAfter := getMetric(t, env.endpoint, "sip_exporter_packets_total")
+	recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)
+	protocolsAfter := readProtocolCounters(t, env.endpoint)
+	protocols := protocolsAfter.delta(protocolsBefore)
+	packetsAfter := protocolsAfter.SIPPackets
+	errorsAfter := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
+	capture := newCaptureResult(expectedTotal, protocols.SIPPackets)
+	require.NoError(t, capture.ValidateExact())
 
 	actualPPS := 0.0
 	if sippDuration.Seconds() > 0 {
@@ -958,21 +1677,25 @@ func runConcurrentLoad(
 
 	result := loadResult{
 		Duration:      sippDuration,
+		Generator:     generator,
+		Capture:       capture,
+		Protocols:     protocols,
 		PacketsBefore: packetsBefore,
 		PacketsAfter:  packetsAfter,
 		ActualPPS:     actualPPS,
+		ErrorCount:    errorsAfter - errorsBefore,
 		DrainTime:     drainTime,
-		CPUAvg:        cpuAvg,
-		CPUPeak:       cpuPeak,
-		MemMaxMB:      memMaxMB,
 		PeakSessions:  peakSessions,
+		Resources:     resourceSummary,
 	}
+	recordLoadResultEvidence(t, result)
 
 	inviteTotal := getMetric(t, env.endpoint, "sip_exporter_invite_total")
 
 	t.Logf("Concurrent result: actual=%.0f PPS, peak_sessions=%.0f, invites=%.0f, drain=%v, cpu=%.2f%%(peak=%.2f%%), mem=%.1fMB, duration=%v",
 		result.ActualPPS, peakSessions, inviteTotal, result.DrainTime,
-		result.CPUAvg, result.CPUPeak, result.MemMaxMB, result.Duration)
+		result.Resources.CPUP95Percent, result.Resources.CPUP95Percent,
+		result.Resources.WorkingSetP99MB, result.Duration)
 
 	return result
 }

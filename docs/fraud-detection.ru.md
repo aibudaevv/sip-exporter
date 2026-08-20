@@ -1,6 +1,6 @@
 # Детекция фрода — Как это работает
 
-> **Версия:** sip-exporter v1.3.3+
+> **Версия:** sip-exporter v1.9.0
 >
 > sip-exporter предоставляет **сигнальную** (signal-only) детекцию фрода.
 > Экспортёр не блокирует и не перехватывает трафик. Вместо этого он экспортирует
@@ -11,18 +11,19 @@
 ## Что детектируется
 
 sip-exporter покрывает топовые категории VoIP-фрода — компрометацию PBX и кражу
-личности — четырьмя сигналами детекции:
+личности — пятью сигналами детекции:
 
 | Сигнал | Метрика | Тип | Что детектирует |
 |--------|---------|-----|-----------------|
 | Сканирование регистраций | `register_scan_total` | счётчик | Перечисление аккаунтов / компрометация PBX |
 | Смена страны регистрации | `register_country_change_total` | счётчик | Перехват аккаунта из новой географии |
 | Всплеск INVITE | `invite_burst_total` | счётчик | Начало toll-fraud / SIP-флуд DDoS |
+| False Answer Supervision | `fas_calls_total` | счётчик | Ответивший вызов с media без answer-side RTP |
 | Утилизация сессий | `sessions_utilization` | gauge | Исчерпание ёмкости / нарушение контракта |
 
-Все счётчики несут лейблы `{carrier,source_country}`. IP-адрес источника
-используется внутри для threshold-детектинга, но **никогда не экспонируется**
-как Prometheus-лейбл.
+Три signaling-счётчика несут лейблы `{carrier,source_country,direction}`. FAS —
+call-level сигнал и дополнительно несёт `ua_type`. IP-адрес источника используется
+внутри для threshold-детектинга, но **никогда не экспонируется** как Prometheus-лейбл.
 
 ---
 
@@ -30,7 +31,7 @@ sip-exporter покрывает топовые категории VoIP-фрод�
 
 ### Сканирование регистраций
 
-`sip_exporter_register_scan_total{carrier,source_country}` — счётчик
+`sip_exporter_register_scan_total{carrier,source_country,direction}` — счётчик
 
 Детектирует регистрацию множества уникальных SIP-аккаунтов (AOR) с одного
 IP-адреса в скользящем окне. Ловит компрометацию PBX (массовая регистрация
@@ -46,7 +47,7 @@ IP-адреса в скользящем окне. Ловит компромет�
 
 ### Смена страны регистрации
 
-`sip_exporter_register_country_change_total{carrier,source_country}` — счётчик
+`sip_exporter_register_country_change_total{carrier,source_country,direction}` — счётчик
 
 Детектирует перерегистрацию того же AOR из другой страны — сигнал перехвата
 аккаунта. Конфигурация не требуется (использует существующую настройку
@@ -57,7 +58,7 @@ GeoIP/страны оператора).
 
 ### Всплеск INVITE
 
-`sip_exporter_invite_burst_total{carrier,source_country}` — счётчик
+`sip_exporter_invite_burst_total{carrier,source_country,direction}` — счётчик
 
 Детектирует аномально высокую частоту первоначальных INVITE с одного IP —
 toll-fraud или SIP-флуд. Re-INVITE внутри существующего диалога исключаются
@@ -70,6 +71,23 @@ toll-fraud или SIP-флуд. Re-INVITE внутри существующег�
 
 **Пример:** PBX на 198.51.100.10 совершает 150 звонков/мин, порог=100: INVITE
 1–99 → сигнала нет; 100-й → счётчик +1; 101–150 → +1 за каждый.
+
+### False Answer Supervision
+
+`sip_exporter_fas_calls_total{carrier,ua_type,source_country,direction}` — счётчик
+
+Детектирует ответивший вызов с media без answer-side RTP. Сигнал имеет
+два пути: периодический sweep после настроенного threshold (плюс 15s grace
+для DTLS-SRTP) или BYE teardown после независимого floor 3s. Он отличается от
+`sessions_missing_rtp_total`, который вычисляется при завершении диалога.
+
+| Переменная окружения | По умолчанию | Описание |
+|----------------------|-------------|----------|
+| `SIP_EXPORTER_FRAUD_FAS_THRESHOLD` | `10s` | Базовое ожидание periodic sweep; не изменяет BYE floor 3s |
+
+FAS зависит от полноты RTP-захвата. Перед реакцией проверяйте
+`sip_exporter_rtp_dropped_total`. Side detection, короткие вызовы, NAT и ожидаемые
+false positive для one-way media описаны в [ограничениях FAS](METRICS.ru.md#ограничения-fas).
 
 ### Утилизация сессий
 
@@ -101,6 +119,8 @@ sessions_limits:
 > **Примечание об окне `rate()`:** `rate(counter[5m]) > 0` остаётся истинным
 > ~5 минут после сигнала. Параметр `for: 1m` снижает шум от кратковременных
 > всплесков.
+> Выражение country-change объединяет `increase()` для повторных событий с веткой
+> новой series по точному набору лейблов, поэтому детектирует первое и последующие события каждого направления.
 
 ```yaml
 # Сканирование регистраций → расследование credential stuffing
@@ -125,13 +145,30 @@ sessions_limits:
 
 # Смена страны регистрации → перехват аккаунта
 - alert: SIPRegistrationCountryChange
-  expr: sip_exporter_register_country_change_total > 0 unless on (carrier, source_country) (sip_exporter_register_country_change_total offset 5m > 0)
+  expr: |
+    increase(sip_exporter_register_country_change_total[5m]) > 0
+    or
+    (sip_exporter_register_country_change_total > 0
+      unless sip_exporter_register_country_change_total offset 5m)
   for: 0m
   labels:
     severity: warning
   annotations:
     summary: "Обнаружена смена страны регистрации"
     description: "Пользователь перерегистрировался из другой страны на {{ $labels.carrier }}."
+
+# False Answer Supervision → расследование биллинг-фрода
+- alert: SIPFalseAnswerSupervision
+  expr: |
+    (rate(sip_exporter_fas_calls_total[5m]) > 0)
+    unless on()
+    (rate(sip_exporter_rtp_dropped_total[5m]) > 100)
+  for: 2m
+  labels:
+    severity: warning
+  annotations:
+    summary: "Подозрение на False Answer Supervision"
+    description: "Ответившие вызовы на {{ $labels.carrier }} не понесли answer-side RTP. Перед реакцией проверьте RTP-дропы и ожидаемые one-way-media эндпоинты."
 
 # Исчерпание ёмкости сессий
 - alert: SIPSessionCapacityExhaustion
@@ -160,6 +197,11 @@ sessions_limits:
 
 **Всплеск INVITE:**
 - SBC/шлюз, мультиплексирующий абонентов через один IP, может превысить порог=100. Повысьте порог для этого источника.
+
+**False Answer Supervision:**
+- Неполный RTP-захват может дать false positive; коррелируйте сигнал с socket- и userspace-drop метриками.
+- Voicemail, IVR, paging и announcement-эндпоинты без answer-side RTP триггерят эвристику по дизайну.
+- Перед использованием сигнала для enforcement изучите [полные ограничения FAS](METRICS.ru.md#ограничения-fas).
 
 **Утилизация сессий:**
 - Ограничено 100% — `активные=300, лимит=100` покажет 100%. Отслеживайте `sip_exporter_sessions` (raw gauge) для экстремальной перегрузки.

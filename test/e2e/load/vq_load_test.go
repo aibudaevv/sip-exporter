@@ -83,6 +83,7 @@ func TestLoadVQScenarios(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			for _, rate := range tt.rates {
 				t.Run(fmt.Sprintf("rate_%d", rate), func(t *testing.T) {
+					beginScenario(t)
 					env := newTestEnv(t.Context(), t)
 
 					ctx, cancel := context.WithTimeout(t.Context(), subtestTimeout)
@@ -94,7 +95,8 @@ func TestLoadVQScenarios(t *testing.T) {
 
 					t.Logf("%s rate=%d: actual=%.0f PPS, expected=%.0f PPS, loss=%.2f%%, drain=%v, cpu=%.2f%%(peak=%.2f%%), mem=%.1fMB",
 						tt.name, rate, result.ActualPPS, result.ExpectedPPS, result.LossRate*100,
-						result.DrainTime, result.CPUAvg, result.CPUPeak, result.MemMaxMB)
+						result.DrainTime, result.Resources.CPUP95Percent,
+						result.Resources.CPUP95Percent, result.Resources.WorkingSetP99MB)
 
 					totalPackets := result.PacketsAfter - result.PacketsBefore
 					maxErrors := totalPackets * 0.001
@@ -103,25 +105,25 @@ func TestLoadVQScenarios(t *testing.T) {
 					require.Greater(t, result.PacketsAfter, result.PacketsBefore,
 						"exporter should have processed packets")
 
-					vqReports := getMetric(t, env.endpoint, "sip_exporter_vq_reports_total")
+					vqReports := result.Protocols.VQReports
 					expectedReports := float64(callCount)
 					t.Logf("vq_reports_total = %.0f (want %.0f)", vqReports, expectedReports)
 					require.Equal(t, expectedReports, vqReports)
 
 					extras := tt.extraChecks(t, env, callCount)
 
-					resultMetrics := map[string]MetricEntry{
+					resultMetrics := resourceMetricEntries(result.Resources)
+					for name, metric := range map[string]MetricEntry{
 						"actual_pps": {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
 						"loss_rate":  {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
-						"cpu_peak":   {Value: result.CPUPeak, Unit: "%", Direction: dirLowerIsBetter},
-						"cpu_avg":    {Value: result.CPUAvg, Unit: "%", Direction: dirLowerIsBetter},
-						"mem_mb":     {Value: result.MemMaxMB, Unit: "MB", Direction: dirLowerIsBetter},
 						"vq_reports": {Value: vqReports, Unit: "count", Direction: dirHigherIsBetter},
+					} {
+						resultMetrics[name] = metric
 					}
 					for k, v := range extras {
 						resultMetrics[k] = v
 					}
-					recordResult(t.Name(), resultMetrics)
+					recordResult(t, resultMetrics)
 				})
 			}
 		})

@@ -1,7 +1,9 @@
 # SIP Exporter — Carrier Configuration
 #
 # This file maps IP subnets (CIDRs) to carrier names.
-# All Prometheus SIP metrics will include a "carrier" label based on this mapping.
+# Metrics with carrier context include a "carrier" label based on this mapping.
+# Specialized self-monitoring families use the exact schemas documented in
+# docs/METRICS.md.
 #
 # Usage:
 #   SIP_EXPORTER_CARRIERS_CONFIG=/etc/sip-exporter/carriers.yaml
@@ -31,8 +33,8 @@
 #      for all IPs in this carrier's CIDRs. Takes priority over GeoIP lookup.
 #
 # Example metric output:
-#   sip_exporter_invite_total{carrier="telecom-alpha",ua_type="other",source_country="RU",destination_country="US",caller_host="10.1.0.5",called_host="sip.example.com"} 1523
-#   sip_exporter_ser{carrier="telecom-alpha",ua_type="other",source_country="RU"} 95.2
+#   sip_exporter_invite_total{carrier="telecom-alpha",ua_type="other",source_country="RU",direction="inbound",destination_country="US",caller_host="10.1.0.5",called_host="sip.example.com",iface="ens3"} 1523
+#   sip_exporter_ser{carrier="telecom-alpha",ua_type="other",source_country="RU",direction="inbound"} 95.2
 
 carriers:
   - name: "telecom-alpha"

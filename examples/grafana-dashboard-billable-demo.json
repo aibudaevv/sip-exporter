@@ -204,7 +204,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (destination_country) (rate(sip_exporter_billable_seconds_total[5m])) / 60 / clamp_min(sum by (destination_country) (rate(sip_exporter_invite_200_total[5m])), 1)",
+          "expr": "sum by (destination_country) (rate(sip_exporter_billable_seconds_total[5m])) / 60 / sum by (destination_country) (rate(sip_exporter_invite_200_total[5m]))",
           "legendFormat": "{{destination_country}}",
           "refId": "A"
         }

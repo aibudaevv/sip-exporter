@@ -40,8 +40,8 @@
 - 🐳 **Один контейнер** — никаких внешних зависимостей
 - 🔧 **Настраиваемые SIP-порты** — мониторинг нестандартных портов через переменные окружения
 - 📈 **Нативный Prometheus** — стандартный эндпоинт `/metrics`
-- 🏷️ **Метрики по операторам** — разрешение carrier на основе CIDR для всех SIP-метрик
-- 🏷️ **Метрики по типам устройств** — классификация User-Agent для всех SIP-метрик
+- 🏷️ **Метрики по операторам** — CIDR-разрешение carrier для SIP-семейств с carrier-контекстом
+- 🏷️ **Метрики по типам устройств** — классификация User-Agent для SIP-семейств с контекстом устройства
 - 🌍 **Гео-обогащение** — лейблы `source_country` (GeoIP) и `destination_country` (E.164 prefix) в SIP-метриках
 - 🔀 **Направление трафика** — лейбл `inbound`/`outbound` в SIP- и RTP-метриках трафика через kernel `pkttype`, без настройки
 - 📞 **Качество голоса (RFC 6035)** — MOS, джиттер, потери пакетов из SIP PUBLISH/NOTIFY
@@ -79,17 +79,13 @@ SIP + RTP-трафик → NIC → eBPF socket filter → AF_PACKET socket → G
 
 ## Производительность
 
-Нулевая потеря пакетов в измеренном сценарии полного жизненного цикла SIP-диалога до **1 800 CPS** (~21 200 PPS), при **<15% CPU** и **9–16 МБ RAM**. GC stop-the-world паузы менее **1 мс** в измеренной нагрузке и имеют большой запас относительно буфера сокета. Во время бенчмарка память оставалась стабильной.
+Проверенный release-профиль включает full-call трафик на 1 000 CPS под лимитами 1 CPU / 128 MiB,
+full-call трафик с параллельными Prometheus scrape на 1 800 CPS под лимитами 2 CPU / 256 MiB и
+десятиминутный soak на 500 CPS под лимитами 1 CPU / 128 MiB. Это результаты конкретных профилей
+приёмки, а не универсальная гарантия production sizing.
 
-Микробенчмарки Go:
-
-| Операция | Задержка | Память |
-|-----------|---------|--------|
-| Парсинг BYE (L2→SIP) | ~860 ns | 712 B/op |
-| Парсинг INVITE (L2→SIP) | ~1.1 μs | 808 B/op |
-| Парсинг 200 OK (L2→SIP) | ~2.0 μs | 1176 B/op |
-
-Полные результаты: [docs/BENCHMARK.md](./docs/BENCHMARK.md).
+Измеренные сценарии, проверки целостности, окружение и команды воспроизведения описаны в
+[docs/BENCHMARK.md](./docs/BENCHMARK.md).
 
 ## Установка
 
@@ -102,7 +98,7 @@ docker pull frzq/sip-exporter:latest
 Переменные окружения:
 * `SIP_EXPORTER_INTERFACE` — один или несколько сетевых интерфейсов через запятую (обязательно). Примеры: `eth0`, `eth0,eth1,eth2`.
 * `SIP_EXPORTER_HTTP_PORT` — HTTP-порт для Prometheus (по умолчанию 2112)
-* `SIP_EXPORTER_LOGGER_LEVEL` — уровень логирования (по умолчанию info)
+* `SIP_EXPORTER_LOGGER_LEVEL` — уровень логирования: `error`, `info` или `debug` (по умолчанию `info`). Debug-логи содержат raw SIP payload; используйте их только в контролируемой среде. Любое другое значение сейчас включает debug-логирование.
 * `SIP_EXPORTER_SIP_PORTS` — один или несколько SIP-портов через запятую (по умолчанию 5060; до 3 на интерфейс). Через `;` — наборы для каждого интерфейса: `5060,5062;5060,5061`.
 * `SIP_EXPORTER_OBJECT_FILE_PATH` — путь к eBPF-объектному файлу (по умолчанию /usr/local/bin/sip.o)
 * `SIP_EXPORTER_CARRIERS_CONFIG` — путь к YAML-конфигурации carriers (опционально, см. [`examples/carriers.yaml`](examples/carriers.yaml))
@@ -112,6 +108,12 @@ docker pull frzq/sip-exporter:latest
 * `SIP_EXPORTER_GEOIP_COUNTRY_DB` — путь к MaxMind GeoLite2-Country.mmdb для лейбла `source_country` (опционально)
 * `SIP_EXPORTER_LOCAL_COUNTRY_CODE` — код страны ISO alpha-2 для локальных номеров без международного префикса в `destination_country` (опционально, напр. `RU`)
 * `SIP_EXPORTER_HOST_LABELS` — включить лейблы `caller_host`/`called_host` в INVITE-метриках (по умолчанию `false`; opt-in — неограниченная кардинальность, включайте только в доверенных деплоях с ограниченным числом узлов)
+* `SIP_EXPORTER_SESSIONS_LIMITS` — путь к YAML-конфигурации лимитов сессий (опционально, per-carrier лимиты параллельных сессий и метрики утилизации)
+* `SIP_EXPORTER_FRAUD_REGISTER_SCAN_THRESHOLD` — сканирование регистраций: количество уникальных аккаунтов (AoR), успешно зарегистрированных (200 OK) с одного source IP, для срабатывания сигнала (по умолчанию 10)
+* `SIP_EXPORTER_FRAUD_REGISTER_SCAN_WINDOW` — скользящее окно сканирования регистраций (по умолчанию 60s)
+* `SIP_EXPORTER_FRAUD_INVITE_BURST_THRESHOLD` — INVITE burst: количество INVITE с одного источника для срабатывания сигнала (по умолчанию 100)
+* `SIP_EXPORTER_FRAUD_INVITE_BURST_WINDOW` — скользящее окно INVITE burst (по умолчанию 60s)
+* `SIP_EXPORTER_FRAUD_FAS_THRESHOLD` — False Answer Supervision: базовое ожидание sweep-path после 200 OK без answer-side RTP (по умолчанию 10s; BYE-path использует независимый floor 3s)
 * `SIP_EXPORTER_TELEMETRY` — анонимная телеметрия использования, отключается значением `false` (по умолчанию true)
 
 Контейнер должен запускаться с `--privileged` и `--network host` (eBPF требует `CAP_BPF` и доступ к сетевому интерфейсу). Подробнее о безопасности — в [Безопасность](docs/SECURITY.ru.md).
@@ -141,14 +143,14 @@ docker pull frzq/sip-exporter:latest
 
 ## Метрики
 
-Все метрики доступны на `/metrics` в формате Prometheus. Все SIP-метрики содержат лейблы `carrier`, `ua_type` и `source_country` для многомерного анализа. INVITE-метрики дополнительно содержат лейбл `iface`, идентифицирующий сетевой интерфейс, захвативший трафик. Экспортер предоставляет:
+Все метрики доступны на `/metrics` в формате Prometheus. Большинство SIP-метрик содержит `carrier`, `ua_type`, `source_country` и `direction`; специализированные семейства fraud, capacity, traffic, RTP/RTCP и самомониторинга используют точные схемы из [матрицы лейблов](docs/METRICS.ru.md#лейблы). Raw INVITE-метрики дополнительно содержат `destination_country`, opt-in `caller_host`/`called_host` и capture-interface `iface`. Экспортер предоставляет:
 
 - **Счётчики трафика** — типы SIP-запросов (INVITE, re-INVITE, BYE, REGISTER и т.д.) и коды ответов (100–606)
 - **Активные сессии** — количество активных SIP-диалогов в реальном времени
 - **Метрики RFC 6076** — SER, SEER, ISA, SCR, ASR, NER, RRD, SPD, TTR, PDD, PBD
 - **Метрики качества голоса RFC 6035** — NLR, JDR, BLD, GLD, RTD, ESD, IAJ, MAJ, MOSLQ, MOSCQ, RLQ, RCQ, RERL
 - **Метрики RTP-медиа** — `rtp_packets_total`, `rtp_packets_lost_total`, `rtp_jitter_milliseconds`, `rtp_pdv_milliseconds` (per-packet Packet Delay Variation), `rtp_mos_score`, `rtp_active_streams` (лейблы: `carrier,ua_type,codec,source_country,direction`)
-- **Метрики RTCP-качества** — `rtcp_reports_total`, `rtcp_loss_fraction_percent`, `rtcp_cumulative_loss_total`, `rtcp_jitter_milliseconds`, `rtcp_rtt_milliseconds`, `rtcp_orphan_reports_total` (лейблы: `carrier,ua_type,codec,source_country,direction`)
+- **Метрики RTCP-качества** — гистограммы качества и cumulative loss используют `carrier,ua_type,codec,source_country,direction`; в `rtcp_reports_total` вместо `codec` используется `type`, а `rtcp_orphan_reports_total` не имеет лейблов
 - **Фрод-сигналы** — `fas_calls_total` (False Answer Supervision: 200 OK без RTP в течение threshold), `register_scan_total`, `invite_burst_total`, `register_country_change_total`
 - **Диагностика** — `sip_retransmission_total` (ретрансмиссии по SIP Timer A), `rtp_out_of_order_total` (нарушение порядка RTP-пакетов), `short_calls_total` (звонки короче 20/60/180 секунд)
 
@@ -158,7 +160,7 @@ docker pull frzq/sip-exporter:latest
 
 Если ваша SIP-инфраструктура обрабатывает трафик от нескольких операторов (телефонные провайдеры, SIP-транки, PBX-кластеры), вам нужно видеть метрики **по каждому оператору**, а не в сумме.
 
-Функция carrier решает эту задачу, связывая IP-подсети с именами операторов через YAML-конфигурацию. Каждая метрика — количество INVITE, SER, активные сессии, задержка RRD — получает лейбл `carrier`, что позволяет строить отдельные дашборды Grafana и алерты для каждого оператора.
+Функция carrier решает эту задачу, связывая IP-подсети с именами операторов через YAML-конфигурацию. Call-метрики — количество INVITE, SER, активные сессии, задержка RRD — получают лейбл `carrier`, что позволяет строить отдельные дашборды Grafana и алерты для каждого оператора.
 
 **Как это работает:**
 
@@ -189,10 +191,10 @@ carriers:
 После настройки метрики выглядят так:
 
 ```
-sip_exporter_invite_total{carrier="telecom-alpha",ua_type="other"}  1523
-sip_exporter_ser{carrier="telecom-alpha",ua_type="other"}            95.2
-sip_exporter_ser{carrier="telecom-beta",ua_type="other"}             87.4
-sip_exporter_ser{carrier="other",ua_type="other"}                     0.0
+sip_exporter_invite_total{carrier="telecom-alpha",ua_type="other",source_country="unknown",direction="inbound",destination_country="unknown",caller_host="",called_host="",iface="ens3"} 1523
+sip_exporter_ser{carrier="telecom-alpha",ua_type="other",source_country="unknown",direction="inbound"} 95.2
+sip_exporter_ser{carrier="telecom-beta",ua_type="other",source_country="unknown",direction="inbound"} 87.4
+sip_exporter_ser{carrier="other",ua_type="other",source_country="unknown",direction="inbound"} 0.0
 ```
 
 **Важно знать:**
@@ -200,7 +202,7 @@ sip_exporter_ser{carrier="other",ua_type="other"}                     0.0
 - Carrier определяется в момент **запроса** (INVITE/REGISTER/OPTIONS), а не ответа. Если carrier-A отправил INVITE, а carrier-B ответил 200 OK — все метрики относятся к carrier-A, инициатору звонка
 - Если source IP не входит ни в одну CIDR-подсеть, проверяется destination IP. Если и он не найден → `carrier="other"`
 - При пересекающихся CIDR **побеждает первое совпадение** — указывайте более специфичные подсети перед широкими
-- Без файла конфигурации все метрики получают `carrier="other"` — ничего не ломается
+- Без файла конфигурации метрики с `carrier` используют `carrier="other"` — ничего не ломается
 - Для каждого carrier можно указать несколько CIDR, количество carrier не ограничено
 - CIDR-нотация обязательна — обычные IP-адреса без `/` не принимаются. Используйте `/32` для одного хоста, например `"10.226.97.5/32"` вместо `"10.226.97.5"`
 
@@ -208,9 +210,9 @@ sip_exporter_ser{carrier="other",ua_type="other"}                     0.0
 
 ### Метрики по типам устройств (User-Agent)
 
-Если вам нужно видеть метрики **по типам SIP-устройств** — IP-телефоны, софтфоны, SBC — функция классификации User-Agent добавляет лейбл `ua_type` к каждой метрике.
+Если вам нужно видеть метрики **по типам SIP-устройств** — IP-телефоны, софтфоны, SBC — классификация User-Agent добавляет `ua_type` к семействам с контекстом устройства.
 
-Экспортер читает заголовок `User-Agent` из каждого SIP-запроса и сопоставляет его с regex-паттернами из YAML-конфигурации. Каждая метрика — количество INVITE, SER, активные сессии, длительность SPD — получает лейбл `ua_type`, что позволяет строить отдельные дашборды Grafana и алерты для каждого семейства устройств.
+Экспортер читает заголовок `User-Agent` из каждого SIP-запроса и сопоставляет его с regex-паттернами из YAML-конфигурации. Call-метрики — количество INVITE, SER, активные сессии, длительность SPD — получают `ua_type`, что позволяет строить отдельные дашборды Grafana и алерты для каждого семейства устройств.
 
 **Как это работает:**
 
@@ -244,10 +246,10 @@ user_agents:
 После настройки метрики выглядят так:
 
 ```
-sip_exporter_invite_total{carrier="telecom-alpha",ua_type="yealink"}     1523
-sip_exporter_ser{carrier="telecom-alpha",ua_type="yealink"}               95.2
-sip_exporter_ser{carrier="telecom-alpha",ua_type="grandstream"}           87.4
-sip_exporter_ser{carrier="telecom-alpha",ua_type="other"}                  0.0
+sip_exporter_invite_total{carrier="telecom-alpha",ua_type="yealink",source_country="unknown",direction="inbound",destination_country="unknown",caller_host="",called_host="",iface="ens3"} 1523
+sip_exporter_ser{carrier="telecom-alpha",ua_type="yealink",source_country="unknown",direction="inbound"} 95.2
+sip_exporter_ser{carrier="telecom-alpha",ua_type="grandstream",source_country="unknown",direction="inbound"} 87.4
+sip_exporter_ser{carrier="telecom-alpha",ua_type="other",source_country="unknown",direction="inbound"} 0.0
 ```
 
 **Важно знать:**
@@ -256,9 +258,9 @@ sip_exporter_ser{carrier="telecom-alpha",ua_type="other"}                  0.0
 - Заголовок `User-Agent` извлекается из всех SIP-пакетов, но SIP-ответы обычно используют заголовок `Server`, поэтому на практике только запросы дают осмысленную классификацию
 - Если ни один паттерн не совпал → `ua_type="other"`
 - При пересечении паттернов **побеждает первое совпадение** — указывайте специфичные паттерны перед широкими
-- Без файла конфигурации все метрики получают `ua_type="other"` — ничего не ломается
+- Без файла конфигурации метрики с `ua_type` используют `ua_type="other"` — ничего не ломается
 - Паттерны нечувствительны к регистру при использовании префикса `(?i)`
-- Работает **совместно с carrier** — каждая метрика имеет оба лейбла `carrier` и `ua_type` для двумерного анализа
+- Работает **совместно с carrier** — базовые и call-level SIP-метрики имеют оба лейба для двумерного анализа
 
 **Совместные запросы carrier + ua_type:**
 
@@ -281,7 +283,7 @@ sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
 
 | Лейбл | Метод | Область |
 |-------|-------|---------|
-| `source_country` | GeoIP-лукап source IP (MaxMind GeoLite2-Country) | Все SIP + RTP метрики |
+| `source_country` | GeoIP-лукап source IP (MaxMind GeoLite2-Country) | Базовые/call-level SIP-, RTP- и скоррелированные RTCP-метрики |
 | `destination_country` | Префикс E.164 номера (embedded, без БД) | Только INVITE-метрики |
 
 **Разрешение source_country:**
@@ -313,7 +315,7 @@ sum by (destination_country) (rate(sip_exporter_invite_total[5m]))
 
 ### Анализ RTP-медиа
 
-Помимо сигналинга SIP, экспортер захватывает RTP-потоки для оценки transport quality в **точке захвата** (джиттер, разрывы sequence number и E-model MOS). RTP-потоки **скоррелированы с SIP-диалогами**: когда `200 OK` на INVITE несёт SDP, экспортер регистрирует согласованные media-endpoint'ы и отслеживает соответствующие RTP-потоки до BYE (или истечения Session-Expires). Поэтому RTP-метрики наследуют лейблы диалога `carrier`, `ua_type` и согласованный `codec`.
+Помимо сигналинга SIP, экспортер захватывает RTP-потоки для оценки transport quality в **точке захвата** (джиттер, разрывы sequence number и E-model MOS). RTP-потоки **скоррелированы с SIP-диалогами**: когда `200 OK` на INVITE несёт SDP, экспортер регистрирует согласованные media-endpoint'ы и отслеживает соответствующие RTP-потоки до BYE (или истечения Session-Expires). Поэтому RTP-метрики наследуют лейблы диалога `carrier`, `ua_type`, `source_country` и `direction`, а также согласованный `codec`.
 
 Производимые метрики:
 
@@ -340,7 +342,10 @@ sum by (codec) (rate(sip_exporter_rtp_mos_score_sum[5m]))
 
 # Доля потерь по операторам
 sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
-  / sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m]))
+  / (
+      sum by (carrier) (rate(sip_exporter_rtp_packets_total[5m]))
+      + sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
+    )
 ```
 
 Полный справочник по RTP-метрикам, формулы и разрешение лейблов — в [docs/METRICS.ru.md](docs/METRICS.ru.md).
@@ -351,7 +356,7 @@ sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
 
 - **Сканирование регистраций** — много уникальных аккаунтов (AoR), зарегистрированных с одного IP за короткое окно
 - **Всплеск INVITE** — аномальная частота INVITE с одного источника
-- **Перехват аккаунта** — абонент совершает вызовы из страны, отличной от ранее наблюдавшейся
+- **Перехват аккаунта** — тот же AOR успешно перерегистрируется из страны, отличной от его активной регистрации
 
 Полная настройка, метрики и алерты: [docs/fraud-detection.ru.md](docs/fraud-detection.ru.md)
 
@@ -365,13 +370,8 @@ sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
 
 ### Покрытие тестами
 
-| Пакет | Покрытие |
-|---------|----------|
-| `internal/config` | 100.0% |
-| `pkg/log` | 95.5% |
-| `internal/server` | 90.5% |
-| `internal/service` | 75.4% |
-| `internal/exporter` | 64.0% |
+Покрытие меняется вместе с набором тестов и не фиксируется в этом документе. Актуальное покрытие
+пакетов можно получить командой `go test -cover ./internal/... ./pkg/...`.
 
 Набор тестов:
 - **Unit-тесты** — MC/DC-ориентированное покрытие бизнес-логики
@@ -380,9 +380,8 @@ sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
 
 ## Нагрузочное тестирование
 
-Результаты: **0% потерь пакетов при 1 800 CPS (~21 200 PPS) в измеренном полном сценарии вызова**.
-
-Подробности в [BENCHMARK.md](./docs/BENCHMARK.md) — результаты, методология и заметки по оптимизации.
+В [BENCHMARK.md](./docs/BENCHMARK.md) приведены проверенный release-профиль нагрузки, методика,
+пороги приёмки и ограничения применимости результатов.
 
 ## Алертинг
 
