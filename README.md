@@ -34,6 +34,7 @@ a Linux host into Prometheus metrics and Grafana dashboards, without storing pac
 - [Fraud Detection](#fraud-detection)
 - [Security](docs/SECURITY.md)
 - [Development](#development)
+- [Contributing](CONTRIBUTING.md)
 - [Benchmark](#benchmark)
 - [Alerting](#alerting)
 - [Metrics Storage Compatibility](#metrics-storage-compatibility)
@@ -384,6 +385,10 @@ Full setup, metrics reference, and alerting guidance: [docs/fraud-detection.md](
 
 ## Development
 
+Before contributing, read the [Contributing Guide](CONTRIBUTING.md),
+[Code of Conduct](CODE_OF_CONDUCT.md), and [Governance](GOVERNANCE.md). Report vulnerabilities
+privately through the [Security Policy](.github/SECURITY.md).
+
 ### Requirements
 - Go 1.26.6+
 - Clang/LLVM (for eBPF compilation)
@@ -432,6 +437,7 @@ SIP-Exporter exports metrics in Prometheus exposition format, compatible with:
 ## Support
 
 For support, bug reports, and feature requests, use [GitHub Issues](https://github.com/aibudaevv/sip-exporter/issues).
+Report suspected vulnerabilities privately through the [Security Policy](.github/SECURITY.md).
 
 ## License
 This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.

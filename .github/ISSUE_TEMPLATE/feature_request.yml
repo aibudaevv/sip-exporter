@@ -1,0 +1,49 @@
+name: Feature request
+description: Propose a bounded capability or operational improvement
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the operational problem before proposing implementation. Do not include private SIP, subscriber, or network data.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Operational problem
+      description: What cannot be observed, diagnosed, or operated with the current release?
+    validations:
+      required: true
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Sanitized use case and topology
+      description: Include the SIP stack, traffic path, and Prometheus/Grafana environment without identifying data.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe observable behavior and how an operator would verify it.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Explain current workarounds or why existing metrics and documentation are insufficient.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing Issues for the same request.
+          required: true
+        - label: I understand that acceptance does not promise a release date.
+          required: true
+        - label: I removed sensitive and identifying data from this request.
+          required: true
+        - label: I agree to follow the Code of Conduct.
+          required: true
