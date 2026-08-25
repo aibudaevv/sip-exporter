@@ -386,9 +386,8 @@ sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
 ## Разработка
 
 Перед участием в разработке прочитайте канонические английские документы:
-[Contributing Guide](CONTRIBUTING.md), [Code of Conduct](CODE_OF_CONDUCT.md) и
-[Governance](GOVERNANCE.md). Об уязвимостях сообщайте приватно по
-[Security Policy](.github/SECURITY.md).
+[Contributing Guide](CONTRIBUTING.md) и [Code of Conduct](CODE_OF_CONDUCT.md).
+Об уязвимостях сообщайте приватно по [Security Policy](.github/SECURITY.md).
 
 ### Требования
 - Go 1.26.6+

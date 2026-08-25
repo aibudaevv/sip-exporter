@@ -385,9 +385,9 @@ Full setup, metrics reference, and alerting guidance: [docs/fraud-detection.md](
 
 ## Development
 
-Before contributing, read the [Contributing Guide](CONTRIBUTING.md),
-[Code of Conduct](CODE_OF_CONDUCT.md), and [Governance](GOVERNANCE.md). Report vulnerabilities
-privately through the [Security Policy](.github/SECURITY.md).
+Before contributing, read the [Contributing Guide](CONTRIBUTING.md) and
+[Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities privately through the
+[Security Policy](.github/SECURITY.md).
 
 ### Requirements
 - Go 1.26.6+

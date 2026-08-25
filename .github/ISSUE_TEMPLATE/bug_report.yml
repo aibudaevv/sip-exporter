@@ -1,72 +1,32 @@
 name: Bug report
-description: Report reproducible incorrect behavior in sip-exporter
+description: Report a reproducible problem
 title: "[Bug]: "
 body:
   - type: markdown
     attributes:
-      value: |
-        Do not include credentials, phone numbers, Call-IDs, raw SIP messages, packet captures, or identifiable network details. Report vulnerabilities through [GitHub Private Vulnerability Reporting](https://github.com/aibudaevv/sip-exporter/security/advisories/new), not here.
-  - type: dropdown
-    id: area
-    attributes:
-      label: Affected area
-      options:
-        - Exporter runtime or packet processing
-        - Prometheus metrics
-        - Grafana dashboard or alerting
-        - Deployment or documentation
-        - Other
-    validations:
-      required: true
+      value: Do not include private SIP data, credentials, or packet captures. Report vulnerabilities through the private security channel.
   - type: input
     id: version
     attributes:
       label: Version or commit
-      placeholder: v1.11.0 or a full commit SHA
     validations:
       required: true
   - type: textarea
-    id: environment
+    id: problem
     attributes:
-      label: Sanitized environment and topology
-      description: Include Linux distribution, kernel, architecture, deployment method, and where the sensor observes SIP/RTP. Anonymize addresses and identifiers.
-    validations:
-      required: true
-  - type: textarea
-    id: behavior
-    attributes:
-      label: Current behavior
-      description: Describe what happened, including relevant metrics or sanitized errors.
+      label: What happened?
+      description: Include sanitized environment details and errors.
     validations:
       required: true
   - type: textarea
     id: reproduce
     attributes:
-      label: Steps to reproduce
-      description: Provide the smallest deterministic sequence that demonstrates the problem.
+      label: How can we reproduce it?
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: Expected behavior
+      label: What did you expect?
     validations:
       required: true
-  - type: textarea
-    id: evidence
-    attributes:
-      label: Additional sanitized evidence
-      description: Paste only redacted logs, configuration, screenshots, or metric samples.
-  - type: checkboxes
-    id: checks
-    attributes:
-      label: Checks
-      options:
-        - label: I searched existing Issues for the same problem.
-          required: true
-        - label: I checked the latest release or current master, or explained why I could not.
-          required: true
-        - label: I removed sensitive and identifying data from this report.
-          required: true
-        - label: I agree to follow the Code of Conduct.
-          required: true
