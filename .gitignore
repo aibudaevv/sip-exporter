@@ -28,3 +28,4 @@ logs/
 .e2e-logs
 .codex
 .agents
+/.superpowers/
