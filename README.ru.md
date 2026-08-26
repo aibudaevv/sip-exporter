@@ -34,6 +34,7 @@ sip-exporter — это eBPF-сенсор с открытым исходным �
 - [Метрики](#метрики)
 - [Детекция фрода](#детекция-фрода)
 - [Безопасность](docs/SECURITY.ru.md)
+- [Участие в разработке](CONTRIBUTING.md)
 - [Разработка](#разработка)
 - [Нагрузочное тестирование](#нагрузочное-тестирование)
 - [Алертинг](#алертинг)
@@ -384,6 +385,10 @@ sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
 
 ## Разработка
 
+Перед участием в разработке прочитайте канонические английские документы:
+[Contributing Guide](CONTRIBUTING.md) и [Code of Conduct](CODE_OF_CONDUCT.md).
+Об уязвимостях сообщайте приватно по [Security Policy](.github/SECURITY.md).
+
 ### Требования
 - Go 1.26.6+
 - Clang/LLVM (для компиляции eBPF)
@@ -431,6 +436,7 @@ SIP-Exporter экспортирует метрики в формате Prometheu
 ## Поддержка
 
 Для поддержки, сообщений об ошибках и запросов функций используйте [GitHub Issues](https://github.com/aibudaevv/sip-exporter/issues).
+О предполагаемых уязвимостях сообщайте приватно по [Security Policy](.github/SECURITY.md).
 
 ## Лицензия
 

@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest an improvement
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: Do not include private SIP, subscriber, or network data.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
