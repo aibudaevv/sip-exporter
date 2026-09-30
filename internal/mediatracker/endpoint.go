@@ -17,6 +17,10 @@ func newBinaryEndpointKey(ip string, port uint16) binaryEndpointKey {
 	return binaryEndpointKey{ipv4: addr.As4(), port: port, isIPv4: true}
 }
 
+func newIPv4EndpointKey(ip [4]byte, port uint16) binaryEndpointKey {
+	return binaryEndpointKey{ipv4: ip, port: port, isIPv4: true}
+}
+
 func (k binaryEndpointKey) ipString() string {
 	if !k.isIPv4 {
 		return k.fallbackIP

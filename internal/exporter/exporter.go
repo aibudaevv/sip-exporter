@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -551,6 +552,12 @@ func extractIPs(ipHeader []byte) (net.IP, net.IP) {
 	return srcIP, dstIP
 }
 
+func ipv4Bytes(ip net.IP) [4]byte {
+	var result [4]byte
+	copy(result[:], ip.To4())
+	return result
+}
+
 func (e *exporter) resolveCarrier(ipHeader []byte) (string, string) {
 	if e.carrierResolver == nil {
 		return defaultCarrier, ""
@@ -1059,11 +1066,12 @@ func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 	if sipData[0]&rtpVersionMask == rtpVersion2Prefix {
 		srcPort := binary.BigEndian.Uint16(packet[udpOffset : udpOffset+2])
 		dstPort := binary.BigEndian.Uint16(packet[udpOffset+2 : udpOffset+4])
-		srcIP, dstIP := extractIPs(ipHeader)
+		srcIP := [4]byte{ipHeader[12], ipHeader[13], ipHeader[14], ipHeader[15]}
+		dstIP := [4]byte{ipHeader[16], ipHeader[17], ipHeader[18], ipHeader[19]}
 		if isRTCPPayload(sipData) {
-			return e.handleRTCP(srcIP, srcPort, dstIP, dstPort, sipData)
+			return e.handleRTCPIPv4(srcIP, srcPort, dstIP, dstPort, sipData)
 		}
-		return e.handleRTP(srcIP, srcPort, dstIP, dstPort, sipData)
+		return e.handleRTPIPv4(srcIP, srcPort, dstIP, dstPort, sipData)
 	}
 
 	if len(sipData) < minSIPDataLen {
@@ -1225,9 +1233,9 @@ func nowNTP32(t time.Time) uint32 {
 // stream's labels. RTT is computed as (now_NTP32 − LSR − DLSR) and skipped when
 // LSR or DLSR is zero (no prior SR) or the result is negative (clock skew). Blocks whose
 // SSRC is not tracked are dropped — consistent with RTP correlation.
-func (e *exporter) handleRTCP(
-	srcIP net.IP, srcPort uint16,
-	dstIP net.IP, dstPort uint16,
+func (e *exporter) handleRTCPIPv4(
+	srcIP [4]byte, srcPort uint16,
+	dstIP [4]byte, dstPort uint16,
 	payload []byte,
 ) (string, error) {
 	reports, err := rtcp.Parse(payload)
@@ -1245,10 +1253,8 @@ func (e *exporter) handleRTCP(
 		ts = time.Now()
 	}
 	nowNTP := nowNTP32(ts)
-	sIP, dIP := srcIP.String(), dstIP.String()
-
 	for _, rep := range reports {
-		e.handleRTCPReport(rep, nowNTP, sIP, srcPort, dIP, dstPort)
+		e.handleRTCPReport(rep, nowNTP, srcIP, srcPort, dstIP, dstPort)
 	}
 	return "", nil
 }
@@ -1256,9 +1262,9 @@ func (e *exporter) handleRTCP(
 func (e *exporter) handleRTCPReport(
 	report rtcp.Report,
 	nowNTP uint32,
-	srcIP string,
+	srcIP [4]byte,
 	srcPort uint16,
-	dstIP string,
+	dstIP [4]byte,
 	dstPort uint16,
 ) {
 	reportType := "rr"
@@ -1266,12 +1272,14 @@ func (e *exporter) handleRTCPReport(
 		reportType = "sr"
 	}
 	for _, block := range report.Blocks {
-		ctx, lossDelta, ok := e.mediaTracker.RecordRTCP(
+		ctx, lossDelta, ok := e.mediaTracker.RecordRTCPIPv4(
 			block.SSRC, block.CumulativeLost, srcIP, srcPort, dstIP, dstPort)
 		if !ok {
 			e.services.metricser.UpdateRTCPOrphan()
 			zap.L().Debug("RTCP orphan: SSRC not tracked at this endpoint",
-				zap.Uint32("ssrc", block.SSRC), zap.String("src", srcIP), zap.String("dst", dstIP))
+				zap.Uint32("ssrc", block.SSRC),
+				zap.String("src", netip.AddrFrom4(srcIP).String()),
+				zap.String("dst", netip.AddrFrom4(dstIP).String()))
 			continue
 		}
 		carrier, uaType, codec := ctx.Labels.Carrier, ctx.Labels.UAType, ctx.Codec
@@ -1314,6 +1322,14 @@ func (e *exporter) handleRTP(
 	dstIP net.IP, dstPort uint16,
 	payload []byte,
 ) (string, error) {
+	return e.handleRTPIPv4(ipv4Bytes(srcIP), srcPort, ipv4Bytes(dstIP), dstPort, payload)
+}
+
+func (e *exporter) handleRTPIPv4(
+	srcIP [4]byte, srcPort uint16,
+	dstIP [4]byte, dstPort uint16,
+	payload []byte,
+) (string, error) {
 	header, err := rtp.ParseHeader(payload)
 	if err != nil {
 		zap.L().Debug("RTP header parse skipped", zap.Error(err))
@@ -1331,7 +1347,7 @@ func (e *exporter) handleRTP(
 		e.services.metricser.RTPKernelTimestampMissing()
 	}
 	e.mediaLifecycleMu.Lock()
-	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, dstIP.String(), dstPort, header, arrival)
+	res, ok := e.mediaTracker.ObserveIPv4(srcIP, srcPort, dstIP, dstPort, header, arrival)
 	if res.LearnedEndpoint != nil {
 		e.retainRTPEndpoint(res.LearnedEndpoint.IP, res.LearnedEndpoint.Port)
 		key, _ := ipPortToKey(res.LearnedEndpoint.IP, res.LearnedEndpoint.Port)
@@ -1348,7 +1364,9 @@ func (e *exporter) handleRTP(
 	}
 	if res.Counted {
 		e.fasTracker.clearIfAnswerMedia(
-			res.CallID, fasEndpoint{ip: res.MatchedIP, port: res.MatchedPort}, res.StreamPacketsTotal, res.MatchedBy,
+			res.CallID,
+			fasEndpoint{ip: binary.BigEndian.Uint32(res.MatchedIPv4[:]), port: res.MatchedPort},
+			res.StreamPacketsTotal, res.MatchedBy,
 		)
 		e.services.metricser.UpdateRTPPackets(res.Carrier, res.UAType, res.Codec, res.SourceCountry, res.Direction)
 		if res.StreamPacketsTotal > 1 {
@@ -1730,9 +1748,7 @@ func (e *exporter) handleInvite200OK(
 	if hasOfferSDP {
 		eps, _ := e.registerMediaEndpoints(offerSDP, labels)
 		mediaEndpoints += len(eps)
-		for _, ep := range eps {
-			offerEndpoints = append(offerEndpoints, fasEndpoint{ip: ep.IP, port: ep.Port})
-		}
+		offerEndpoints = appendFASOfferEndpoints(offerEndpoints, eps)
 	}
 	answerSRTP := false
 	if hasAnswerSDP {
@@ -1749,6 +1765,17 @@ func (e *exporter) handleInvite200OK(
 		e.fasTracker.updateOffer(callID, offerEndpoints, answerSRTP)
 	}
 	return nil
+}
+
+func appendFASOfferEndpoints(dst []fasEndpoint, endpoints []mediatracker.MediaEndpoint) []fasEndpoint {
+	for _, ep := range endpoints {
+		if key, ok := ipPortToKey(ep.IP, ep.Port); ok {
+			dst = append(dst, fasEndpoint{ip: key.IP, port: key.Port})
+			continue
+		}
+		dst = append(dst, fasEndpoint{fallbackIP: ep.IP, port: ep.Port})
+	}
+	return dst
 }
 
 func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {

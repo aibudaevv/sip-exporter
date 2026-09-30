@@ -63,6 +63,7 @@ type (
 		DelayVariationMs   float64 // raw per-packet PDV (|arrivalDelta − tsDelta|, ms) of the last forward packet; not updated on duplicate/reorder (only emitted when Counted)
 		StreamPacketsTotal uint64  // stream's total forward-counted packets after this Observe
 		MatchedIP          string  // IP of the correlated media endpoint the stream is keyed by (dst-first, then src)
+		MatchedIPv4        [4]byte // binary IPv4 companion used by the packet hot path
 		MatchedPort        uint16  // port of the correlated media endpoint (companion of MatchedIP)
 		MatchedBy          string  // which candidate matched: "dst" (local receive endpoint) or "src" (sender, NAT fallback)
 		Codec              string  // resolved codec name
@@ -375,41 +376,45 @@ func (t *Tracker) LearnSourceAlias(
 	source := newBinaryEndpointKey(sourceIP, sourcePort)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.learnSourceAlias(callID, matched, source)
+	alias := t.learnSourceAlias(callID, matched, source)
+	if alias == nil {
+		return MediaEndpoint{}, false
+	}
+	return *alias, true
 }
 
 func (t *Tracker) learnSourceAlias(
 	callID string, matched, source binaryEndpointKey,
-) (MediaEndpoint, bool) {
+) *MediaEndpoint {
 	endpoints := t.callMediaOrder[callID]
 	if len(endpoints) != aliasEndpointCount || !t.canLearnSourceAlias(callID, matched) {
-		return MediaEndpoint{}, false
+		return nil
 	}
 
 	peer := endpoints[0]
 	if peer == matched {
 		peer = endpoints[1]
 	} else if endpoints[1] != matched {
-		return MediaEndpoint{}, false
+		return nil
 	}
 	if !peer.sameIP(source) || peer.port == source.port {
-		return MediaEndpoint{}, false
+		return nil
 	}
 	if _, exists := t.media[source]; exists {
-		return MediaEndpoint{}, false
+		return nil
 	}
 	if _, exists := t.mediaAliases[source]; exists {
-		return MediaEndpoint{}, false
+		return nil
 	}
 	if t.sourceAliases[callID] == nil {
 		t.sourceAliases[callID] = make(map[binaryEndpointKey]binaryEndpointKey)
 	}
 	if _, exists := t.sourceAliases[callID][peer]; exists {
-		return MediaEndpoint{}, false
+		return nil
 	}
 	t.sourceAliases[callID][peer] = source
 	t.mediaAliases[source] = t.callMedia[callID][peer]
-	return MediaEndpoint{IP: source.ipString(), Port: source.port}, true
+	return &MediaEndpoint{IP: source.ipString(), Port: source.port}
 }
 
 func (t *Tracker) canLearnSourceAlias(callID string, matched binaryEndpointKey) bool {
@@ -462,6 +467,32 @@ func (t *Tracker) Observe(
 ) (ObserveResult, bool) {
 	src := newBinaryEndpointKey(srcIP, srcPort)
 	dst := newBinaryEndpointKey(dstIP, dstPort)
+	result, ok := t.observe(src, dst, h, arrival)
+	if !ok {
+		return ObserveResult{}, false
+	}
+	result.MatchedIP = dstIP
+	if result.MatchedBy == matchedBySrc {
+		result.MatchedIP = srcIP
+	}
+	return result, true
+}
+
+// ObserveIPv4 ingests an RTP packet without rendering packet addresses as strings.
+func (t *Tracker) ObserveIPv4(
+	srcIP [4]byte, srcPort uint16,
+	dstIP [4]byte, dstPort uint16,
+	h rtp.Header, arrival time.Time,
+) (ObserveResult, bool) {
+	return t.observe(
+		newIPv4EndpointKey(srcIP, srcPort), newIPv4EndpointKey(dstIP, dstPort), h, arrival,
+	)
+}
+
+func (t *Tracker) observe(
+	src, dst binaryEndpointKey,
+	h rtp.Header, arrival time.Time,
+) (ObserveResult, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -505,20 +536,13 @@ func (t *Tracker) Observe(
 	counted := entry.state.packetsTotal > prevTotal
 	var learned *MediaEndpoint
 	if counted && matchedBy == matchedByDst {
-		if alias, learnedOK := t.learnSourceAlias(labels.CallID, ep, src); learnedOK {
-			learned = &alias
-		}
+		learned = t.learnSourceAlias(labels.CallID, ep, src)
 	}
 
 	var lostDelta uint64
 	if entry.state.packetsLost >= prevLost {
 		lostDelta = entry.state.packetsLost - prevLost
 	}
-	matchedIP := dstIP
-	if matchedBy == matchedBySrc {
-		matchedIP = srcIP
-	}
-
 	return ObserveResult{
 		Counted:            counted,
 		Duplicate:          entry.state.packetsDuplicate > prevDup,
@@ -526,7 +550,7 @@ func (t *Tracker) Observe(
 		Lost:               lostDelta,
 		DelayVariationMs:   entry.state.lastPacketDelayVariationMs,
 		StreamPacketsTotal: entry.state.packetsTotal,
-		MatchedIP:          matchedIP,
+		MatchedIPv4:        ep.ipv4,
 		MatchedPort:        ep.port,
 		MatchedBy:          matchedBy,
 		Codec:              codec,
@@ -669,6 +693,24 @@ func (t *Tracker) RecordRTCP(
 ) (RTCPContext, uint64, bool) {
 	src := newBinaryEndpointKey(srcIP, srcPort)
 	dst := newBinaryEndpointKey(dstIP, dstPort)
+	return t.recordRTCP(ssrc, cumulative, src, dst)
+}
+
+// RecordRTCPIPv4 correlates an RTCP report without rendering packet addresses as strings.
+func (t *Tracker) RecordRTCPIPv4(
+	ssrc uint32, cumulative int32,
+	srcIP [4]byte, srcPort uint16,
+	dstIP [4]byte, dstPort uint16,
+) (RTCPContext, uint64, bool) {
+	return t.recordRTCP(
+		ssrc, cumulative, newIPv4EndpointKey(srcIP, srcPort), newIPv4EndpointKey(dstIP, dstPort),
+	)
+}
+
+func (t *Tracker) recordRTCP(
+	ssrc uint32, cumulative int32,
+	src, dst binaryEndpointKey,
+) (RTCPContext, uint64, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	e := t.selectStream(ssrc, src, dst)

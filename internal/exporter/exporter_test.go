@@ -2553,6 +2553,33 @@ func TestFASCallerRTPDoesNotClear(t *testing.T) {
 		"answer-side RTP (arriving at offer endpoint) must clear FAS")
 }
 
+func TestFASInvalidOfferEndpointDoesNotEnableAnyMediaFallback(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Hour)
+	invalidOffer := "v=0\r\no=- 1 1 IN IP4 999.0.0.1\r\ns=-\r\n" +
+		"c=IN IP4 999.0.0.1\r\nt=0 0\r\nm=audio 5004 RTP/AVP 0\r\n"
+
+	e.storeInviteSDP("call-invalid-offer", "", []byte(invalidOffer), "from-tag")
+	require.NoError(
+		t,
+		e.handleInvite200OK(
+			"carrier-a", "yealink", "US", "inbound",
+			fasInvite200OK("call-invalid-offer", fasSdpNormal), false,
+		),
+	)
+
+	for _, seq := range []uint16{1, 2, 3} {
+		_, err := e.handleRTP(
+			net.ParseIP("10.0.0.2"), 5004,
+			net.ParseIP("10.0.0.1"), 5004,
+			fasRTPPacket(seq),
+		)
+		require.NoError(t, err)
+	}
+	require.Len(t, e.fasTracker.entries, 1,
+		"an invalid offer endpoint is still known, so caller RTP must not enable the unknown-side fallback")
+}
+
 // TestFASRetransmit200OKPreservesOfferSet verifies that a retransmitted 200 OK
 // (Timer G, UDP) does not destroy the offer-side gating established by the first
 // 200 OK. On retransmission the cached INVITE SDP is already consumed, so
@@ -2571,7 +2598,7 @@ func TestFASRetransmit200OKPreservesOfferSet(t *testing.T) {
 	require.NoError(t,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), true),
 	)
-	require.Contains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: "10.0.0.2", port: 5004},
+	require.Contains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: 0x0A000002, port: 5004},
 		"retransmitted 200 OK must not delete the offer set")
 
 	for _, seq := range []uint16{1, 2, 3} {
@@ -2832,7 +2859,7 @@ func TestFASReinviteUpdatesOfferEndpoints(t *testing.T) {
 	require.NoError(t,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
 	)
-	require.Contains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: "10.0.0.2", port: 5004},
+	require.Contains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: 0x0A000002, port: 5004},
 		"initial offer endpoint must be tracked")
 
 	// Re-INVITE: caller changes endpoint to 10.0.0.3:5004.
@@ -2841,9 +2868,9 @@ func TestFASReinviteUpdatesOfferEndpoints(t *testing.T) {
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), true),
 	)
 
-	require.Contains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: "10.0.0.3", port: 5004},
+	require.Contains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: 0x0A000003, port: 5004},
 		"re-INVITE must update offer to the new endpoint")
-	require.NotContains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: "10.0.0.2", port: 5004},
+	require.NotContains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: 0x0A000002, port: 5004},
 		"stale offer endpoint must be replaced")
 
 	// Answer-side media at the NEW offer endpoint must clear FAS.
@@ -2900,7 +2927,7 @@ func TestFASConcurrentSweepClearBye(t *testing.T) {
 			defer wg.Done()
 			for range 200 {
 				e.fasTracker.sweep(mm)
-				e.fasTracker.clearIfAnswerMedia("call-1", fasEndpoint{ip: "10.0.0.2", port: 5004}, 5, "dst")
+				e.fasTracker.clearIfAnswerMedia("call-1", fasEndpoint{ip: 0x0A000002, port: 5004}, 5, "dst")
 				e.fasTracker.finalizeOnBye("call-1", mm)
 			}
 		}()
@@ -3096,6 +3123,31 @@ func BenchmarkHandleRTP_FASHotPath(b *testing.B) {
 		pkt[3] = byte(uint16(i))
 		_, _ = e.handleRTP(src, 5004, dst, 5004, pkt)
 	}
+}
+
+func TestHandleRTPIPv4HotPathAvoidsIPStringAllocations(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Hour)
+	e.pktTimestamp = time.Unix(1_700_000_000, 0)
+	e.storeInviteSDP("alloc", "", []byte(fasSdpOffer), "from-tag")
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("alloc", fasSdpNormal), false),
+	)
+
+	dst := [4]byte{10, 0, 0, 2}
+	src := [4]byte{10, 0, 0, 1}
+	pkt := fasRTPPacket(0)
+	allHandled := true
+
+	allocs := testing.AllocsPerRun(100, func() {
+		seq := binary.BigEndian.Uint16(pkt[2:4]) + 1
+		binary.BigEndian.PutUint16(pkt[2:4], seq)
+		_, err := e.handleRTPIPv4(src, 5004, dst, 5004, pkt)
+		allHandled = allHandled && err == nil
+	})
+
+	require.True(t, allHandled)
+	require.Zero(t, allocs)
 }
 
 func TestHandleMessageReINVITEExcludedFromBurst(t *testing.T) {
