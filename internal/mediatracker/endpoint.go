@@ -23,3 +23,13 @@ func (k binaryEndpointKey) ipString() string {
 	}
 	return netip.AddrFrom4(k.ipv4).String()
 }
+
+func (k binaryEndpointKey) sameIP(other binaryEndpointKey) bool {
+	if k.isIPv4 != other.isIPv4 {
+		return false
+	}
+	if k.isIPv4 {
+		return k.ipv4 == other.ipv4
+	}
+	return k.fallbackIP == other.fallbackIP
+}
