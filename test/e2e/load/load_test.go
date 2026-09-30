@@ -33,6 +33,7 @@ import (
 
 const (
 	sippImage                = "pbertera/sipp@sha256:063e8e9c8ecf54552e8efc3c363007afbfd3cae5a0f3f037db1c2e7fa4cd0349"
+	sippNofileLimit          = 4096
 	testInterface            = "lo"
 	selfMetricSampleInterval = 2 * time.Second
 )
@@ -81,22 +82,24 @@ type (
 		ErrorCount      float64
 		DrainTime       time.Duration
 		PeakSessions    float64
+		RTPPPSP95       float64
 		Resources       ResourceSummaryV2
 		ResourceSamples ResourceSamplesV2
 	}
 
 	steadyMeasurement struct {
-		mu             sync.Mutex
-		env            *testEnv
-		dockerCli      *client.Client
-		cancel         context.CancelFunc
-		done           chan struct{}
-		measuring      bool
-		ending         bool
-		start          time.Time
-		containerStart time.Time
-		samples        ResourceSamplesV2
-		err            error
+		mu              sync.Mutex
+		env             *testEnv
+		dockerCli       *client.Client
+		cancel          context.CancelFunc
+		done            chan struct{}
+		measuring       bool
+		ending          bool
+		start           time.Time
+		containerStart  time.Time
+		dockerStatsSeen bool
+		samples         ResourceSamplesV2
+		err             error
 	}
 
 	testWriter struct {
@@ -521,11 +524,16 @@ func metricSamplePointFromBody(at time.Time, body []byte) (metricSamplePoint, er
 	if err != nil {
 		return metricSamplePoint{}, err
 	}
-	if !finiteFloats(channel, socketDrops, rtpDrops) {
+	var rtpPackets float64
+	for _, sample := range parseMetricSamples(body, "sip_exporter_rtp_packets_total") {
+		rtpPackets += sample.value
+	}
+	if !finiteFloats(channel, socketDrops, rtpDrops, rtpPackets) {
 		return metricSamplePoint{}, fmt.Errorf("self metric is non-finite")
 	}
 	return metricSamplePoint{
 		At: at, ChannelLength: channel, SocketDrops: socketDrops, RTPDrops: rtpDrops,
+		RTPPackets: rtpPackets,
 	}, nil
 }
 
@@ -962,7 +970,8 @@ func sippContainerRequest(
 	cmd := append([]string(nil), args...)
 	mounts := testcontainers.Mounts(testcontainers.BindMount(sippVol, "/scenarios"))
 	if statsDir != "" {
-		cmd = append(cmd, "-trace_stat", "-stat_delimiter", ";", "-stf", "/artifacts/stats.csv")
+		cmd = append(cmd, "-trace_stat", "-fd", "1s", "-stat_delimiter", ";",
+			"-stf", "/artifacts/stats.csv")
 		mounts = append(mounts, testcontainers.BindMount(statsDir, "/artifacts"))
 	}
 
@@ -971,6 +980,12 @@ func sippContainerRequest(
 		NetworkMode: container.NetworkMode(networkMode),
 		Cmd:         cmd,
 		Mounts:      mounts,
+		HostConfigModifier: func(hostConfig *container.HostConfig) {
+			hostConfig.NetworkMode = container.NetworkMode(networkMode)
+			hostConfig.Ulimits = []*container.Ulimit{{
+				Name: "nofile", Soft: sippNofileLimit, Hard: sippNofileLimit,
+			}}
+		},
 	}
 
 	if waitForExit {
@@ -1120,11 +1135,7 @@ func (m *steadyMeasurement) Begin(ctx context.Context, at time.Time) error {
 	if at.IsZero() {
 		return fmt.Errorf("measurement start is zero")
 	}
-	body, err := fetchMetricsBodyContext(ctx, m.env.endpoint)
-	if err != nil {
-		return err
-	}
-	point, err := metricSamplePointFromBody(at, body)
+	point, err := m.fetchMetricPoint(ctx, at)
 	if err != nil {
 		return err
 	}
@@ -1265,15 +1276,38 @@ func (m *steadyMeasurement) collectDockerStats(ctx context.Context) {
 		if !measuring {
 			continue
 		}
-		sample, err := resourceSampleFromStats(stats.Read, stats, m.env.limits)
-		if err != nil {
-			m.setMeasurementError(err)
-			continue
-		}
-		m.mu.Lock()
-		m.samples.Resources = append(m.samples.Resources, sample)
-		m.mu.Unlock()
+		m.recordDockerStats(stats)
 	}
+}
+
+func (m *steadyMeasurement) recordDockerStats(stats container.StatsResponse) {
+	sample, err := resourceSampleFromStats(stats.Read, stats, m.env.limits)
+	if err != nil {
+		m.mu.Lock()
+		startupInterval := errors.Is(err, errInvalidDockerStatsInterval) &&
+			!m.dockerStatsSeen
+		m.dockerStatsSeen = true
+		m.mu.Unlock()
+		if startupInterval {
+			return
+		}
+		m.setMeasurementError(err)
+		return
+	}
+	m.mu.Lock()
+	m.dockerStatsSeen = true
+	if len(m.samples.Resources) > 0 {
+		previous := m.samples.Resources[len(m.samples.Resources)-1]
+		cpuPercent, cpuErr := cpuQuotaPercent(previous, sample, m.env.limits)
+		if cpuErr != nil {
+			m.mu.Unlock()
+			m.setMeasurementError(cpuErr)
+			return
+		}
+		sample.CPUQuotaPercent = cpuPercent
+	}
+	m.samples.Resources = append(m.samples.Resources, sample)
+	m.mu.Unlock()
 }
 
 func (m *steadyMeasurement) collectSelfMetrics(ctx context.Context) {
@@ -1316,10 +1350,12 @@ func (m *steadyMeasurement) fetchMetricPoint(ctx context.Context, at time.Time) 
 	if err != nil {
 		return metricSamplePoint{}, err
 	}
+	observedAt := time.Now()
 	point, err := metricSamplePointFromBody(at, body)
 	if err != nil {
 		return metricSamplePoint{}, err
 	}
+	point.ObservedAt = observedAt
 	return point, nil
 }
 

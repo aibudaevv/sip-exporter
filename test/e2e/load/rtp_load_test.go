@@ -24,19 +24,21 @@ const (
 	// packets are verified separately via rtp_packets_total.
 	rtpSipPacketsPerCall = 6.0
 	rtpLoadTimeout       = 120 * time.Second
+	rtpMediaSeconds      = 18
+	rtpPacketsPerSecond  = 100
+	rtpOfferSeconds      = 33
+	rtpMaxConcurrent     = 1024
 )
 
-// allocateRTPPorts reserves a port block wide enough for SIPp media port
-// increment (SIPp increments -mp by 2 per concurrent call: RTP+RTCP pair).
-// Layout: [0]=HTTP [1]=UAS-SIP [2]=UAC-SIP [3]=UAS-media [1003]=UAC-media.
-// 1000-port gap between media bases covers up to 500 concurrent calls.
+// allocateRTPPorts reserves the HTTP, SIP, and fixed SDP [media_port] values.
+// SIPp 3.5.1 does not increment -mp for concurrent calls.
 func allocateRTPPorts() (http, uasSIP, uacSIP, uasMedia, uacMedia string) {
 	portMu.Lock()
 	defer portMu.Unlock()
 	base := nextBasePort
-	nextBasePort += 2004
+	nextBasePort += 5
 	return strconv.Itoa(base), strconv.Itoa(base + 1), strconv.Itoa(base + 2),
-		strconv.Itoa(base + 3), strconv.Itoa(base + 1003)
+		strconv.Itoa(base + 3), strconv.Itoa(base + 4)
 }
 
 // newRTPTestEnv starts the exporter with RTP capture enabled and allocates
@@ -130,6 +132,7 @@ func runSippRTPLoad(
 			"-p", env.sippPort,
 			"-mp", env.uasMediaPort,
 			"-m", strconv.Itoa(callCount),
+			"-l", strconv.Itoa(rtpMaxConcurrent),
 			"-nr",
 			"-nostdin",
 		},
@@ -152,13 +155,18 @@ func runSippRTPLoad(
 			"-mp", env.uacMediaPort,
 			"-m", strconv.Itoa(callCount),
 			"-r", strconv.Itoa(rate),
+			"-l", strconv.Itoa(rtpMaxConcurrent),
 			"-nr",
 			"127.0.0.1:" + env.sippPort,
 		},
 		sippVol, "generator", true,
 	)
 	measureEnd := time.Now()
-	resourceSummary := finishSteadyMeasurement(ctx, t, measurement, measureEnd)
+	resourceSummary, resourceSamples := finishSteadyMeasurementWithSamples(
+		ctx, t, measurement, measureEnd,
+	)
+	rtpPPSP95, rtpRateErr := rtpRateP95(resourceSamples.Metrics)
+	require.NoError(t, rtpRateErr)
 	generator, generatorErr := uacContainer.readGeneratorEvidence(ctx, t, PhaseTimestamps{
 		WarmupStart: measureStart, Ready: measureStart, MeasureStart: measureStart,
 		MeasureEnd: measureEnd, DrainEnd: measureEnd,
@@ -176,6 +184,14 @@ func runSippRTPLoad(
 	require.NoError(t, validatePostPhaseOrdering(measureEnd, evidenceAt, uasExitAt, stableTime))
 	drainTime := stableTime.Sub(measureEnd)
 	generator.Phases.DrainEnd = stableTime
+	generator.ActualRate, generatorErr = sippRampRate(
+		callCount, generator.startedAt, generator.rampEndAt,
+	)
+	require.NoError(t, generatorErr)
+	require.NoError(t, generator.Validate(WorkloadSpec{
+		Calls: callCount,
+		Rate:  float64(rate),
+	}))
 
 	recordMetricsSnapshot(t, "metrics-after.prom", env.endpoint)
 	protocolsAfter := readProtocolCounters(t, env.endpoint)
@@ -193,50 +209,50 @@ func runSippRTPLoad(
 	expectedPPS := float64(rate) * rtpSipPacketsPerCall
 
 	result := loadResult{
-		Duration:      sippDuration,
-		Generator:     generator,
-		Capture:       capture,
-		Protocols:     protocols,
-		PacketsBefore: packetsBefore,
-		PacketsAfter:  packetsAfter,
-		ActualPPS:     actualPPS,
-		ExpectedPPS:   expectedPPS,
-		LossRate:      capture.LossPct / 100,
-		ErrorCount:    errorsAfter - errorsBefore,
-		DrainTime:     drainTime,
-		Resources:     resourceSummary,
+		Duration:        sippDuration,
+		Generator:       generator,
+		Capture:         capture,
+		Protocols:       protocols,
+		PacketsBefore:   packetsBefore,
+		PacketsAfter:    packetsAfter,
+		ActualPPS:       actualPPS,
+		ExpectedPPS:     expectedPPS,
+		LossRate:        capture.LossPct / 100,
+		ErrorCount:      errorsAfter - errorsBefore,
+		DrainTime:       drainTime,
+		RTPPPSP95:       rtpPPSP95,
+		Resources:       resourceSummary,
+		ResourceSamples: resourceSamples,
 	}
 	recordLoadResultEvidence(t, result)
 
-	t.Logf("RTP load: actual=%.0f PPS, captured=%.0f, expected=%.0f, loss=%.2f%%, drain=%v, cpu=%.2f%%(peak=%.2f%%), mem=%.1fMB, errors=%.0f",
-		result.ActualPPS, totalCaptured, expectedTotal, result.LossRate*100, result.DrainTime,
-		result.Resources.CPUP95Percent, result.Resources.CPUP95Percent,
+	t.Logf("RTP load: offered_cps=%.1f, sip_pps=%.0f, rtp_pps_p95=%.0f, captured=%.0f, expected=%.0f, loss=%.2f%%, drain=%v, cpu_p95=%.2f%% quota (%.3f cores), mem_p99=%.1fMB, errors=%.0f",
+		result.Generator.ActualRate, result.ActualPPS, result.RTPPPSP95, totalCaptured, expectedTotal,
+		result.LossRate*100, result.DrainTime, result.Resources.CPUP95Percent,
+		result.Resources.CPUP95Percent*result.Resources.Limits.CPUCores/100,
 		result.Resources.WorkingSetP99MB, result.ErrorCount)
 
 	return result
 }
 
 // TestLoadFullCallWithRTP measures combined SIP+RTP throughput. Each call
-// runs a full SIP dialog (INVITE→200→ACK→BYE→200) plus 4s of G.711a RTP media
-// in both directions. Rates are 10× lower than SIP-only tests because RTP adds
-// ~400 packets per call (2 × 50pps × 4s).
+// runs a full SIP dialog (INVITE→200→ACK→BYE→200) plus 18s of G.711a RTP media
+// in both directions, yielding about 1800 packets per call (2 × 50pps × 18s).
 func TestLoadFullCallWithRTP(t *testing.T) {
-	rates := []int{10, 25, 50, 100}
+	rates := []int{25, 50}
 	for _, rate := range rates {
 		t.Run(fmt.Sprintf("rate_%d", rate), func(t *testing.T) {
 			beginScenario(t)
-			env := newRTPTestEnv(t.Context(), t)
+			env := newRTPTestEnvWithLimits(t.Context(), t, diagnosticMemoryLimits)
 
 			ctx, cancel := context.WithTimeout(t.Context(), rtpLoadTimeout)
 			defer cancel()
 
-			callCount := rate * 5
+			callCount := rate * rtpOfferSeconds
 			result := runSippRTPLoad(ctx, t, callCount, rate, env)
 
-			totalPackets := result.PacketsAfter - result.PacketsBefore
-			maxErrors := totalPackets * 0.001
-			require.LessOrEqual(t, result.ErrorCount, maxErrors,
-				"error rate SLO: < 0.1%% of processed packets")
+			require.Zero(t, result.ErrorCount,
+				"exporter must not report system errors")
 			require.Greater(t, result.PacketsAfter, result.PacketsBefore,
 				"exporter should have processed packets")
 
@@ -247,18 +263,41 @@ func TestLoadFullCallWithRTP(t *testing.T) {
 			rtpPackets := result.Protocols.RTPPackets
 			require.Greater(t, rtpPackets, 0.0,
 				"RTP packets must be captured")
+			expectedRTPPackets := float64(callCount * rtpMediaSeconds * rtpPacketsPerSecond)
+			require.InDelta(t, expectedRTPPackets, rtpPackets, expectedRTPPackets*0.02,
+				"captured RTP volume must cover every call's media interval")
+			expectedSteadyRTPPPS := float64(rate * rtpMediaSeconds * rtpPacketsPerSecond)
+			require.InDelta(t, expectedSteadyRTPPPS, result.RTPPPSP95,
+				expectedSteadyRTPPPS*0.10,
+				"observed RTP p95 must reach the steady offered packet rate")
+			for _, metricName := range []string{
+				"sip_exporter_rtp_packets_lost_total",
+				"sip_exporter_rtp_duplicate_packets_total",
+				"sip_exporter_rtp_out_of_order_total",
+			} {
+				require.Zero(t, metricSumOrZero(t, env.endpoint, metricName),
+					"healthy generated RTP must not increment %s", metricName)
+			}
 
-			t.Logf("Full call + RTP rate=%d: actual=%.0f PPS, rtp_packets=%.0f, ser=%.1f%%, loss=%.2f%%, cpu=%.2f%%(peak=%.2f%%), mem=%.1fMB",
-				rate, result.ActualPPS, rtpPackets, ser, result.LossRate*100,
-				result.Resources.CPUP95Percent, result.Resources.CPUP95Percent,
+			t.Logf("Full call + RTP rate=%d: offered_cps=%.1f, sip_pps=%.0f, rtp_pps_p95=%.0f, rtp_packets=%.0f, ser=%.1f%%, loss=%.2f%%, cpu_p95=%.2f%% quota (%.3f cores), mem_p99=%.1fMB",
+				rate, result.Generator.ActualRate, result.ActualPPS, result.RTPPPSP95,
+				rtpPackets, ser, result.LossRate*100,
+				result.Resources.CPUP95Percent,
+				result.Resources.CPUP95Percent*result.Resources.Limits.CPUCores/100,
 				result.Resources.WorkingSetP99MB)
 
 			metrics := resourceMetricEntries(result.Resources)
 			for name, metric := range map[string]MetricEntry{
-				"actual_pps":  {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
-				"loss_rate":   {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
-				"ser":         {Value: ser, Unit: "%", Direction: dirHigherIsBetter},
-				"rtp_packets": {Value: rtpPackets, Unit: "count", Direction: dirHigherIsBetter},
+				"actual_pps":    {Value: result.ActualPPS, Unit: "pps", Direction: dirHigherIsBetter},
+				"generator_cps": {Value: result.Generator.ActualRate, Unit: "cps", Direction: dirHigherIsBetter},
+				"loss_rate":     {Value: result.LossRate * 100, Unit: "%", Direction: dirLowerIsBetter},
+				"ser":           {Value: ser, Unit: "%", Direction: dirHigherIsBetter},
+				"rtp_packets":   {Value: rtpPackets, Unit: "count", Direction: dirHigherIsBetter},
+				"rtp_pps_p95":   {Value: result.RTPPPSP95, Unit: "pps", Direction: dirHigherIsBetter},
+				"cpu_cores_p95": {
+					Value: result.Resources.CPUP95Percent * result.Resources.Limits.CPUCores / 100,
+					Unit:  "cores", Direction: dirLowerIsBetter,
+				},
 			} {
 				metrics[name] = metric
 			}
@@ -288,8 +327,8 @@ func TestBenchmarkMemoryPerRTPStream(t *testing.T) {
 
 			var streams float64
 			if limit > 0 {
-				// Each call lives ~4s (RTP streaming pause) → concurrent = rate × 4.
-				rate := limit / 4
+				// Each call lives ~18s (RTP streaming pause) → concurrent = rate × 18.
+				rate := limit / rtpMediaSeconds
 				if rate < 10 {
 					rate = 10
 				}

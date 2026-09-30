@@ -3,6 +3,7 @@
 package load
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 )
+
+var errInvalidDockerStatsInterval = errors.New("invalid Docker stats interval")
 
 type (
 	WorkloadLimits struct {
@@ -19,6 +22,7 @@ type (
 
 	resourceSample struct {
 		At                  time.Time
+		CPUUsageNS          uint64
 		CPUQuotaPercent     float64
 		WorkingSetBytes     uint64
 		CPUPeriods          uint64
@@ -27,9 +31,11 @@ type (
 
 	metricSamplePoint struct {
 		At            time.Time
+		ObservedAt    time.Time
 		ChannelLength float64
 		SocketDrops   float64
 		RTPDrops      float64
+		RTPPackets    float64
 	}
 
 	gcPauseSample struct {
@@ -110,6 +116,43 @@ func percentile(values []float64, p float64) (float64, error) {
 	return owned[lower]*(1-frac) + owned[upper]*frac, nil
 }
 
+func rtpRateP95(samples []metricSamplePoint) (float64, error) {
+	if len(samples) < 2 {
+		return 0, fmt.Errorf("RTP rate requires at least two samples")
+	}
+	if samples[0].ObservedAt.IsZero() {
+		return 0, fmt.Errorf("RTP rate sample observation time is zero")
+	}
+	rates := make([]float64, 0, len(samples)-1)
+	for i := 1; i < len(samples); i++ {
+		previous, current := samples[i-1], samples[i]
+		if !current.ObservedAt.After(previous.ObservedAt) {
+			return 0, fmt.Errorf("RTP rate sample time is not increasing")
+		}
+		if current.RTPPackets < previous.RTPPackets {
+			return 0, fmt.Errorf("RTP packet counter rollback")
+		}
+		rates = append(rates, (current.RTPPackets-previous.RTPPackets)/
+			current.ObservedAt.Sub(previous.ObservedAt).Seconds())
+	}
+	return percentile(rates, 95)
+}
+
+func cpuQuotaPercent(previous, current resourceSample, limits WorkloadLimits) (float64, error) {
+	if limits.CPUCores <= 0 || math.IsNaN(limits.CPUCores) || math.IsInf(limits.CPUCores, 0) {
+		return 0, fmt.Errorf("invalid CPU limit")
+	}
+	if !current.At.After(previous.At) {
+		return 0, fmt.Errorf("CPU sample time is not increasing")
+	}
+	if current.CPUUsageNS < previous.CPUUsageNS {
+		return 0, fmt.Errorf("CPU usage counter rollback")
+	}
+	cpuDelta := float64(current.CPUUsageNS - previous.CPUUsageNS)
+	elapsed := float64(current.At.Sub(previous.At))
+	return cpuDelta / elapsed / limits.CPUCores * 100, nil
+}
+
 func resourceSampleFromStats(
 	at time.Time,
 	stats container.StatsResponse,
@@ -119,23 +162,20 @@ func resourceSampleFromStats(
 		return resourceSample{}, fmt.Errorf("invalid workload limits")
 	}
 	if stats.Read.IsZero() || stats.PreRead.IsZero() || !stats.Read.After(stats.PreRead) {
-		return resourceSample{}, fmt.Errorf("invalid Docker stats interval")
+		return resourceSample{}, errInvalidDockerStatsInterval
 	}
 	cpuUsage := stats.CPUStats.CPUUsage.TotalUsage
 	previousCPUUsage := stats.PreCPUStats.CPUUsage.TotalUsage
 	if cpuUsage < previousCPUUsage {
 		return resourceSample{}, fmt.Errorf("invalid CPU stats delta")
 	}
-	cpuDelta := float64(cpuUsage - previousCPUUsage)
-	elapsed := float64(stats.Read.Sub(stats.PreRead))
-	cpuQuotaPercent := cpuDelta / elapsed / limits.CPUCores * 100
 	workingSet, err := workingSetBytes(stats.MemoryStats.Usage, stats.MemoryStats.Stats)
 	if err != nil {
 		return resourceSample{}, err
 	}
 	return resourceSample{
 		At:                  at,
-		CPUQuotaPercent:     cpuQuotaPercent,
+		CPUUsageNS:          cpuUsage,
 		WorkingSetBytes:     workingSet,
 		CPUPeriods:          stats.CPUStats.ThrottlingData.Periods,
 		CPUThrottledPeriods: stats.CPUStats.ThrottlingData.ThrottledPeriods,
