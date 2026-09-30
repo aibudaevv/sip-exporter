@@ -1037,10 +1037,6 @@ func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 		return parseErrTypeL3, err
 	}
 
-	carrier, carrierCountry := e.resolveCarrier(ipHeader)
-	sourceCountry := e.resolveSourceCountry(carrierCountry, ipHeader)
-	e.pktSrcIP = net.IPv4(ipHeader[12], ipHeader[13], ipHeader[14], ipHeader[15]).String()
-
 	if ipHeader[9] != ipProtoUDP {
 		return parseErrTypeL4, errors.New("not UDP packet")
 	}
@@ -1077,6 +1073,10 @@ func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 	if !isSIPMethod(sipData) {
 		return parseErrTypeSIP, errors.New("not a SIP packet")
 	}
+
+	carrier, carrierCountry := e.resolveCarrier(ipHeader)
+	sourceCountry := e.resolveSourceCountry(carrierCountry, ipHeader)
+	e.pktSrcIP = net.IPv4(ipHeader[12], ipHeader[13], ipHeader[14], ipHeader[15]).String()
 
 	zap.L().Debug("packet raw", zap.ByteString("sip_data", sipData))
 
