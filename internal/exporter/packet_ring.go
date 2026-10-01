@@ -45,6 +45,16 @@ type packetRingBlock struct {
 	firstPacketOffset uint32
 }
 
+type packetRingBlockOwnership struct {
+	references atomic.Int64
+	release    func()
+}
+
+type packetRingBlockReference struct {
+	ownership *packetRingBlockOwnership
+	released  atomic.Bool
+}
+
 type packetRingFrame struct {
 	data    []byte
 	ts      time.Time
@@ -200,6 +210,45 @@ func (b packetRingBlock) frames() packetRingFrameIterator {
 
 func (b packetRingBlock) release() {
 	atomic.StoreUint32((*uint32)(unsafe.Pointer(&b.data[tpacketV3BlockStatusOff])), unix.TP_STATUS_KERNEL)
+}
+
+func newPacketRingBlockReference(release func()) *packetRingBlockReference {
+	ownership := &packetRingBlockOwnership{release: release}
+	ownership.references.Store(1)
+	return &packetRingBlockReference{ownership: ownership}
+}
+
+func (r *packetRingBlockReference) retain() *packetRingBlockReference {
+	if r.released.Load() {
+		return nil
+	}
+	for {
+		references := r.ownership.references.Load()
+		if references == 0 {
+			return nil
+		}
+		if !r.ownership.references.CompareAndSwap(references, references+1) {
+			continue
+		}
+		if r.released.Load() {
+			r.ownership.releaseReference()
+			return nil
+		}
+		return &packetRingBlockReference{ownership: r.ownership}
+	}
+}
+
+func (r *packetRingBlockReference) release() {
+	if !r.released.CompareAndSwap(false, true) {
+		return
+	}
+	r.ownership.releaseReference()
+}
+
+func (o *packetRingBlockOwnership) releaseReference() {
+	if o.references.Add(-1) == 0 {
+		o.release()
+	}
 }
 
 func (i *packetRingFrameIterator) next() (packetRingFrame, bool, error) {

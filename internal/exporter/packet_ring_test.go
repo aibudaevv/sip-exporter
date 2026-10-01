@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -510,6 +511,72 @@ func TestPacketRingBlockRelease(t *testing.T) {
 	block.release()
 
 	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(memory[8:12]))
+}
+
+func TestPacketRingBlockReferenceReleasesAfterLastOwner(t *testing.T) {
+	memory := make([]byte, 128)
+	binary.NativeEndian.PutUint32(memory[8:12], unix.TP_STATUS_USER)
+	block := packetRingBlock{data: memory}
+	var releaseCalls atomic.Int32
+	root := newPacketRingBlockReference(func() {
+		releaseCalls.Add(1)
+		block.release()
+	})
+	first := root.retain()
+	second := root.retain()
+	require.NotNil(t, first)
+	require.NotNil(t, second)
+
+	root.release()
+	require.Equal(t, uint32(unix.TP_STATUS_USER), binary.NativeEndian.Uint32(memory[8:12]))
+	first.release()
+	require.Equal(t, uint32(unix.TP_STATUS_USER), binary.NativeEndian.Uint32(memory[8:12]))
+	second.release()
+
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(memory[8:12]))
+	require.Equal(t, int32(1), releaseCalls.Load())
+}
+
+func TestPacketRingBlockReferenceCannotBeReusedAfterRelease(t *testing.T) {
+	var releaseCalls atomic.Int32
+	root := newPacketRingBlockReference(func() { releaseCalls.Add(1) })
+	borrowed := root.retain()
+	require.NotNil(t, borrowed)
+
+	root.release()
+	root.release()
+	require.Nil(t, root.retain())
+	require.Zero(t, releaseCalls.Load())
+
+	borrowed.release()
+	borrowed.release()
+	require.Nil(t, borrowed.retain())
+	require.Equal(t, int32(1), releaseCalls.Load())
+}
+
+func TestPacketRingBlockReferenceConcurrentRelease(t *testing.T) {
+	const borrowedCount = 32
+	var releaseCalls atomic.Int32
+	root := newPacketRingBlockReference(func() { releaseCalls.Add(1) })
+	borrowed := make([]*packetRingBlockReference, borrowedCount)
+	for i := range borrowed {
+		borrowed[i] = root.retain()
+		require.NotNil(t, borrowed[i])
+	}
+	root.release()
+
+	var wg sync.WaitGroup
+	wg.Add(len(borrowed))
+	for _, reference := range borrowed {
+		go func() {
+			defer wg.Done()
+			reference.release()
+			reference.release()
+		}()
+	}
+	wg.Wait()
+
+	require.Equal(t, int32(1), releaseCalls.Load())
 }
 
 func TestConsumePacketRingBlockCopiesFramesAndMetadata(t *testing.T) {
