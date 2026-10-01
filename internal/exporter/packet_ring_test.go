@@ -2,6 +2,7 @@ package exporter
 
 import (
 	"math"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -114,4 +115,87 @@ func TestDefaultPacketRingGeometryMemoryBudget(t *testing.T) {
 	require.LessOrEqual(t, perInterface, uint64(128*miB))
 	require.Equal(t, uint64(24*miB), perInterface*3)
 	require.LessOrEqual(t, perInterface*3, uint64(256*miB))
+}
+
+func TestPacketRingCloseZeroValue(t *testing.T) {
+	var ring packetRing
+
+	require.NoError(t, ring.close())
+	require.NoError(t, ring.close())
+}
+
+func TestPacketRingCloseUnmapsMemory(t *testing.T) {
+	memory, err := unix.Mmap(-1, 0, unix.Getpagesize(), unix.PROT_READ|unix.PROT_WRITE,
+		unix.MAP_ANON|unix.MAP_PRIVATE)
+	require.NoError(t, err)
+	ring := packetRing{memory: memory}
+
+	require.NoError(t, ring.close())
+	require.Nil(t, ring.memory)
+	require.ErrorIs(t, unix.Mprotect(memory, unix.PROT_NONE), unix.ENOMEM)
+}
+
+func TestPacketRingCloseClosesFD(t *testing.T) {
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = unix.Close(fds[1]) })
+	ring := packetRing{fd: fds[0], fdOpen: true}
+
+	require.NoError(t, ring.close())
+	_, err = unix.FcntlInt(uintptr(fds[0]), unix.F_GETFD, 0)
+	require.ErrorIs(t, err, unix.EBADF)
+	require.NoError(t, ring.close())
+}
+
+func TestPacketRingCloseContinuesAfterRingDisableError(t *testing.T) {
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = unix.Close(fds[1]) })
+	ring := packetRing{fd: fds[0], fdOpen: true, rxRingConfigured: true}
+
+	require.ErrorContains(t, ring.close(), "disable packet RX ring")
+	_, err = unix.FcntlInt(uintptr(fds[0]), unix.F_GETFD, 0)
+	require.ErrorIs(t, err, unix.EBADF)
+	require.NoError(t, ring.close())
+}
+
+func TestPacketRingCloseConfiguredRXRing(t *testing.T) {
+	if syscall.Geteuid() != 0 {
+		t.Skip("requires root privileges for AF_PACKET")
+	}
+
+	fd, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW, int(htons(ethPAll)))
+	require.NoError(t, err)
+	fdOpen := true
+	t.Cleanup(func() {
+		if fdOpen {
+			_ = unix.Close(fd)
+		}
+	})
+	require.NoError(t, unix.SetsockoptInt(fd, unix.SOL_PACKET, unix.PACKET_VERSION, unix.TPACKET_V3))
+	req, err := defaultPacketRingGeometry().request(uint32(unix.Getpagesize()))
+	require.NoError(t, err)
+	require.NoError(t, unix.SetsockoptTpacketReq3(fd, unix.SOL_PACKET, unix.PACKET_RX_RING, &req))
+	rxRingConfigured := true
+	t.Cleanup(func() {
+		if rxRingConfigured {
+			_ = unix.SetsockoptTpacketReq3(fd, unix.SOL_PACKET, unix.PACKET_RX_RING, &unix.TpacketReq3{})
+		}
+	})
+	memory, err := unix.Mmap(fd, 0, int(req.Block_size*req.Block_nr), unix.PROT_READ|unix.PROT_WRITE,
+		unix.MAP_SHARED)
+	require.NoError(t, err)
+	memoryMapped := true
+	t.Cleanup(func() {
+		if memoryMapped {
+			_ = unix.Munmap(memory)
+		}
+	})
+	ring := packetRing{fd: fd, memory: memory, fdOpen: true, rxRingConfigured: true}
+
+	require.NoError(t, ring.close())
+	memoryMapped, rxRingConfigured, fdOpen = false, false, false
+	_, err = unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
+	require.ErrorIs(t, err, unix.EBADF)
+	require.NoError(t, ring.close())
 }
