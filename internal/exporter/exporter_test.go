@@ -296,6 +296,9 @@ func (m *mockMetricser) UpdateVQReport(carrier string, uaType string, _, _ strin
 	m.vqReport = report
 }
 
+func (m *mockMetricser) BindRTPMetrics(string, string, string, string, string) service.RTPMetricser {
+	return nil
+}
 func (m *mockMetricser) UpdateRTPPackets(_, _, _, _, _ string) {
 	m.rtpPacketsCalls++
 }
@@ -5143,6 +5146,9 @@ func (m *carrierTrackingMetricser) UpdateVQReport(carrier, uaType, _, _ string, 
 	m.vqReports = append(m.vqReports, carrierCall{carrier: carrier, uaType: uaType})
 }
 
+func (m *carrierTrackingMetricser) BindRTPMetrics(string, string, string, string, string) service.RTPMetricser {
+	return nil
+}
 func (m *carrierTrackingMetricser) UpdateRTPPackets(string, string, string, string, string)         {}
 func (m *carrierTrackingMetricser) UpdateRTPLoss(string, string, string, string, string, uint64)    {}
 func (m *carrierTrackingMetricser) UpdateRTPDuplicates(string, string, string, string, string)      {}

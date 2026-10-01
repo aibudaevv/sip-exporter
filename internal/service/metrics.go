@@ -178,6 +178,17 @@ type (
 		activeDialogs             prometheus.Gauge
 	}
 
+	boundRTPMetrics struct {
+		packets prometheus.Counter
+		pdv     prometheus.Observer
+	}
+
+	// RTPMetricser records packet-path metrics for one fixed RTP label set.
+	RTPMetricser interface {
+		UpdateRTPPackets()
+		UpdateRTPPDV(pdvMs float64)
+	}
+
 	// Metricser records all SIP, RTP, and VQ-RTCPXR metrics exposed by the
 	// exporter. Every method adds data point(s) to Prometheus collectors
 	// keyed by carrier, user-agent type, and source country.
@@ -211,6 +222,7 @@ type (
 		UpdateBillableSeconds(carrier, destinationCountry, direction string, duration time.Duration)
 		UpdateActiveRegistrations(counts []LabeledCount)
 		UpdateVQReport(carrier, uaType, sourceCountry, direction string, report *vq.SessionReport)
+		BindRTPMetrics(carrier, uaType, codec, sourceCountry, direction string) RTPMetricser
 		UpdateRTPPackets(carrier, uaType, codec, sourceCountry, direction string)
 		UpdateRTPLoss(carrier, uaType, codec, sourceCountry, direction string, lost uint64)
 		UpdateRTPDuplicates(carrier, uaType, codec, sourceCountry, direction string)
@@ -1213,6 +1225,21 @@ func (m *metrics) UpdateVQReport(carrier, uaType, sourceCountry, direction strin
 		}
 	}
 	m.vqReports.WithLabelValues(carrier, uaType, sourceCountry, direction).Inc()
+}
+
+func (m *metrics) BindRTPMetrics(carrier, uaType, codec, sourceCountry, direction string) RTPMetricser {
+	return &boundRTPMetrics{
+		packets: m.rtpPackets.WithLabelValues(carrier, uaType, codec, sourceCountry, direction),
+		pdv:     m.rtpPDV.WithLabelValues(carrier, uaType, codec, sourceCountry, direction),
+	}
+}
+
+func (m *boundRTPMetrics) UpdateRTPPackets() {
+	m.packets.Inc()
+}
+
+func (m *boundRTPMetrics) UpdateRTPPDV(pdvMs float64) {
+	m.pdv.Observe(pdvMs)
 }
 
 func (m *metrics) UpdateRTPPackets(carrier, uaType, codec, sourceCountry, direction string) {
