@@ -55,6 +55,11 @@ type packetRingBlockReference struct {
 	released  atomic.Bool
 }
 
+type packetBatchQueueAccounting struct {
+	maxPackets    int64
+	queuedPackets atomic.Int64
+}
+
 type packetRingFrame struct {
 	data    []byte
 	ts      time.Time
@@ -249,6 +254,37 @@ func (o *packetRingBlockOwnership) releaseReference() {
 	if o.references.Add(-1) == 0 {
 		o.release()
 	}
+}
+
+func newPacketBatchQueueAccounting(capacity uint32) *packetBatchQueueAccounting {
+	return &packetBatchQueueAccounting{maxPackets: int64(capacity)}
+}
+
+func (a *packetBatchQueueAccounting) reserve(requested uint32) uint32 {
+	for requested != 0 {
+		queued := a.queuedPackets.Load()
+		available := a.maxPackets - queued
+		if available <= 0 {
+			break
+		}
+		accepted := min(int64(requested), available)
+		if a.queuedPackets.CompareAndSwap(queued, queued+accepted) {
+			return uint32(accepted)
+		}
+	}
+	return 0
+}
+
+func (a *packetBatchQueueAccounting) release(packetCount uint32) {
+	a.queuedPackets.Add(-int64(packetCount))
+}
+
+func (a *packetBatchQueueAccounting) length() int {
+	return int(a.queuedPackets.Load())
+}
+
+func (a *packetBatchQueueAccounting) capacity() int {
+	return int(a.maxPackets)
 }
 
 func (i *packetRingFrameIterator) next() (packetRingFrame, bool, error) {

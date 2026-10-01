@@ -579,6 +579,75 @@ func TestPacketRingBlockReferenceConcurrentRelease(t *testing.T) {
 	require.Equal(t, int32(1), releaseCalls.Load())
 }
 
+func TestPacketBatchQueueAccountingReservesAvailablePackets(t *testing.T) {
+	accounting := newPacketBatchQueueAccounting(5)
+
+	require.Zero(t, accounting.reserve(0))
+	require.Equal(t, 0, accounting.length())
+	require.Equal(t, 5, accounting.capacity())
+
+	require.Equal(t, uint32(3), accounting.reserve(3))
+	require.Equal(t, 3, accounting.length())
+
+	require.Equal(t, uint32(2), accounting.reserve(3))
+	require.Equal(t, 5, accounting.length())
+	require.Zero(t, accounting.reserve(1))
+}
+
+func TestPacketBatchQueueAccountingCountsPacketsAcrossReservations(t *testing.T) {
+	oneReservation := newPacketBatchQueueAccounting(5)
+	multipleReservations := newPacketBatchQueueAccounting(5)
+
+	require.Equal(t, uint32(5), oneReservation.reserve(5))
+	require.Equal(t, uint32(2), multipleReservations.reserve(2))
+	require.Equal(t, uint32(3), multipleReservations.reserve(3))
+	require.Equal(t, 5, oneReservation.length())
+	require.Equal(t, 5, multipleReservations.length())
+
+	oneReservation.release(5)
+	multipleReservations.release(2)
+	require.Equal(t, 3, multipleReservations.length())
+	multipleReservations.release(3)
+	require.Zero(t, oneReservation.length())
+	require.Zero(t, multipleReservations.length())
+}
+
+func TestPacketBatchQueueAccountingConcurrentReservation(t *testing.T) {
+	const (
+		capacity = 1000
+		workers  = 64
+		request  = 31
+	)
+	accounting := newPacketBatchQueueAccounting(capacity)
+	accepted := make([]uint32, workers)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := range workers {
+		go func() {
+			defer wg.Done()
+			accepted[i] = accounting.reserve(request)
+		}()
+	}
+	wg.Wait()
+
+	var total uint32
+	for _, packetCount := range accepted {
+		total += packetCount
+	}
+	require.Equal(t, uint32(capacity), total)
+	require.Equal(t, capacity, accounting.length())
+
+	wg.Add(workers)
+	for _, packetCount := range accepted {
+		go func() {
+			defer wg.Done()
+			accounting.release(packetCount)
+		}()
+	}
+	wg.Wait()
+	require.Zero(t, accounting.length())
+}
+
 func TestConsumePacketRingBlockCopiesFramesAndMetadata(t *testing.T) {
 	sip := buildUDPPacket(12345, 5060)
 	rtp := buildUDPPacket(12345, 5004)
