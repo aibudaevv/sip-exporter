@@ -1,6 +1,7 @@
 package exporter
 
 import (
+	"encoding/binary"
 	"errors"
 	"math"
 	"syscall"
@@ -234,6 +235,8 @@ func TestSetupPacketRingSuccess(t *testing.T) {
 	require.True(t, ring.fdOpen)
 	require.True(t, ring.rxRingConfigured)
 	require.Len(t, ring.memory, 8*miB)
+	require.Equal(t, uint32(1<<20), ring.blockSize)
+	require.Equal(t, uint32(8), ring.blockCount)
 }
 
 func TestPacketRingCloseZeroValue(t *testing.T) {
@@ -305,4 +308,90 @@ func TestSetupPacketRingConfiguredRXRing(t *testing.T) {
 	_, err = unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
 	require.ErrorIs(t, err, unix.EBADF)
 	require.NoError(t, ring.close())
+}
+
+func TestPacketRingDecodeBlockStatusAndWrap(t *testing.T) {
+	const blockSize = 128
+	memory := make([]byte, 2*blockSize)
+	binary.NativeEndian.PutUint32(memory[8:12], unix.TP_STATUS_USER|unix.TP_STATUS_COPY)
+	binary.NativeEndian.PutUint32(memory[12:16], 1)
+	binary.NativeEndian.PutUint32(memory[16:20], tpacketV3BlockHeaderLen)
+	binary.NativeEndian.PutUint32(memory[blockSize+12:blockSize+16], math.MaxUint32)
+	ring := packetRing{memory: memory, blockSize: blockSize, blockCount: 2}
+
+	block, ready, err := ring.decodeBlock(0)
+	require.NoError(t, err)
+	require.True(t, ready)
+	require.Len(t, block.data, blockSize)
+	require.Equal(t, uint32(1), block.packetCount)
+	require.Equal(t, uint32(tpacketV3BlockHeaderLen), block.firstPacketOffset)
+	block.data[blockSize-1] = 42
+	require.Equal(t, byte(42), ring.memory[blockSize-1])
+	require.Equal(t, uint32(unix.TP_STATUS_USER|unix.TP_STATUS_COPY),
+		binary.NativeEndian.Uint32(memory[8:12]))
+
+	block, ready, err = ring.decodeBlock(1)
+	require.NoError(t, err)
+	require.False(t, ready)
+	require.Zero(t, block)
+
+	wrapped, ready, err := ring.decodeBlock(2)
+	require.NoError(t, err)
+	require.True(t, ready)
+	require.Len(t, wrapped.data, blockSize)
+	require.Equal(t, byte(42), wrapped.data[blockSize-1])
+}
+
+func TestPacketRingDecodeBlockBounds(t *testing.T) {
+	tests := []struct {
+		name            string
+		memorySize      int
+		blockSize       uint32
+		blockCount      uint32
+		packetCount     uint32
+		firstOffset     uint32
+		wantPacketCount uint32
+		wantErr         bool
+	}{
+		{name: "zero packets", memorySize: 128, blockSize: 128, blockCount: 1},
+		{name: "multiple packets", memorySize: 256, blockSize: 256, blockCount: 1,
+			packetCount: 2, firstOffset: tpacketV3BlockHeaderLen, wantPacketCount: 2},
+		{name: "block size shorter than header", memorySize: tpacketV3BlockHeaderLen - 1,
+			blockSize: tpacketV3BlockHeaderLen - 1, blockCount: 1, wantErr: true},
+		{name: "zero block count", memorySize: 128, blockSize: 128, wantErr: true},
+		{name: "truncated block header", memorySize: tpacketV3BlockHeaderLen - 1,
+			blockSize: 128, blockCount: 1, wantErr: true},
+		{name: "first frame overlaps block header", memorySize: 128, blockSize: 128,
+			blockCount: 1, packetCount: 1,
+			firstOffset: tpacketV3BlockHeaderLen - 1, wantErr: true},
+		{name: "first frame outside block", memorySize: 128, blockSize: 128,
+			blockCount: 1, packetCount: 1,
+			firstOffset: 128, wantErr: true},
+		{name: "packet count exceeds selected block capacity", memorySize: 192, blockSize: 128,
+			blockCount: 1, packetCount: 2,
+			firstOffset: tpacketV3BlockHeaderLen, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			memory := make([]byte, tt.memorySize)
+			if len(memory) >= tpacketV3BlockHeaderLen {
+				binary.NativeEndian.PutUint32(memory[8:12], unix.TP_STATUS_USER)
+				binary.NativeEndian.PutUint32(memory[12:16], tt.packetCount)
+				binary.NativeEndian.PutUint32(memory[16:20], tt.firstOffset)
+			}
+			ring := packetRing{memory: memory, blockSize: tt.blockSize, blockCount: tt.blockCount}
+
+			block, ready, err := ring.decodeBlock(0)
+			if tt.wantErr {
+				require.Error(t, err)
+				require.False(t, ready)
+				require.Zero(t, block)
+				return
+			}
+			require.NoError(t, err)
+			require.True(t, ready)
+			require.Equal(t, tt.wantPacketCount, block.packetCount)
+		})
+	}
 }

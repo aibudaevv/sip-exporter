@@ -1,8 +1,11 @@
 package exporter
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"sync/atomic"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -14,6 +17,7 @@ const (
 	packetRingRetireTimeoutMS = 60
 	maxPacketRingBytes        = 8 * miB
 	tpacketV3BlockHeaderLen   = 48 // sizeof struct tpacket_block_desc in the Linux UAPI.
+	tpacketV3BlockStatusOff   = 8
 	tpacketV3HeaderLen        = (unix.SizeofTpacket3Hdr+unix.TPACKET_ALIGNMENT-1) &
 		^(unix.TPACKET_ALIGNMENT-1) + unix.SizeofSockaddrLinklayer
 )
@@ -24,9 +28,17 @@ type packetRingGeometry struct {
 
 type packetRing struct {
 	fd               int
+	blockSize        uint32
+	blockCount       uint32
 	memory           []byte
 	fdOpen           bool
 	rxRingConfigured bool
+}
+
+type packetRingBlock struct {
+	data              []byte
+	packetCount       uint32
+	firstPacketOffset uint32
 }
 
 type packetRingSetupOps struct {
@@ -82,6 +94,7 @@ func setupPacketRing(
 	if err != nil {
 		return rollbackPacketRingSetup(ring, fmt.Errorf("build packet ring request: %w", err))
 	}
+	ring.blockSize, ring.blockCount = req.Block_size, req.Block_nr
 	if err = ops.setVersion(fd, unix.SOL_PACKET, unix.PACKET_VERSION, unix.TPACKET_V3); err != nil {
 		return rollbackPacketRingSetup(ring, fmt.Errorf("set PACKET_VERSION: %w", err))
 	}
@@ -95,6 +108,39 @@ func setupPacketRing(
 		return rollbackPacketRingSetup(ring, fmt.Errorf("mmap PACKET_RX_RING: %w", err))
 	}
 	return ring, nil
+}
+
+func (r *packetRing) decodeBlock(index uint32) (packetRingBlock, bool, error) {
+	if r.blockSize < tpacketV3BlockHeaderLen || r.blockCount == 0 {
+		return packetRingBlock{}, false, fmt.Errorf("invalid packet ring geometry: %w", unix.EINVAL)
+	}
+	physicalIndex := index % r.blockCount
+	start := uint64(physicalIndex) * uint64(r.blockSize)
+	end := start + uint64(r.blockSize)
+	if end > uint64(len(r.memory)) {
+		return packetRingBlock{}, false, fmt.Errorf("truncated packet ring block: %w", unix.EINVAL)
+	}
+	block := r.memory[int(start):int(end)]
+	status := atomic.LoadUint32((*uint32)(unsafe.Pointer(&block[tpacketV3BlockStatusOff])))
+	if status&unix.TP_STATUS_USER == 0 {
+		return packetRingBlock{}, false, nil
+	}
+	packetCount := binary.NativeEndian.Uint32(block[12:16])
+	firstPacketOffset := binary.NativeEndian.Uint32(block[16:20])
+	if packetCount == 0 {
+		return packetRingBlock{data: block}, true, nil
+	}
+	if firstPacketOffset < tpacketV3BlockHeaderLen ||
+		uint64(firstPacketOffset)+uint64(tpacketV3HeaderLen) > uint64(len(block)) {
+		return packetRingBlock{}, false, fmt.Errorf("invalid first packet offset: %w", unix.EINVAL)
+	}
+	capacity := (uint32(len(block)) - firstPacketOffset) / uint32(tpacketV3HeaderLen)
+	if packetCount > capacity {
+		return packetRingBlock{}, false, fmt.Errorf("invalid packet count: %w", unix.EINVAL)
+	}
+	return packetRingBlock{
+		data: block, packetCount: packetCount, firstPacketOffset: firstPacketOffset,
+	}, true, nil
 }
 
 func rollbackPacketRingSetup(ring *packetRing, setupErr error) (*packetRing, error) {
