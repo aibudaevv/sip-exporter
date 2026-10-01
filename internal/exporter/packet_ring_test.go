@@ -648,6 +648,422 @@ func TestPacketBatchQueueAccountingConcurrentReservation(t *testing.T) {
 	require.Zero(t, accounting.length())
 }
 
+func TestPacketBatchQueueAdmitsPureRTPByPacketCapacity(t *testing.T) {
+	tests := []struct {
+		name, iface            string
+		capacity, accepted     uint32
+		wantDrops, wantBatches int
+	}{
+		{name: "full capacity", iface: "eth-full", capacity: 3, accepted: 3, wantBatches: 1},
+		{name: "partial capacity", iface: "eth-partial", capacity: 2, accepted: 2, wantDrops: 1, wantBatches: 1},
+		{name: "zero capacity", iface: "eth-zero", wantDrops: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			block := packetRingBlockWithPackets(t, []packetRingFrame{
+				{data: buildUDPPacket(10000, 5004)},
+				{data: buildUDPPacket(10001, 5005)},
+				{data: buildUDPPacket(10002, 5006)},
+			})
+			drops := 0
+			queue := newPacketBatchQueue(tt.capacity, func() { drops++ })
+
+			keepReading, err := queue.enqueueBlock(block, tt.iface, []uint16{5060})
+
+			require.NoError(t, err)
+			require.True(t, keepReading)
+			require.Equal(t, tt.wantDrops, drops)
+			require.Equal(t, int(tt.accepted), queue.accounting.length())
+			require.Len(t, queue.runs, tt.wantBatches)
+			if tt.accepted == 0 {
+				require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(block.data[8:12]))
+				return
+			}
+
+			run := <-queue.runs
+			require.Equal(t, tt.iface, run.iface)
+			require.Len(t, run.frames, int(tt.accepted))
+			for i, frame := range run.frames {
+				require.Equal(t, uint16(5004+i), binary.BigEndian.Uint16(frame.data[36:38]))
+			}
+			require.Equal(t, uint32(unix.TP_STATUS_USER), binary.NativeEndian.Uint32(block.data[8:12]))
+
+			run.release()
+			require.Zero(t, queue.accounting.length())
+			require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(block.data[8:12]))
+		})
+	}
+}
+
+func TestPacketBatchQueueBlocksSIPUntilConsumerReleasesCapacity(t *testing.T) {
+	var drops atomic.Int32
+	queue := newPacketBatchQueue(2, func() { drops.Add(1) })
+	firstBlock := packetRingBlockWithPackets(t, []packetRingFrame{
+		{data: buildUDPPacket(10000, 5004)},
+		{data: buildUDPPacket(10001, 5005)},
+	})
+	keepReading, err := queue.enqueueBlock(firstBlock, "eth-rtp", []uint16{5060})
+	require.NoError(t, err)
+	require.True(t, keepReading)
+	firstRun := <-queue.runs
+
+	sipBlock := packetRingBlockWithPackets(t, []packetRingFrame{
+		{data: buildUDPPacket(20000, 5060)},
+		{data: buildUDPPacket(20001, 5060)},
+	})
+	type enqueueResult struct {
+		keepReading bool
+		err         error
+	}
+	result := make(chan enqueueResult, 1)
+	go func() {
+		keep, enqueueErr := queue.enqueueBlock(sipBlock, "eth-sip", []uint16{5060})
+		result <- enqueueResult{keepReading: keep, err: enqueueErr}
+	}()
+
+	select {
+	case <-result:
+		t.Fatal("SIP run was admitted without packet capacity")
+	case <-time.After(20 * time.Millisecond):
+	}
+	firstRun.release()
+
+	select {
+	case got := <-result:
+		require.NoError(t, got.err)
+		require.True(t, got.keepReading)
+	case <-time.After(time.Second):
+		t.Fatal("SIP run did not resume after consumer released capacity")
+	}
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(firstBlock.data[8:12]))
+	sipRun := <-queue.runs
+	require.Len(t, sipRun.frames, 2)
+	require.Equal(t, uint32(unix.TP_STATUS_USER), binary.NativeEndian.Uint32(sipBlock.data[8:12]))
+	sipRun.release()
+	require.Zero(t, drops.Load())
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(sipBlock.data[8:12]))
+}
+
+func TestPacketBatchQueueRTPYieldsToWaitingSIP(t *testing.T) {
+	var drops atomic.Int32
+	queue := newPacketBatchQueue(2, func() { drops.Add(1) })
+	t.Cleanup(queue.stop)
+	require.Equal(t, uint32(2), queue.accounting.reserve(2))
+
+	sipBlock := packetRingBlockWithPackets(t, []packetRingFrame{
+		{data: buildUDPPacket(20000, 5060)},
+		{data: buildUDPPacket(20001, 5060)},
+	})
+	type enqueueResult struct {
+		keepReading bool
+		err         error
+	}
+	result := make(chan enqueueResult, 1)
+	go func() {
+		keep, err := queue.enqueueBlock(sipBlock, "eth-sip", []uint16{5060})
+		result <- enqueueResult{keepReading: keep, err: err}
+	}()
+	require.Eventually(t, func() bool {
+		return packetBatchQueueSIPWaiters(queue) == 1
+	}, time.Second, time.Millisecond)
+
+	queue.admissionMu.Lock()
+	queue.accounting.release(1)
+	queue.admissionMu.Unlock()
+	rtpBlock := packetRingBlockWithPackets(t,
+		[]packetRingFrame{{data: buildUDPPacket(10000, 5004)}})
+	keepReading, err := queue.enqueueBlock(rtpBlock, "eth-rtp", []uint16{5060})
+
+	require.NoError(t, err)
+	require.True(t, keepReading)
+	require.Equal(t, int32(1), drops.Load())
+	require.Equal(t, 1, queue.accounting.length())
+	require.Empty(t, queue.runs)
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(rtpBlock.data[8:12]))
+
+	queue.release(1)
+	select {
+	case got := <-result:
+		require.NoError(t, got.err)
+		require.True(t, got.keepReading)
+	case <-time.After(time.Second):
+		t.Fatal("waiting SIP run did not reserve released capacity")
+	}
+	require.Zero(t, packetBatchQueueSIPWaiters(queue))
+	sipRun := <-queue.runs
+	require.Len(t, sipRun.frames, 2)
+	sipRun.release()
+	require.Zero(t, queue.accounting.length())
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(sipBlock.data[8:12]))
+}
+
+func TestPacketBatchQueuePreservesSIPWaiterOrder(t *testing.T) {
+	var drops atomic.Int32
+	queue := newPacketBatchQueue(2, func() { drops.Add(1) })
+	t.Cleanup(queue.stop)
+	require.Equal(t, uint32(2), queue.accounting.reserve(2))
+	type enqueueResult struct {
+		keepReading bool
+		err         error
+	}
+
+	olderBlock := packetRingBlockWithPackets(t, []packetRingFrame{
+		{data: buildUDPPacket(20000, 5060)},
+		{data: buildUDPPacket(20001, 5060)},
+	})
+	olderResult := make(chan enqueueResult, 1)
+	go func() {
+		keep, err := queue.enqueueBlock(olderBlock, "eth-older", []uint16{5060})
+		olderResult <- enqueueResult{keepReading: keep, err: err}
+	}()
+	require.Eventually(t, func() bool {
+		return packetBatchQueueSIPWaiters(queue) == 1
+	}, time.Second, time.Millisecond)
+
+	queue.admissionMu.Lock()
+	queue.accounting.release(1)
+	queue.admissionMu.Unlock()
+	newerBlock := packetRingBlockWithPackets(t,
+		[]packetRingFrame{{data: buildUDPPacket(30000, 5060)}})
+	newerResult := make(chan enqueueResult, 1)
+	go func() {
+		keep, err := queue.enqueueBlock(newerBlock, "eth-newer", []uint16{5060})
+		newerResult <- enqueueResult{keepReading: keep, err: err}
+	}()
+	require.Eventually(t, func() bool {
+		return packetBatchQueueSIPWaiters(queue) == 2
+	}, time.Second, time.Millisecond)
+
+	queue.release(1)
+	select {
+	case got := <-olderResult:
+		require.NoError(t, got.err)
+		require.True(t, got.keepReading)
+	case <-time.After(time.Second):
+		t.Fatal("older SIP run did not reserve full capacity")
+	}
+	olderRun := <-queue.runs
+	require.Equal(t, "eth-older", olderRun.iface)
+	require.Len(t, olderRun.frames, 2)
+	require.Equal(t, uint32(1), packetBatchQueueSIPWaiters(queue))
+	olderRun.release()
+
+	select {
+	case got := <-newerResult:
+		require.NoError(t, got.err)
+		require.True(t, got.keepReading)
+	case <-time.After(time.Second):
+		t.Fatal("newer SIP run did not follow the older run")
+	}
+	newerRun := <-queue.runs
+	require.Equal(t, "eth-newer", newerRun.iface)
+	require.Len(t, newerRun.frames, 1)
+	newerRun.release()
+
+	require.Zero(t, packetBatchQueueSIPWaiters(queue))
+	require.Zero(t, queue.accounting.length())
+	require.Zero(t, drops.Load())
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(olderBlock.data[8:12]))
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(newerBlock.data[8:12]))
+}
+
+func TestPacketBatchQueueSplitsSIPRunLargerThanCapacity(t *testing.T) {
+	var drops atomic.Int32
+	queue := newPacketBatchQueue(2, func() { drops.Add(1) })
+	t.Cleanup(queue.stop)
+	block := packetRingBlockWithPackets(t, []packetRingFrame{
+		{data: buildUDPPacket(20000, 5060)},
+		{data: buildUDPPacket(20001, 5060)},
+		{data: buildUDPPacket(20002, 5060)},
+	})
+	type enqueueResult struct {
+		keepReading bool
+		err         error
+	}
+	result := make(chan enqueueResult, 1)
+	go func() {
+		keep, err := queue.enqueueBlock(block, "eth-sip", []uint16{5060})
+		result <- enqueueResult{keepReading: keep, err: err}
+	}()
+
+	require.Eventually(t, func() bool { return len(queue.runs) == 1 }, time.Second, time.Millisecond)
+	first := <-queue.runs
+	require.Len(t, first.frames, 2)
+	first.release()
+
+	select {
+	case got := <-result:
+		require.NoError(t, got.err)
+		require.True(t, got.keepReading)
+	case <-time.After(time.Second):
+		t.Fatal("SIP suffix was not admitted after consumer released capacity")
+	}
+	second := <-queue.runs
+	require.Len(t, second.frames, 1)
+	require.Equal(t, uint16(5060), binary.BigEndian.Uint16(second.frames[0].data[36:38]))
+	require.Equal(t, uint32(unix.TP_STATUS_USER), binary.NativeEndian.Uint32(block.data[8:12]))
+	second.release()
+	require.Zero(t, drops.Load())
+	require.Zero(t, queue.accounting.length())
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(block.data[8:12]))
+}
+
+func TestPacketBatchQueuePreservesMixedRunOrderAndRTPPolicy(t *testing.T) {
+	drops := 0
+	queue := newPacketBatchQueue(2, func() { drops++ })
+	block := packetRingBlockWithPackets(t, []packetRingFrame{
+		{data: buildUDPPacket(10000, 5060)},
+		{data: buildUDPPacket(10001, 5004)},
+		{data: buildUDPPacket(10002, 5060)},
+		{data: buildUDPPacket(10003, 5005)},
+	})
+	type enqueueResult struct {
+		keepReading bool
+		err         error
+	}
+	result := make(chan enqueueResult, 1)
+	go func() {
+		keep, err := queue.enqueueBlock(block, "eth-mixed", []uint16{5060})
+		result <- enqueueResult{keepReading: keep, err: err}
+	}()
+
+	require.Eventually(t, func() bool { return len(queue.runs) == 2 }, time.Second, time.Millisecond)
+	first := <-queue.runs
+	wantPorts := []uint16{5060}
+	require.Equal(t, wantPorts[0], binary.BigEndian.Uint16(first.frames[0].data[36:38]))
+	first.release()
+
+	select {
+	case got := <-result:
+		require.NoError(t, got.err)
+		require.True(t, got.keepReading)
+	case <-time.After(time.Second):
+		t.Fatal("mixed block did not resume after SIP capacity became available")
+	}
+	for len(queue.runs) != 0 {
+		run := <-queue.runs
+		for _, frame := range run.frames {
+			wantPorts = append(wantPorts, binary.BigEndian.Uint16(frame.data[36:38]))
+		}
+		run.release()
+	}
+
+	require.Equal(t, []uint16{5060, 5004, 5060}, wantPorts)
+	require.Equal(t, 1, drops)
+	require.Zero(t, queue.accounting.length())
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(block.data[8:12]))
+}
+
+func TestPacketBatchQueueStopsBlockedSIPOnShutdown(t *testing.T) {
+	var drops atomic.Int32
+	queue := newPacketBatchQueue(0, func() { drops.Add(1) })
+	block := packetRingBlockWithPackets(t, []packetRingFrame{{data: buildUDPPacket(10000, 5060)}})
+	type enqueueResult struct {
+		keepReading bool
+		err         error
+	}
+	result := make(chan enqueueResult, 1)
+	go func() {
+		keepReading, err := queue.enqueueBlock(block, "eth-sip", []uint16{5060})
+		result <- enqueueResult{keepReading: keepReading, err: err}
+	}()
+	require.Eventually(t, func() bool {
+		return packetBatchQueueSIPWaiters(queue) == 1
+	}, time.Second, time.Millisecond)
+	queue.stop()
+
+	select {
+	case got := <-result:
+		require.NoError(t, got.err)
+		require.False(t, got.keepReading)
+	case <-time.After(time.Second):
+		t.Fatal("blocked SIP admission ignored shutdown")
+	}
+	require.Zero(t, queue.accounting.length())
+	require.Empty(t, queue.runs)
+	require.Zero(t, drops.Load())
+	require.Zero(t, packetBatchQueueSIPWaiters(queue))
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(block.data[8:12]))
+}
+
+func TestPacketBatchQueueRejectsRunsAfterStop(t *testing.T) {
+	tests := []struct {
+		name     string
+		capacity uint32
+		port     uint16
+	}{
+		{name: "SIP with capacity", capacity: 1, port: 5060},
+		{name: "RTP with capacity", capacity: 1, port: 5004},
+		{name: "RTP without capacity", port: 5004},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var drops atomic.Int32
+			queue := newPacketBatchQueue(tt.capacity, func() { drops.Add(1) })
+			queue.stop()
+			block := packetRingBlockWithPackets(t,
+				[]packetRingFrame{{data: buildUDPPacket(10000, tt.port)}})
+
+			keepReading, err := queue.enqueueBlock(block, "eth-stopped", []uint16{5060})
+
+			require.NoError(t, err)
+			require.False(t, keepReading)
+			require.Zero(t, drops.Load())
+			require.Zero(t, queue.accounting.length())
+			require.Empty(t, queue.runs)
+			require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(block.data[8:12]))
+		})
+	}
+}
+
+func packetBatchQueueSIPWaiters(queue *packetBatchQueue) uint32 {
+	queue.admissionMu.Lock()
+	defer queue.admissionMu.Unlock()
+	return queue.pendingSIP
+}
+
+func TestPacketBatchQueueAdmitsValidPrefixBeforeIteratorError(t *testing.T) {
+	tests := []struct {
+		name                  string
+		prefixPort, capacity  uint16
+		wantBatches, wantDrop int
+	}{
+		{name: "SIP prefix", prefixPort: 5060, capacity: 1, wantBatches: 1},
+		{name: "RTP prefix without capacity", prefixPort: 5004, wantDrop: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			block := packetRingBlockWithPackets(t, []packetRingFrame{
+				{data: buildUDPPacket(10000, tt.prefixPort)},
+				{data: buildUDPPacket(10001, 5005)},
+			})
+			const secondFrameOffset = tpacketV3BlockHeaderLen + 128
+			binary.NativeEndian.PutUint16(
+				block.data[secondFrameOffset+24:], uint16(tpacketV3HeaderLen-1),
+			)
+			drops := 0
+			queue := newPacketBatchQueue(uint32(tt.capacity), func() { drops++ })
+
+			keepReading, err := queue.enqueueBlock(block, "eth-prefix", []uint16{5060})
+
+			require.ErrorIs(t, err, unix.EINVAL)
+			require.True(t, keepReading)
+			require.Equal(t, tt.wantDrop, drops)
+			require.Len(t, queue.runs, tt.wantBatches)
+			if tt.wantBatches == 0 {
+				require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(block.data[8:12]))
+				return
+			}
+			run := <-queue.runs
+			require.Len(t, run.frames, 1)
+			require.Equal(t, tt.prefixPort, binary.BigEndian.Uint16(run.frames[0].data[36:38]))
+			require.Equal(t, uint32(unix.TP_STATUS_USER), binary.NativeEndian.Uint32(block.data[8:12]))
+			run.release()
+			require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(block.data[8:12]))
+		})
+	}
+}
+
 func TestConsumePacketRingBlockCopiesFramesAndMetadata(t *testing.T) {
 	sip := buildUDPPacket(12345, 5060)
 	rtp := buildUDPPacket(12345, 5004)

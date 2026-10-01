@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -58,6 +59,26 @@ type packetRingBlockReference struct {
 type packetBatchQueueAccounting struct {
 	maxPackets    int64
 	queuedPackets atomic.Int64
+}
+
+type packetRingFrameRun struct {
+	frames    []packetRingFrame
+	iface     string
+	reference *packetRingBlockReference
+	queue     *packetBatchQueue
+}
+
+type packetBatchQueue struct {
+	runs       chan *packetRingFrameRun
+	accounting *packetBatchQueueAccounting
+	rtpDropped func()
+
+	admissionMu      sync.RWMutex
+	admissionChanged chan struct{}
+	pendingSIP       uint32
+	nextSIP          uint64
+	servingSIP       uint64
+	stopped          bool
 }
 
 type packetRingFrame struct {
@@ -275,6 +296,18 @@ func (a *packetBatchQueueAccounting) reserve(requested uint32) uint32 {
 	return 0
 }
 
+func (a *packetBatchQueueAccounting) reserveAll(requested uint32) bool {
+	for {
+		queued := a.queuedPackets.Load()
+		if int64(requested) > a.maxPackets-queued {
+			return false
+		}
+		if a.queuedPackets.CompareAndSwap(queued, queued+int64(requested)) {
+			return true
+		}
+	}
+}
+
 func (a *packetBatchQueueAccounting) release(packetCount uint32) {
 	a.queuedPackets.Add(-int64(packetCount))
 }
@@ -285,6 +318,162 @@ func (a *packetBatchQueueAccounting) length() int {
 
 func (a *packetBatchQueueAccounting) capacity() int {
 	return int(a.maxPackets)
+}
+
+func newPacketBatchQueue(capacity uint32, rtpDropped func()) *packetBatchQueue {
+	return &packetBatchQueue{
+		runs: make(chan *packetRingFrameRun, capacity), accounting: newPacketBatchQueueAccounting(capacity),
+		rtpDropped: rtpDropped, admissionChanged: make(chan struct{}),
+	}
+}
+
+func (q *packetBatchQueue) enqueueBlock(
+	block packetRingBlock, iface string, ports []uint16,
+) (bool, error) {
+	reference := newPacketRingBlockReference(block.release)
+	defer reference.release()
+	frames := make([]packetRingFrame, 0, block.packetCount)
+	iterator := block.frames()
+	runStart := 0
+	runSIP := false
+	for {
+		frame, ok, err := iterator.next()
+		if err != nil {
+			if runStart < len(frames) && !q.enqueueRun(reference, iface, frames[runStart:], runSIP) {
+				return false, nil
+			}
+			return true, err
+		}
+		if !ok {
+			break
+		}
+		isSIP := isSIPPacket(frame.data, ports)
+		if len(frames) == 0 {
+			runSIP = isSIP
+		} else if isSIP != runSIP {
+			if !q.enqueueRun(reference, iface, frames[runStart:], runSIP) {
+				return false, nil
+			}
+			runStart = len(frames)
+			runSIP = isSIP
+		}
+		frames = append(frames, frame)
+	}
+	if runStart < len(frames) && !q.enqueueRun(reference, iface, frames[runStart:], runSIP) {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (q *packetBatchQueue) enqueueRun(
+	reference *packetRingBlockReference, iface string, frames []packetRingFrame, sip bool,
+) bool {
+	if sip && q.accounting.capacity() > 0 && len(frames) > q.accounting.capacity() {
+		capacity := q.accounting.capacity()
+		for start := 0; start < len(frames); start += capacity {
+			end := min(start+capacity, len(frames))
+			if !q.enqueueRun(reference, iface, frames[start:end:end], true) {
+				return false
+			}
+		}
+		return true
+	}
+	packetCount := uint32(len(frames))
+	if sip {
+		return q.enqueueSIPRun(reference, iface, frames)
+	}
+	return q.enqueueRTPRun(reference, iface, frames, packetCount)
+}
+
+func (q *packetBatchQueue) enqueueSIPRun(
+	reference *packetRingBlockReference, iface string, frames []packetRingFrame,
+) bool {
+	packetCount := uint32(len(frames))
+	q.admissionMu.Lock()
+	if q.stopped {
+		q.admissionMu.Unlock()
+		return false
+	}
+	ticket := q.nextSIP
+	q.nextSIP++
+	q.pendingSIP++
+	for {
+		if q.stopped {
+			q.pendingSIP--
+			q.admissionMu.Unlock()
+			return false
+		}
+		if ticket == q.servingSIP && q.accounting.reserveAll(packetCount) {
+			borrowed := reference.retain()
+			q.runs <- &packetRingFrameRun{
+				frames: frames, iface: iface, reference: borrowed, queue: q,
+			}
+			q.finishSIPLocked()
+			q.admissionMu.Unlock()
+			return true
+		}
+		changed := q.admissionChanged
+		q.admissionMu.Unlock()
+		<-changed
+		q.admissionMu.Lock()
+	}
+}
+
+func (q *packetBatchQueue) finishSIPLocked() {
+	q.pendingSIP--
+	q.servingSIP++
+	q.signalAdmissionLocked()
+}
+
+func (q *packetBatchQueue) enqueueRTPRun(
+	reference *packetRingBlockReference, iface string, frames []packetRingFrame, packetCount uint32,
+) bool {
+	q.admissionMu.RLock()
+	if q.stopped {
+		q.admissionMu.RUnlock()
+		return false
+	}
+	accepted := uint32(0)
+	if q.pendingSIP == 0 {
+		accepted = q.accounting.reserve(packetCount)
+	}
+	for dropped := accepted; dropped < packetCount; dropped++ {
+		q.rtpDropped()
+	}
+	if accepted != 0 {
+		borrowed := reference.retain()
+		q.runs <- &packetRingFrameRun{
+			frames: frames[:accepted:accepted], iface: iface, reference: borrowed, queue: q,
+		}
+	}
+	q.admissionMu.RUnlock()
+	return true
+}
+
+func (q *packetBatchQueue) release(packetCount uint32) {
+	q.admissionMu.Lock()
+	q.accounting.release(packetCount)
+	q.signalAdmissionLocked()
+	q.admissionMu.Unlock()
+}
+
+func (q *packetBatchQueue) signalAdmissionLocked() {
+	close(q.admissionChanged)
+	q.admissionChanged = make(chan struct{})
+}
+
+func (q *packetBatchQueue) stop() {
+	q.admissionMu.Lock()
+	if !q.stopped {
+		q.stopped = true
+		q.signalAdmissionLocked()
+	}
+	q.admissionMu.Unlock()
+}
+
+func (r *packetRingFrameRun) release() {
+	r.queue.release(uint32(len(r.frames)))
+	r.reference.release()
 }
 
 func (i *packetRingFrameIterator) next() (packetRingFrame, bool, error) {
