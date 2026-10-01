@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -18,6 +19,8 @@ const (
 	maxPacketRingBytes        = 8 * miB
 	tpacketV3BlockHeaderLen   = 48 // sizeof struct tpacket_block_desc in the Linux UAPI.
 	tpacketV3BlockStatusOff   = 8
+	tpacketV3FrameAlignment   = 8 // V3_ALIGNMENT in Linux net/packet/af_packet.c.
+	tpacketV3PacketTypeOff    = unix.SizeofTpacket3Hdr + 10
 	tpacketV3HeaderLen        = (unix.SizeofTpacket3Hdr+unix.TPACKET_ALIGNMENT-1) &
 		^(unix.TPACKET_ALIGNMENT-1) + unix.SizeofSockaddrLinklayer
 )
@@ -39,6 +42,17 @@ type packetRingBlock struct {
 	data              []byte
 	packetCount       uint32
 	firstPacketOffset uint32
+}
+
+type packetRingFrame struct {
+	data    []byte
+	ts      time.Time
+	pkttype uint8
+}
+
+type packetRingFrameIterator struct {
+	block         packetRingBlock
+	index, offset uint32
 }
 
 type packetRingSetupOps struct {
@@ -141,6 +155,53 @@ func (r *packetRing) decodeBlock(index uint32) (packetRingBlock, bool, error) {
 	return packetRingBlock{
 		data: block, packetCount: packetCount, firstPacketOffset: firstPacketOffset,
 	}, true, nil
+}
+
+func (b packetRingBlock) frames() packetRingFrameIterator {
+	return packetRingFrameIterator{block: b, offset: b.firstPacketOffset}
+}
+
+func (i *packetRingFrameIterator) next() (packetRingFrame, bool, error) {
+	if i.index >= i.block.packetCount {
+		return packetRingFrame{}, false, nil
+	}
+	start := uint64(i.offset)
+	headerEnd := start + uint64(tpacketV3HeaderLen)
+	if headerEnd > uint64(len(i.block.data)) {
+		return i.invalid("truncated packet frame metadata")
+	}
+	header := i.block.data[int(start):int(headerEnd)]
+	nextOffset := binary.NativeEndian.Uint32(header[0:4])
+	snaplen := binary.NativeEndian.Uint32(header[12:16])
+	macOffset := binary.NativeEndian.Uint16(header[24:26])
+	payloadStart := start + uint64(macOffset)
+	payloadEnd := payloadStart + uint64(snaplen)
+	if macOffset < uint16(tpacketV3HeaderLen) {
+		return i.invalid("invalid packet data offset")
+	}
+	if payloadEnd > uint64(len(i.block.data)) {
+		return i.invalid("truncated packet frame data")
+	}
+	if i.index+1 < i.block.packetCount {
+		nextStart := start + uint64(nextOffset)
+		if nextOffset%tpacketV3FrameAlignment != 0 ||
+			nextStart < payloadEnd || nextStart+uint64(tpacketV3HeaderLen) > uint64(len(i.block.data)) {
+			return i.invalid("invalid next packet offset")
+		}
+		i.offset += nextOffset
+	}
+	i.index++
+	return packetRingFrame{
+		data: i.block.data[int(payloadStart):int(payloadEnd)],
+		ts: time.Unix(int64(binary.NativeEndian.Uint32(header[4:8])),
+			int64(binary.NativeEndian.Uint32(header[8:12]))),
+		pkttype: header[tpacketV3PacketTypeOff],
+	}, true, nil
+}
+
+func (i *packetRingFrameIterator) invalid(reason string) (packetRingFrame, bool, error) {
+	i.index = i.block.packetCount
+	return packetRingFrame{}, false, fmt.Errorf("%s: %w", reason, unix.EINVAL)
 }
 
 func rollbackPacketRingSetup(ring *packetRing, setupErr error) (*packetRing, error) {

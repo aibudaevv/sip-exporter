@@ -6,6 +6,7 @@ import (
 	"math"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
@@ -394,4 +395,121 @@ func TestPacketRingDecodeBlockBounds(t *testing.T) {
 			require.Equal(t, tt.wantPacketCount, block.packetCount)
 		})
 	}
+}
+
+func TestPacketRingFrameIterator(t *testing.T) {
+	memory := make([]byte, 320)
+	binary.NativeEndian.PutUint32(memory[8:12], unix.TP_STATUS_USER)
+	putPacketRingFrame(memory, 48, 88, time.Unix(100, 200), unix.PACKET_OUTGOING, []byte("one"))
+	putPacketRingFrame(memory, 136, 0, time.Unix(300, 400), unix.PACKET_HOST, []byte("two"))
+	iterator := (packetRingBlock{data: memory, packetCount: 2, firstPacketOffset: 48}).frames()
+
+	first, ok, err := iterator.next()
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, []byte("one"), first.data)
+	require.Equal(t, time.Unix(100, 200), first.ts)
+	require.Equal(t, uint8(unix.PACKET_OUTGOING), first.pkttype)
+	first.data[0] = 'O'
+	require.Equal(t, byte('O'), memory[128])
+
+	second, ok, err := iterator.next()
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, []byte("two"), second.data)
+	require.Equal(t, time.Unix(300, 400), second.ts)
+	require.Equal(t, uint8(unix.PACKET_HOST), second.pkttype)
+
+	frame, ok, err := iterator.next()
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Zero(t, frame)
+	require.Equal(t, uint32(unix.TP_STATUS_USER), binary.NativeEndian.Uint32(memory[8:12]))
+}
+
+func TestPacketRingFrameIteratorBounds(t *testing.T) {
+	tests := []struct {
+		name        string
+		memorySize  int
+		packetCount uint32
+		firstOffset uint32
+		nextOffset  uint32
+		macOffset   uint16
+		snaplen     uint32
+	}{
+		{name: "truncated frame metadata", memorySize: 100, packetCount: 1, firstOffset: 48},
+		{name: "packet data overlaps metadata", memorySize: 128, packetCount: 1,
+			firstOffset: 48, macOffset: tpacketV3HeaderLen - 1},
+		{name: "snap length outside block", memorySize: 128, packetCount: 1,
+			firstOffset: 48, macOffset: tpacketV3HeaderLen, snaplen: 13},
+		{name: "zero next offset before last frame", memorySize: 256, packetCount: 2,
+			firstOffset: 48, macOffset: tpacketV3HeaderLen, snaplen: 1},
+		{name: "next offset overlaps packet data", memorySize: 256, packetCount: 2,
+			firstOffset: 48, nextOffset: 64, macOffset: tpacketV3HeaderLen, snaplen: 1},
+		{name: "unaligned next offset", memorySize: 256, packetCount: 2,
+			firstOffset: 48, nextOffset: 84, macOffset: tpacketV3HeaderLen, snaplen: 1},
+		{name: "next frame metadata outside block", memorySize: 256, packetCount: 2,
+			firstOffset: 48, nextOffset: 160, macOffset: tpacketV3HeaderLen, snaplen: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			memory := make([]byte, tt.memorySize)
+			if int(tt.firstOffset)+unix.SizeofTpacket3Hdr <= len(memory) {
+				header := memory[tt.firstOffset:]
+				binary.NativeEndian.PutUint32(header[0:4], tt.nextOffset)
+				binary.NativeEndian.PutUint32(header[12:16], tt.snaplen)
+				binary.NativeEndian.PutUint16(header[24:26], tt.macOffset)
+			}
+			iterator := (packetRingBlock{
+				data: memory, packetCount: tt.packetCount, firstPacketOffset: tt.firstOffset,
+			}).frames()
+
+			frame, ok, err := iterator.next()
+			require.ErrorIs(t, err, unix.EINVAL)
+			require.False(t, ok)
+			require.Zero(t, frame)
+			frame, ok, err = iterator.next()
+			require.NoError(t, err)
+			require.False(t, ok)
+			require.Zero(t, frame)
+		})
+	}
+}
+
+func TestPacketRingFrameIteratorZeroPackets(t *testing.T) {
+	iterator := (packetRingBlock{data: make([]byte, 48)}).frames()
+
+	frame, ok, err := iterator.next()
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Zero(t, frame)
+}
+
+func TestPacketRingFrameIteratorAllocations(t *testing.T) {
+	memory := make([]byte, 160)
+	putPacketRingFrame(memory, 48, 0, time.Unix(100, 200), unix.PACKET_HOST, []byte{42})
+	block := packetRingBlock{data: memory, packetCount: 1, firstPacketOffset: 48}
+
+	allocations := testing.AllocsPerRun(1000, func() {
+		iterator := block.frames()
+		frame, ok, err := iterator.next()
+		if err != nil || !ok || len(frame.data) != 1 || frame.data[0] != 42 {
+			panic("unexpected packet ring frame")
+		}
+	})
+	require.Zero(t, allocations)
+}
+
+func putPacketRingFrame(
+	memory []byte, offset, nextOffset uint32, timestamp time.Time, pkttype uint8, payload []byte,
+) {
+	header := memory[offset:]
+	binary.NativeEndian.PutUint32(header[0:4], nextOffset)
+	binary.NativeEndian.PutUint32(header[4:8], uint32(timestamp.Unix()))
+	binary.NativeEndian.PutUint32(header[8:12], uint32(timestamp.Nanosecond()))
+	binary.NativeEndian.PutUint32(header[12:16], uint32(len(payload)))
+	binary.NativeEndian.PutUint16(header[24:26], 80)
+	header[unix.SizeofTpacket3Hdr+10] = pkttype
+	copy(header[80:], payload)
 }
