@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"math"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -499,6 +500,360 @@ func TestPacketRingFrameIteratorAllocations(t *testing.T) {
 		}
 	})
 	require.Zero(t, allocations)
+}
+
+func TestPacketRingBlockRelease(t *testing.T) {
+	memory := make([]byte, 128)
+	binary.NativeEndian.PutUint32(memory[8:12], unix.TP_STATUS_USER|unix.TP_STATUS_COPY)
+	block := packetRingBlock{data: memory}
+
+	block.release()
+
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(memory[8:12]))
+}
+
+func TestConsumePacketRingBlockCopiesFramesAndMetadata(t *testing.T) {
+	sip := buildUDPPacket(12345, 5060)
+	rtp := buildUDPPacket(12345, 5004)
+	rtcp := buildUDPPacket(12345, 5005)
+	block := packetRingBlockWithPackets(t, []packetRingFrame{
+		{data: sip, ts: time.Unix(100, 200), pkttype: unix.PACKET_HOST},
+		{data: rtp, ts: time.Unix(300, 400), pkttype: unix.PACKET_OUTGOING},
+		{data: rtcp, ts: time.Unix(500, 600), pkttype: unix.PACKET_HOST},
+	})
+	e := &exporter{
+		messages: make(chan *rawPacket, 3), done: make(chan struct{}),
+		services: services{metricser: &mockMetricser{}},
+	}
+
+	keepReading, err := e.consumePacketRingBlock(block, "eth-test", []uint16{5060})
+	require.NoError(t, err)
+	require.True(t, keepReading)
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(block.data[8:12]))
+
+	packets := make([]*rawPacket, 0, 3)
+	for i, want := range []packetRingFrame{
+		{data: sip, ts: time.Unix(100, 200), pkttype: unix.PACKET_HOST},
+		{data: rtp, ts: time.Unix(300, 400), pkttype: unix.PACKET_OUTGOING},
+		{data: rtcp, ts: time.Unix(500, 600), pkttype: unix.PACKET_HOST},
+	} {
+		packet := <-e.messages
+		packets = append(packets, packet)
+		require.Equal(t, want.data, packet.data, "packet %d payload", i)
+		require.Equal(t, "eth-test", packet.iface)
+		require.Equal(t, want.ts, packet.ts)
+		require.Equal(t, want.pkttype, packet.pkttype)
+	}
+
+	block.data[128] ^= 0xff
+	require.Equal(t, sip, packets[0].data)
+}
+
+func TestConsumePacketRingBlockCountsEveryRTPDrop(t *testing.T) {
+	block := packetRingBlockWithPackets(t, []packetRingFrame{
+		{data: buildUDPPacket(12345, 5004)},
+		{data: buildUDPPacket(12345, 5005)},
+	})
+	metricser := &mockMetricser{}
+	e := &exporter{
+		messages: make(chan *rawPacket, 1), done: make(chan struct{}),
+		services: services{metricser: metricser},
+	}
+	e.messages <- &rawPacket{}
+
+	keepReading, err := e.consumePacketRingBlock(block, "eth-test", []uint16{5060})
+	require.NoError(t, err)
+	require.True(t, keepReading)
+	require.Equal(t, 2, metricser.rtpDroppedCount)
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(block.data[8:12]))
+}
+
+func TestConsumePacketRingBlockReleasesOnShutdown(t *testing.T) {
+	block := packetRingBlockWithPackets(t, []packetRingFrame{{data: buildUDPPacket(12345, 5060)}})
+	e := &exporter{
+		messages: make(chan *rawPacket), done: make(chan struct{}),
+		services: services{metricser: &mockMetricser{}},
+	}
+	close(e.done)
+
+	keepReading, err := e.consumePacketRingBlock(block, "eth-test", []uint16{5060})
+	require.NoError(t, err)
+	require.False(t, keepReading)
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(block.data[8:12]))
+}
+
+func TestConsumePacketRingBlockReleasesMalformedBlock(t *testing.T) {
+	block := packetRingBlockWithPackets(t, []packetRingFrame{{data: buildUDPPacket(12345, 5060)}})
+	binary.NativeEndian.PutUint16(block.data[tpacketV3BlockHeaderLen+24:], tpacketV3HeaderLen-1)
+	e := &exporter{
+		messages: make(chan *rawPacket, 1), done: make(chan struct{}),
+		services: services{metricser: &mockMetricser{}},
+	}
+
+	keepReading, err := e.consumePacketRingBlock(block, "eth-test", []uint16{5060})
+
+	require.ErrorIs(t, err, unix.EINVAL)
+	require.True(t, keepReading)
+	require.Empty(t, e.messages)
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(block.data[8:12]))
+}
+
+func TestReadPacketRingConsumesBlocksBeforeWaiting(t *testing.T) {
+	first := packetRingBlockWithPackets(t, []packetRingFrame{{data: buildUDPPacket(10000, 5060)}})
+	second := packetRingBlockWithPackets(t, []packetRingFrame{{data: buildUDPPacket(10001, 5060)}})
+	memory := append(append([]byte(nil), first.data...), second.data...)
+	ring := &packetRing{
+		fd: 42, memory: memory, blockSize: uint32(len(first.data)), blockCount: 2,
+	}
+	for i := range uint32(2) {
+		block, ready, err := ring.decodeBlock(i)
+		require.NoError(t, err, "block %d", i)
+		require.True(t, ready, "block %d", i)
+		require.Equal(t, uint32(1), block.packetCount, "block %d", i)
+	}
+	metricser := &mockMetricser{}
+	e := &exporter{
+		messages: make(chan *rawPacket, 2), done: make(chan struct{}),
+		services: services{metricser: metricser},
+	}
+	waits := 0
+
+	e.readPacketRing(sockEntry{ring: ring, iface: "eth-test"}, []uint16{5060}, func(fd int) error {
+		require.Equal(t, 42, fd)
+		waits++
+		return unix.ENODEV
+	})
+
+	require.Equal(t, 1, waits)
+	require.Len(t, e.messages, 2)
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(memory[8:12]))
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(memory[len(first.data)+8:]))
+	require.False(t, metricser.systemErrorCalled)
+}
+
+func TestReadPacketRingContinuesAfterNonDeliveringBlock(t *testing.T) {
+	tests := []struct {
+		name            string
+		first           func(*testing.T) packetRingBlock
+		wantSystemError bool
+	}{
+		{
+			name: "empty block",
+			first: func(t *testing.T) packetRingBlock {
+				return packetRingBlockWithPackets(t, nil)
+			},
+		},
+		{
+			name: "malformed frame",
+			first: func(t *testing.T) packetRingBlock {
+				block := packetRingBlockWithPackets(t,
+					[]packetRingFrame{{data: buildUDPPacket(10000, 5060)}})
+				binary.NativeEndian.PutUint16(
+					block.data[tpacketV3BlockHeaderLen+24:], tpacketV3HeaderLen-1)
+				return block
+			},
+			wantSystemError: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			first := tt.first(t)
+			second := packetRingBlockWithPackets(t,
+				[]packetRingFrame{{data: buildUDPPacket(10001, 5060)}})
+			blockSize := len(second.data)
+			memory := make([]byte, blockSize*2)
+			copy(memory, first.data)
+			copy(memory[blockSize:], second.data)
+			ring := &packetRing{
+				fd: 42, memory: memory, blockSize: uint32(blockSize), blockCount: 2,
+			}
+			metricser := &mockMetricser{}
+			e := &exporter{
+				messages: make(chan *rawPacket, 1), done: make(chan struct{}),
+				services: services{metricser: metricser},
+			}
+
+			e.readPacketRing(sockEntry{ring: ring, iface: "eth-test"}, []uint16{5060},
+				func(int) error { return unix.ENODEV })
+
+			require.Len(t, e.messages, 1)
+			require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(memory[8:12]))
+			require.Equal(t, uint32(unix.TP_STATUS_KERNEL),
+				binary.NativeEndian.Uint32(memory[blockSize+8:]))
+			require.Equal(t, tt.wantSystemError, metricser.systemErrorCalled)
+		})
+	}
+}
+
+func TestReadPacketRingHotUnplugStopsWithoutSystemError(t *testing.T) {
+	metricser := &mockMetricser{}
+	e := &exporter{
+		messages: make(chan *rawPacket, 1), done: make(chan struct{}),
+		services: services{metricser: metricser},
+	}
+	ring := &packetRing{fd: 42, memory: make([]byte, 128), blockSize: 128, blockCount: 1}
+
+	e.readPacketRing(sockEntry{ring: ring, iface: "eth-test"}, []uint16{5060}, func(int) error {
+		return unix.ENETDOWN
+	})
+
+	require.False(t, metricser.systemErrorCalled)
+}
+
+func TestWaitPacketRingRejectsInvalidFD(t *testing.T) {
+	require.ErrorIs(t, waitPacketRing(-1), unix.EBADF)
+}
+
+func TestPacketRingPollResult(t *testing.T) {
+	tests := []struct {
+		name      string
+		revents   int16
+		socketErr int
+		want      error
+	}{
+		{name: "ready", revents: unix.POLLIN},
+		{name: "invalid fd", revents: unix.POLLNVAL, want: unix.EBADF},
+		{name: "hot unplug", revents: unix.POLLERR, socketErr: int(unix.ENETDOWN), want: unix.ENETDOWN},
+		{name: "unexpected socket error", revents: unix.POLLERR, socketErr: int(unix.EIO), want: unix.EIO},
+		{name: "hangup without socket error", revents: unix.POLLHUP, want: unix.ENODEV},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.ErrorIs(t, packetRingPollResult(tt.revents, tt.socketErr), tt.want)
+		})
+	}
+}
+
+func TestReadSocketUsesPacketRing(t *testing.T) {
+	payload := buildUDPPacket(10000, 5060)
+	block := packetRingBlockWithPackets(t, []packetRingFrame{{data: payload}})
+	ring := &packetRing{
+		fd: -1, memory: block.data, blockSize: uint32(len(block.data)), blockCount: 1,
+	}
+	e := &exporter{
+		socks:       []sockEntry{{fd: -1, iface: "eth-test", ring: ring}},
+		sipPortSets: [][]uint16{{5060}},
+		messages:    make(chan *rawPacket, 1),
+		done:        make(chan struct{}),
+		services:    services{metricser: &mockMetricser{}},
+	}
+
+	e.wg.Add(1)
+	go e.readSocket(0)
+
+	select {
+	case packet := <-e.messages:
+		require.Equal(t, payload, packet.data)
+		require.Equal(t, "eth-test", packet.iface)
+	case <-time.After(time.Second):
+		t.Fatal("readSocket did not consume the ready packet ring block")
+	}
+	e.wg.Wait()
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(block.data[8:12]))
+}
+
+func TestExporterCloseUnmapsPacketRings(t *testing.T) {
+	memory, err := unix.Mmap(-1, 0, unix.Getpagesize(), unix.PROT_READ|unix.PROT_WRITE,
+		unix.MAP_ANON|unix.MAP_PRIVATE)
+	require.NoError(t, err)
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = unix.Close(fds[1]) })
+	ring := &packetRing{fd: fds[0], memory: memory, fdOpen: true}
+	e := &exporter{
+		socks: []sockEntry{{fd: fds[0], ring: ring}},
+		done:  make(chan struct{}), messages: make(chan *rawPacket),
+	}
+
+	e.Close()
+
+	require.False(t, ring.fdOpen)
+	require.Nil(t, ring.memory)
+	require.ErrorIs(t, unix.Mprotect(memory, unix.PROT_NONE), unix.ENOMEM)
+}
+
+func TestExporterCloseStopsBlockedPacketRingReaderBeforeTeardown(t *testing.T) {
+	block := packetRingBlockWithPackets(t, []packetRingFrame{{data: buildUDPPacket(12345, 5060)}})
+	fd, err := unix.MemfdCreate("packet-ring-close-test", unix.MFD_CLOEXEC)
+	require.NoError(t, err)
+	fdOwnedByRing := false
+	t.Cleanup(func() {
+		if !fdOwnedByRing {
+			_ = unix.Close(fd)
+		}
+	})
+	require.NoError(t, unix.Ftruncate(fd, int64(unix.Getpagesize())))
+	ringMemory, err := unix.Mmap(fd, 0, unix.Getpagesize(), unix.PROT_READ|unix.PROT_WRITE,
+		unix.MAP_SHARED)
+	require.NoError(t, err)
+	memoryOwnedByRing := false
+	t.Cleanup(func() {
+		if !memoryOwnedByRing {
+			_ = unix.Munmap(ringMemory)
+		}
+	})
+	observerMemory, err := unix.Mmap(fd, 0, unix.Getpagesize(), unix.PROT_READ|unix.PROT_WRITE,
+		unix.MAP_SHARED)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, unix.Munmap(observerMemory)) })
+	copy(ringMemory, block.data)
+	ring := &packetRing{
+		fd: fd, memory: ringMemory, blockSize: uint32(len(ringMemory)), blockCount: 1, fdOpen: true,
+	}
+	fdOwnedByRing = true
+	memoryOwnedByRing = true
+	t.Cleanup(func() { _ = ring.close() })
+	acquired := make(chan struct{})
+	e := &exporter{
+		socks:       []sockEntry{{fd: -1, iface: "eth-test", ring: ring}},
+		sipPortSets: [][]uint16{{5060}},
+		messages:    make(chan *rawPacket, 1),
+		done:        make(chan struct{}),
+		services:    services{metricser: &mockMetricser{}},
+		packetPool: sync.Pool{New: func() any {
+			close(acquired)
+			return &rawPacket{data: make([]byte, 0, readBufSize)}
+		}},
+	}
+	e.messages <- &rawPacket{}
+	e.wg.Add(1)
+	go e.readSocket(0)
+	<-acquired
+	closed := make(chan struct{})
+	go func() {
+		e.Close()
+		close(closed)
+	}()
+
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("Close did not stop the blocked packet ring reader")
+	}
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(observerMemory[8:12]))
+	require.Nil(t, ring.memory)
+	require.False(t, ring.fdOpen)
+	require.ErrorIs(t, unix.Mprotect(ringMemory, unix.PROT_NONE), unix.ENOMEM)
+}
+
+func packetRingBlockWithPackets(t *testing.T, frames []packetRingFrame) packetRingBlock {
+	t.Helper()
+	const frameStride = 128
+	memory := make([]byte, tpacketV3BlockHeaderLen+frameStride*len(frames))
+	binary.NativeEndian.PutUint32(memory[8:12], unix.TP_STATUS_USER)
+	binary.NativeEndian.PutUint32(memory[12:16], uint32(len(frames)))
+	binary.NativeEndian.PutUint32(memory[16:20], tpacketV3BlockHeaderLen)
+	for i, frame := range frames {
+		offset := uint32(tpacketV3BlockHeaderLen + frameStride*i)
+		nextOffset := uint32(frameStride)
+		if i == len(frames)-1 {
+			nextOffset = 0
+		}
+		putPacketRingFrame(memory, offset, nextOffset, frame.ts, frame.pkttype, frame.data)
+	}
+	return packetRingBlock{
+		data: memory, packetCount: uint32(len(frames)), firstPacketOffset: tpacketV3BlockHeaderLen,
+	}
 }
 
 func putPacketRingFrame(

@@ -178,6 +178,7 @@ type (
 	sockEntry struct {
 		fd    int
 		iface string
+		ring  *packetRing
 	}
 	rawPacket struct {
 		data    []byte
@@ -384,7 +385,7 @@ func (e *exporter) Initialize(cfg InitConfig) error {
 	// releaseAll rolls back every resource allocated so far on failure.
 	releaseAll := func() {
 		for _, s := range createdSocks {
-			_ = unix.Close(s.fd)
+			_ = s.ring.close()
 		}
 		for _, c := range collections {
 			c.Close()
@@ -418,10 +419,16 @@ func (e *exporter) Initialize(cfg InitConfig) error {
 			releaseAll()
 			return fmt.Errorf("interface %s: %w", ifaceName, sockErr)
 		}
+		ring, ringErr := setupPacketRing(sock, defaultPacketRingGeometry(), linuxPacketRingSetupOps())
+		if ringErr != nil {
+			coll.Close()
+			releaseAll()
+			return fmt.Errorf("interface %s: %w", ifaceName, ringErr)
+		}
 
 		collections = append(collections, coll)
 		rtpEndpointsMaps = append(rtpEndpointsMaps, rtpMap)
-		createdSocks = append(createdSocks, sockEntry{fd: sock, iface: ifaceName})
+		createdSocks = append(createdSocks, sockEntry{fd: sock, iface: ifaceName, ring: ring})
 	}
 
 	e.collections = collections
@@ -755,13 +762,17 @@ func (e *exporter) Close() {
 	e.closeOnce.Do(func() {
 		e.initialized.Store(false)
 		close(e.done)
+		e.wg.Wait()
 		for _, c := range e.collections {
 			c.Close()
 		}
 		for _, s := range e.socks {
+			if s.ring != nil {
+				_ = s.ring.close()
+				continue
+			}
 			_ = unix.Close(s.fd)
 		}
-		e.wg.Wait()
 		close(e.messages)
 	})
 }
@@ -865,7 +876,7 @@ func parseTimestampNS(oob []byte) time.Time {
 	return time.Unix(sec, nsec)
 }
 
-func (e *exporter) readSocket(idx int) {
+func (e *exporter) readSocketRecvmsg(idx int) {
 	defer e.wg.Done()
 	entry := e.socks[idx]
 	buf := make([]byte, readBufSize)
@@ -903,6 +914,69 @@ func (e *exporter) readSocket(idx int) {
 
 		if !e.sendPacket(pkt, e.sipPortSets[idx]) {
 			return
+		}
+	}
+}
+
+func (e *exporter) readSocket(idx int) {
+	defer e.wg.Done()
+	e.readPacketRing(e.socks[idx], e.sipPortSets[idx], waitPacketRing)
+}
+
+func (e *exporter) readPacketRing(
+	entry sockEntry, ports []uint16, wait func(int) error,
+) {
+	var blockIndex uint32
+	for {
+		select {
+		case <-e.done:
+			return
+		default:
+		}
+		block, ready, err := entry.ring.decodeBlock(blockIndex)
+		if err != nil {
+			e.services.metricser.SystemError()
+			zap.L().Error("decode packet ring block", zap.Error(err))
+			return
+		}
+		if !ready {
+			if err = wait(entry.ring.fd); err != nil && e.handleReadError(err) {
+				return
+			}
+			continue
+		}
+		keepReading, consumeErr := e.consumePacketRingBlock(block, entry.iface, ports)
+		blockIndex++
+		if consumeErr != nil {
+			e.services.metricser.SystemError()
+			zap.L().Error("iterate packet ring block", zap.Error(consumeErr))
+		}
+		if !keepReading {
+			return
+		}
+	}
+}
+
+func (e *exporter) consumePacketRingBlock(
+	block packetRingBlock, iface string, ports []uint16,
+) (bool, error) {
+	defer block.release()
+	frames := block.frames()
+	for {
+		frame, ok, err := frames.next()
+		if err != nil {
+			return true, err
+		}
+		if !ok {
+			return true, nil
+		}
+		pkt := e.acquireBuf()
+		pkt.data = append(pkt.data[:0], frame.data...)
+		pkt.iface = iface
+		pkt.ts = frame.ts
+		pkt.pkttype = frame.pkttype
+		if !e.sendPacket(pkt, ports) {
+			return false, nil
 		}
 	}
 }

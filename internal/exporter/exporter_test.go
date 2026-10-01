@@ -5979,7 +5979,7 @@ func TestHandleRequestNOTIFYVQInvalidBody(t *testing.T) {
 	require.Empty(t, mm.vqReports, "VQ handler should not report metrics for invalid body")
 }
 
-// TestExporterGracefulShutdown verifies that readSocket exits cleanly when
+// TestExporterGracefulShutdown verifies that the legacy recvmsg reader exits cleanly when
 // Close() is called (no EBADF spin loop), and that Close() completes within a
 // reasonable timeout. readPackets and sipDialogMetricsUpdate also receive the
 // done signal and wind down asynchronously.
@@ -6010,7 +6010,7 @@ func TestExporterGracefulShutdown(t *testing.T) {
 	e.wg.Add(1)
 	go e.readPackets()
 	e.wg.Add(1)
-	go e.readSocket(0)
+	go e.readSocketRecvmsg(0)
 	e.wg.Add(1)
 	go e.sipDialogMetricsUpdate()
 
@@ -6599,7 +6599,7 @@ func TestSIPDialogMetricsUpdateTrackerLenNoRace(t *testing.T) {
 	require.NotPanics(t, func() { e.Close() })
 }
 
-// TestReadSocketFailStopNoSystemError verifies that readSocket returns cleanly
+// TestReadSocketFailStopNoSystemError verifies that the legacy recvmsg reader returns cleanly
 // without incrementing SystemError when the socket becomes invalid (EBADF).
 // This is the same return-path used for ENETDOWN/ENODEV hot-unplug (S14-7.1):
 // the goroutine stops silently rather than spamming Error+SystemError every
@@ -6625,7 +6625,7 @@ func TestReadSocketFailStopNoSystemError(t *testing.T) {
 	}
 
 	e.wg.Add(1)
-	go e.readSocket(0)
+	go e.readSocketRecvmsg(0)
 
 	// Close the FD → EBADF in readSocket → clean return, no SystemError.
 	unix.Close(fds[0])

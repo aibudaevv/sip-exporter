@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync/atomic"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -157,8 +158,48 @@ func (r *packetRing) decodeBlock(index uint32) (packetRingBlock, bool, error) {
 	}, true, nil
 }
 
+func waitPacketRing(fd int) error {
+	if fd < 0 {
+		return unix.EBADF
+	}
+	pollFDs := [1]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+	n, err := unix.Poll(pollFDs[:], int(socketRcvTimeo/time.Millisecond))
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return unix.EAGAIN
+	}
+	revents := pollFDs[0].Revents
+	var socketErr int
+	if revents&(unix.POLLERR|unix.POLLHUP) != 0 {
+		socketErr, err = unix.GetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_ERROR)
+		if err != nil {
+			return err
+		}
+	}
+	return packetRingPollResult(revents, socketErr)
+}
+
+func packetRingPollResult(revents int16, socketErr int) error {
+	if revents&unix.POLLNVAL != 0 {
+		return unix.EBADF
+	}
+	if socketErr != 0 {
+		return syscall.Errno(socketErr)
+	}
+	if revents&(unix.POLLERR|unix.POLLHUP) != 0 {
+		return unix.ENODEV
+	}
+	return nil
+}
+
 func (b packetRingBlock) frames() packetRingFrameIterator {
 	return packetRingFrameIterator{block: b, offset: b.firstPacketOffset}
+}
+
+func (b packetRingBlock) release() {
+	atomic.StoreUint32((*uint32)(unsafe.Pointer(&b.data[tpacketV3BlockStatusOff])), unix.TP_STATUS_KERNEL)
 }
 
 func (i *packetRingFrameIterator) next() (packetRingFrame, bool, error) {

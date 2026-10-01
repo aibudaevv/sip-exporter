@@ -414,6 +414,9 @@ func TestRTPReachesAppWithCapture(t *testing.T) {
 		before, after, delta)
 	require.GreaterOrEqual(t, delta, 3.0,
 		"RTP packets must reach the exporter socket when capture is enabled on a registered endpoint")
+	require.True(t, metricExists(t, endpoint, "sip_exporter_rtp_kernel_timestamp_missing_total"))
+	require.Zero(t, getMetricByLabel(t, endpoint, "sip_exporter_rtp_kernel_timestamp_missing_total"),
+		"TPACKET_V3 frames must preserve the kernel receive timestamp")
 
 	wait()
 }
