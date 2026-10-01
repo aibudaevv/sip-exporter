@@ -194,6 +194,13 @@ type (
 		endpoint rtpEndpointKey
 		callID   string
 	}
+	rtpMetricLabels struct {
+		carrier       string
+		uaType        string
+		codec         string
+		sourceCountry string
+		direction     string
+	}
 	rtpEndpointMap interface {
 		Update(key, value any, flags ebpf.MapUpdateFlags) error
 		Delete(key any) error
@@ -205,6 +212,7 @@ type (
 
 		dirtyRTPEndpoints map[rtpEndpointKey]bool
 		rtpAliasLabels    map[rtpAliasKey][2]string
+		rtpMetricHandles  map[rtpMetricLabels]service.RTPMetricser
 
 		rtpEndpointMutex  sync.Mutex
 		mediaLifecycleMu  sync.Mutex
@@ -1325,6 +1333,24 @@ func (e *exporter) handleRTP(
 	return e.handleRTPIPv4(ipv4Bytes(srcIP), srcPort, ipv4Bytes(dstIP), dstPort, payload)
 }
 
+func (e *exporter) rtpMetricHandle(res mediatracker.ObserveResult) service.RTPMetricser {
+	labels := rtpMetricLabels{
+		carrier: res.Carrier, uaType: res.UAType, codec: res.Codec,
+		sourceCountry: res.SourceCountry, direction: res.Direction,
+	}
+	if handle, ok := e.rtpMetricHandles[labels]; ok {
+		return handle
+	}
+	handle := e.services.metricser.BindRTPMetrics(
+		labels.carrier, labels.uaType, labels.codec, labels.sourceCountry, labels.direction,
+	)
+	if e.rtpMetricHandles == nil {
+		e.rtpMetricHandles = make(map[rtpMetricLabels]service.RTPMetricser)
+	}
+	e.rtpMetricHandles[labels] = handle
+	return handle
+}
+
 func (e *exporter) handleRTPIPv4(
 	srcIP [4]byte, srcPort uint16,
 	dstIP [4]byte, dstPort uint16,
@@ -1368,16 +1394,10 @@ func (e *exporter) handleRTPIPv4(
 			fasEndpoint{ip: binary.BigEndian.Uint32(res.MatchedIPv4[:]), port: res.MatchedPort},
 			res.StreamPacketsTotal, res.MatchedBy,
 		)
-		e.services.metricser.UpdateRTPPackets(res.Carrier, res.UAType, res.Codec, res.SourceCountry, res.Direction)
+		rtpMetrics := e.rtpMetricHandle(res)
+		rtpMetrics.UpdateRTPPackets()
 		if res.StreamPacketsTotal > 1 {
-			e.services.metricser.UpdateRTPPDV(
-				res.Carrier,
-				res.UAType,
-				res.Codec,
-				res.SourceCountry,
-				res.Direction,
-				res.DelayVariationMs,
-			)
+			rtpMetrics.UpdateRTPPDV(res.DelayVariationMs)
 		}
 	}
 	if res.Duplicate {

@@ -120,6 +120,10 @@ type mockMetricser struct {
 	vqUAType                       string
 	vqReport                       *vq.SessionReport
 	rtpPacketsCalls                int
+	rtpPDVCalls                    int
+	rtpPDVValue                    float64
+	rtpBindCalls                   int
+	rtpBindLabels                  [][5]string
 	rtpLossCalls                   int
 	rtpLossValue                   uint64
 	rtpDuplicateCalls              int
@@ -148,6 +152,19 @@ type mockMetricser struct {
 	rtpAliasCarrier                string
 	rtpAliasDirection              string
 	rtpAliasMismatchType           string
+}
+
+type mockRTPMetricser struct {
+	metricser *mockMetricser
+}
+
+func (m *mockRTPMetricser) UpdateRTPPackets() {
+	m.metricser.rtpPacketsCalls++
+}
+
+func (m *mockRTPMetricser) UpdateRTPPDV(pdvMs float64) {
+	m.metricser.rtpPDVCalls++
+	m.metricser.rtpPDVValue = pdvMs
 }
 
 func (m *mockMetricser) UpdateSessions(_ []service.LabeledCount) {}
@@ -296,8 +313,12 @@ func (m *mockMetricser) UpdateVQReport(carrier string, uaType string, _, _ strin
 	m.vqReport = report
 }
 
-func (m *mockMetricser) BindRTPMetrics(string, string, string, string, string) service.RTPMetricser {
-	return nil
+func (m *mockMetricser) BindRTPMetrics(
+	carrier, uaType, codec, sourceCountry, direction string,
+) service.RTPMetricser {
+	m.rtpBindCalls++
+	m.rtpBindLabels = append(m.rtpBindLabels, [5]string{carrier, uaType, codec, sourceCountry, direction})
+	return &mockRTPMetricser{metricser: m}
 }
 func (m *mockMetricser) UpdateRTPPackets(_, _, _, _, _ string) {
 	m.rtpPacketsCalls++
@@ -313,8 +334,11 @@ func (m *mockMetricser) UpdateRTPOutOfOrder(_, _, _, _, _ string) {
 	m.rtpOutOfOrderCalls++
 }
 func (m *mockMetricser) UpdateRTPJitter(string, string, string, string, string, float64) {}
-func (m *mockMetricser) UpdateRTPPDV(string, string, string, string, string, float64)    {}
-func (m *mockMetricser) UpdateRTPMOS(string, string, string, string, string, float64)    {}
+func (m *mockMetricser) UpdateRTPPDV(_, _, _, _, _ string, pdvMs float64) {
+	m.rtpPDVCalls++
+	m.rtpPDVValue = pdvMs
+}
+func (m *mockMetricser) UpdateRTPMOS(string, string, string, string, string, float64) {}
 func (m *mockMetricser) UpdateRTPMOSVariants(string, string, string, string, string, float64, float64, float64) {
 }
 func (m *mockMetricser) UpdateRTPRFactor(string, string, string, string, string, float64) {}
