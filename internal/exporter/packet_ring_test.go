@@ -1,6 +1,7 @@
 package exporter
 
 import (
+	"errors"
 	"math"
 	"syscall"
 	"testing"
@@ -117,6 +118,124 @@ func TestDefaultPacketRingGeometryMemoryBudget(t *testing.T) {
 	require.LessOrEqual(t, perInterface*3, uint64(256*miB))
 }
 
+func TestSetupPacketRingPartialFailureClosesFD(t *testing.T) {
+	injectedErr := errors.New("injected setup failure")
+	tests := []struct {
+		name      string
+		geometry  packetRingGeometry
+		failAt    string
+		wantCalls []string
+		wantErr   error
+		wantText  string
+	}{
+		{
+			name: "invalid geometry", geometry: packetRingGeometry{},
+			wantErr: unix.EINVAL, wantText: "build packet ring request",
+		},
+		{
+			name: "packet version", geometry: defaultPacketRingGeometry(), failAt: "version",
+			wantCalls: []string{"version"}, wantErr: injectedErr, wantText: "set PACKET_VERSION",
+		},
+		{
+			name: "RX ring", geometry: defaultPacketRingGeometry(), failAt: "ring",
+			wantCalls: []string{"version", "ring"}, wantErr: injectedErr, wantText: "configure PACKET_RX_RING",
+		},
+		{
+			name: "mmap", geometry: defaultPacketRingGeometry(), failAt: "mmap",
+			wantCalls: []string{"version", "ring", "mmap"}, wantErr: injectedErr,
+			wantText: "mmap PACKET_RX_RING",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM, 0)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = unix.Close(fds[1]) })
+			var calls []string
+			ops := packetRingSetupOps{
+				setVersion: func(fd, level, option, version int) error {
+					calls = append(calls, "version")
+					require.Equal(t, fds[0], fd)
+					require.Equal(t, unix.SOL_PACKET, level)
+					require.Equal(t, unix.PACKET_VERSION, option)
+					require.Equal(t, unix.TPACKET_V3, version)
+					if tt.failAt == "version" {
+						return injectedErr
+					}
+					return nil
+				},
+				setRXRing: func(fd, level, option int, req *unix.TpacketReq3) error {
+					calls = append(calls, "ring")
+					require.Equal(t, fds[0], fd)
+					require.Equal(t, unix.SOL_PACKET, level)
+					require.Equal(t, unix.PACKET_RX_RING, option)
+					require.Equal(t, &unix.TpacketReq3{
+						Block_size: 1 << 20, Block_nr: 8, Frame_size: 1 << 11,
+						Frame_nr: 4096, Retire_blk_tov: 60,
+					}, req)
+					if tt.failAt == "ring" {
+						return injectedErr
+					}
+					return nil
+				},
+				mmap: func(fd int, offset int64, length, prot, flags int) ([]byte, error) {
+					calls = append(calls, "mmap")
+					require.Equal(t, fds[0], fd)
+					require.Zero(t, offset)
+					require.Equal(t, 8*miB, length)
+					require.Equal(t, unix.PROT_READ|unix.PROT_WRITE, prot)
+					require.Equal(t, unix.MAP_SHARED, flags)
+					return nil, injectedErr
+				},
+			}
+
+			ring, setupErr := setupPacketRing(fds[0], tt.geometry, ops)
+			require.Nil(t, ring)
+			require.ErrorIs(t, setupErr, tt.wantErr)
+			require.ErrorContains(t, setupErr, tt.wantText)
+			if tt.failAt == "mmap" {
+				require.ErrorContains(t, setupErr, "disable packet RX ring")
+			}
+			require.Equal(t, tt.wantCalls, calls)
+			_, err = unix.FcntlInt(uintptr(fds[0]), unix.F_GETFD, 0)
+			require.ErrorIs(t, err, unix.EBADF)
+		})
+	}
+}
+
+func TestSetupPacketRingSuccess(t *testing.T) {
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = unix.Close(fds[1]) })
+	calls := make([]string, 0, 3)
+	ops := packetRingSetupOps{
+		setVersion: func(int, int, int, int) error {
+			calls = append(calls, "version")
+			return nil
+		},
+		setRXRing: func(int, int, int, *unix.TpacketReq3) error {
+			calls = append(calls, "ring")
+			return nil
+		},
+		mmap: func(_ int, _ int64, length int, _, _ int) ([]byte, error) {
+			calls = append(calls, "mmap")
+			return unix.Mmap(-1, 0, length, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_ANON|unix.MAP_PRIVATE)
+		},
+	}
+
+	ring, err := setupPacketRing(fds[0], defaultPacketRingGeometry(), ops)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		ring.rxRingConfigured = false
+		_ = ring.close()
+	})
+	require.Equal(t, []string{"version", "ring", "mmap"}, calls)
+	require.True(t, ring.fdOpen)
+	require.True(t, ring.rxRingConfigured)
+	require.Len(t, ring.memory, 8*miB)
+}
+
 func TestPacketRingCloseZeroValue(t *testing.T) {
 	var ring packetRing
 
@@ -159,7 +278,7 @@ func TestPacketRingCloseContinuesAfterRingDisableError(t *testing.T) {
 	require.NoError(t, ring.close())
 }
 
-func TestPacketRingCloseConfiguredRXRing(t *testing.T) {
+func TestSetupPacketRingConfiguredRXRing(t *testing.T) {
 	if syscall.Geteuid() != 0 {
 		t.Skip("requires root privileges for AF_PACKET")
 	}
@@ -172,29 +291,17 @@ func TestPacketRingCloseConfiguredRXRing(t *testing.T) {
 			_ = unix.Close(fd)
 		}
 	})
-	require.NoError(t, unix.SetsockoptInt(fd, unix.SOL_PACKET, unix.PACKET_VERSION, unix.TPACKET_V3))
-	req, err := defaultPacketRingGeometry().request(uint32(unix.Getpagesize()))
+	fdOpen = false
+	ring, err := setupPacketRing(fd, defaultPacketRingGeometry(), linuxPacketRingSetupOps())
 	require.NoError(t, err)
-	require.NoError(t, unix.SetsockoptTpacketReq3(fd, unix.SOL_PACKET, unix.PACKET_RX_RING, &req))
-	rxRingConfigured := true
-	t.Cleanup(func() {
-		if rxRingConfigured {
-			_ = unix.SetsockoptTpacketReq3(fd, unix.SOL_PACKET, unix.PACKET_RX_RING, &unix.TpacketReq3{})
-		}
-	})
-	memory, err := unix.Mmap(fd, 0, int(req.Block_size*req.Block_nr), unix.PROT_READ|unix.PROT_WRITE,
-		unix.MAP_SHARED)
+	t.Cleanup(func() { _ = ring.close() })
+	version, err := unix.GetsockoptInt(fd, unix.SOL_PACKET, unix.PACKET_VERSION)
 	require.NoError(t, err)
-	memoryMapped := true
-	t.Cleanup(func() {
-		if memoryMapped {
-			_ = unix.Munmap(memory)
-		}
-	})
-	ring := packetRing{fd: fd, memory: memory, fdOpen: true, rxRingConfigured: true}
+	require.Equal(t, unix.TPACKET_V3, version)
+	require.Len(t, ring.memory, 8*miB)
+	ring.memory[0] = 1
 
 	require.NoError(t, ring.close())
-	memoryMapped, rxRingConfigured, fdOpen = false, false, false
 	_, err = unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
 	require.ErrorIs(t, err, unix.EBADF)
 	require.NoError(t, ring.close())
