@@ -1346,6 +1346,48 @@ func TestProcessPacketRingRunContinuesAfterParseError(t *testing.T) {
 	require.Zero(t, queue.accounting.length())
 }
 
+func TestStartWorkersConsumesPacketRuns(t *testing.T) {
+	block := packetRingBlockWithFrameStride(t, 256, []packetRingFrame{{
+		data: rawUDPPacket(optionsPayload("worker-run")), ts: time.Unix(300, 400),
+		pkttype: unix.PACKET_HOST,
+	}})
+	queue := newPacketBatchQueue(1, func() {})
+	t.Cleanup(queue.stop)
+	keepReading, err := queue.enqueueBlock(block, "eth-worker", []uint16{5060})
+	require.NoError(t, err)
+	require.True(t, keepReading)
+	processed := make(chan struct{})
+	metricser := &mockMetricser{requestHook: func() { close(processed) }}
+	e := &exporter{
+		packetBatches:  queue,
+		done:           make(chan struct{}),
+		services:       services{metricser: metricser, dialoger: &mockDialoger{}},
+		optionsTracker: make(map[string]optionsEntry),
+	}
+	var stopOnce sync.Once
+	stop := func() {
+		stopOnce.Do(func() {
+			close(e.done)
+			e.wg.Wait()
+		})
+	}
+	t.Cleanup(stop)
+
+	e.startWorkers()
+	select {
+	case <-processed:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("production workers did not consume the queued packet run")
+	}
+	stop()
+
+	require.Equal(t, 1, metricser.requestCount)
+	require.Zero(t, queue.accounting.length())
+	require.Equal(t, "eth-worker", e.pktIface)
+	require.Equal(t, time.Unix(300, 400), e.pktTimestamp)
+	require.Equal(t, uint32(unix.TP_STATUS_KERNEL), binary.NativeEndian.Uint32(block.data[8:12]))
+}
+
 func TestReadPacketRunsProcessesQueuedRun(t *testing.T) {
 	block := packetRingBlockWithFrameStride(t, 256, []packetRingFrame{{
 		data: rawUDPPacket(optionsPayload("queued-run")), ts: time.Unix(300, 400),

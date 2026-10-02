@@ -224,7 +224,6 @@ type (
 		done              chan struct{}
 		wg                sync.WaitGroup
 		closeOnce         sync.Once
-		packetPool        sync.Pool
 		sipPortSets       [][]uint16
 		services          services
 		carrierResolver   *carriers.Resolver
@@ -338,11 +337,6 @@ func NewExporter(deps Deps) Exporter {
 		closedInviteCalls:     make(map[string]time.Time),
 		optionsTracker:        make(map[string]optionsEntry),
 		byeTracker:            make(map[string]byeEntry),
-		packetPool: sync.Pool{
-			New: func() any {
-				return &rawPacket{data: make([]byte, 0, readBufSize)}
-			},
-		},
 	}
 	e.packetBatches = newPacketBatchQueue(messagesChanSize, func() {
 		e.services.metricser.RTPDropped()
@@ -827,7 +821,6 @@ func (e *exporter) readPackets() {
 				e.services.metricser.ParseError(errType)
 				zap.L().Error("parse err", zap.Error(err))
 			}
-			e.packetPool.Put(pkt)
 		}
 	}
 }
@@ -875,14 +868,6 @@ func (e *exporter) processPacketRingRun(run *packetRingFrameRun) {
 			zap.L().Error("parse err", zap.Error(err))
 		}
 	}
-}
-
-func (e *exporter) acquireBuf() *rawPacket {
-	b, ok := e.packetPool.Get().(*rawPacket)
-	if !ok {
-		b = &rawPacket{}
-	}
-	return b
 }
 
 // handleReadError classifies a unix.Read error from readSocket. Returns true
@@ -952,10 +937,12 @@ func (e *exporter) readSocketRecvmsg(idx int) {
 			continue
 		}
 
-		pkt := e.acquireBuf()
-		pkt.data = append(pkt.data[:0], buf[:n]...)
-		pkt.iface = entry.iface
-		pkt.ts = parseTimestampNS(oob[:oobn])
+		pkt := &rawPacket{
+			data:  make([]byte, n),
+			iface: entry.iface,
+			ts:    parseTimestampNS(oob[:oobn]),
+		}
+		copy(pkt.data, buf[:n])
 		if sa, ok := from.(*unix.SockaddrLinklayer); ok {
 			pkt.pkttype = sa.Pkttype
 		} else {
@@ -1064,7 +1051,6 @@ func (e *exporter) sendPacket(pkt *rawPacket, ports []uint16) bool {
 		return false
 	default:
 		e.services.metricser.RTPDropped()
-		e.packetPool.Put(pkt)
 	}
 	return true
 }
