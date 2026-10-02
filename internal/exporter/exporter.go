@@ -220,6 +220,7 @@ type (
 		dialogLifecycleMu sync.Mutex
 		socks             []sockEntry
 		messages          chan *rawPacket
+		packetBatches     *packetBatchQueue
 		done              chan struct{}
 		wg                sync.WaitGroup
 		closeOnce         sync.Once
@@ -234,7 +235,7 @@ type (
 		vqHandler         *vq.Handler
 		mediaTracker      *mediatracker.Tracker
 		// pktSrcIP is written in parseRawPacket and read in handleMessage.
-		// Both run synchronously in the readPackets goroutine — no mutex needed.
+		// Both run synchronously in the packet consumer goroutine — no mutex needed.
 		// If packet parsing becomes parallel (worker pool), thread srcIP as a
 		// parameter instead of using this shared field.
 		pktSrcIP              string
@@ -343,6 +344,9 @@ func NewExporter(deps Deps) Exporter {
 			},
 		},
 	}
+	e.packetBatches = newPacketBatchQueue(messagesChanSize, func() {
+		e.services.metricser.RTPDropped()
+	})
 	if e.registerScanTracker == nil {
 		zap.L().Warn("fraud register scan detection disabled: threshold and window must be > 0",
 			zap.Int("threshold", deps.FraudRegScanThreshold),
@@ -633,7 +637,7 @@ func directionFromPkttype(pkttype uint8, isResponse bool) string {
 
 func (e *exporter) startWorkers() {
 	e.wg.Add(1)
-	go e.readPackets()
+	go e.readPacketRuns()
 	for i := range e.socks {
 		e.wg.Add(1)
 		go e.readSocket(i)
@@ -647,7 +651,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	e.services.metricser.UpdateChannelCapacity(cap(e.messages))
+	e.services.metricser.UpdateChannelCapacity(e.packetBatches.accounting.capacity())
 
 	for {
 		select {
@@ -692,7 +696,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		e.services.metricser.UpdateActiveRegistrations(e.registrationCounts())
 
 		e.services.metricser.SocketStats(e.readSocketStats())
-		e.services.metricser.UpdateChannelLength(len(e.messages))
+		e.services.metricser.UpdateChannelLength(e.packetBatches.accounting.length())
 		e.updateTrackerSizes()
 		e.updateRTPMetrics()
 		e.services.metricser.UpdateActiveDialogs(s)
@@ -761,6 +765,9 @@ func (e *exporter) cleanupInviteTracker() {
 func (e *exporter) Close() {
 	e.closeOnce.Do(func() {
 		e.initialized.Store(false)
+		if e.packetBatches != nil {
+			e.packetBatches.stop()
+		}
 		close(e.done)
 		e.wg.Wait()
 		for _, c := range e.collections {
@@ -821,6 +828,51 @@ func (e *exporter) readPackets() {
 				zap.L().Error("parse err", zap.Error(err))
 			}
 			e.packetPool.Put(pkt)
+		}
+	}
+}
+
+func (e *exporter) readPacketRuns() {
+	defer e.wg.Done()
+	for {
+		select {
+		case <-e.done:
+			e.releaseQueuedPacketRuns()
+			return
+		default:
+		}
+		select {
+		case <-e.done:
+			e.releaseQueuedPacketRuns()
+			return
+		case run := <-e.packetBatches.runs:
+			e.processPacketRingRun(run)
+		}
+	}
+}
+
+func (e *exporter) releaseQueuedPacketRuns() {
+	for {
+		select {
+		case run := <-e.packetBatches.runs:
+			run.release()
+		default:
+			return
+		}
+	}
+}
+
+func (e *exporter) processPacketRingRun(run *packetRingFrameRun) {
+	defer run.release()
+	e.pktIface = run.iface
+	for _, frame := range run.frames {
+		run.dequeueFrame()
+		e.pktType = frame.pkttype
+		e.pktTimestamp = frame.ts
+		if errType, err := e.parseRawPacket(frame.data); err != nil {
+			e.services.metricser.SystemError()
+			e.services.metricser.ParseError(errType)
+			zap.L().Error("parse err", zap.Error(err))
 		}
 	}
 }
@@ -927,24 +979,19 @@ func (e *exporter) readPacketRing(
 	entry sockEntry, ports []uint16, wait func(int) error,
 ) {
 	var blockIndex uint32
+	borrowedBlocks := newPacketRingBorrowedBlocks(entry.ring.blockCount)
 	for {
-		select {
-		case <-e.done:
-			return
-		default:
-		}
-		block, ready, err := entry.ring.decodeBlock(blockIndex)
+		block, physicalIndex, keepReading, err := e.nextPacketRingBlock(
+			entry.ring, blockIndex, &borrowedBlocks, wait)
 		if err != nil {
 			e.services.metricser.SystemError()
 			zap.L().Error("decode packet ring block", zap.Error(err))
 			return
 		}
-		if !ready {
-			if err = wait(entry.ring.fd); err != nil && e.handleReadError(err) {
-				return
-			}
-			continue
+		if !keepReading {
+			return
 		}
+		borrowedBlocks.track(&block, physicalIndex)
 		keepReading, consumeErr := e.consumePacketRingBlock(block, entry.iface, ports)
 		blockIndex++
 		if consumeErr != nil {
@@ -957,28 +1004,45 @@ func (e *exporter) readPacketRing(
 	}
 }
 
+func (e *exporter) nextPacketRingBlock(
+	ring *packetRing,
+	blockIndex uint32,
+	borrowedBlocks *packetRingBorrowedBlocks,
+	wait func(int) error,
+) (packetRingBlock, uint32, bool, error) {
+	physicalIndex := blockIndex % ring.blockCount
+	if !borrowedBlocks.waitUntilReusable(e.done, physicalIndex) {
+		return packetRingBlock{}, 0, false, nil
+	}
+	for {
+		select {
+		case <-e.done:
+			return packetRingBlock{}, 0, false, nil
+		default:
+		}
+		block, ready, err := ring.decodeBlock(blockIndex)
+		if err != nil {
+			return packetRingBlock{}, 0, false, err
+		}
+		if ready {
+			return block, physicalIndex, true, nil
+		}
+		if borrowedBlocks.count != 0 {
+			if !borrowedBlocks.waitForRelease(e.done) {
+				return packetRingBlock{}, 0, false, nil
+			}
+			continue
+		}
+		if err = wait(ring.fd); err != nil && e.handleReadError(err) {
+			return packetRingBlock{}, 0, false, nil
+		}
+	}
+}
+
 func (e *exporter) consumePacketRingBlock(
 	block packetRingBlock, iface string, ports []uint16,
 ) (bool, error) {
-	defer block.release()
-	frames := block.frames()
-	for {
-		frame, ok, err := frames.next()
-		if err != nil {
-			return true, err
-		}
-		if !ok {
-			return true, nil
-		}
-		pkt := e.acquireBuf()
-		pkt.data = append(pkt.data[:0], frame.data...)
-		pkt.iface = iface
-		pkt.ts = frame.ts
-		pkt.pkttype = frame.pkttype
-		if !e.sendPacket(pkt, ports) {
-			return false, nil
-		}
-	}
+	return e.packetBatches.enqueueBlock(block, iface, ports)
 }
 
 // sendPacket routes a packet to the messages channel. SIP packets (matching one

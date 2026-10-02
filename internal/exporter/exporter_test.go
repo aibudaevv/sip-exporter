@@ -77,6 +77,7 @@ func (m *fakeRTPEndpointMap) Delete(key any) error {
 type mockMetricser struct {
 	requestCalled                  []byte
 	requestCount                   int
+	requestHook                    func()
 	reinviteCalled                 bool
 	sipRetransmissionCalls         int
 	sipRetransmissionMethod        string
@@ -177,6 +178,9 @@ func (m *mockMetricser) Request(_, _, _, _, _, _, _, _ string, in []byte) {
 	m.requestCalled = in
 	m.requestCount++
 	m.packetsIncremented++
+	if m.requestHook != nil {
+		m.requestHook()
+	}
 }
 
 func (m *mockMetricser) Reinvite(_, _, _, _ string) {
@@ -3510,6 +3514,9 @@ func TestNewExporter(t *testing.T) {
 		Dialoger:  d,
 	})
 	require.NotNil(t, exp)
+	e := exp.(*exporter)
+	require.NotNil(t, e.packetBatches)
+	require.Equal(t, messagesChanSize, e.packetBatches.accounting.capacity())
 }
 
 // ==================== htons tests ====================
@@ -5992,9 +5999,10 @@ func TestExporterGracefulShutdown(t *testing.T) {
 	require.NoError(t, unix.SetsockoptTimeval(fds[0], unix.SOL_SOCKET, unix.SO_RCVTIMEO, tv))
 
 	e := &exporter{
-		socks:    []sockEntry{{fd: fds[0], iface: "test"}},
-		messages: make(chan *rawPacket, 10),
-		done:     make(chan struct{}),
+		socks:         []sockEntry{{fd: fds[0], iface: "test"}},
+		messages:      make(chan *rawPacket, 10),
+		packetBatches: newPacketBatchQueue(messagesChanSize, func() {}),
+		done:          make(chan struct{}),
 		services: services{
 			metricser: &mockMetricser{},
 			dialoger:  &mockDialoger{},
@@ -6051,10 +6059,12 @@ func countOpenFDs(t *testing.T) int {
 // exercising Initialize() — all maps and services required by the production
 // code path are allocated.
 func newRollbackExporter() *exporter {
+	metricser := &mockMetricser{}
 	return &exporter{
 		messages:        make(chan *rawPacket, messagesChanSize),
+		packetBatches:   newPacketBatchQueue(messagesChanSize, metricser.RTPDropped),
 		done:            make(chan struct{}),
-		services:        services{metricser: &mockMetricser{}, dialoger: &mockDialoger{}},
+		services:        services{metricser: metricser, dialoger: &mockDialoger{}},
 		mediaTracker:    mediatracker.NewTracker(30 * time.Second),
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),

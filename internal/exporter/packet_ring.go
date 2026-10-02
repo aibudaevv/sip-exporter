@@ -41,9 +41,11 @@ type packetRing struct {
 }
 
 type packetRingBlock struct {
-	data              []byte
-	packetCount       uint32
-	firstPacketOffset uint32
+	data                 []byte
+	packetCount          uint32
+	firstPacketOffset    uint32
+	releaseNotifications chan<- uint32
+	releaseIndex         uint32
 }
 
 type packetRingBlockOwnership struct {
@@ -66,6 +68,8 @@ type packetRingFrameRun struct {
 	iface     string
 	reference *packetRingBlockReference
 	queue     *packetBatchQueue
+	remaining uint32
+	released  atomic.Bool
 }
 
 type packetBatchQueue struct {
@@ -75,7 +79,7 @@ type packetBatchQueue struct {
 
 	admissionMu      sync.RWMutex
 	admissionChanged chan struct{}
-	pendingSIP       uint32
+	pendingSIP       atomic.Int64
 	nextSIP          uint64
 	servingSIP       uint64
 	stopped          bool
@@ -90,6 +94,12 @@ type packetRingFrame struct {
 type packetRingFrameIterator struct {
 	block         packetRingBlock
 	index, offset uint32
+}
+
+type packetRingBorrowedBlocks struct {
+	releaseNotifications chan uint32
+	borrowed             []bool
+	count                uint32
 }
 
 type packetRingSetupOps struct {
@@ -236,6 +246,43 @@ func (b packetRingBlock) frames() packetRingFrameIterator {
 
 func (b packetRingBlock) release() {
 	atomic.StoreUint32((*uint32)(unsafe.Pointer(&b.data[tpacketV3BlockStatusOff])), unix.TP_STATUS_KERNEL)
+	if b.releaseNotifications != nil {
+		b.releaseNotifications <- b.releaseIndex
+	}
+}
+
+func newPacketRingBorrowedBlocks(blockCount uint32) packetRingBorrowedBlocks {
+	return packetRingBorrowedBlocks{
+		releaseNotifications: make(chan uint32, blockCount),
+		borrowed:             make([]bool, blockCount),
+	}
+}
+
+func (b *packetRingBorrowedBlocks) track(block *packetRingBlock, index uint32) {
+	block.releaseNotifications = b.releaseNotifications
+	block.releaseIndex = index
+	b.borrowed[index] = true
+	b.count++
+}
+
+func (b *packetRingBorrowedBlocks) waitUntilReusable(done <-chan struct{}, index uint32) bool {
+	for b.borrowed[index] {
+		if !b.waitForRelease(done) {
+			return false
+		}
+	}
+	return true
+}
+
+func (b *packetRingBorrowedBlocks) waitForRelease(done <-chan struct{}) bool {
+	select {
+	case <-done:
+		return false
+	case index := <-b.releaseNotifications:
+		b.borrowed[index] = false
+		b.count--
+		return true
+	}
 }
 
 func newPacketRingBlockReference(release func()) *packetRingBlockReference {
@@ -327,6 +374,18 @@ func newPacketBatchQueue(capacity uint32, rtpDropped func()) *packetBatchQueue {
 	}
 }
 
+func newPacketRingFrameRun(
+	frames []packetRingFrame,
+	iface string,
+	reference *packetRingBlockReference,
+	queue *packetBatchQueue,
+) *packetRingFrameRun {
+	return &packetRingFrameRun{
+		frames: frames, iface: iface, reference: reference, queue: queue,
+		remaining: uint32(len(frames)),
+	}
+}
+
 func (q *packetBatchQueue) enqueueBlock(
 	block packetRingBlock, iface string, ports []uint16,
 ) (bool, error) {
@@ -396,18 +455,16 @@ func (q *packetBatchQueue) enqueueSIPRun(
 	}
 	ticket := q.nextSIP
 	q.nextSIP++
-	q.pendingSIP++
+	q.pendingSIP.Add(1)
 	for {
 		if q.stopped {
-			q.pendingSIP--
+			q.pendingSIP.Add(-1)
 			q.admissionMu.Unlock()
 			return false
 		}
 		if ticket == q.servingSIP && q.accounting.reserveAll(packetCount) {
 			borrowed := reference.retain()
-			q.runs <- &packetRingFrameRun{
-				frames: frames, iface: iface, reference: borrowed, queue: q,
-			}
+			q.runs <- newPacketRingFrameRun(frames, iface, borrowed, q)
 			q.finishSIPLocked()
 			q.admissionMu.Unlock()
 			return true
@@ -420,7 +477,7 @@ func (q *packetBatchQueue) enqueueSIPRun(
 }
 
 func (q *packetBatchQueue) finishSIPLocked() {
-	q.pendingSIP--
+	q.pendingSIP.Add(-1)
 	q.servingSIP++
 	q.signalAdmissionLocked()
 }
@@ -434,7 +491,7 @@ func (q *packetBatchQueue) enqueueRTPRun(
 		return false
 	}
 	accepted := uint32(0)
-	if q.pendingSIP == 0 {
+	if q.pendingSIP.Load() == 0 {
 		accepted = q.accounting.reserve(packetCount)
 	}
 	for dropped := accepted; dropped < packetCount; dropped++ {
@@ -442,18 +499,24 @@ func (q *packetBatchQueue) enqueueRTPRun(
 	}
 	if accepted != 0 {
 		borrowed := reference.retain()
-		q.runs <- &packetRingFrameRun{
-			frames: frames[:accepted:accepted], iface: iface, reference: borrowed, queue: q,
-		}
+		q.runs <- newPacketRingFrameRun(frames[:accepted:accepted], iface, borrowed, q)
 	}
 	q.admissionMu.RUnlock()
 	return true
 }
 
 func (q *packetBatchQueue) release(packetCount uint32) {
-	q.admissionMu.Lock()
+	if packetCount == 0 {
+		return
+	}
 	q.accounting.release(packetCount)
-	q.signalAdmissionLocked()
+	if q.pendingSIP.Load() == 0 {
+		return
+	}
+	q.admissionMu.Lock()
+	if q.pendingSIP.Load() != 0 {
+		q.signalAdmissionLocked()
+	}
 	q.admissionMu.Unlock()
 }
 
@@ -472,8 +535,20 @@ func (q *packetBatchQueue) stop() {
 }
 
 func (r *packetRingFrameRun) release() {
-	r.queue.release(uint32(len(r.frames)))
+	if !r.released.CompareAndSwap(false, true) {
+		return
+	}
+	r.queue.release(r.remaining)
+	r.remaining = 0
 	r.reference.release()
+}
+
+func (r *packetRingFrameRun) dequeueFrame() {
+	if r.remaining == 0 || r.released.Load() {
+		return
+	}
+	r.remaining--
+	r.queue.release(1)
 }
 
 func (i *packetRingFrameIterator) next() (packetRingFrame, bool, error) {
