@@ -85,6 +85,7 @@ type mockMetricser struct {
 	responseIsInvite               bool
 	sessionUpdated                 int
 	systemErrorCalled              bool
+	systemErrorCount               int
 	packetsIncremented             int
 	invite200OKCalled              bool
 	sessionCompletedFlag           bool
@@ -297,6 +298,7 @@ func (m *mockMetricser) UpdatePBD(_, _, _, _ string, delayMs float64) {
 
 func (m *mockMetricser) SystemError() {
 	m.systemErrorCalled = true
+	m.systemErrorCount++
 }
 
 func (m *mockMetricser) ParseError(errorType string) {
@@ -5986,55 +5988,18 @@ func TestHandleRequestNOTIFYVQInvalidBody(t *testing.T) {
 	require.Empty(t, mm.vqReports, "VQ handler should not report metrics for invalid body")
 }
 
-// TestExporterGracefulShutdown verifies that the legacy recvmsg reader exits cleanly when
-// Close() is called (no EBADF spin loop), and that Close() completes within a
-// reasonable timeout. readPackets and sipDialogMetricsUpdate also receive the
-// done signal and wind down asynchronously.
-func TestExporterGracefulShutdown(t *testing.T) {
-	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM, 0)
-	require.NoError(t, err)
-	defer unix.Close(fds[1])
-
-	tv := &unix.Timeval{Sec: 1}
-	require.NoError(t, unix.SetsockoptTimeval(fds[0], unix.SOL_SOCKET, unix.SO_RCVTIMEO, tv))
-
+// TestExporterCloseStopsLegacyPacketConsumer keeps the shutdown contract for readPackets until
+// the remaining per-packet routing path is removed by S30-4.13.
+func TestExporterCloseStopsLegacyPacketConsumer(t *testing.T) {
 	e := &exporter{
-		socks:         []sockEntry{{fd: fds[0], iface: "test"}},
 		messages:      make(chan *rawPacket, 10),
 		packetBatches: newPacketBatchQueue(messagesChanSize, func() {}),
 		done:          make(chan struct{}),
-		services: services{
-			metricser: &mockMetricser{},
-			dialoger:  &mockDialoger{},
-		},
-		mediaTracker:    mediatracker.NewTracker(30 * time.Second),
-		sipPortSets:     [][]uint16{{5060, 5061}},
-		registerTracker: make(map[string]registerEntry),
-		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
-		optionsTracker:  make(map[string]optionsEntry),
 	}
 
 	e.wg.Add(1)
 	go e.readPackets()
-	e.wg.Add(1)
-	go e.readSocketRecvmsg(0)
-	e.wg.Add(1)
-	go e.sipDialogMetricsUpdate()
-
-	time.Sleep(100 * time.Millisecond)
-
-	done := make(chan struct{})
-	go func() {
-		e.Close()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Close() did not complete within 5s — goroutine leak")
-	}
+	e.Close()
 
 	_, ok := <-e.messages
 	require.False(t, ok, "messages channel should be closed after Close()")
@@ -6607,53 +6572,6 @@ func TestSIPDialogMetricsUpdateTrackerLenNoRace(t *testing.T) {
 	}
 
 	require.NotPanics(t, func() { e.Close() })
-}
-
-// TestReadSocketFailStopNoSystemError verifies that the legacy recvmsg reader returns cleanly
-// without incrementing SystemError when the socket becomes invalid (EBADF).
-// This is the same return-path used for ENETDOWN/ENODEV hot-unplug (S14-7.1):
-// the goroutine stops silently rather than spamming Error+SystemError every
-// second on a dead NIC.
-//
-// A dedicated ENETDOWN test requires veth-pair infrastructure (root-gated)
-// and is deferred to S15 (S14-7.5 readSocket error-branch MC/DC tests).
-func TestReadSocketFailStopNoSystemError(t *testing.T) {
-	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM, 0)
-	require.NoError(t, err)
-	defer unix.Close(fds[1])
-
-	tv := &unix.Timeval{Sec: 1}
-	require.NoError(t, unix.SetsockoptTimeval(fds[0], unix.SOL_SOCKET, unix.SO_RCVTIMEO, tv))
-
-	mm := &mockMetricser{}
-	e := &exporter{
-		socks:       []sockEntry{{fd: fds[0]}},
-		sipPortSets: [][]uint16{{5060, 5061}},
-		messages:    make(chan *rawPacket, 10),
-		done:        make(chan struct{}),
-		services:    services{metricser: mm, dialoger: &mockDialoger{}},
-	}
-
-	e.wg.Add(1)
-	go e.readSocketRecvmsg(0)
-
-	// Close the FD → EBADF in readSocket → clean return, no SystemError.
-	unix.Close(fds[0])
-
-	done := make(chan struct{})
-	go func() {
-		e.wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("readSocket did not exit within 3s after FD closed")
-	}
-
-	require.False(t, mm.systemErrorCalled,
-		"SystemError should not be called on fail-stop (EBADF/ENETDOWN/ENODEV)")
 }
 
 func TestDirectionFromPkttype(t *testing.T) {

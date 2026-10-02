@@ -1675,19 +1675,45 @@ func TestReadPacketRingContinuesAfterNonDeliveringBlock(t *testing.T) {
 	}
 }
 
-func TestReadPacketRingHotUnplugStopsWithoutSystemError(t *testing.T) {
-	metricser := &mockMetricser{}
-	e := &exporter{
-		messages: make(chan *rawPacket, 1), done: make(chan struct{}),
-		services: services{metricser: metricser},
+func TestReadPacketRingHandlesWaitErrors(t *testing.T) {
+	tests := []struct {
+		name             string
+		waitErrors       []error
+		wantWaitCalls    int
+		wantSystemErrors int
+	}{
+		{name: "interrupted retry", waitErrors: []error{unix.EINTR, unix.ENODEV}, wantWaitCalls: 2},
+		{name: "not ready retry", waitErrors: []error{unix.EAGAIN, unix.ENODEV}, wantWaitCalls: 2},
+		{name: "closed fd", waitErrors: []error{unix.EBADF}, wantWaitCalls: 1},
+		{name: "closed socket", waitErrors: []error{unix.ENOTSOCK}, wantWaitCalls: 1},
+		{name: "interface down", waitErrors: []error{unix.ENETDOWN}, wantWaitCalls: 1},
+		{name: "interface removed", waitErrors: []error{unix.ENODEV}, wantWaitCalls: 1},
+		{
+			name: "unexpected retry", waitErrors: []error{unix.EIO, unix.ENODEV},
+			wantWaitCalls: 2, wantSystemErrors: 1,
+		},
 	}
-	ring := &packetRing{fd: 42, memory: make([]byte, 128), blockSize: 128, blockCount: 1}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			metricser := &mockMetricser{}
+			e := &exporter{
+				done: make(chan struct{}), services: services{metricser: metricser},
+			}
+			ring := &packetRing{
+				fd: 42, memory: make([]byte, 128), blockSize: 128, blockCount: 1,
+			}
+			waitCalls := 0
 
-	e.readPacketRing(sockEntry{ring: ring, iface: "eth-test"}, []uint16{5060}, func(int) error {
-		return unix.ENETDOWN
-	})
+			e.readPacketRing(sockEntry{ring: ring, iface: "eth-test"}, []uint16{5060}, func(int) error {
+				err := tt.waitErrors[waitCalls]
+				waitCalls++
+				return err
+			})
 
-	require.False(t, metricser.systemErrorCalled)
+			require.Equal(t, tt.wantWaitCalls, waitCalls)
+			require.Equal(t, tt.wantSystemErrors, metricser.systemErrorCount)
+		})
+	}
 }
 
 func TestWaitPacketRingRejectsInvalidFD(t *testing.T) {

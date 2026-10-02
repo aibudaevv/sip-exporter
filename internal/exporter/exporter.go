@@ -913,50 +913,6 @@ func parseTimestampNS(oob []byte) time.Time {
 	return time.Unix(sec, nsec)
 }
 
-func (e *exporter) readSocketRecvmsg(idx int) {
-	defer e.wg.Done()
-	entry := e.socks[idx]
-	buf := make([]byte, readBufSize)
-	oob := make([]byte, unix.CmsgSpace(tsCmsgLen))
-
-	for {
-		n, oobn, _, from, err := unix.Recvmsg(entry.fd, buf, oob, 0)
-		if err != nil {
-			if e.handleReadError(err) {
-				return
-			}
-			select {
-			case <-e.done:
-				return
-			default:
-				continue
-			}
-		}
-
-		if n == 0 {
-			continue
-		}
-
-		pkt := &rawPacket{
-			data:  make([]byte, n),
-			iface: entry.iface,
-			ts:    parseTimestampNS(oob[:oobn]),
-		}
-		copy(pkt.data, buf[:n])
-		if sa, ok := from.(*unix.SockaddrLinklayer); ok {
-			pkt.pkttype = sa.Pkttype
-		} else {
-			pkt.pkttype = unix.PACKET_HOST
-		}
-
-		zap.L().Debug("packet from socket", zap.Int("len", n))
-
-		if !e.sendPacket(pkt, e.sipPortSets[idx]) {
-			return
-		}
-	}
-}
-
 func (e *exporter) readSocket(idx int) {
 	defer e.wg.Done()
 	e.readPacketRing(e.socks[idx], e.sipPortSets[idx], waitPacketRing)
