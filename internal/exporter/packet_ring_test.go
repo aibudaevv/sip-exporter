@@ -1781,7 +1781,7 @@ func TestExporterCloseUnmapsPacketRings(t *testing.T) {
 	e := &exporter{
 		socks:         []sockEntry{{fd: fds[0], ring: ring}},
 		packetBatches: newPacketBatchQueue(1, func() {}),
-		done:          make(chan struct{}), messages: make(chan *rawPacket),
+		done:          make(chan struct{}),
 	}
 
 	e.Close()
@@ -1828,7 +1828,6 @@ func TestExporterCloseStopsBlockedPacketRingReaderBeforeTeardown(t *testing.T) {
 		socks:         []sockEntry{{fd: -1, iface: "eth-test", ring: ring}},
 		sipPortSets:   [][]uint16{{5060}},
 		packetBatches: queue,
-		messages:      make(chan *rawPacket, 1),
 		done:          make(chan struct{}),
 		services:      services{metricser: &mockMetricser{}},
 	}

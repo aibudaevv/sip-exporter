@@ -180,12 +180,6 @@ type (
 		iface string
 		ring  *packetRing
 	}
-	rawPacket struct {
-		data    []byte
-		iface   string
-		pkttype uint8
-		ts      time.Time // kernel SO_TIMESTAMPNS receive time (zero → fallback to time.Now())
-	}
 	rtpEndpointKey struct {
 		IP   uint32
 		Port uint16
@@ -219,7 +213,6 @@ type (
 		mediaLifecycleMu  sync.Mutex
 		dialogLifecycleMu sync.Mutex
 		socks             []sockEntry
-		messages          chan *rawPacket
 		packetBatches     *packetBatchQueue
 		done              chan struct{}
 		wg                sync.WaitGroup
@@ -325,7 +318,6 @@ func NewExporter(deps Deps) Exporter {
 		registerScanTracker:   newRegisterScanTracker(deps.FraudRegScanThreshold, deps.FraudRegScanWindow),
 		inviteBurstTracker:    newInviteBurstTracker(deps.FraudInviteBurstThreshold, deps.FraudInviteBurstWindow),
 		fasTracker:            newFasTracker(deps.FraudFASThreshold),
-		messages:              make(chan *rawPacket, messagesChanSize),
 		done:                  make(chan struct{}),
 		rtpEndpointRefs:       make(map[rtpEndpointKey]uint),
 		dirtyRTPEndpoints:     make(map[rtpEndpointKey]bool),
@@ -774,7 +766,6 @@ func (e *exporter) Close() {
 			}
 			_ = unix.Close(s.fd)
 		}
-		close(e.messages)
 	})
 }
 
@@ -801,28 +792,6 @@ func (e *exporter) readSocketStats() []service.SocketStat {
 		})
 	}
 	return stats
-}
-
-func (e *exporter) readPackets() {
-	defer e.wg.Done()
-	for {
-		select {
-		case <-e.done:
-			return
-		case pkt, ok := <-e.messages:
-			if !ok {
-				return
-			}
-			e.pktIface = pkt.iface
-			e.pktType = pkt.pkttype
-			e.pktTimestamp = pkt.ts
-			if errType, err := e.parseRawPacket(pkt.data); err != nil {
-				e.services.metricser.SystemError()
-				e.services.metricser.ParseError(errType)
-				zap.L().Error("parse err", zap.Error(err))
-			}
-		}
-	}
 }
 
 func (e *exporter) readPacketRuns() {
@@ -986,29 +955,6 @@ func (e *exporter) consumePacketRingBlock(
 	block packetRingBlock, iface string, ports []uint16,
 ) (bool, error) {
 	return e.packetBatches.enqueueBlock(block, iface, ports)
-}
-
-// sendPacket routes a packet to the messages channel. SIP packets (matching one
-// of ports) use a blocking send — they must not be starved by RTP flood.
-// All other packets (RTP) use a non-blocking send — dropped when the channel
-// is full. Returns false if shutdown was signaled.
-func (e *exporter) sendPacket(pkt *rawPacket, ports []uint16) bool {
-	if isSIPPacket(pkt.data, ports) {
-		select {
-		case e.messages <- pkt:
-		case <-e.done:
-			return false
-		}
-		return true
-	}
-	select {
-	case e.messages <- pkt:
-	case <-e.done:
-		return false
-	default:
-		e.services.metricser.RTPDropped()
-	}
-	return true
 }
 
 // isSIPPacket does a quick L4 port check to classify a packet as SIP (one of

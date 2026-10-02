@@ -671,11 +671,11 @@ func TestInviteSDPCSeqRetransmitReplacesSameTransaction(t *testing.T) {
 
 func TestStoreInviteSDPOwnsPacketBuffer(t *testing.T) {
 	e := &exporter{inviteSDP: make(map[inviteSDPKey]inviteSDPEntity)}
-	raw := rawPacket{data: []byte("SIP body: v=0\r\nm=audio 4000 RTP/AVP 8\r\n")}
-	body := raw.data[len("SIP body: "):]
+	raw := []byte("SIP body: v=0\r\nm=audio 4000 RTP/AVP 8\r\n")
+	body := raw[len("SIP body: "):]
 
 	e.storeInviteSDP("call-1", "2", body)
-	copy(raw.data[len("SIP body: "):], []byte("x=0\r\nm=audio 9999 RTP/AVP 8\r\n"))
+	copy(raw[len("SIP body: "):], []byte("x=0\r\nm=audio 9999 RTP/AVP 8\r\n"))
 
 	got, ok := e.takeInviteSDP("call-1", "2")
 	require.True(t, ok)
@@ -2942,8 +2942,8 @@ func TestFASReinviteSRTPExtendsDeadline(t *testing.T) {
 
 // TestFASConcurrentSweepClearBye verifies thread safety of fasTracker under
 // concurrent access from the three goroutines that touch it in production:
-// sipDialogMetricsUpdate (sweep), readPackets/handleRTP (clearIfAnswerMedia),
-// and readPackets/handleBye200OK (finalizeOnBye). Run with -race.
+// sipDialogMetricsUpdate (sweep), readPacketRuns/handleRTP (clearIfAnswerMedia),
+// and readPacketRuns/handleBye200OK (finalizeOnBye). Run with -race.
 func TestFASConcurrentSweepClearBye(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, time.Hour)
@@ -5988,23 +5988,6 @@ func TestHandleRequestNOTIFYVQInvalidBody(t *testing.T) {
 	require.Empty(t, mm.vqReports, "VQ handler should not report metrics for invalid body")
 }
 
-// TestExporterCloseStopsLegacyPacketConsumer keeps the shutdown contract for readPackets until
-// the remaining per-packet routing path is removed by S30-4.13.
-func TestExporterCloseStopsLegacyPacketConsumer(t *testing.T) {
-	e := &exporter{
-		messages:      make(chan *rawPacket, 10),
-		packetBatches: newPacketBatchQueue(messagesChanSize, func() {}),
-		done:          make(chan struct{}),
-	}
-
-	e.wg.Add(1)
-	go e.readPackets()
-	e.Close()
-
-	_, ok := <-e.messages
-	require.False(t, ok, "messages channel should be closed after Close()")
-}
-
 // bpfObjectPath resolves the path to bin/sip.o relative to the package
 // directory. go test runs from the package dir, so ../../bin/sip.o reaches
 // the project root.
@@ -6026,7 +6009,6 @@ func countOpenFDs(t *testing.T) int {
 func newRollbackExporter() *exporter {
 	metricser := &mockMetricser{}
 	return &exporter{
-		messages:        make(chan *rawPacket, messagesChanSize),
 		packetBatches:   newPacketBatchQueue(messagesChanSize, metricser.RTPDropped),
 		done:            make(chan struct{}),
 		services:        services{metricser: metricser, dialoger: &mockDialoger{}},
@@ -6342,70 +6324,6 @@ func TestIsSIPPacket(t *testing.T) {
 	}
 }
 
-func TestSendPacketRTPDropWhenFull(t *testing.T) {
-	mm := &mockMetricser{}
-	e := &exporter{
-		messages: make(chan *rawPacket, 1),
-		done:     make(chan struct{}),
-		services: services{metricser: mm},
-	}
-	fillPkt := rawPacket{}
-	e.messages <- &fillPkt // fill the channel
-
-	// RTP packet (non-blocking) → dropped, sendPacket returns true
-	rtpPkt := buildUDPPacket(12345, 5004)
-	require.True(t, e.sendPacket(&rawPacket{data: rtpPkt}, []uint16{5060, 5061}), "RTP sendPacket should not block")
-	require.Equal(t, 1, mm.rtpDroppedCount, "RTPDropped should be called when channel is full")
-
-	// SIP packet (blocking) → would block, but we signal done to unblock
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		close(e.done)
-	}()
-	sipPkt := buildUDPPacket(12345, 5060)
-	require.False(
-		t,
-		e.sendPacket(&rawPacket{data: sipPkt}, []uint16{5060, 5061}),
-		"SIP sendPacket should return false on done",
-	)
-}
-
-func TestSendPacketSuccessPaths(t *testing.T) {
-	t.Run("SIP success", func(t *testing.T) {
-		e := &exporter{
-			messages: make(chan *rawPacket, 1),
-			done:     make(chan struct{}),
-		}
-		sipPkt := buildUDPPacket(12345, 5060)
-		require.True(t, e.sendPacket(&rawPacket{data: sipPkt}, []uint16{5060, 5061}))
-		require.Len(t, e.messages, 1)
-	})
-
-	t.Run("RTP success", func(t *testing.T) {
-		e := &exporter{
-			messages: make(chan *rawPacket, 1),
-			done:     make(chan struct{}),
-		}
-		rtpPkt := buildUDPPacket(12345, 5004)
-		require.True(t, e.sendPacket(&rawPacket{data: rtpPkt}, []uint16{5060, 5061}))
-		require.Len(t, e.messages, 1)
-	})
-
-	t.Run("RTP done signal", func(t *testing.T) {
-		e := &exporter{
-			messages: make(chan *rawPacket), // zero-capacity → always full
-			done:     make(chan struct{}),
-		}
-		close(e.done)
-		rtpPkt := buildUDPPacket(12345, 5004)
-		require.False(
-			t,
-			e.sendPacket(&rawPacket{data: rtpPkt}, []uint16{5060, 5061}),
-			"RTP sendPacket should return false on done",
-		)
-	})
-}
-
 func buildIPHeader(srcIP, dstIP [4]byte) []byte {
 	hdr := make([]byte, 20)
 	hdr[12] = srcIP[0]
@@ -6518,19 +6436,19 @@ func TestResolveSourceCountry(t *testing.T) {
 
 // TestSIPDialogMetricsUpdateTrackerLenNoRace verifies that len() calls on
 // registerTracker, inviteTracker, and optionsTracker in sipDialogMetricsUpdate
-// do not race with concurrent writes from readPackets.
+// do not race with concurrent writes from the packet consumer.
 //
 // Run with: go test -race -run TestSIPDialogMetricsUpdateTrackerLenNoRace
 //
 // Before S14-7.2 fix, the three len() calls at exporter.go:516-518 read map
-// headers without holding the matching mutex, while readPackets (simulated
+// headers without holding the matching mutex, while the packet consumer (simulated
 // here by a writer goroutine) mutates those maps under lock. Under -race this
 // produces "concurrent map read and map write" — a fatal runtime error.
 func TestSIPDialogMetricsUpdateTrackerLenNoRace(t *testing.T) {
 	e := newRollbackExporter()
 
 	// Writer goroutine: intensively writes/deletes tracker entries under locks,
-	// simulating the readPackets consumer mutating maps while the metrics
+	// simulating the packet consumer mutating maps while the metrics
 	// goroutine tries to read len().
 	writerDone := make(chan struct{})
 	go func() {
