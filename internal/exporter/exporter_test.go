@@ -3100,13 +3100,13 @@ func TestHandleRTPKernelTimestampMissingCounter(t *testing.T) {
 	_, err := e.handleRTP(net.ParseIP("10.0.0.1"), 5004, net.ParseIP("10.0.0.2"), 5004, fasRTPPacket(1))
 	require.NoError(t, err)
 	require.Equal(t, 1, mm.rtpKernelTimestampMissingCalls,
-		"zero pktTimestamp (no SO_TIMESTAMPNS) must increment the counter")
+		"zero pktTimestamp (no kernel capture timestamp) must increment the counter")
 
 	e.pktTimestamp = time.Unix(1_700_000_000, 0)
 	_, err = e.handleRTP(net.ParseIP("10.0.0.1"), 5004, net.ParseIP("10.0.0.2"), 5004, fasRTPPacket(2))
 	require.NoError(t, err)
 	require.Equal(t, 1, mm.rtpKernelTimestampMissingCalls,
-		"non-zero pktTimestamp must not increment the counter")
+		"non-zero kernel capture timestamp must not increment the counter")
 }
 
 // TestFASSweepLatency10kEntries is a performance regression guard: sweeping

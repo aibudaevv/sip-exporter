@@ -40,8 +40,6 @@ var (
 const (
 	ethPAll                   = 0x0003
 	readBufSize               = 65536
-	tsCmsgLen                 = 16 // sizeof struct timespec (SCM_TIMESTAMPNS payload) on 64-bit linux
-	tsCmsgHdr                 = 16 // sizeof struct Cmsghdr on 64-bit linux (Len 8 + Level 4 + Type 4)
 	defaultRegisterTTL        = 60 * time.Second
 	defaultInviteTTL          = 60 * time.Second
 	defaultOptionsTTL         = 60 * time.Second
@@ -233,7 +231,7 @@ type (
 		pktSrcIP              string
 		pktIface              string
 		pktType               uint8
-		pktTimestamp          time.Time // packet capture timestamp (SO_TIMESTAMPNS) for PDV
+		pktTimestamp          time.Time // kernel packet-ring capture timestamp for PDV
 		registerScanTracker   *registerScanTracker
 		inviteBurstTracker    *inviteBurstTracker
 		fasTracker            *fasTracker
@@ -515,10 +513,6 @@ func createSocketForInterface(ifaceName string, progFD int, ignoreOutgoing bool)
 
 	if err = unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_ATTACH_BPF, progFD); err != nil {
 		return 0, fmt.Errorf("failed to attach BPF program: %w", err)
-	}
-
-	if err = unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_TIMESTAMPNS, 1); err != nil {
-		return 0, fmt.Errorf("failed to set SO_TIMESTAMPNS: %w", err)
 	}
 
 	zap.L().Info("eBPF program attached to AF_PACKET socket",
@@ -839,7 +833,7 @@ func (e *exporter) processPacketRingRun(run *packetRingFrameRun) {
 	}
 }
 
-// handleReadError classifies a unix.Read error from readSocket. Returns true
+// handleReadError classifies an error while waiting for packet-ring readiness. Returns true
 // if the goroutine should stop (return); false to continue the read loop.
 // SystemError is incremented for unexpected transient errors.
 func (e *exporter) handleReadError(err error) bool {
@@ -860,26 +854,6 @@ func (e *exporter) handleReadError(err error) bool {
 		e.services.metricser.SystemError()
 	}
 	return false
-}
-
-// parseTimestampNS extracts the kernel SO_TIMESTAMPNS receive timestamp from a
-// Recvmsg out-of-band buffer. Returns the zero time when the cmsg is absent or
-// malformed so the caller falls back to time.Now(). Parses the Cmsghdr + timespec
-// layout directly (no unix.ParseSocketControlMessage) to avoid per-packet heap
-// allocation on the hot path.
-func parseTimestampNS(oob []byte) time.Time {
-	if len(oob) < tsCmsgHdr+tsCmsgLen {
-		return time.Time{}
-	}
-	if int32(binary.NativeEndian.Uint32(oob[8:12])) != unix.SOL_SOCKET {
-		return time.Time{}
-	}
-	if int32(binary.NativeEndian.Uint32(oob[12:16])) != unix.SCM_TIMESTAMPNS {
-		return time.Time{}
-	}
-	sec := int64(binary.NativeEndian.Uint64(oob[tsCmsgHdr : tsCmsgHdr+8]))
-	nsec := int64(binary.NativeEndian.Uint64(oob[tsCmsgHdr+8 : tsCmsgHdr+tsCmsgLen]))
-	return time.Unix(sec, nsec)
 }
 
 func (e *exporter) readSocket(idx int) {

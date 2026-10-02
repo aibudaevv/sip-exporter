@@ -354,7 +354,7 @@ func TestHandleRTCPMixedCompound(t *testing.T) {
 }
 
 // TestHandleRTCPRTTUsesCaptureTimestamp proves that RTT is computed from the
-// kernel capture timestamp (e.pktTimestamp, SO_TIMESTAMPNS), not wall-clock
+// kernel packet-ring timestamp (e.pktTimestamp), not wall-clock
 // time.Now(). The capture time is set 60 s in the past; LSR is 5 s before the
 // capture time and DLSR is 1 s, so the correct RTT ≈ 4 s. Without the fix the
 // handler uses time.Now(), yielding RTT ≈ 64 s (60 s of accumulated drift).

@@ -723,7 +723,7 @@ func (m *metrics) initRTPMetrics(reg *prometheus.Registry) {
 		"Number of active learned RTP endpoint aliases", []string{"carrier", "direction"}, reg)
 	m.rtpKernelTimestampMissing = newCounterWithRegistry(
 		"sip_exporter_rtp_kernel_timestamp_missing_total",
-		"RTP packets missing kernel SO_TIMESTAMPNS (PDV fell back to processing time; growing rate means unreliable PDV)",
+		"RTP packets missing the kernel packet-ring timestamp (PDV fell back to processing time; growing rate means unreliable PDV)",
 		reg,
 	)
 }
