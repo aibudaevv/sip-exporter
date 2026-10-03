@@ -3,8 +3,10 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -59,5 +61,34 @@ func TestIfaceLabelMultiInterface(t *testing.T) {
 		getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_200_total", loLabel))
 	require.False(t, metricWithLabelExists(t, env.endpoint, "sip_exporter_invite_200_total", vethLabel),
 		"outgoing veth responses must remain excluded")
+	require.Eventually(t, func() bool {
+		samples := readMetricSamples(t, env.endpoint, "sip_exporter_socket_packets_received_total")
+		seen := make(map[string]bool, len(samples))
+		for _, sample := range samples {
+			seen[sample.labels["iface"]] = sample.value > 0
+		}
+		return len(samples) == 2 && seen[testInterface] && seen[fixture.hostInterface]
+	}, 3*time.Second, 100*time.Millisecond,
+		"TPACKET_V3 socket statistics must remain isolated per configured interface")
 
+}
+
+func TestPacketRingHotUnplugPreservesOtherInterface(t *testing.T) {
+	fixture := newNetworkFixture(t)
+	env := newTestEnvWithExtraEnv(t.Context(), t, "", map[string]string{
+		"SIP_EXPORTER_INTERFACE": fmt.Sprintf("%s,%s", testInterface, fixture.hostInterface),
+	})
+	errorsBefore := getMetric(t, env.endpoint, "sip_exporter_system_error_total")
+
+	deleteCtx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	out, err := runHostIP(deleteCtx, "link", "delete", fixture.hostInterface)
+	require.NoError(t, err, "delete capture interface: %s", string(out))
+
+	const callCount = 10
+	runSippScenario(t.Context(), t, "uas_100.xml", "uac_100.xml", callCount, env)
+	require.Equal(t, float64(callCount),
+		getMetricWithLabel(t, env.endpoint, "sip_exporter_invite_total", `iface="lo"`))
+	require.Equal(t, errorsBefore, getMetric(t, env.endpoint, "sip_exporter_system_error_total"),
+		"hot-unplug must stop only the affected ring without a system error")
 }

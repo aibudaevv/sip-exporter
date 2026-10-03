@@ -37,16 +37,23 @@ promtool check rules /etc/prometheus/rules/prometheus-recording-rules.yml
 promtool check rules /etc/prometheus/rules/prometheus-alerts.yml
 ```
 
-Набор покрывает доступность экспортёра, drops kernel socket, насыщение внутреннего канала, ухудшение
-SER, RTP loss, отсутствие RTP и one-way RTP. Пороги: 1% socket drops, 80% channel, 90% SER, 5%
-RTP/media failure и минимальный трафик — безопасные стартовые значения, а не универсальные SLO.
-Соберите не менее семи дней нормального трафика, прежде чем менять их. Исключите ожидаемое one-way
-медиа (paging, IVR, voicemail), прежде чем направлять этот алерт в escalation policy.
+Набор покрывает доступность экспортёра, drops kernel socket, userspace RTP drops, насыщение
+внутреннего канала, ухудшение SER, RTP loss, отсутствие RTP и one-way RTP. Любые устойчивые
+userspace RTP drops, пороги 1% socket drops, 80% channel, 90% SER и 5% RTP/media failure, а также
+минимальный трафик — начальные настройки для проверки на вашем трафике, а не универсальные SLO. Соберите не менее семи
+дней нормального трафика, прежде чем менять их. Исключите ожидаемое one-way медиа (paging, IVR,
+voicemail), прежде чем направлять этот алерт в escalation policy.
 
 Каждый алерт ссылается на этот раздел и содержит симптом с вероятной причиной. Используйте исходные
 метрики `sip_exporter_*` и dashboard, чтобы отличить сетевую проблему от неполного захвата.
 
+Для missing/one-way RTP доля считается от **всех завершённых сессий** (`sdc_total`), включая завершённые по таймауту; это не доля только SDP-диалогов. Минимальная активность этих правил — 0,1 завершения/с; для SER — 0,1 INVITE/с. Сначала разберите потери захвата, затем трактуйте медиа-алерты.
+
 ## Правила алертов Prometheus
+
+Следующие фрагменты — дополнительные примеры, а не продолжение готового production-файла. Выбирайте нужные правила и помещайте их в `groups[].rules` отдельного YAML. Не загружайте одноимённые правила повторно. Пороги и получателей настройте под свою сеть; шаблонные ссылки на runbook замените рабочими.
+
+Исполняемые примеры проверяются командой `make test-docs-promql` (Go + Docker, образ `prom/prometheus:v3.13.0`). Она извлекает правила и запросы из обеих языковых версий и проверяет результат на временных рядах.
 
 ### Critical-алерты
 
@@ -65,7 +72,11 @@ groups:
           description: "Инстанс SIP Exporter {{ $labels.instance }} недоступен более 1 минуты."
 
       - alert: SIPHighServerErrorRate
-        expr: avg(sip_exporter_isa) > 50
+        expr: |
+          sip_exporter_isa > 50
+          and on (job, instance, carrier, ua_type, source_country, direction)
+            sum by (job, instance, carrier, ua_type, source_country, direction)
+              (rate(sip_exporter_invite_total[5m])) >= 0.1
         for: 1m
         labels:
           severity: critical
@@ -186,15 +197,26 @@ groups:
 
 ### Алерты здоровья регистраций
 
+Низкий success ratio проверяется за последние 5 минут по терминальным исходам: 200 OK и ошибкам, кроме 401/407 и 3xx. При отсутствии таких исходов правило не срабатывает. 401/407 сами по себе являются обычным этапом digest-аутентификации и не доказывают подбор пароля.
+
 ```yaml
       - alert: SIPRegistrationSuccessLow
-        expr: sip_exporter_register_success_ratio < 80
+        expr: |
+          100 * (
+            sum by (job, instance, carrier, ua_type, source_country, direction) (rate(sip_exporter_register_success_total[5m]))
+            or 0 * sum by (job, instance, carrier, ua_type, source_country, direction) (rate(sip_exporter_register_failure_total{code!~"401|407|3.."}[5m]))
+          ) / (
+            (sum by (job, instance, carrier, ua_type, source_country, direction) (rate(sip_exporter_register_success_total[5m]))
+              or 0 * sum by (job, instance, carrier, ua_type, source_country, direction) (rate(sip_exporter_register_failure_total{code!~"401|407|3.."}[5m])))
+            + (sum by (job, instance, carrier, ua_type, source_country, direction) (rate(sip_exporter_register_failure_total{code!~"401|407|3.."}[5m]))
+              or 0 * sum by (job, instance, carrier, ua_type, source_country, direction) (rate(sip_exporter_register_success_total[5m])))
+          ) < 80
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "Низкий success ratio регистраций"
-          description: "REGISTER success ratio составляет {{ $value | printf \"%.1f\" }}% (ниже 80%). Клиенты не могут зарегистрироваться — проверьте здоровье регистратора, учётные данные или ACL. Примечание: 401/407 digest-auth исключаются из знаменателя."
+          description: "REGISTER success ratio составляет {{ $value | printf \"%.1f\" }}% (ниже 80%). Клиенты не могут зарегистрироваться — проверьте здоровье регистратора, учётные данные или ACL. Примечание: 401/407 и 3xx исключаются из знаменателя; окно расчёта — 5 минут."
 
       - alert: SIPRegistrationBruteForce
         expr: sum by (carrier, ua_type, source_country) (rate(sip_exporter_register_failure_total{code="401"}[5m])) > 10
@@ -219,6 +241,8 @@ groups:
 
 ### Алерты детекции фрода
 
+Счётчики событий появляются лениво. Примеры учитывают и рост за 5 минут, и новую положительную серию с теми же лейблами. После восстановления мониторинга старая серия тоже может выглядеть новой: уточняйте время события по дополнительным данным. FAS подавляется при любых зарегистрированных kernel/userspace drops только на том же `job, instance`.
+
 Эти алерты детектируют подозрительные SIP-паттерны: перехват аккаунта, перечисление регистраций и флуд INVITE. Полная конфигурация описана в `docs/fraud-detection.ru.md`.
 
 ```yaml
@@ -236,7 +260,10 @@ groups:
           description: "Пользователь перерегистрировался из другой страны на {{ $labels.carrier }} ({{ $labels.source_country }}). Возможный перехват аккаунта."
 
       - alert: SIPRegistrationScan
-        expr: rate(sip_exporter_register_scan_total[5m]) > 0
+        expr: |
+          (increase(sip_exporter_register_scan_total[5m]) > 0)
+          or
+          (sip_exporter_register_scan_total > 0 unless sip_exporter_register_scan_total offset 5m)
         for: 1m
         labels:
           severity: critical
@@ -245,7 +272,10 @@ groups:
           description: "Один IP регистрирует множество разных аккаунтов на {{ $labels.carrier }} из {{ $labels.source_country }}. Возможный credential stuffing или перечисление."
 
       - alert: SIPInviteBurst
-        expr: rate(sip_exporter_invite_burst_total[5m]) > 0
+        expr: |
+          (increase(sip_exporter_invite_burst_total[5m]) > 0)
+          or
+          (sip_exporter_invite_burst_total > 0 unless sip_exporter_invite_burst_total offset 5m)
         for: 1m
         labels:
           severity: critical
@@ -255,15 +285,22 @@ groups:
 
       - alert: SIPFalseAnswerSupervision
         expr: |
-          (rate(sip_exporter_fas_calls_total[5m]) > 0)
-          unless on()
-          (rate(sip_exporter_rtp_dropped_total[5m]) > 100)
+          (
+            (increase(sip_exporter_fas_calls_total[5m]) > 0)
+            or
+            (sip_exporter_fas_calls_total > 0 unless sip_exporter_fas_calls_total offset 5m)
+          )
+          unless on (job, instance)
+          (
+            rate(sip_exporter_rtp_dropped_total[5m]) > 0
+            or rate(sip_exporter_socket_packets_dropped_total[5m]) > 0
+          )
         for: 2m
         labels:
           severity: warning
         annotations:
           summary: "Подозрение на False Answer Supervision"
-          description: "Ответившие вызовы на {{ $labels.carrier }} (ua_type={{ $labels.ua_type }}, {{ $labels.source_country }}, {{ $labels.direction }}) не понесли answer-side RTP в течение threshold (sweep-path) или fasByeFloor 3 с (BYE-path). Возможный биллинг-фрод. Подавляется при RTP-дропах >100/с (деградация захвата). Проверьте sip_exporter_rtp_dropped_total и one-way-media эндпоинты (voicemail/IVR) перед реакцией."
+          description: "Ответившие вызовы на {{ $labels.carrier }} (ua_type={{ $labels.ua_type }}, {{ $labels.source_country }}, {{ $labels.direction }}) не передавали RTP со стороны ответа за настроенное время ожидания либо при завершении после независимого порога 3 секунды. Возможный биллинг-фрод. Подавляется при потерях в ядре или приложении на этом сенсоре. Проверьте sip_exporter_rtp_dropped_total и one-way-media эндпоинты (voicemail/IVR) перед реакцией."
 
       - alert: SIPSessionCapacityExhaustion
         expr: sip_exporter_sessions_utilization > 90
@@ -451,7 +488,7 @@ groups:
 
 ### Алерты здоровья системы
 
-Эти алерты мониторят собственное здоровье SIP Exporter — потери в буфере kernel socket, которые указывают, что экспортёр не успевает за приёмом пакетов (`sip_exporter_socket_packets_dropped_total`).
+Эти алерты различают потери в буфере kernel socket (`sip_exporter_socket_packets_dropped_total`) и RTP, отклонённый userspace packet-batch admission (`sip_exporter_rtp_dropped_total`). Оба случая означают неполный захват.
 
 ```yaml
       - alert: SIPPacketDropHigh
@@ -462,6 +499,15 @@ groups:
         annotations:
           summary: "Высокий rate потерь пакетов"
           description: "Kernel socket отбрасывает {{ $value | printf \"%.1f\" }} пакетов/с. Увеличьте буфер сокета или снизьте трафик."
+
+      - alert: SIPExporterRTPUserspaceDrops
+        expr: rate(sip_exporter_rtp_dropped_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SIP Exporter отбрасывает RTP в userspace"
+          description: "RTP packet admission отбрасывает данные в userspace. Считайте сигналы RTP QoE, FAS и наличия медиа неполными; снизьте трафик на сенсор или увеличьте производительность обработки."
 ```
 
 ### Info-алерты
@@ -504,15 +550,20 @@ groups:
           summary: "Скачок минут трафика в направление {{ $labels.destination_country }}"
           description: "Секунды трафика в направление {{ $labels.destination_country }} выросли более чем в 3 раза по сравнению с 1ч назад. Возможен всплеск трафика или фрод."
 
-      - alert: SIPACDLowByDestination
-        expr: (sum by (destination_country) (rate(sip_exporter_billable_seconds_total[15m])) / 60)
-              / sum by (destination_country) (rate(sip_exporter_invite_200_total[15m])) < 0.5
+      - alert: SIPSessionDurationLow
+        expr: |
+          (
+            sum by (job, instance, carrier) (rate(sip_exporter_spd_sum[15m]))
+            / sum by (job, instance, carrier) (rate(sip_exporter_spd_count[15m])) < 30
+          )
+          and on (job, instance, carrier)
+            sum by (job, instance, carrier) (rate(sip_exporter_spd_count[15m])) > 0
         for: 15m
         labels:
           severity: warning
         annotations:
-          summary: "Низкий ACD для {{ $labels.destination_country }}"
-          description: "Средняя длительность звонка в направление {{ $labels.destination_country }} ниже 30 секунд уже 15 минут. Короткие звонки могут указывать на проблемы с качеством или фрод."
+          summary: "Короткие завершённые сессии на {{ $labels.carrier }}"
+          description: "Средняя длительность завершённых SIP-сессий ниже 30 секунд уже 15 минут. Учитываются также сессии, завершённые по таймауту; это не время разговора и не ACD по стране назначения."
 ```
 
 ## Дашборд Grafana
@@ -667,7 +718,7 @@ amtool silence add --duration=2h --comment="Плановое обслужива�
 
 ```yaml
 annotations:
-  runbook_url: "https://wiki.example.com/runbooks/{{ .GroupLabels.alertname }}"
+  runbook_url: "https://wiki.example.com/runbooks/sip-ser-low"
 ```
 
 ### Несколько инстансов
@@ -685,7 +736,7 @@ scrape_configs:
 
 ### Кардинальность метрик
 
-SIP Exporter экспортирует ~115 метрик с лейблами `carrier`, `ua_type` и `source_country`. RTP-метрики также имеют лейбл `codec` (обычно 3-8 кодеков). Кардинальность равна числу настроенных операторов × типов UA × исходных стран × (для RTP) активных кодеков. Без конфигурации операторов и без GeoIP `source_country="unknown"` (кардинальность = 1); включение GeoIP или настройка `carrier.country` увеличивает кардинальность на число наблюдаемых исходных стран.
+Наборы лейблов различаются — см. [справочник метрик](METRICS.ru.md). Число временных рядов оценивайте отдельно для каждой метрики по наблюдаемым сочетаниям лейблов, включая `direction`, `codec`, `iface` и опциональные host-лейблы там, где они есть. Гистограммы дополнительно создают ряды bucket, sum и count. Без GeoIP и `carrier.country` значение `source_country="unknown"` означает одно значение страны, а не один ряд для всей метрики.
 
 ### Организация дашбордов
 

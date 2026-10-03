@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/moby/moby/api/types/container"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,6 +22,8 @@ func TestSIPpGeneratorRequestIsPinnedAndWritesStatistics(t *testing.T) {
 	require.Contains(t, req.Image, "@sha256:")
 	require.NotContains(t, req.Image, ":latest")
 	require.True(t, slices.Contains(req.Cmd, "-trace_stat"))
+	require.Contains(t, req.Cmd, "-fd")
+	require.Contains(t, req.Cmd, "1s")
 	require.True(t, slices.Contains(req.Cmd, "-stf"))
 	require.True(t, slices.Contains(req.Cmd, "/artifacts/stats.csv"))
 
@@ -33,6 +36,12 @@ func TestSIPpGeneratorRequestIsPinnedAndWritesStatistics(t *testing.T) {
 	}
 	require.True(t, foundStatsMount)
 	require.True(t, strings.Contains(req.Image, "pbertera/sipp"))
+	require.NotNil(t, req.HostConfigModifier)
+	hostConfig := &container.HostConfig{}
+	req.HostConfigModifier(hostConfig)
+	require.Equal(t, []*container.Ulimit{{
+		Name: "nofile", Soft: sippNofileLimit, Hard: sippNofileLimit,
+	}}, hostConfig.Ulimits)
 }
 
 func TestSIPpGeneratorArgsUseUniqueCallIDs(t *testing.T) {

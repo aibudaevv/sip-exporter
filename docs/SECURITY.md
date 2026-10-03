@@ -9,7 +9,7 @@ It requires a privileged Linux deployment on a host that observes IPv4/UDP SIP s
 correlated RTP/RTCP path. It does not store packets or audio and is not a packet-search UI. QoE
 metrics describe traffic visible at the sensor, not guaranteed end-to-end subscriber quality.
 
-## Why `--privileged` Is Required
+## Privileges in the Supported Deployment
 
 SIP-exporter uses **eBPF** (extended Berkeley Packet Filter) attached to `AF_PACKET` sockets to capture SIP traffic directly in the Linux kernel. This requires three specific capabilities:
 
@@ -19,11 +19,11 @@ SIP-exporter uses **eBPF** (extended Berkeley Packet Filter) attached to `AF_PAC
 | `CAP_NET_RAW` | Create `AF_PACKET` raw socket (`SOCK_RAW`) | `internal/exporter/exporter.go` — `unix.Socket(AF_PACKET, SOCK_RAW, ...)` |
 | `CAP_NET_ADMIN` | Request a forced socket receive buffer | `internal/exporter/exporter.go` — `SO_RCVBUFFORCE` with `SO_RCVBUF` fallback |
 
-These capabilities are only available to root (`UID 0`), hence `--privileged`.
+The supported Docker example runs as root with `privileged: true`. The current implementation explicitly checks UID 0 during initialization. Linux capabilities can be granted independently of UID; they do not imply a universal requirement for `--privileged`. A minimal-capability container configuration is not validated here.
 
 ### Why `network_mode: host`
 
-Packet capture via `AF_PACKET` requires direct access to the host's network interface. Bridge networking would only see the container's virtual interface, not the actual SIP traffic on the physical NIC. There is no workaround for this — it's a fundamental requirement of passive network monitoring.
+AF_PACKET capture requires access to the monitored interface. An ordinary container bridge exposes its virtual interface rather than the host NIC. The supported Docker example provides access through `network_mode: host`; other network arrangements require separate validation.
 
 ## What the Container Does with Privileges
 
@@ -31,7 +31,7 @@ The container performs **read-only packet inspection**:
 
 1. **Loads** an eBPF socket filter program into the kernel (once, at startup)
 2. **Creates** an `AF_PACKET` raw socket bound to the specified network interface
-3. **Reads** packets from the socket into a Go channel (10,000 buffer)
+3. **Receives** packets into bounded processing queues; the current branch uses a TPACKET_V3 ring and SIP-prioritized packet batches
 4. **Parses** SIP headers (method, status, Call-ID, From/To tags, CSeq, Session-Expires), fixed RTP headers (12 bytes: version, payload type, sequence, timestamp, SSRC), and RTCP report blocks
 5. **Exports** metrics to Prometheus via `/metrics` HTTP endpoint
 
@@ -79,7 +79,7 @@ No **phone numbers** ever reach Prometheus labels. The privacy-relevant packet a
 | `carrier` | CIDR match of source IP against `carriers.yaml` | Most SIP, RTP, and correlated RTCP metrics | `telecom-alpha` |
 | `ua_type` | User-Agent classification (`user_agents.yaml`) | Base/call-level SIP, RTP, and correlated RTCP metrics | `yealink` |
 | `source_country` | `carrier.country` → MaxMind GeoIP(src IP) → `unknown` | Base/call-level SIP, RTP, and correlated RTCP metrics | `RU` |
-| `destination_country` | E.164 prefix of the called number (embedded table) | INVITE metrics only | `US` |
+| `destination_country` | E.164 prefix of the called number (embedded table) | INVITE raw and `billable_seconds_total` | `US` |
 | `caller_host`, `called_host` | Host part of the From/To SIP URI | INVITE metrics only (**opt-in**, default off) | `10.0.0.5`, `sip.example.com` |
 | `codec` | RTP payload type / SDP `a=rtpmap` | RTP and correlated RTCP quality metrics | `G.711` |
 | `direction` | Kernel packet type | SIP and RTP traffic metrics | `inbound` |
@@ -98,7 +98,7 @@ No **phone numbers** ever reach Prometheus labels. The privacy-relevant packet a
 | Application | Single statically linked Go binary plus the eBPF object file |
 | Volumes | Writable `sip-exporter-state:/var/lib/sip-exporter` for the telemetry ID; optional configuration and timezone mounts are read-only |
 | Network | Inbound `/metrics` and `/health` HTTP endpoints (default port 10047); optional outbound telemetry |
-| Processes | A single application process; no shell or daemon process is started |
+| Processes | One main application process; healthchecks periodically run wget, and the Dockerfile shell-form healthcheck also starts a shell |
 
 > **Security note — unauthenticated endpoints:** `/metrics` and `/health` are registered without any authentication or authorization middleware (`internal/server/server.go:102-103`). Anyone who can reach port `10047` can read all exported metrics. The current service listens on all interfaces and does not provide a bind-address setting; on untrusted networks, firewall port `10047` or place a reverse proxy with authentication in front of it.
 
@@ -121,20 +121,9 @@ The eBPF program is [~166 lines of C](../internal/bpf/sip.c). It does two things
 
 **Critical point:** The eBPF filter is a *socket filter*, not a *tc/XDP filter*. It only controls which packets are copied to the application's socket buffer. Dropped packets are **not** lost — they continue through the normal network stack to their destination. The filter cannot modify or block traffic.
 
-## Industry Standard
+## Privilege Boundary
 
-Running privileged for eBPF-based observability is standard practice:
-
-| Project | What it does | Privileged? |
-|---|---|---|
-| [Cilium](https://github.com/cilium/cilium) | eBPF networking & security | Yes |
-| [Falco](https://github.com/falcosecurity/falco) | eBPF system call monitoring | Yes |
-| [Pixie](https://github.com/pixie-io/pixie) | eBPF Kubernetes observability | Yes |
-| [kubectl-trace](https://github.com/iovisor/kubectl-trace) | eBPF tracing | Yes |
-| [Parca](https://github.com/parca-dev/parca) | eBPF continuous profiling | Yes |
-| **SIP-exporter** | eBPF SIP traffic monitoring | Yes |
-
-All eBPF-based tools require `CAP_BPF` / `CAP_SYS_ADMIN` to load programs into the kernel. This is a kernel-level security boundary, not a container-level one.
+`privileged: true` grants broad container privileges. Passive socket-filter behavior describes the application, but does not constrain a compromised process. Restrict access to the host and HTTP port, use a trusted image and keep it updated.
 
 ## Automated Vulnerability Scanning
 
@@ -142,8 +131,10 @@ All code and container images are automatically scanned for known vulnerabilitie
 
 | Scanner | What it checks | Frequency |
 |---|---|---|
-| [Go Vulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) | Go dependencies against Go Vulnerability Database | Every push + daily |
-| [Trivy](https://trivy.dev) | Container image (OS packages + Go binaries) against CVE databases | Every push + daily |
+| [Go Vulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) | Go dependencies against Go Vulnerability Database | Selected push/PR branches + daily |
+| [Trivy](https://trivy.dev) | Container image (OS packages + Go binaries) against CVE databases | Selected push/PR branches + daily |
+
+Push scans cover `main`, `master`, `develop` and `ab/**`; PR scans target `main`, `master` and `develop`. A direct push to `feature/**` alone does not trigger these scans.
 
 Results are uploaded to the [GitHub Security tab](https://github.com/aibudaevv/sip-exporter/security).
 

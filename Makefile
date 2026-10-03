@@ -27,6 +27,10 @@ ebpf_log:
 test:
 	go test -v ./...
 
+.PHONY: test-docs-promql
+test-docs-promql:
+	SIP_EXPORTER_TEST_PROMQL=true go test -v -count=1 -run '^TestDocumentedPromQL$$' ./examples
+
 test-all: docker_build
 	@echo "=== Unit tests ==="
 	go test -v ./internal/... ./pkg/...

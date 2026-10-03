@@ -19,7 +19,8 @@ Bug reports, ideas, documentation, tests, and code are welcome. Please follow th
 3. Follow the existing style and add tests or documentation when relevant.
 4. List the checks you ran and anything you could not verify.
 
-For documentation-only changes, run `git diff --check`. For Go changes, run `make test` and
+For prose-only documentation changes, run `git diff --check`. For PromQL examples or alert/recording
+rules, also run `make test-docs-promql` (Docker required; uses Prometheus promtool v3.13.0). For Go changes, run `make test` and
 `make lint`. Run E2E and load tests only through their Makefile targets and never concurrently.
 
 By contributing, you agree that your work is licensed under the repository's

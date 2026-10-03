@@ -46,6 +46,121 @@ func (m *metrics) rtpGauge(gv *prometheus.GaugeVec, carrier, uaType, codec strin
 	return d.GetGauge().GetValue()
 }
 
+func requireRTPMetric(
+	t *testing.T,
+	families []*dto.MetricFamily,
+	name string,
+	labels map[string]string,
+) *dto.Metric {
+	t.Helper()
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			if len(metric.GetLabel()) != len(labels) {
+				continue
+			}
+			matches := true
+			for _, pair := range metric.GetLabel() {
+				want, ok := labels[pair.GetName()]
+				if !ok || want != pair.GetValue() {
+					matches = false
+					break
+				}
+			}
+			if matches {
+				return metric
+			}
+		}
+	}
+	t.Fatalf("metric %q with labels %v not found", name, labels)
+	return nil
+}
+
+func metricFamilyNames(families []*dto.MetricFamily) map[string]struct{} {
+	names := make(map[string]struct{}, len(families))
+	for _, family := range families {
+		names[family.GetName()] = struct{}{}
+	}
+	return names
+}
+
+func TestRTPMetricserIsolatesEveryLabel(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newMetricserWithRegistry(reg)
+	tests := []struct {
+		name    string
+		labels  [5]string
+		packets int
+		pdv     float64
+	}{
+		{name: "base", labels: [5]string{"carrier-a", "yealink", "PCMU", "US", "inbound"}, packets: 1, pdv: 11},
+		{name: "carrier", labels: [5]string{"carrier-b", "yealink", "PCMU", "US", "inbound"}, packets: 2, pdv: 22},
+		{name: "ua type", labels: [5]string{"carrier-a", "cisco", "PCMU", "US", "inbound"}, packets: 3, pdv: 33},
+		{name: "codec", labels: [5]string{"carrier-a", "yealink", "PCMA", "US", "inbound"}, packets: 4, pdv: 44},
+		{
+			name: "source country", labels: [5]string{"carrier-a", "yealink", "PCMU", "DE", "inbound"},
+			packets: 5, pdv: 55,
+		},
+		{name: "direction", labels: [5]string{"carrier-a", "yealink", "PCMU", "US", "outbound"}, packets: 6, pdv: 66},
+	}
+
+	for _, tt := range tests {
+		handle := m.BindRTPMetrics(tt.labels[0], tt.labels[1], tt.labels[2], tt.labels[3], tt.labels[4])
+		for range tt.packets {
+			handle.UpdateRTPPackets()
+		}
+		handle.UpdateRTPPDV(tt.pdv)
+	}
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			labels := map[string]string{
+				"carrier": tt.labels[0], "ua_type": tt.labels[1], "codec": tt.labels[2],
+				"source_country": tt.labels[3], "direction": tt.labels[4],
+			}
+			counter := requireRTPMetric(t, families, "sip_exporter_rtp_packets_total", labels)
+			require.InDelta(t, float64(tt.packets), counter.GetCounter().GetValue(), 0.001)
+			histogram := requireRTPMetric(t, families, "sip_exporter_rtp_pdv_milliseconds", labels)
+			require.Equal(t, uint64(1), histogram.GetHistogram().GetSampleCount())
+			require.InDelta(t, tt.pdv, histogram.GetHistogram().GetSampleSum(), 0.001)
+		})
+	}
+}
+
+func TestRTPMetricserRepeatedBindReusesExistingFamilies(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newMetricserWithRegistry(reg)
+	labels := [5]string{"carrier-a", "yealink", "PCMU", "US", "inbound"}
+	m.UpdateRTPPackets(labels[0], labels[1], labels[2], labels[3], labels[4])
+	m.UpdateRTPPDV(labels[0], labels[1], labels[2], labels[3], labels[4], 10)
+	before, err := reg.Gather()
+	require.NoError(t, err)
+
+	first := m.BindRTPMetrics(labels[0], labels[1], labels[2], labels[3], labels[4])
+	second := m.BindRTPMetrics(labels[0], labels[1], labels[2], labels[3], labels[4])
+	first.UpdateRTPPackets()
+	first.UpdateRTPPDV(20)
+	second.UpdateRTPPackets()
+	second.UpdateRTPPDV(30)
+
+	after, err := reg.Gather()
+	require.NoError(t, err)
+	require.Equal(t, metricFamilyNames(before), metricFamilyNames(after))
+	wantLabels := map[string]string{
+		"carrier": labels[0], "ua_type": labels[1], "codec": labels[2],
+		"source_country": labels[3], "direction": labels[4],
+	}
+	counter := requireRTPMetric(t, after, "sip_exporter_rtp_packets_total", wantLabels)
+	require.InDelta(t, 3.0, counter.GetCounter().GetValue(), 0.001)
+	histogram := requireRTPMetric(t, after, "sip_exporter_rtp_pdv_milliseconds", wantLabels)
+	require.Equal(t, uint64(3), histogram.GetHistogram().GetSampleCount())
+	require.InDelta(t, 60.0, histogram.GetHistogram().GetSampleSum(), 0.001)
+}
+
 func TestRTPPacketsAndLoss(t *testing.T) {
 	m := NewTestMetricser().(*metrics)
 	m.UpdateRTPPackets("carrier-a", "yealink", "PCMU", "", "")

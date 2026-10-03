@@ -37,16 +37,23 @@ promtool check rules /etc/prometheus/rules/prometheus-recording-rules.yml
 promtool check rules /etc/prometheus/rules/prometheus-alerts.yml
 ```
 
-The pack covers exporter availability, kernel socket drops, internal channel saturation, degraded
-SER, RTP loss, missing RTP, and one-way RTP. Its 1% socket-drop, 80% channel, 90% SER, 5% RTP/media
-failure thresholds and traffic floor are safe starting points, not universal SLOs. Observe at least
-seven days of normal traffic before changing them. Exclude intentional one-way media such as paging,
-IVR, or voicemail before routing that alert to an escalation policy.
+The pack covers exporter availability, kernel socket drops, userspace RTP drops, internal channel
+saturation, degraded SER, RTP loss, missing RTP, and one-way RTP. Any sustained userspace RTP drops,
+the 1% socket-drop, 80% channel, 90% SER, and 5% RTP/media failure thresholds, and the traffic floor
+are initial settings to validate against your traffic, not universal SLOs. Observe at least seven days of normal traffic before
+changing them. Exclude intentional one-way media such as paging, IVR, or voicemail before routing
+that alert to an escalation policy.
 
 Every alert links to this section and states the symptom with a likely cause. Use raw
 `sip_exporter_*` metrics and the dashboard to distinguish a network problem from incomplete capture.
 
+For missing/one-way RTP, the denominator is **all completed sessions** (`sdc_total`), including expiry, not only SDP dialogs. Their traffic floor is 0.1 completions/s; the SER floor is 0.1 INVITEs/s. Investigate capture drops before interpreting media alerts.
+
 ## Prometheus Alert Rules
+
+The following snippets are additional examples, not a continuation of the production file. Select the rules you need and place them under `groups[].rules` in a separate YAML file. Do not load duplicate alert names. Adapt thresholds and receivers to your network and replace placeholder runbook URLs.
+
+Executable examples are checked with `make test-docs-promql` (Go + Docker, image `prom/prometheus:v3.13.0`). It extracts rules and queries from both language versions and evaluates them against time-series fixtures.
 
 ### Critical Alerts
 
@@ -65,7 +72,11 @@ groups:
           description: "SIP Exporter instance {{ $labels.instance }} has been down for more than 1 minute."
 
       - alert: SIPHighServerErrorRate
-        expr: avg(sip_exporter_isa) > 50
+        expr: |
+          sip_exporter_isa > 50
+          and on (job, instance, carrier, ua_type, source_country, direction)
+            sum by (job, instance, carrier, ua_type, source_country, direction)
+              (rate(sip_exporter_invite_total[5m])) >= 0.1
         for: 1m
         labels:
           severity: critical
@@ -186,15 +197,26 @@ groups:
 
 ### Registration Health Alerts
 
+The low-success rule uses terminal outcomes over the last five minutes: 200 OK and failures excluding 401/407 and 3xx. Without terminal outcomes it does not fire. A 401/407 challenge is a normal digest-auth step and does not by itself prove brute force.
+
 ```yaml
       - alert: SIPRegistrationSuccessLow
-        expr: sip_exporter_register_success_ratio < 80
+        expr: |
+          100 * (
+            sum by (job, instance, carrier, ua_type, source_country, direction) (rate(sip_exporter_register_success_total[5m]))
+            or 0 * sum by (job, instance, carrier, ua_type, source_country, direction) (rate(sip_exporter_register_failure_total{code!~"401|407|3.."}[5m]))
+          ) / (
+            (sum by (job, instance, carrier, ua_type, source_country, direction) (rate(sip_exporter_register_success_total[5m]))
+              or 0 * sum by (job, instance, carrier, ua_type, source_country, direction) (rate(sip_exporter_register_failure_total{code!~"401|407|3.."}[5m])))
+            + (sum by (job, instance, carrier, ua_type, source_country, direction) (rate(sip_exporter_register_failure_total{code!~"401|407|3.."}[5m]))
+              or 0 * sum by (job, instance, carrier, ua_type, source_country, direction) (rate(sip_exporter_register_success_total[5m])))
+          ) < 80
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "Low registration success ratio"
-          description: "REGISTER success ratio is {{ $value | printf \"%.1f\" }}% (below 80%). Clients are failing to register — check registrar health, credentials, or ACLs. Note: 401/407 digest-auth challenges are excluded from the denominator."
+          description: "REGISTER success ratio is {{ $value | printf \"%.1f\" }}% (below 80%). Clients are failing to register — check registrar health, credentials, or ACLs. Note: 401/407 challenges and 3xx redirects are excluded; the calculation window is five minutes."
 
       - alert: SIPRegistrationBruteForce
         expr: sum by (carrier, ua_type, source_country) (rate(sip_exporter_register_failure_total{code="401"}[5m])) > 10
@@ -219,6 +241,8 @@ groups:
 
 ### Fraud Detection Alerts
 
+Event counters are created lazily. The examples handle both five-minute increases and newly observed positive series with the same labels. After monitoring recovers, an old series can also appear new: corroborate event timing separately. Any recorded kernel/userspace drops suppress FAS only on the same `job, instance`.
+
 These alerts detect suspicious SIP patterns: account takeover, registration enumeration, and INVITE flooding. See `docs/fraud-detection.md` for full configuration details.
 
 ```yaml
@@ -236,7 +260,10 @@ These alerts detect suspicious SIP patterns: account takeover, registration enum
           description: "A user re-registered from a different country on {{ $labels.carrier }} ({{ $labels.source_country }}). Possible account takeover."
 
       - alert: SIPRegistrationScan
-        expr: rate(sip_exporter_register_scan_total[5m]) > 0
+        expr: |
+          (increase(sip_exporter_register_scan_total[5m]) > 0)
+          or
+          (sip_exporter_register_scan_total > 0 unless sip_exporter_register_scan_total offset 5m)
         for: 1m
         labels:
           severity: critical
@@ -245,7 +272,10 @@ These alerts detect suspicious SIP patterns: account takeover, registration enum
           description: "Single IP is registering many different accounts on {{ $labels.carrier }} from {{ $labels.source_country }}. Possible credential stuffing or enumeration."
 
       - alert: SIPInviteBurst
-        expr: rate(sip_exporter_invite_burst_total[5m]) > 0
+        expr: |
+          (increase(sip_exporter_invite_burst_total[5m]) > 0)
+          or
+          (sip_exporter_invite_burst_total > 0 unless sip_exporter_invite_burst_total offset 5m)
         for: 1m
         labels:
           severity: critical
@@ -255,15 +285,22 @@ These alerts detect suspicious SIP patterns: account takeover, registration enum
 
       - alert: SIPFalseAnswerSupervision
         expr: |
-          (rate(sip_exporter_fas_calls_total[5m]) > 0)
-          unless on()
-          (rate(sip_exporter_rtp_dropped_total[5m]) > 100)
+          (
+            (increase(sip_exporter_fas_calls_total[5m]) > 0)
+            or
+            (sip_exporter_fas_calls_total > 0 unless sip_exporter_fas_calls_total offset 5m)
+          )
+          unless on (job, instance)
+          (
+            rate(sip_exporter_rtp_dropped_total[5m]) > 0
+            or rate(sip_exporter_socket_packets_dropped_total[5m]) > 0
+          )
         for: 2m
         labels:
           severity: warning
         annotations:
           summary: "False Answer Supervision suspected"
-          description: "Answered calls on {{ $labels.carrier }} (ua_type={{ $labels.ua_type }}, {{ $labels.source_country }}, {{ $labels.direction }}) carried no answer-side RTP within the threshold (sweep path) or fasByeFloor 3 s (BYE path). Possible billing fraud. Suppressed when RTP drops exceed 100/s (capture degradation). Check sip_exporter_rtp_dropped_total and one-way-media endpoints (voicemail/IVR) before acting."
+          description: "Answered calls on {{ $labels.carrier }} (ua_type={{ $labels.ua_type }}, {{ $labels.source_country }}, {{ $labels.direction }}) carried no answer-side RTP within the configured wait or after the independent 3-second BYE floor. Possible billing fraud. Suppressed when this sensor reports kernel or userspace drops. Check sip_exporter_rtp_dropped_total and one-way-media endpoints (voicemail/IVR) before acting."
 
       - alert: SIPSessionCapacityExhaustion
         expr: sip_exporter_sessions_utilization > 90
@@ -451,7 +488,7 @@ These alerts monitor real-time RTP stream quality (jitter, packet loss, MOS) mea
 
 ### System Health Alerts
 
-These alerts monitor the SIP Exporter's own health — kernel socket buffer drops that indicate the exporter cannot keep up with packet ingestion (`sip_exporter_socket_packets_dropped_total`).
+These alerts distinguish kernel socket buffer drops (`sip_exporter_socket_packets_dropped_total`) from RTP rejected by userspace packet-batch admission (`sip_exporter_rtp_dropped_total`). Either means the capture is incomplete.
 
 ```yaml
       - alert: SIPPacketDropHigh
@@ -462,6 +499,15 @@ These alerts monitor the SIP Exporter's own health — kernel socket buffer drop
         annotations:
           summary: "High packet drop rate"
           description: "Kernel socket is dropping {{ $value | printf \"%.1f\" }} packets/sec. Increase socket buffer or reduce traffic."
+
+      - alert: SIPExporterRTPUserspaceDrops
+        expr: rate(sip_exporter_rtp_dropped_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SIP Exporter is dropping RTP in userspace"
+          description: "RTP packet admission is dropping data in userspace. Treat RTP QoE, FAS, and media-presence signals as incomplete; reduce traffic per sensor or increase processing capacity."
 ```
 
 ### Info Alerts
@@ -504,15 +550,20 @@ These alerts monitor the SIP Exporter's own health — kernel socket buffer drop
           summary: "Traffic minutes spike to {{ $labels.destination_country }}"
           description: "Traffic seconds to {{ $labels.destination_country }} increased >3× compared to 1h ago. Possible traffic surge or fraud."
 
-      - alert: SIPACDLowByDestination
-        expr: (sum by (destination_country) (rate(sip_exporter_billable_seconds_total[15m])) / 60)
-              / sum by (destination_country) (rate(sip_exporter_invite_200_total[15m])) < 0.5
+      - alert: SIPSessionDurationLow
+        expr: |
+          (
+            sum by (job, instance, carrier) (rate(sip_exporter_spd_sum[15m]))
+            / sum by (job, instance, carrier) (rate(sip_exporter_spd_count[15m])) < 30
+          )
+          and on (job, instance, carrier)
+            sum by (job, instance, carrier) (rate(sip_exporter_spd_count[15m])) > 0
         for: 15m
         labels:
           severity: warning
         annotations:
-          summary: "Low ACD for {{ $labels.destination_country }}"
-          description: "Average call duration to {{ $labels.destination_country }} is below 30 seconds for 15m. Short calls may indicate quality issues or toll fraud."
+          summary: "Short completed sessions on {{ $labels.carrier }}"
+          description: "Mean completed SIP session duration is below 30 seconds for 15 minutes. Includes expired sessions; this is not talk time or per-destination ACD."
 ```
 
 ## Grafana Dashboard
@@ -667,7 +718,7 @@ Link runbooks to alerts using `runbook_url` annotation:
 
 ```yaml
 annotations:
-  runbook_url: "https://wiki.example.com/runbooks/{{ .GroupLabels.alertname }}"
+  runbook_url: "https://wiki.example.com/runbooks/sip-ser-low"
 ```
 
 ### Multiple Instances
@@ -685,7 +736,7 @@ scrape_configs:
 
 ### Metric Cardinality
 
-The SIP Exporter exposes ~115 metrics with `carrier`, `ua_type`, and `source_country` labels. RTP metrics additionally carry a `codec` label (typically 3-8 codecs). Cardinality equals the number of configured carriers × UA types × source countries × (for RTP) active codecs. Without a carriers config and without GeoIP, `source_country="unknown"` (cardinality = 1); enabling GeoIP or setting `carrier.country` increases cardinality by the number of distinct source countries observed.
+Label sets vary by metric; see the [metric reference](METRICS.md). Estimate series separately for each metric from its observed label combinations, including `direction`, `codec`, `iface` or optional host labels where applicable. Histograms also create bucket, sum and count series. Without GeoIP or `carrier.country`, `source_country="unknown"` contributes one country value, not one series for the whole metric.
 
 ### Dashboard Organization
 

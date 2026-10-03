@@ -38,6 +38,36 @@ func TestSteadyMeasurementBeginHonorsCanceledContext(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+func TestSteadyMeasurementBeginUsesCompletedScrapeTime(t *testing.T) {
+	scrapeStarted := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(scrapeStarted)
+		<-release
+		_, err := io.WriteString(w, "sip_exporter_channel_length 1\n"+
+			"sip_exporter_socket_packets_dropped_total{interface=\"lo\"} 0\n"+
+			"sip_exporter_rtp_dropped_total 0\n")
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+	measurement := &steadyMeasurement{env: &testEnv{endpoint: server.URL}}
+	logicalAt := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+
+	beginErr := make(chan error, 1)
+	go func() {
+		beginErr <- measurement.Begin(t.Context(), logicalAt)
+	}()
+	<-scrapeStarted
+	completionFloor := time.Now()
+	close(release)
+	require.NoError(t, <-beginErr)
+
+	require.Len(t, measurement.samples.Metrics, 1)
+	point := measurement.samples.Metrics[0]
+	require.Equal(t, logicalAt, point.At)
+	require.False(t, point.ObservedAt.Before(completionFloor))
+}
+
 func TestSteadyMeasurementWaitForSamplesRequiresBothCollectors(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -113,6 +143,87 @@ func TestSteadyMeasurementRetainsCollectorFailureBeforePhaseStart(t *testing.T) 
 	require.ErrorIs(t, measurement.err, context.DeadlineExceeded)
 }
 
+func TestSteadyMeasurementDockerStatsStartupInterval(t *testing.T) {
+	at := time.Date(2026, 9, 29, 12, 0, 1, 0, time.UTC)
+	invalidInterval := validDockerStats(at)
+	invalidInterval.PreRead = time.Time{}
+
+	t.Run("initial invalid interval is ignored", func(t *testing.T) {
+		measurement := &steadyMeasurement{
+			env: &testEnv{limits: peakLimits}, measuring: true,
+		}
+
+		measurement.recordDockerStats(invalidInterval)
+
+		require.NoError(t, measurement.err)
+		require.Empty(t, measurement.samples.Resources)
+	})
+
+	t.Run("second invalid interval is fatal", func(t *testing.T) {
+		measurement := &steadyMeasurement{
+			env: &testEnv{limits: peakLimits}, measuring: true,
+		}
+		measurement.recordDockerStats(invalidInterval)
+
+		measurement.recordDockerStats(invalidInterval)
+
+		require.ErrorContains(t, measurement.err, "invalid Docker stats interval")
+		require.Empty(t, measurement.samples.Resources)
+	})
+
+	t.Run("valid interval is recorded", func(t *testing.T) {
+		measurement := &steadyMeasurement{
+			env: &testEnv{limits: peakLimits}, measuring: true,
+		}
+
+		measurement.recordDockerStats(validDockerStats(at))
+
+		require.NoError(t, measurement.err)
+		require.Len(t, measurement.samples.Resources, 1)
+	})
+
+	t.Run("adjacent valid samples use collector interval", func(t *testing.T) {
+		measurement := &steadyMeasurement{
+			env: &testEnv{limits: peakLimits}, measuring: true,
+		}
+		measurement.recordDockerStats(validDockerStats(at))
+		next := validDockerStats(at.Add(2 * time.Second))
+		next.PreCPUStats.CPUUsage.TotalUsage = 1_500_000_000
+		next.CPUStats.CPUUsage.TotalUsage = 2_500_000_000
+
+		measurement.recordDockerStats(next)
+
+		require.NoError(t, measurement.err)
+		require.Len(t, measurement.samples.Resources, 2)
+		require.InDelta(t, 25, measurement.samples.Resources[1].CPUQuotaPercent, 0.000001)
+	})
+
+	t.Run("invalid interval after valid sample is fatal", func(t *testing.T) {
+		measurement := &steadyMeasurement{
+			env: &testEnv{limits: peakLimits}, measuring: true,
+		}
+		measurement.recordDockerStats(validDockerStats(at))
+
+		measurement.recordDockerStats(invalidInterval)
+
+		require.ErrorContains(t, measurement.err, "invalid Docker stats interval")
+		require.Len(t, measurement.samples.Resources, 1)
+	})
+
+	t.Run("non interval startup failure is fatal", func(t *testing.T) {
+		invalidMemory := validDockerStats(at)
+		invalidMemory.MemoryStats.Stats = nil
+		measurement := &steadyMeasurement{
+			env: &testEnv{limits: peakLimits}, measuring: true,
+		}
+
+		measurement.recordDockerStats(invalidMemory)
+
+		require.ErrorContains(t, measurement.err, "missing inactive file cache")
+		require.Empty(t, measurement.samples.Resources)
+	})
+}
+
 func TestSteadyMeasurementEndSamplesMetricBoundary(t *testing.T) {
 	var measurement *steadyMeasurement
 	boundaryWhileMeasuring := false
@@ -127,8 +238,8 @@ func TestSteadyMeasurementEndSamplesMetricBoundary(t *testing.T) {
 	}))
 	defer server.Close()
 
-	start := time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC)
-	end := start.Add(3 * time.Second)
+	start := time.Now().Add(-3 * time.Second)
+	end := time.Now()
 	done := make(chan struct{})
 	close(done)
 	measurement = &steadyMeasurement{
@@ -148,15 +259,20 @@ func TestSteadyMeasurementEndSamplesMetricBoundary(t *testing.T) {
 		},
 	}
 
+	fetchStarted := time.Now()
 	summary, samples, err := measurement.End(t.Context(), end)
+	fetchFinished := time.Now()
 
 	require.NoError(t, err)
 	require.True(t, boundaryWhileMeasuring)
 	require.Equal(t, float64(1), summary.SocketDrops)
 	require.Equal(t, float64(7), summary.ChannelPeak)
-	require.Equal(t, metricSamplePoint{
-		At: end.Add(-time.Nanosecond), ChannelLength: 7, SocketDrops: 1,
-	}, samples.Metrics[len(samples.Metrics)-1])
+	boundary := samples.Metrics[len(samples.Metrics)-1]
+	require.Equal(t, end.Add(-time.Nanosecond), boundary.At)
+	require.False(t, boundary.ObservedAt.Before(fetchStarted))
+	require.False(t, boundary.ObservedAt.After(fetchFinished))
+	require.Equal(t, float64(7), boundary.ChannelLength)
+	require.Equal(t, float64(1), boundary.SocketDrops)
 }
 
 func TestSteadyMeasurementEndRejectsInflightPeriodicSample(t *testing.T) {
@@ -180,8 +296,8 @@ func TestSteadyMeasurementEndRejectsInflightPeriodicSample(t *testing.T) {
 	}))
 	defer server.Close()
 
-	start := time.Date(2026, 8, 15, 9, 0, 0, 0, time.UTC)
-	end := start.Add(3 * time.Second)
+	start := time.Now().Add(-3 * time.Second)
+	end := time.Now()
 	done := make(chan struct{})
 	close(done)
 	measurement := &steadyMeasurement{
@@ -203,7 +319,9 @@ func TestSteadyMeasurementEndRejectsInflightPeriodicSample(t *testing.T) {
 	}()
 	<-periodicStarted
 
+	boundaryFetchStarted := time.Now()
 	summary, _, endErr := measurement.End(t.Context(), end)
+	boundaryFetchFinished := time.Now()
 	close(releasePeriodic)
 	fetchErr := <-periodicErr
 
@@ -213,7 +331,37 @@ func TestSteadyMeasurementEndRejectsInflightPeriodicSample(t *testing.T) {
 	measurement.mu.Lock()
 	defer measurement.mu.Unlock()
 	require.Len(t, measurement.samples.Metrics, 3)
-	require.Equal(t, end.Add(-time.Nanosecond), measurement.samples.Metrics[2].At)
+	boundary := measurement.samples.Metrics[2]
+	require.Equal(t, end.Add(-time.Nanosecond), boundary.At)
+	require.False(t, boundary.ObservedAt.Before(boundaryFetchStarted))
+	require.False(t, boundary.ObservedAt.After(boundaryFetchFinished))
+}
+
+func TestFetchMetricPointUsesCompletedScrapeTime(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		<-release
+		_, err := io.WriteString(w, "sip_exporter_channel_length 1\n"+
+			"sip_exporter_socket_packets_dropped_total{interface=\"lo\"} 0\n"+
+			"sip_exporter_rtp_dropped_total 0\n")
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+	measurement := &steadyMeasurement{env: &testEnv{endpoint: server.URL}}
+	logicalAt := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+
+	result := make(chan metricSamplePoint, 1)
+	go func() {
+		point, err := measurement.fetchMetricPoint(t.Context(), logicalAt)
+		require.NoError(t, err)
+		result <- point
+	}()
+	requestStarted := time.Now()
+	close(release)
+	point := <-result
+
+	require.Equal(t, logicalAt, point.At)
+	require.False(t, point.ObservedAt.Before(requestStarted))
 }
 
 func TestPhaseSamplesSelectsHalfOpenMeasurementInterval(t *testing.T) {
@@ -345,48 +493,63 @@ func TestPercentileRejectsInvalidInput(t *testing.T) {
 	}
 }
 
-func TestResourceSampleFromStatsNormalizesCPUToQuota(t *testing.T) {
-	at := time.Date(2026, 8, 14, 12, 0, 1, 0, time.UTC)
-	validLimits := WorkloadLimits{CPUCores: 2, MemoryBytes: 256 << 20}
+func TestCPUQuotaPercentUsesAdjacentCumulativeSamples(t *testing.T) {
+	start := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
-		name   string
-		limits WorkloadLimits
-		mutate func(*container.StatsResponse)
-		want   float64
+		name     string
+		previous resourceSample
+		current  resourceSample
+		limits   WorkloadLimits
+		want     float64
 	}{
-		{name: "one-core quota", limits: WorkloadLimits{CPUCores: 1, MemoryBytes: 256 << 20}, want: 100},
-		{name: "two-core quota", limits: validLimits, want: 50},
-		{name: "host delta ignored", limits: validLimits, mutate: func(s *container.StatsResponse) {
-			s.CPUStats.SystemUsage = s.PreCPUStats.SystemUsage
-		}, want: 50},
-		{name: "online CPU count ignored", limits: validLimits, mutate: func(s *container.StatsResponse) {
-			s.CPUStats.OnlineCPUs = 0
-			s.CPUStats.CPUUsage.PercpuUsage = nil
-		}, want: 50},
-		{name: "zero CPU delta", limits: validLimits, mutate: func(s *container.StatsResponse) {
-			s.CPUStats.CPUUsage.TotalUsage = s.PreCPUStats.CPUUsage.TotalUsage
-		}, want: 0},
-		{name: "above one hundred is not clamped", limits: WorkloadLimits{CPUCores: 1, MemoryBytes: 256 << 20}, mutate: func(s *container.StatsResponse) {
-			s.CPUStats.CPUUsage.TotalUsage = 2_500_000_000
-		}, want: 200},
+		{name: "one-core quota", previous: resourceSample{At: start, CPUUsageNS: 1_000_000_000}, current: resourceSample{At: start.Add(time.Second), CPUUsageNS: 2_000_000_000}, limits: WorkloadLimits{CPUCores: 1}, want: 100},
+		{name: "two-core quota", previous: resourceSample{At: start, CPUUsageNS: 1_000_000_000}, current: resourceSample{At: start.Add(time.Second), CPUUsageNS: 2_000_000_000}, limits: WorkloadLimits{CPUCores: 2}, want: 50},
+		{name: "two-second interval", previous: resourceSample{At: start, CPUUsageNS: 1_000_000_000}, current: resourceSample{At: start.Add(2 * time.Second), CPUUsageNS: 2_000_000_000}, limits: WorkloadLimits{CPUCores: 2}, want: 25},
+		{name: "zero CPU delta", previous: resourceSample{At: start, CPUUsageNS: 1_000_000_000}, current: resourceSample{At: start.Add(time.Second), CPUUsageNS: 1_000_000_000}, limits: WorkloadLimits{CPUCores: 2}, want: 0},
+		{name: "above one hundred is not clamped", previous: resourceSample{At: start}, current: resourceSample{At: start.Add(time.Second), CPUUsageNS: 2_000_000_000}, limits: WorkloadLimits{CPUCores: 1}, want: 200},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			stats := validDockerStats(at)
-			if tt.mutate != nil {
-				tt.mutate(&stats)
-			}
-
-			got, err := resourceSampleFromStats(at, stats, tt.limits)
+			got, err := cpuQuotaPercent(tt.previous, tt.current, tt.limits)
 
 			require.NoError(t, err)
-			require.InDelta(t, tt.want, got.CPUQuotaPercent, 0.000001)
+			require.InDelta(t, tt.want, got, 0.000001)
 		})
 	}
+}
+
+func TestCPUQuotaPercentRejectsInvalidSamples(t *testing.T) {
+	start := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name     string
+		previous resourceSample
+		current  resourceSample
+		limits   WorkloadLimits
+	}{
+		{name: "zero quota", previous: resourceSample{At: start}, current: resourceSample{At: start.Add(time.Second)}, limits: WorkloadLimits{}},
+		{name: "NaN quota", previous: resourceSample{At: start}, current: resourceSample{At: start.Add(time.Second)}, limits: WorkloadLimits{CPUCores: math.NaN()}},
+		{name: "infinite quota", previous: resourceSample{At: start}, current: resourceSample{At: start.Add(time.Second)}, limits: WorkloadLimits{CPUCores: math.Inf(1)}},
+		{name: "equal timestamps", previous: resourceSample{At: start}, current: resourceSample{At: start}, limits: WorkloadLimits{CPUCores: 2}},
+		{name: "reversed timestamps", previous: resourceSample{At: start}, current: resourceSample{At: start.Add(-time.Second)}, limits: WorkloadLimits{CPUCores: 2}},
+		{name: "counter rollback", previous: resourceSample{At: start, CPUUsageNS: 2}, current: resourceSample{At: start.Add(time.Second), CPUUsageNS: 1}, limits: WorkloadLimits{CPUCores: 2}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := cpuQuotaPercent(tt.previous, tt.current, tt.limits)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestResourceSampleFromStatsExtractsCumulativeCPU(t *testing.T) {
+	at := time.Date(2026, 8, 14, 12, 0, 1, 0, time.UTC)
+	validLimits := WorkloadLimits{CPUCores: 2, MemoryBytes: 256 << 20}
 
 	got, err := resourceSampleFromStats(at, validDockerStats(at), validLimits)
 	require.NoError(t, err)
+	require.Equal(t, uint64(1_500_000_000), got.CPUUsageNS)
 	require.Equal(t, uint64(80<<20), got.WorkingSetBytes)
 	require.Equal(t, uint64(100), got.CPUPeriods)
 	require.Equal(t, uint64(2), got.CPUThrottledPeriods)
@@ -795,14 +958,60 @@ func TestMetricSamplePointFromBodyRequiresCompleteSelfMetrics(t *testing.T) {
 	body := []byte("sip_exporter_channel_length 4\n" +
 		"sip_exporter_socket_packets_dropped_total{interface=\"lo\"} 1\n" +
 		"sip_exporter_socket_packets_dropped_total{interface=\"eth0\"} 2\n" +
-		"sip_exporter_rtp_dropped_total 5\n")
+		"sip_exporter_rtp_dropped_total 5\n" +
+		"sip_exporter_rtp_packets_total{direction=\"inbound\"} 10\n" +
+		"sip_exporter_rtp_packets_total{direction=\"outbound\"} 20\n")
 
 	got, err := metricSamplePointFromBody(at, body)
 
 	require.NoError(t, err)
 	require.Equal(t, metricSamplePoint{
-		At: at, ChannelLength: 4, SocketDrops: 3, RTPDrops: 5,
+		At: at, ChannelLength: 4, SocketDrops: 3, RTPDrops: 5, RTPPackets: 30,
 	}, got)
+}
+
+func TestRTPRateP95UsesObservedCounterIntervals(t *testing.T) {
+	start := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	samples := []metricSamplePoint{
+		{At: start, ObservedAt: start, RTPPackets: 0},
+		{At: start.Add(time.Second), ObservedAt: start.Add(time.Second), RTPPackets: 100},
+		{At: start.Add(2 * time.Second), ObservedAt: start.Add(3 * time.Second), RTPPackets: 500},
+		{At: start.Add(3 * time.Second), ObservedAt: start.Add(4 * time.Second), RTPPackets: 800},
+	}
+
+	got, err := rtpRateP95(samples)
+
+	require.NoError(t, err)
+	require.InDelta(t, 290, got, 0.000001)
+}
+
+func TestRTPRateP95RejectsUntrustworthySamples(t *testing.T) {
+	start := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name    string
+		samples []metricSamplePoint
+	}{
+		{name: "fewer than two samples", samples: []metricSamplePoint{{At: start, ObservedAt: start}}},
+		{name: "missing initial observation", samples: []metricSamplePoint{
+			{At: start},
+			{At: start.Add(time.Second), ObservedAt: start.Add(time.Second), RTPPackets: 1},
+		}},
+		{name: "counter rollback", samples: []metricSamplePoint{
+			{At: start, ObservedAt: start, RTPPackets: 2},
+			{At: start.Add(time.Second), ObservedAt: start.Add(time.Second), RTPPackets: 1},
+		}},
+		{name: "non increasing time", samples: []metricSamplePoint{
+			{At: start, ObservedAt: start},
+			{At: start.Add(time.Second), ObservedAt: start, RTPPackets: 1},
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := rtpRateP95(tt.samples)
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestMetricSamplePointFromBodyFailsClosed(t *testing.T) {

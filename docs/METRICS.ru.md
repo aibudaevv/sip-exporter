@@ -48,7 +48,7 @@ SIP-метрики используют многоуровневую модел�
 | `ua_type` | Базовый SIP-tier | Тип UA из конфига | `User-Agent` → regex-маппинг, разрешается при запросе |
 | `source_country` | Базовый SIP-tier | ISO 3166-1 alpha-2 | Страна вызывающего устройства. См. [Лейблы геообогащения](#лейблы-геообогащения) |
 | `direction` | Базовый SIP-tier | `inbound` или `outbound` | Направление трафика с точки зрения сервера. См. [Лейбл direction](#лейбл-direction) |
-| `destination_country` | Только INVITE | ISO alpha-2 или `"unknown"` | Страна назначения по префиксу номера E.164. См. [Лейблы геообогащения](#лейблы-геообогащения) |
+| `destination_country` | Raw-метрики INVITE и `billable_seconds_total` | ISO alpha-2 или `"unknown"` | Страна назначения по префиксу номера E.164. См. [Лейблы геообогащения](#лейблы-геообогащения) |
 | `caller_host` | Только INVITE (**opt-in**) | IP или домен | Хост-часть SIP URI из заголовка `From` |
 | `called_host` | Только INVITE (**opt-in**) | IP или домен | Хост-часть SIP URI из заголовка `To` |
 | `iface` | INVITE raw и socket-самомониторинг | Имя интерфейса | Настроенный capture-интерфейс, например `ens3` |
@@ -92,7 +92,7 @@ sip_exporter_ser{carrier="carrier-a",ua_type="yealink",source_country="RU",direc
 Следующие метрики являются системными и не включают ни один из этих лейблов:
 
 - `sip_exporter_system_error_total` — внутренние ошибки экспортёра (не SIP-трафик)
-- `sip_exporter_packets_total` — считает все разобранные SIP-пакеты независимо от источника
+- `sip_exporter_packets_total` — разобранные SIP-пакеты, кроме распознанных повторных INVITE
 
 ### Поведение по умолчанию
 
@@ -101,7 +101,7 @@ sip_exporter_ser{carrier="carrier-a",ua_type="yealink",source_country="RU",direc
 
 ### Лейбл carrier
 
-Лейбл `carrier` идентифицирует сетевого оператора, который **инициировал** SIP-транзакцию. Он разрешается из IP-адреса источника **запроса** (INVITE, REGISTER, OPTIONS) и распространяется на все связанные ответы и события жизненного цикла диалога через трекер.
+Лейбл `carrier` сопоставляет IP-адрес источника пакета с оператором из конфигурации. Коррелированные ответы INVITE/REGISTER наследуют оператора запроса; метрики жизненного цикла диалога и RTP используют контекст исходного INVITE. Остальные raw-счётчики используют источник самого пакета. Подробности — в алгоритме определения ниже.
 
 ### Конфигурация
 
@@ -146,7 +146,7 @@ carriers:
 
 ### Алгоритм разрешения
 
-Оператор определяется в момент **запроса** и наследуется всеми ответами в той же транзакции:
+Carrier связанных ответов INVITE/REGISTER наследуется от запроса. У остальных счётчиков ответов он определяется по IP пакета; метрики задержек и завершения диалога используют сохранённый контекст:
 
 ```
 1. Поступает SIP-запрос (INVITE/REGISTER/OPTIONS):
@@ -157,10 +157,10 @@ carriers:
    - Оператор сохраняется в трекере по Call-ID
 
 2. Поступает SIP-ответ:
-   - Оператор извлекается из трекера (по Call-ID), НЕ из IP ответа
+   - Для INVITE/REGISTER carrier извлекается из трекера по Call-ID
    - Ответы на INVITE → carrier из inviteTracker
    - Ответы на REGISTER → carrier из registerTracker
-   - Ответы на OPTIONS → carrier из optionsTracker
+   - OPTIONS: carrier из optionsTracker только для ORD; счётчики ответов — по IP пакета
    - Если запись в трекере истекла (TTL 60с) → fallback на IP пакета ответа
 
 3. Жизненный цикл диалога:
@@ -174,7 +174,7 @@ carriers:
 | Метрика | Источник carrier | Значение |
 |---------|-----------------|----------|
 | `invite_total{carrier}` | IP отправителя INVITE | Сколько вызовов инициировал этот оператор |
-| `200_total{carrier}` | Трекер запроса | Сколько 200 OK для транзакций этого оператора |
+| `200_total{carrier}` | INVITE/REGISTER: трекер; иначе IP пакета | Сколько 200 OK для транзакций этого оператора |
 | `sessions{carrier}` | Трекер INVITE → диалог | Активные диалоги, инициированные этим оператором |
 | SER, SEER, ISA, SCR, ASR, NER | Трекер INVITE | Качество вызовов, инициированных этим оператором |
 | RRD | Трекер REGISTER | Задержка регистрации для этого оператора |
@@ -184,7 +184,7 @@ carriers:
 | ORD | Трекер OPTIONS | Задержка ответа OPTIONS для этого оператора |
 | LRD | Трекер REGISTER | Задержка редиректа регистрации для этого оператора |
 | `system_error_total` | Без carrier | Системные ошибки |
-| `packets_total` | Без carrier | Все SIP-пакеты |
+| `packets_total` | Без carrier | Учтённые SIP-пакеты, кроме распознанных повторных INVITE |
 
 ### Пример сценария
 
@@ -201,7 +201,7 @@ INVITE                  | 10.0.1.5   | carrier-A         | IP → трекер
 200 OK                  | 10.0.2.5   | carrier-A         | inviteTracker
 ACK                     | 10.0.1.5   | carrier-A         | IP (запрос)
 BYE                     | 10.0.1.5   | carrier-A         | IP (запрос)
-200 OK to BYE           | 10.0.2.5   | carrier-A         | запись диалога
+200 OK to BYE           | 10.0.2.5   | carrier-B         | IP ответа (счётчик); завершение — carrier-A
 
 Результат:
   invite_total{carrier="carrier-A",ua_type="yealink"} += 1
@@ -222,7 +222,7 @@ BYE                     | 10.0.1.5   | carrier-A         | IP (запрос)
 
 ## Лейбл типа User-Agent
 
-Лейбл `ua_type` идентифицирует **тип SIP-устройства**, отправившего запрос, на основе заголовка `User-Agent`. Он разрешается по regex-шаблонам из YAML-конфига и распространяется на все связанные ответы и события жизненного цикла диалога через тот же механизм трекера, что и `carrier`.
+Лейбл `ua_type` классифицирует заголовок `User-Agent` по regex-шаблонам из YAML-конфига. Коррелированные ответы INVITE/REGISTER наследуют тип устройства запроса; метрики жизненного цикла диалога и RTP используют контекст исходного INVITE. Остальные raw-счётчики классифицируют заголовок самого пакета, используя `other`, если заголовка или совпадения нет.
 
 **Почему это важно:**
 - Разные SIP-устройства имеют разные паттерны сбоев — IP-телефоны ломаются не так, как софтфоны или SBC
@@ -279,7 +279,7 @@ user_agents:
 
 ### Алгоритм разрешения
 
-Тип UA определяется в момент **запроса** и наследуется всеми ответами в той же транзакции через тот же механизм трекера, что и `carrier`:
+Связанные ответы INVITE/REGISTER наследуют `ua_type` запроса. Другие счётчики ответов используют User-Agent конкретного пакета; метрики задержек и жизненного цикла используют сохранённый контекст:
 
 ```
 1. Поступает SIP-запрос (INVITE/REGISTER/OPTIONS):
@@ -289,10 +289,10 @@ user_agents:
    - ua_type сохраняется в трекере по Call-ID (вместе с carrier)
 
 2. Поступает SIP-ответ:
-   - ua_type извлекается из трекера (по Call-ID), НЕ из пакета ответа
+   - Для INVITE/REGISTER ua_type извлекается из трекера по Call-ID
    - Ответы на INVITE → ua_type из inviteTracker
    - Ответы на REGISTER → ua_type из registerTracker
-   - Ответы на OPTIONS → ua_type из optionsTracker
+   - OPTIONS: ua_type из optionsTracker только для ORD; счётчики ответов — по заголовку
    - Если запись в трекере истекла (TTL 60с) → fallback на User-Agent пакета ответа
    - Если в ответе нет User-Agent → ua_type="other"
 
@@ -307,7 +307,7 @@ user_agents:
 | Метрика | Источник UA type | Значение |
 |---------|-----------------|----------|
 | `invite_total{ua_type}` | User-Agent из INVITE | Сколько вызовов инициировал этот тип устройств |
-| `200_total{ua_type}` | Трекер запроса | Сколько 200 OK для транзакций этого типа устройств |
+| `200_total{ua_type}` | INVITE/REGISTER: трекер; иначе заголовок пакета | Сколько 200 OK для транзакций этого типа устройств |
 | `sessions{ua_type}` | Трекер INVITE → диалог | Активные диалоги от этого типа устройств |
 | SER, SEER, ISA, SCR, ASR, NER | Трекер INVITE | Качество вызовов от этого типа устройств |
 | RRD | Трекер REGISTER | Задержка регистрации для этого типа устройств |
@@ -317,7 +317,7 @@ user_agents:
 | ORD | Трекер OPTIONS | Задержка ответа OPTIONS для этого типа устройств |
 | LRD | Трекер REGISTER | Задержка редиректа регистрации для этого типа устройств |
 | `system_error_total` | Без ua_type | Системные ошибки |
-| `packets_total` | Без ua_type | Все SIP-пакеты |
+| `packets_total` | Без ua_type | Учтённые SIP-пакеты, кроме распознанных повторных INVITE |
 
 ### Пример сценария
 
@@ -335,7 +335,7 @@ INVITE                       | Yealink SIP-T46S 66.15  | yealink           | з�
 200 OK                       | (нет / Server header)   | yealink           | inviteTracker
 ACK                          | Yealink SIP-T46S 66.15  | yealink           | заголовок (запрос)
 BYE                          | Yealink SIP-T46S 66.15  | yealink           | заголовок (запрос)
-200 OK to BYE                | (нет / Server header)   | yealink           | запись диалога
+200 OK to BYE                | (нет / Server header)   | other             | заголовок ответа; завершение — yealink
 
 Результат:
   invite_total{carrier="...",ua_type="yealink"} += 1
@@ -366,7 +366,7 @@ sip_exporter_ser{carrier="carrier-a",ua_type="yealink"}
 
 # Сравнение Yealink vs Grandstream у одного оператора
 sip_exporter_ser{carrier="carrier-a",ua_type="yealink"}
-  - sip_exporter_ser{carrier="carrier-a",ua_type="grandstream"}
+  - ignoring (ua_type) sip_exporter_ser{carrier="carrier-a",ua_type="grandstream"}
 
 # Активные сессии по типам устройств (по всем операторам)
 sum by (ua_type) (sip_exporter_sessions)
@@ -422,7 +422,7 @@ GeoIP для IP источника, префикс номера для назн�
 
 - **Таблица E.164** встроена в бинарник (сгенерирована из Google libphonenumber `PhoneNumberMetadata.xml`, Apache 2.0). **Не требует скачивания БД** — в отличие от GeoIP
 - Корректно обрабатывает мультинациональные коды: `+1212...`→US, `+1416...`→CA (Торонто), `+7727...`→KZ (Алматы), `+7495...`→RU
-- **Только для INVITE**: `destination_country` появляется только на `invite_total` и `invite_200_total` (не на счётчиках ответов, SER/SCR, RTP и т.д.)
+- `destination_country` доступен у `invite_total`, `invite_200_total` и `billable_seconds_total`. У счётчиков ответов, SER/SCR и RTP этого лейбла нет.
 
 **Конфиг:**
 
@@ -491,7 +491,7 @@ rate(sip_exporter_socket_packets_dropped_total{iface="ens3"}[5m])
 - `inbound` — кто-то звонит нам (входящие вызовы, регистрации от устройств, OPTIONS от пиров)
 - `outbound` — мы звоним вовне (исходящие вызовы, исходящие регистрации, исходящие OPTIONS)
 
-Все пакеты в пределах одного вызова несут одинаковое значение `direction`.
+Метрики диалога, RTP/RTCP и связанные ответы на INVITE наследуют направление исходного INVITE. Счётчики отдельных SIP-запросов используют направление конкретного пакета: например, BYE от отвечающей стороны может иметь другое значение `direction`.
 
 **Требования:**
 
@@ -501,7 +501,11 @@ rate(sip_exporter_socket_packets_dropped_total{iface="ens3"}[5m])
 **Примеры PromQL:**
 ```promql
 # ASR отдельно для входящих и исходящих вызовов
-sum by (direction) (sip_exporter_asr)
+# example: asr-direction
+100 * (
+  sum by (direction) (rate(sip_exporter_invite_200_total[5m]))
+  or 0 * sum by (direction) (rate(sip_exporter_invite_total[5m]))
+) / sum by (direction) (rate(sip_exporter_invite_total[5m]))
 
 # Rate INVITE по направлениям
 sum by (direction) (rate(sip_exporter_invite_total[5m]))
@@ -534,7 +538,7 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 
 ---
 
-`sip_exporter_packets_total`: общее количество разобранных SIP-пакетов (запросы + ответы). **Без лейблов `carrier` и `ua_type`.**
+`sip_exporter_packets_total`: количество SIP-пакетов, учтённых обработчиками запросов и ответов. Распознанные повторные INVITE учитываются отдельно в `sip_retransmission_total` и не увеличивают этот счётчик. **Без лейблов.**
 
 ## Активные сессии
 
@@ -653,7 +657,7 @@ topk(5, sum by (code) (rate(sip_exporter_register_failure_total[5m])))
 
 ## Детекция фрода
 
-Сигналы фрода детектируют подозрительные паттерны: сканирование регистраций (один IP регистрирует множество аккаунтов), географическую невозможность (тот же аккаунт из разных стран), флуд INVITE (один IP отправляет всплеск вызовов) и False Answer Supervision (ответившие вызовы без медиа). Сигнальные эвристики разбиты по `carrier,source_country,direction` — `ua_type` намеренно опущен, т.к. атакующие варьируют User-Agent. **FAS — исключение**: это call-level сигнал, измеряемый на 200 OK, где `ua_type` отвечающего эндпоинта осмыслен, поэтому он несёт полный набор `carrier,ua_type,source_country,direction`.
+Сигналы фрода отмечают успешные регистрации множества аккаунтов с одного IP, смену страны регистрации, всплески INVITE и отсутствие RTP со стороны ответа. Они требуют проверки оператором и не доказывают мошенничество. Сигнальные счётчики имеют лейблы `carrier,source_country,direction`. FAS дополнительно наследует `ua_type` исходного INVITE — тип устройства инициатора вызова, а не отвечающего устройства.
 
 | Метрика | Тип | Лейблы | Описание |
 |---------|-----|--------|----------|
@@ -727,7 +731,7 @@ rate(sip_exporter_fas_calls_total[5m])
 
 #### Ограничения FAS
 
-Это **сигнальная эвристика**. True FAS-детекция требует декодирования аудиопотока и распознавания ringing/two-tone паттернов в «ответившем» медиа (напр. европейские/UK ringing tones) — вне рамок Prometheus-экспортёра (won't fix). Известные ограничения:
+Эвристика использует SIP-сигнализацию и наблюдаемый RTP, но не декодирует аудио. Она выявляет ответившие вызовы без ожидаемого медиапотока, а не доказывает мошенничество. Распознавание гудков или тишины внутри полученного аудио в её возможности не входит. Известные ограничения:
 
 - **Adversarial-обход принципиален.** Сторона, контролирующая отвечающий эндпоинт, может послать короткий RTP-буст (≥2 пакета), чтобы отменить сигнал. Gate ≥2 пакетов только поднимает планку против случайных/совпадающих сбросов, но не против целенаправленного атакующего.
 - **Side-gated clearing (требуется медиа answer-side).** FAS снимается только когда наблюдается медиа *отвечающей* стороны (оно приходит на offer/caller-эндпоинт). Медиа *вызывающей* стороны **не** отменяет FAS — ложный 200 OK мошенника больше нельзя замаскировать upstream-RTP жертвы. Требуется, чтобы INVITE offer SDP был закэширован; если INVITE не был виден (экспортёр стартовал посреди вызова, late offer) — сторону определить нельзя и FAS деградирует к any-media-clears. При NAT, меняющем source-порт отвечающей стороны, side-детекция также деградирует к этому fallback.
@@ -735,8 +739,8 @@ rate(sip_exporter_fas_calls_total[5m])
 - **Короткие dead-air вызовы — репорт на BYE.** Вызов, ответивший без answer-side RTP и завершённый BYE раньше sweep-threshold, репортится на teardown при answer→BYE ≥ `fasByeFloor` (3 с) — покрывает частый FAS-паттерн, когда абонент бросает трубку на dead air. Более короткие вызовы (немедленный abandon) исключаются.
 - **Re-INVITE un-hold blind spot.** Если исходный 200 OK нёс held SDP (`c=0.0.0.0`, pending не создаётся), а последующий re-INVITE предлагает реальное медиа — вызов никогда не попадёт под FAS-трекинг. Редко (hold→unhold без предшествующего RTP).
 - **Без аудио-анализа.** Fraudster, стримящий тишину или comfort noise, проходит проверку media-established.
-- **Зависимость от полноты захвата RTP.** Достоверность FAS = полнота захвата RTP. SIP-пакеты идут через блокирующий channel-send (не дропаются); RTP-пакеты — через non-blocking send и дропаются при переполнении канала (`rtp_dropped_total`). Коррелируйте `rate(sip_exporter_rtp_dropped_total[5m])` с `fas_calls_total` перед алертом — всплеск дропов при высоком трафике может вызвать ложные FAS-позитивы (теряется answer-side RTP).
-- **False positive на one-way media.** Серверы, не отправляющие answer-side RTP (voicemail, IVR, paging, проигрывание анонсов), будут триггерить FAS по дизайну. Настройте threshold или исключите такие эндпоинты через правила алертинга.
+- **Зависимость от полноты захвата RTP.** Достоверность FAS = полнота захвата RTP. SIP-батчи ожидают свободной ёмкости userspace-очереди; admission RTP работает без блокировки и отклоняет пакеты, когда ёмкости недостаточно или уже ожидающий SIP-батч имеет приоритет (`rtp_dropped_total`). Коррелируйте `rate(sip_exporter_rtp_dropped_total[5m])` с `fas_calls_total` перед алертом — всплеск дропов при высоком трафике может вызвать ложные FAS-позитивы (теряется answer-side RTP).
+- **Ложные срабатывания при одностороннем медиа.** Легитимная отвечающая сторона, которая только принимает RTP, может вызвать FAS. Учитывайте такие сервисы при маршрутизации алертов; фильтрация по конкретному сервису возможна только при наличии идентифицирующих его лейблов.
 
 ## Мониторинг ёмкости
 
@@ -757,7 +761,7 @@ sessions_limits:
     limit: 1000
 ```
 
-- Утилизация вычисляется при каждом скрейпе: `active_sessions(carrier) / limit × 100`
+- Утилизация обновляется периодически, примерно раз в секунду: `active_sessions(carrier) / limit × 100`; scrape возвращает последнее значение.
 - Ограничено 100 (переполнение показывается как 100, а не >100) — это скрывает тяжесть переподписки; используйте raw gauge `sip_exporter_sessions` для детекции крайнего превышения
 - Операторы без настроенного лимита пропускаются (gauge не эмитится)
 - Операторы с `limit: 0` также пропускаются (рассматривается как «без лимита», а не «0% / блокирован»)
@@ -778,10 +782,11 @@ sip_exporter_sessions_utilization > 90
 **Примеры PromQL:**
 ```promql
 # Rate коротких вызовов (< 20с) как процент завершённых сессий
-rate(sip_exporter_short_calls_total{threshold="20"}[5m]) / rate(sip_exporter_sdc_total[5m]) * 100
+# example: short-call-percent
+rate(sip_exporter_short_calls_total{threshold="20"}[5m]) / ignoring (threshold) rate(sip_exporter_sdc_total[5m]) * 100
 
 # Абсолютное количество вызовов короче 60с по операторам
-sum by (carrier) (rate(sip_exporter_short_calls_total{threshold="60"}[1h]))
+sum by (carrier) (increase(sip_exporter_short_calls_total{threshold="60"}[1h]))
 ```
 
 ## Минуты трафика по направлению
@@ -793,15 +798,18 @@ sum by (carrier) (rate(sip_exporter_short_calls_total{threshold="60"}[1h]))
 **Примеры PromQL:**
 ```promql
 # Минуты трафика/мин по направлениям (top-10)
-topk(10, sum by (destination_country) (rate(sip_exporter_billable_seconds_total[5m]) / 60))
+topk(10, sum by (destination_country) (rate(sip_exporter_billable_seconds_total[5m])))
 
-# ACD (средняя длительность звонка) по направлению, минуты
-sum by (destination_country) (rate(sip_exporter_billable_seconds_total[15m])) / 60
-  / sum by (destination_country) (rate(sip_exporter_invite_200_total[15m]))
+# Средняя длительность завершённых сессий по оператору, минуты (включая истёкшие)
+sum by (carrier) (rate(sip_exporter_spd_sum[15m]))
+  / sum by (carrier) (rate(sip_exporter_spd_count[15m])) / 60
 
 # Минуты трафика по оператору за час
-sum by (carrier) (increase(sip_exporter_billable_seconds_total[1h])) / 3600
+# example: traffic-minutes
+sum by (carrier) (increase(sip_exporter_billable_seconds_total[1h])) / 60
 ```
+
+Средняя длительность выше относится к завершённым SIP-сессиям и включает истечение по таймауту. Точный ACD по стране назначения недоступен: нет счётчика завершённых сессий с `destination_country`. Деление секунд завершённых сессий на новые ответы INVITE смешивает разные вызовы.
 
 ## Метрики RTP-медиа
 
@@ -821,7 +829,7 @@ RTP без коррелированного диалога отбрасывае�
 
 `{carrier="...",ua_type="...",codec="...",source_country="..."}` — `codec` — это имя payload type из SDP `a=rtpmap` (напр. `PCMU`, `PCMA`, `opus`) со статичной fallback-таблицей (RFC 3551). `source_country` наследуется от SIP-диалога (разрешается в момент INVITE).
 
-`sip_exporter_rtp_packets_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: общее количество наблюдённых RTP-пакетов.
+`sip_exporter_rtp_packets_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: RTP-пакеты, принятые учётом последовательности связанного потока. Дубликаты и пакеты вне порядка учитываются отдельно и не увеличивают этот счётчик. Это не общее число UDP-пакетов на интерфейсе.
 
 `sip_exporter_rtp_packets_lost_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: пакеты, обнаруженные как потерянные по разрывам sequence number в RTP.
 
@@ -831,7 +839,7 @@ RTP без коррелированного диалога отбрасывае�
 
 `sip_exporter_rtp_jitter_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 0.1..500 мс)*: сглаженный interarrival jitter (RFC 3550 A.8).
 
-`sip_exporter_rtp_pdv_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 1..500 мс)*: Packet Delay Variation — **сырое** per-packet отклонение `|arrivalDelta − tsDelta|` (без сглаживания), **наблюдается на каждый RTP-пакет** (parity с VoIPMonitor, который бакетирует отклонение каждого пакета от ожидаемого 20 мс интервала). В отличие от `rtp_jitter_milliseconds` (EWMA, сглаживающая всплески), PDV — мгновенное per-packet отклонение, поэтому histogram отражает истинное распределение delay-variation, включая транзиентные всплески. Учитываются только forward (counted) пакеты; reorder/duplicate — нет (их ts-дельта не forward). Первый пакет каждого потока (и после stream restart) пропускается — нет baseline для вычисления дельты. Arrival-тайместамп — это kernel `SO_TIMESTAMPNS` (время приёма на AF_PACKET-сокете), поэтому задержки Go scheduler/GC не влияют на измерение; если таймстамп отсутствует, инкрементируется `rtp_kernel_timestamp_missing_total`. Поскольку формула использует consecutive-дельты `(Rj−Ri)−(Sj−Si)` (та же дрейфо-компенсирующая форма, что у RFC 3550 jitter), она иммунна к дрейфу часов отправителя/получателя. Лейбл `direction` отражает направление SIP-диалога (inbound/outbound), а не направление медиа — оба потока вызова (forward и reverse) агрегируются в одну гистограмму (асимметричная задержка усредняется).
+`sip_exporter_rtp_pdv_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 1..500 мс)*: несглаженное отклонение межпакетных интервалов `|arrivalDelta − tsDelta|`. В отличие от сглаженного jitter, отражает отдельные всплески задержки. Учитываются пакеты, продвигающие последовательность; дубликаты, пакеты вне порядка и первый пакет потока не дают наблюдения PDV. Время прибытия берётся из метаданных ядра (в текущей ветке — TPACKET_V3); отсутствие отметки увеличивает `rtp_kernel_timestamp_missing_total`. Разности интервалов устраняют постоянное смещение часов, но не различие их частот. `direction` относится к SIP-диалогу: распределения двух направлений RTP объединяются, поэтому отдельно оценить асимметрию по этой гистограмме нельзя.
 
 `sip_exporter_rtp_mos_score{carrier,ua_type,codec,source_country,direction}` *(histogram, бакеты 1.0..5.0)*: MOS-LQ, оценённый по ITU-T G.107 E-model с предположением jitter-буфера 60 мс.
 
@@ -921,8 +929,8 @@ RTP без коррелированного диалога отбрасывае�
 |---------|-----|----------|
 | `sip_exporter_socket_packets_received_total{iface}` | CounterVec | Всего пакетов, полученных от kernel AF_PACKET-сокета, по интерфейсам |
 | `sip_exporter_socket_packets_dropped_total{iface}` | CounterVec | Всего пакетов, отброшенных ядром из-за переполнения receive-буфера сокета, по интерфейсам |
-| `sip_exporter_rtp_dropped_total` | Counter | Всего RTP-пакетов, отброшенных в userspace при переполнении внутреннего канала сообщений |
-| `sip_exporter_rtp_kernel_timestamp_missing_total` | Counter | RTP-пакеты, у которых отсутствовал kernel `SO_TIMESTAMPNS` и PDV деградировал до времени обработки (растущий rate означает ненадёжные PDV-замеры) |
+| `sip_exporter_rtp_dropped_total` | Counter | Всего RTP-пакетов, отклонённых admission-механизмом userspace packet-batch из-за недостаточной ёмкости или приоритета уже ожидающего SIP-батча |
+| `sip_exporter_rtp_kernel_timestamp_missing_total` | Counter | RTP-пакеты, у которых отсутствовал kernel packet-ring timestamp и PDV деградировал до времени обработки (растущий rate означает ненадёжные PDV-замеры) |
 | `sip_exporter_channel_length` | Gauge | Текущее количество пакетов во внутреннем буфере канала сообщений |
 | `sip_exporter_channel_capacity` | Gauge | Ёмкость внутреннего буфера канала сообщений (константа: 10000) |
 | `sip_exporter_parse_errors_total{type="..."}` | CounterVec | Всего ошибок разбора пакетов по типам |
@@ -971,7 +979,7 @@ sum(rate(sip_exporter_parse_errors_total[5m]))
 
 ### Буфер канала
 
-`sip_exporter_channel_length` показывает, сколько пакетов буферизировано во внутреннем канале между читателем сокета и SIP-парсером. Если это значение приближается к `channel_capacity` (10000), экспортёр не успевает за потоком пакетов и может терять пакеты на уровне ядра.
+`sip_exporter_channel_length` — периодически обновляемый мгновенный снимок текущей занятости внутреннего канала между читателем сокета и парсером. Gauge может не отразить краткий всплеск admission и оставаться ниже `channel_capacity` (10000), даже когда растёт `sip_exporter_rtp_dropped_total`. Положительный rate RTP drops — достоверный признак потерь в userspace; длительный backpressure способен также привести к потерям в kernel socket. Интерпретируйте userspace- и kernel-счётчики потерь отдельно.
 
 **Примеры PromQL:**
 ```promql
@@ -1023,7 +1031,8 @@ sip_exporter_ser
 sip_exporter_ser{ua_type="yealink"}
 
 # Сравнение SER между операторами
-sip_exporter_ser{carrier="carrier-a"} - sip_exporter_ser{carrier="carrier-b"}
+# example: compare-carriers
+sip_exporter_ser{carrier="carrier-a"} - ignoring (carrier) sip_exporter_ser{carrier="carrier-b"}
 ```
 
 Метрики определены в [RFC 6076](https://datatracker.ietf.org/doc/html/rfc6076):
@@ -1692,8 +1701,9 @@ histogram_quantile(0.95, sum(rate(sip_exporter_vq_rtd_ms_bucket[5m])) by (le))
 # Средний MOS Listening Quality
 rate(sip_exporter_vq_mos_lq_sum[5m]) / rate(sip_exporter_vq_mos_lq_count[5m])
 
-# Процент вызовов с MOS ниже 3.0
-sum(rate(sip_exporter_vq_mos_lq_bucket{le="2.5"}[5m]))
+# Доля отчётов о качестве с MOS <= 3.0, %
+# example: low-mos-percent
+sum(rate(sip_exporter_vq_mos_lq_bucket{le="3"}[5m]))
   / sum(rate(sip_exporter_vq_mos_lq_count[5m])) * 100
 ```
 

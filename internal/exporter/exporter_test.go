@@ -77,6 +77,7 @@ func (m *fakeRTPEndpointMap) Delete(key any) error {
 type mockMetricser struct {
 	requestCalled                  []byte
 	requestCount                   int
+	requestHook                    func()
 	reinviteCalled                 bool
 	sipRetransmissionCalls         int
 	sipRetransmissionMethod        string
@@ -84,6 +85,7 @@ type mockMetricser struct {
 	responseIsInvite               bool
 	sessionUpdated                 int
 	systemErrorCalled              bool
+	systemErrorCount               int
 	packetsIncremented             int
 	invite200OKCalled              bool
 	sessionCompletedFlag           bool
@@ -120,6 +122,10 @@ type mockMetricser struct {
 	vqUAType                       string
 	vqReport                       *vq.SessionReport
 	rtpPacketsCalls                int
+	rtpPDVCalls                    int
+	rtpPDVValue                    float64
+	rtpBindCalls                   int
+	rtpBindLabels                  [][5]string
 	rtpLossCalls                   int
 	rtpLossValue                   uint64
 	rtpDuplicateCalls              int
@@ -150,6 +156,19 @@ type mockMetricser struct {
 	rtpAliasMismatchType           string
 }
 
+type mockRTPMetricser struct {
+	metricser *mockMetricser
+}
+
+func (m *mockRTPMetricser) UpdateRTPPackets() {
+	m.metricser.rtpPacketsCalls++
+}
+
+func (m *mockRTPMetricser) UpdateRTPPDV(pdvMs float64) {
+	m.metricser.rtpPDVCalls++
+	m.metricser.rtpPDVValue = pdvMs
+}
+
 func (m *mockMetricser) UpdateSessions(_ []service.LabeledCount) {}
 
 func (m *mockMetricser) SetSessionsLimits(_ map[string]int) {}
@@ -160,6 +179,9 @@ func (m *mockMetricser) Request(_, _, _, _, _, _, _, _ string, in []byte) {
 	m.requestCalled = in
 	m.requestCount++
 	m.packetsIncremented++
+	if m.requestHook != nil {
+		m.requestHook()
+	}
 }
 
 func (m *mockMetricser) Reinvite(_, _, _, _ string) {
@@ -276,6 +298,7 @@ func (m *mockMetricser) UpdatePBD(_, _, _, _ string, delayMs float64) {
 
 func (m *mockMetricser) SystemError() {
 	m.systemErrorCalled = true
+	m.systemErrorCount++
 }
 
 func (m *mockMetricser) ParseError(errorType string) {
@@ -296,6 +319,13 @@ func (m *mockMetricser) UpdateVQReport(carrier string, uaType string, _, _ strin
 	m.vqReport = report
 }
 
+func (m *mockMetricser) BindRTPMetrics(
+	carrier, uaType, codec, sourceCountry, direction string,
+) service.RTPMetricser {
+	m.rtpBindCalls++
+	m.rtpBindLabels = append(m.rtpBindLabels, [5]string{carrier, uaType, codec, sourceCountry, direction})
+	return &mockRTPMetricser{metricser: m}
+}
 func (m *mockMetricser) UpdateRTPPackets(_, _, _, _, _ string) {
 	m.rtpPacketsCalls++
 }
@@ -310,8 +340,11 @@ func (m *mockMetricser) UpdateRTPOutOfOrder(_, _, _, _, _ string) {
 	m.rtpOutOfOrderCalls++
 }
 func (m *mockMetricser) UpdateRTPJitter(string, string, string, string, string, float64) {}
-func (m *mockMetricser) UpdateRTPPDV(string, string, string, string, string, float64)    {}
-func (m *mockMetricser) UpdateRTPMOS(string, string, string, string, string, float64)    {}
+func (m *mockMetricser) UpdateRTPPDV(_, _, _, _, _ string, pdvMs float64) {
+	m.rtpPDVCalls++
+	m.rtpPDVValue = pdvMs
+}
+func (m *mockMetricser) UpdateRTPMOS(string, string, string, string, string, float64) {}
 func (m *mockMetricser) UpdateRTPMOSVariants(string, string, string, string, string, float64, float64, float64) {
 }
 func (m *mockMetricser) UpdateRTPRFactor(string, string, string, string, string, float64) {}
@@ -638,11 +671,11 @@ func TestInviteSDPCSeqRetransmitReplacesSameTransaction(t *testing.T) {
 
 func TestStoreInviteSDPOwnsPacketBuffer(t *testing.T) {
 	e := &exporter{inviteSDP: make(map[inviteSDPKey]inviteSDPEntity)}
-	raw := rawPacket{data: []byte("SIP body: v=0\r\nm=audio 4000 RTP/AVP 8\r\n")}
-	body := raw.data[len("SIP body: "):]
+	raw := []byte("SIP body: v=0\r\nm=audio 4000 RTP/AVP 8\r\n")
+	body := raw[len("SIP body: "):]
 
 	e.storeInviteSDP("call-1", "2", body)
-	copy(raw.data[len("SIP body: "):], []byte("x=0\r\nm=audio 9999 RTP/AVP 8\r\n"))
+	copy(raw[len("SIP body: "):], []byte("x=0\r\nm=audio 9999 RTP/AVP 8\r\n"))
 
 	got, ok := e.takeInviteSDP("call-1", "2")
 	require.True(t, ok)
@@ -2553,6 +2586,33 @@ func TestFASCallerRTPDoesNotClear(t *testing.T) {
 		"answer-side RTP (arriving at offer endpoint) must clear FAS")
 }
 
+func TestFASInvalidOfferEndpointDoesNotEnableAnyMediaFallback(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Hour)
+	invalidOffer := "v=0\r\no=- 1 1 IN IP4 999.0.0.1\r\ns=-\r\n" +
+		"c=IN IP4 999.0.0.1\r\nt=0 0\r\nm=audio 5004 RTP/AVP 0\r\n"
+
+	e.storeInviteSDP("call-invalid-offer", "", []byte(invalidOffer), "from-tag")
+	require.NoError(
+		t,
+		e.handleInvite200OK(
+			"carrier-a", "yealink", "US", "inbound",
+			fasInvite200OK("call-invalid-offer", fasSdpNormal), false,
+		),
+	)
+
+	for _, seq := range []uint16{1, 2, 3} {
+		_, err := e.handleRTP(
+			net.ParseIP("10.0.0.2"), 5004,
+			net.ParseIP("10.0.0.1"), 5004,
+			fasRTPPacket(seq),
+		)
+		require.NoError(t, err)
+	}
+	require.Len(t, e.fasTracker.entries, 1,
+		"an invalid offer endpoint is still known, so caller RTP must not enable the unknown-side fallback")
+}
+
 // TestFASRetransmit200OKPreservesOfferSet verifies that a retransmitted 200 OK
 // (Timer G, UDP) does not destroy the offer-side gating established by the first
 // 200 OK. On retransmission the cached INVITE SDP is already consumed, so
@@ -2571,7 +2631,7 @@ func TestFASRetransmit200OKPreservesOfferSet(t *testing.T) {
 	require.NoError(t,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), true),
 	)
-	require.Contains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: "10.0.0.2", port: 5004},
+	require.Contains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: 0x0A000002, port: 5004},
 		"retransmitted 200 OK must not delete the offer set")
 
 	for _, seq := range []uint16{1, 2, 3} {
@@ -2832,7 +2892,7 @@ func TestFASReinviteUpdatesOfferEndpoints(t *testing.T) {
 	require.NoError(t,
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), false),
 	)
-	require.Contains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: "10.0.0.2", port: 5004},
+	require.Contains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: 0x0A000002, port: 5004},
 		"initial offer endpoint must be tracked")
 
 	// Re-INVITE: caller changes endpoint to 10.0.0.3:5004.
@@ -2841,9 +2901,9 @@ func TestFASReinviteUpdatesOfferEndpoints(t *testing.T) {
 		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("call-1", fasSdpNormal), true),
 	)
 
-	require.Contains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: "10.0.0.3", port: 5004},
+	require.Contains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: 0x0A000003, port: 5004},
 		"re-INVITE must update offer to the new endpoint")
-	require.NotContains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: "10.0.0.2", port: 5004},
+	require.NotContains(t, e.fasTracker.offer["call-1"], fasEndpoint{ip: 0x0A000002, port: 5004},
 		"stale offer endpoint must be replaced")
 
 	// Answer-side media at the NEW offer endpoint must clear FAS.
@@ -2882,8 +2942,8 @@ func TestFASReinviteSRTPExtendsDeadline(t *testing.T) {
 
 // TestFASConcurrentSweepClearBye verifies thread safety of fasTracker under
 // concurrent access from the three goroutines that touch it in production:
-// sipDialogMetricsUpdate (sweep), readPackets/handleRTP (clearIfAnswerMedia),
-// and readPackets/handleBye200OK (finalizeOnBye). Run with -race.
+// sipDialogMetricsUpdate (sweep), readPacketRuns/handleRTP (clearIfAnswerMedia),
+// and readPacketRuns/handleBye200OK (finalizeOnBye). Run with -race.
 func TestFASConcurrentSweepClearBye(t *testing.T) {
 	mm := &mockMetricser{}
 	e := newFasTestExporter(mm, time.Hour)
@@ -2900,7 +2960,7 @@ func TestFASConcurrentSweepClearBye(t *testing.T) {
 			defer wg.Done()
 			for range 200 {
 				e.fasTracker.sweep(mm)
-				e.fasTracker.clearIfAnswerMedia("call-1", fasEndpoint{ip: "10.0.0.2", port: 5004}, 5, "dst")
+				e.fasTracker.clearIfAnswerMedia("call-1", fasEndpoint{ip: 0x0A000002, port: 5004}, 5, "dst")
 				e.fasTracker.finalizeOnBye("call-1", mm)
 			}
 		}()
@@ -3040,13 +3100,13 @@ func TestHandleRTPKernelTimestampMissingCounter(t *testing.T) {
 	_, err := e.handleRTP(net.ParseIP("10.0.0.1"), 5004, net.ParseIP("10.0.0.2"), 5004, fasRTPPacket(1))
 	require.NoError(t, err)
 	require.Equal(t, 1, mm.rtpKernelTimestampMissingCalls,
-		"zero pktTimestamp (no SO_TIMESTAMPNS) must increment the counter")
+		"zero pktTimestamp (no kernel capture timestamp) must increment the counter")
 
 	e.pktTimestamp = time.Unix(1_700_000_000, 0)
 	_, err = e.handleRTP(net.ParseIP("10.0.0.1"), 5004, net.ParseIP("10.0.0.2"), 5004, fasRTPPacket(2))
 	require.NoError(t, err)
 	require.Equal(t, 1, mm.rtpKernelTimestampMissingCalls,
-		"non-zero pktTimestamp must not increment the counter")
+		"non-zero kernel capture timestamp must not increment the counter")
 }
 
 // TestFASSweepLatency10kEntries is a performance regression guard: sweeping
@@ -3096,6 +3156,31 @@ func BenchmarkHandleRTP_FASHotPath(b *testing.B) {
 		pkt[3] = byte(uint16(i))
 		_, _ = e.handleRTP(src, 5004, dst, 5004, pkt)
 	}
+}
+
+func TestHandleRTPIPv4HotPathAvoidsIPStringAllocations(t *testing.T) {
+	mm := &mockMetricser{}
+	e := newFasTestExporter(mm, time.Hour)
+	e.pktTimestamp = time.Unix(1_700_000_000, 0)
+	e.storeInviteSDP("alloc", "", []byte(fasSdpOffer), "from-tag")
+	require.NoError(t,
+		e.handleInvite200OK("carrier-a", "yealink", "US", "inbound", fasInvite200OK("alloc", fasSdpNormal), false),
+	)
+
+	dst := [4]byte{10, 0, 0, 2}
+	src := [4]byte{10, 0, 0, 1}
+	pkt := fasRTPPacket(0)
+	allHandled := true
+
+	allocs := testing.AllocsPerRun(100, func() {
+		seq := binary.BigEndian.Uint16(pkt[2:4]) + 1
+		binary.BigEndian.PutUint16(pkt[2:4], seq)
+		_, err := e.handleRTPIPv4(src, 5004, dst, 5004, pkt)
+		allHandled = allHandled && err == nil
+	})
+
+	require.True(t, allHandled)
+	require.Zero(t, allocs)
 }
 
 func TestHandleMessageReINVITEExcludedFromBurst(t *testing.T) {
@@ -3431,6 +3516,9 @@ func TestNewExporter(t *testing.T) {
 		Dialoger:  d,
 	})
 	require.NotNil(t, exp)
+	e := exp.(*exporter)
+	require.NotNil(t, e.packetBatches)
+	require.Equal(t, messagesChanSize, e.packetBatches.accounting.capacity())
 }
 
 // ==================== htons tests ====================
@@ -5091,6 +5179,9 @@ func (m *carrierTrackingMetricser) UpdateVQReport(carrier, uaType, _, _ string, 
 	m.vqReports = append(m.vqReports, carrierCall{carrier: carrier, uaType: uaType})
 }
 
+func (m *carrierTrackingMetricser) BindRTPMetrics(string, string, string, string, string) service.RTPMetricser {
+	return nil
+}
 func (m *carrierTrackingMetricser) UpdateRTPPackets(string, string, string, string, string)         {}
 func (m *carrierTrackingMetricser) UpdateRTPLoss(string, string, string, string, string, uint64)    {}
 func (m *carrierTrackingMetricser) UpdateRTPDuplicates(string, string, string, string, string)      {}
@@ -5897,59 +5988,6 @@ func TestHandleRequestNOTIFYVQInvalidBody(t *testing.T) {
 	require.Empty(t, mm.vqReports, "VQ handler should not report metrics for invalid body")
 }
 
-// TestExporterGracefulShutdown verifies that readSocket exits cleanly when
-// Close() is called (no EBADF spin loop), and that Close() completes within a
-// reasonable timeout. readPackets and sipDialogMetricsUpdate also receive the
-// done signal and wind down asynchronously.
-func TestExporterGracefulShutdown(t *testing.T) {
-	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM, 0)
-	require.NoError(t, err)
-	defer unix.Close(fds[1])
-
-	tv := &unix.Timeval{Sec: 1}
-	require.NoError(t, unix.SetsockoptTimeval(fds[0], unix.SOL_SOCKET, unix.SO_RCVTIMEO, tv))
-
-	e := &exporter{
-		socks:    []sockEntry{{fd: fds[0], iface: "test"}},
-		messages: make(chan *rawPacket, 10),
-		done:     make(chan struct{}),
-		services: services{
-			metricser: &mockMetricser{},
-			dialoger:  &mockDialoger{},
-		},
-		mediaTracker:    mediatracker.NewTracker(30 * time.Second),
-		sipPortSets:     [][]uint16{{5060, 5061}},
-		registerTracker: make(map[string]registerEntry),
-		inviteTracker:   make(map[string]inviteEntry),
-		inviteSDP:       make(map[inviteSDPKey]inviteSDPEntity),
-		optionsTracker:  make(map[string]optionsEntry),
-	}
-
-	e.wg.Add(1)
-	go e.readPackets()
-	e.wg.Add(1)
-	go e.readSocket(0)
-	e.wg.Add(1)
-	go e.sipDialogMetricsUpdate()
-
-	time.Sleep(100 * time.Millisecond)
-
-	done := make(chan struct{})
-	go func() {
-		e.Close()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Close() did not complete within 5s — goroutine leak")
-	}
-
-	_, ok := <-e.messages
-	require.False(t, ok, "messages channel should be closed after Close()")
-}
-
 // bpfObjectPath resolves the path to bin/sip.o relative to the package
 // directory. go test runs from the package dir, so ../../bin/sip.o reaches
 // the project root.
@@ -5969,10 +6007,11 @@ func countOpenFDs(t *testing.T) int {
 // exercising Initialize() — all maps and services required by the production
 // code path are allocated.
 func newRollbackExporter() *exporter {
+	metricser := &mockMetricser{}
 	return &exporter{
-		messages:        make(chan *rawPacket, messagesChanSize),
+		packetBatches:   newPacketBatchQueue(messagesChanSize, metricser.RTPDropped),
 		done:            make(chan struct{}),
-		services:        services{metricser: &mockMetricser{}, dialoger: &mockDialoger{}},
+		services:        services{metricser: metricser, dialoger: &mockDialoger{}},
 		mediaTracker:    mediatracker.NewTracker(30 * time.Second),
 		registerTracker: make(map[string]registerEntry),
 		inviteTracker:   make(map[string]inviteEntry),
@@ -6285,70 +6324,6 @@ func TestIsSIPPacket(t *testing.T) {
 	}
 }
 
-func TestSendPacketRTPDropWhenFull(t *testing.T) {
-	mm := &mockMetricser{}
-	e := &exporter{
-		messages: make(chan *rawPacket, 1),
-		done:     make(chan struct{}),
-		services: services{metricser: mm},
-	}
-	fillPkt := rawPacket{}
-	e.messages <- &fillPkt // fill the channel
-
-	// RTP packet (non-blocking) → dropped, sendPacket returns true
-	rtpPkt := buildUDPPacket(12345, 5004)
-	require.True(t, e.sendPacket(&rawPacket{data: rtpPkt}, []uint16{5060, 5061}), "RTP sendPacket should not block")
-	require.Equal(t, 1, mm.rtpDroppedCount, "RTPDropped should be called when channel is full")
-
-	// SIP packet (blocking) → would block, but we signal done to unblock
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		close(e.done)
-	}()
-	sipPkt := buildUDPPacket(12345, 5060)
-	require.False(
-		t,
-		e.sendPacket(&rawPacket{data: sipPkt}, []uint16{5060, 5061}),
-		"SIP sendPacket should return false on done",
-	)
-}
-
-func TestSendPacketSuccessPaths(t *testing.T) {
-	t.Run("SIP success", func(t *testing.T) {
-		e := &exporter{
-			messages: make(chan *rawPacket, 1),
-			done:     make(chan struct{}),
-		}
-		sipPkt := buildUDPPacket(12345, 5060)
-		require.True(t, e.sendPacket(&rawPacket{data: sipPkt}, []uint16{5060, 5061}))
-		require.Len(t, e.messages, 1)
-	})
-
-	t.Run("RTP success", func(t *testing.T) {
-		e := &exporter{
-			messages: make(chan *rawPacket, 1),
-			done:     make(chan struct{}),
-		}
-		rtpPkt := buildUDPPacket(12345, 5004)
-		require.True(t, e.sendPacket(&rawPacket{data: rtpPkt}, []uint16{5060, 5061}))
-		require.Len(t, e.messages, 1)
-	})
-
-	t.Run("RTP done signal", func(t *testing.T) {
-		e := &exporter{
-			messages: make(chan *rawPacket), // zero-capacity → always full
-			done:     make(chan struct{}),
-		}
-		close(e.done)
-		rtpPkt := buildUDPPacket(12345, 5004)
-		require.False(
-			t,
-			e.sendPacket(&rawPacket{data: rtpPkt}, []uint16{5060, 5061}),
-			"RTP sendPacket should return false on done",
-		)
-	})
-}
-
 func buildIPHeader(srcIP, dstIP [4]byte) []byte {
 	hdr := make([]byte, 20)
 	hdr[12] = srcIP[0]
@@ -6461,19 +6436,19 @@ func TestResolveSourceCountry(t *testing.T) {
 
 // TestSIPDialogMetricsUpdateTrackerLenNoRace verifies that len() calls on
 // registerTracker, inviteTracker, and optionsTracker in sipDialogMetricsUpdate
-// do not race with concurrent writes from readPackets.
+// do not race with concurrent writes from the packet consumer.
 //
 // Run with: go test -race -run TestSIPDialogMetricsUpdateTrackerLenNoRace
 //
 // Before S14-7.2 fix, the three len() calls at exporter.go:516-518 read map
-// headers without holding the matching mutex, while readPackets (simulated
+// headers without holding the matching mutex, while the packet consumer (simulated
 // here by a writer goroutine) mutates those maps under lock. Under -race this
 // produces "concurrent map read and map write" — a fatal runtime error.
 func TestSIPDialogMetricsUpdateTrackerLenNoRace(t *testing.T) {
 	e := newRollbackExporter()
 
 	// Writer goroutine: intensively writes/deletes tracker entries under locks,
-	// simulating the readPackets consumer mutating maps while the metrics
+	// simulating the packet consumer mutating maps while the metrics
 	// goroutine tries to read len().
 	writerDone := make(chan struct{})
 	go func() {
@@ -6515,53 +6490,6 @@ func TestSIPDialogMetricsUpdateTrackerLenNoRace(t *testing.T) {
 	}
 
 	require.NotPanics(t, func() { e.Close() })
-}
-
-// TestReadSocketFailStopNoSystemError verifies that readSocket returns cleanly
-// without incrementing SystemError when the socket becomes invalid (EBADF).
-// This is the same return-path used for ENETDOWN/ENODEV hot-unplug (S14-7.1):
-// the goroutine stops silently rather than spamming Error+SystemError every
-// second on a dead NIC.
-//
-// A dedicated ENETDOWN test requires veth-pair infrastructure (root-gated)
-// and is deferred to S15 (S14-7.5 readSocket error-branch MC/DC tests).
-func TestReadSocketFailStopNoSystemError(t *testing.T) {
-	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM, 0)
-	require.NoError(t, err)
-	defer unix.Close(fds[1])
-
-	tv := &unix.Timeval{Sec: 1}
-	require.NoError(t, unix.SetsockoptTimeval(fds[0], unix.SOL_SOCKET, unix.SO_RCVTIMEO, tv))
-
-	mm := &mockMetricser{}
-	e := &exporter{
-		socks:       []sockEntry{{fd: fds[0]}},
-		sipPortSets: [][]uint16{{5060, 5061}},
-		messages:    make(chan *rawPacket, 10),
-		done:        make(chan struct{}),
-		services:    services{metricser: mm, dialoger: &mockDialoger{}},
-	}
-
-	e.wg.Add(1)
-	go e.readSocket(0)
-
-	// Close the FD → EBADF in readSocket → clean return, no SystemError.
-	unix.Close(fds[0])
-
-	done := make(chan struct{})
-	go func() {
-		e.wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("readSocket did not exit within 3s after FD closed")
-	}
-
-	require.False(t, mm.systemErrorCalled,
-		"SystemError should not be called on fail-stop (EBADF/ENETDOWN/ENODEV)")
 }
 
 func TestDirectionFromPkttype(t *testing.T) {

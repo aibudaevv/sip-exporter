@@ -2,7 +2,6 @@ package exporter
 
 import (
 	"encoding/binary"
-	"net"
 	"testing"
 	"time"
 
@@ -104,7 +103,7 @@ func TestHandleRTCPReceiverReport(t *testing.T) {
 	lsr := nowNTP32(time.Now().Add(-5 * time.Second))
 	rr := buildRR(buildRTCPBlock(ssrc, 26, 5, 100, 1600, lsr, 0x00010000))
 
-	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr)
+	_, err := e.handleRTCPIPv4([4]byte{10, 0, 0, 1}, 5004, [4]byte{10, 0, 0, 2}, 5006, rr)
 	require.NoError(t, err)
 
 	require.Equal(t, 1, mm.rtcpReportCalls)
@@ -138,13 +137,13 @@ func TestHandleRTCPCumulativeLossDeltaOnSecondReport(t *testing.T) {
 
 	// First RR: cumulative=5 → baseline, no cumulative-loss delta emitted.
 	rr1 := buildRR(buildRTCPBlock(ssrc, 0, 5, 0, 0, 0, 0))
-	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr1)
+	_, err := e.handleRTCPIPv4([4]byte{10, 0, 0, 1}, 5004, [4]byte{10, 0, 0, 2}, 5006, rr1)
 	require.NoError(t, err)
 	require.Zero(t, mm.rtcpCumLossCalls, "first RR establishes baseline")
 
 	// Second RR: cumulative=8 → delta=3 emitted.
 	rr2 := buildRR(buildRTCPBlock(ssrc, 0, 8, 0, 0, 0, 0))
-	_, err = e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr2)
+	_, err = e.handleRTCPIPv4([4]byte{10, 0, 0, 1}, 5004, [4]byte{10, 0, 0, 2}, 5006, rr2)
 	require.NoError(t, err)
 	require.Equal(t, 1, mm.rtcpCumLossCalls)
 	require.Equal(t, uint64(3), mm.rtcpCumLossVal)
@@ -157,7 +156,7 @@ func TestHandleRTCPRTTSkippedWhenLSRZero(t *testing.T) {
 	registerRTPStream(t, e, ssrc)
 
 	rr := buildRR(buildRTCPBlock(ssrc, 0, 0, 0, 0, 0, 0))
-	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr)
+	_, err := e.handleRTCPIPv4([4]byte{10, 0, 0, 1}, 5004, [4]byte{10, 0, 0, 2}, 5006, rr)
 	require.NoError(t, err)
 
 	require.Equal(t, 1, mm.rtcpReportCalls, "report still counted")
@@ -172,7 +171,7 @@ func TestHandleRTCPUncorrelatedSSRCDropped(t *testing.T) {
 
 	// Report block names an SSRC we do not track.
 	rr := buildRR(buildRTCPBlock(0xDEADBEEF, 26, 5, 100, 1600, 0, 0))
-	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr)
+	_, err := e.handleRTCPIPv4([4]byte{10, 0, 0, 1}, 5004, [4]byte{10, 0, 0, 2}, 5006, rr)
 	require.NoError(t, err)
 
 	require.Zero(t, mm.rtcpReportCalls, "uncorrelated SSRC must not emit metrics")
@@ -186,7 +185,7 @@ func TestHandleRTCPSenderReportType(t *testing.T) {
 	registerRTPStream(t, e, ssrc)
 
 	sr := buildSR(0, buildRTCPBlock(ssrc, 0, 0, 0, 0, 0, 0))
-	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, sr)
+	_, err := e.handleRTCPIPv4([4]byte{10, 0, 0, 1}, 5004, [4]byte{10, 0, 0, 2}, 5006, sr)
 	require.NoError(t, err)
 
 	require.Equal(t, 1, mm.rtcpReportCalls)
@@ -205,7 +204,7 @@ func TestHandleRTCPSenderReportValues(t *testing.T) {
 	lsr := nowNTP32(time.Now().Add(-5 * time.Second))
 	sr := buildSR(0, buildRTCPBlock(ssrc, 26, 5, 100, 1600, lsr, 0x00010000))
 
-	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, sr)
+	_, err := e.handleRTCPIPv4([4]byte{10, 0, 0, 1}, 5004, [4]byte{10, 0, 0, 2}, 5006, sr)
 	require.NoError(t, err)
 
 	require.Equal(t, 1, mm.rtcpJitterCalls)
@@ -230,7 +229,7 @@ func TestHandleRTCPRTTSkippedOnClockSkew(t *testing.T) {
 	// LSR 5 s in the FUTURE → now-LSR-DLSR underflows → int32 < 0 → skip (clock skew).
 	futureLSR := nowNTP32(time.Now().Add(5 * time.Second))
 	rr := buildRR(buildRTCPBlock(ssrc, 0, 0, 0, 0, futureLSR, 0))
-	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr)
+	_, err := e.handleRTCPIPv4([4]byte{10, 0, 0, 1}, 5004, [4]byte{10, 0, 0, 2}, 5006, rr)
 	require.NoError(t, err)
 
 	require.Zero(t, mm.rtcpRTTCalls, "negative RTT from clock skew must be skipped")
@@ -251,7 +250,7 @@ func TestHandleRTCPRTTSkippedWhenDLSRExceedsElapsed(t *testing.T) {
 	lsr := nowNTP32(time.Now().Add(-5 * time.Second)) // LSR 5 s ago (valid)
 	dlsr := uint32(10 * 65536)                        // 10 s in 1/65536 units — exceeds elapsed
 	rr := buildRR(buildRTCPBlock(ssrc, 0, 0, 0, 0, lsr, dlsr))
-	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr)
+	_, err := e.handleRTCPIPv4([4]byte{10, 0, 0, 1}, 5004, [4]byte{10, 0, 0, 2}, 5006, rr)
 	require.NoError(t, err)
 
 	require.Zero(t, mm.rtcpRTTCalls, "negative RTT from DLSR exceeding elapsed must be skipped")
@@ -271,7 +270,7 @@ func TestHandleRTCPRTTSkippedWhenDLSRZero(t *testing.T) {
 
 	lsr := nowNTP32(time.Now().Add(-5 * time.Second))
 	rr := buildRR(buildRTCPBlock(ssrc, 0, 0, 0, 0, lsr, 0)) // DLSR=0
-	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr)
+	_, err := e.handleRTCPIPv4([4]byte{10, 0, 0, 1}, 5004, [4]byte{10, 0, 0, 2}, 5006, rr)
 	require.NoError(t, err)
 
 	require.Zero(t, mm.rtcpRTTCalls, "RTT must be skipped when DLSR=0 (malformed)")
@@ -292,7 +291,9 @@ func TestHandleRTCPPartialCompoundProcessesValidPrefix(t *testing.T) {
 	// length overruns the buffer → Parse returns the RR prefix + ErrTruncated.
 	rr := buildRR(buildRTCPBlock(ssrc, 0, 0, 0, 0, 0, 0))
 	badTail := []byte{0x80, 202, 0xFF, 0xFF} // SDES, length=65535 → overruns payload
-	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, append(rr, badTail...))
+	_, err := e.handleRTCPIPv4(
+		[4]byte{10, 0, 0, 1}, 5004, [4]byte{10, 0, 0, 2}, 5006, append(rr, badTail...),
+	)
 	require.NoError(t, err, "a partial parse is not a handler error")
 
 	require.Equal(t, 1, mm.rtcpReportCalls, "valid RR prefix must be salvaged and counted")
@@ -317,7 +318,7 @@ func TestHandleRTCPMultiBlockRR(t *testing.T) {
 		buildRTCPBlock(knownSSRC, 0, 0, 0, 1600, 0, 0),
 		buildRTCPBlock(orphanSSRC, 0, 0, 0, 3200, 0, 0),
 	)
-	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr)
+	_, err := e.handleRTCPIPv4([4]byte{10, 0, 0, 1}, 5004, [4]byte{10, 0, 0, 2}, 5006, rr)
 	require.NoError(t, err)
 
 	require.Equal(t, 1, mm.rtcpJitterCalls, "only correlated block emits jitter")
@@ -344,7 +345,7 @@ func TestHandleRTCPMixedCompound(t *testing.T) {
 	compound = append(compound, sr...)
 	compound = append(compound, rr...)
 
-	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, compound)
+	_, err := e.handleRTCPIPv4([4]byte{10, 0, 0, 1}, 5004, [4]byte{10, 0, 0, 2}, 5006, compound)
 	require.NoError(t, err)
 
 	require.Equal(t, 2, mm.rtcpReportCalls, "both SR and RR must be processed")
@@ -353,7 +354,7 @@ func TestHandleRTCPMixedCompound(t *testing.T) {
 }
 
 // TestHandleRTCPRTTUsesCaptureTimestamp proves that RTT is computed from the
-// kernel capture timestamp (e.pktTimestamp, SO_TIMESTAMPNS), not wall-clock
+// kernel packet-ring timestamp (e.pktTimestamp), not wall-clock
 // time.Now(). The capture time is set 60 s in the past; LSR is 5 s before the
 // capture time and DLSR is 1 s, so the correct RTT ≈ 4 s. Without the fix the
 // handler uses time.Now(), yielding RTT ≈ 64 s (60 s of accumulated drift).
@@ -369,7 +370,7 @@ func TestHandleRTCPRTTUsesCaptureTimestamp(t *testing.T) {
 	dlsr := uint32(1 * 65536) // 1 s in NTP32 units
 	rr := buildRR(buildRTCPBlock(ssrc, 0, 0, 0, 0, lsr, dlsr))
 
-	_, err := e.handleRTCP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(10, 0, 0, 2), 5006, rr)
+	_, err := e.handleRTCPIPv4([4]byte{10, 0, 0, 1}, 5004, [4]byte{10, 0, 0, 2}, 5006, rr)
 	require.NoError(t, err)
 
 	require.Equal(t, 1, mm.rtcpRTTCalls, "RTT must be computed (LSR/DLSR valid)")
