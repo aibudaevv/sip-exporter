@@ -1,6 +1,6 @@
 # Детекция фрода — Как это работает
 
-> **Версия:** sip-exporter v1.9.0
+> **Область применения:** сигнальный мониторинг; установленную версию проверяйте через `sip_exporter_build_info`.
 >
 > sip-exporter предоставляет **сигнальную** (signal-only) детекцию фрода.
 > Экспортёр не блокирует и не перехватывает трафик. Вместо этого он экспортирует
@@ -116,16 +116,15 @@ sessions_limits:
 
 ## Алерты
 
-> **Примечание об окне `rate()`:** `rate(counter[5m]) > 0` остаётся истинным
-> ~5 минут после сигнала. Параметр `for: 1m` снижает шум от кратковременных
-> всплесков.
-> Выражение country-change объединяет `increase()` для повторных событий с веткой
-> новой series по точному набору лейблов, поэтому детектирует первое и последующие события каждого направления.
+> **Первое событие:** счётчик появляется только после события. Одного `rate()` недостаточно, если первый scrape уже видит положительное значение. Примеры ниже объединяют рост за 5 минут с появлением новой положительной серии; проверка сохраняет полный набор лейблов. После восстановления мониторинга старый положительный счётчик тоже может выглядеть новым — подтвердите время события по дополнительным данным. `for` задаёт время ожидания перед уведомлением, а не число событий. Для FAS потери захвата подавляют уведомление только на том же `job, instance`.
 
 ```yaml
 # Сканирование регистраций → расследование credential stuffing
 - alert: SIPRegistrationScan
-  expr: rate(sip_exporter_register_scan_total[5m]) > 0
+  expr: |
+    (increase(sip_exporter_register_scan_total[5m]) > 0)
+    or
+    (sip_exporter_register_scan_total > 0 unless sip_exporter_register_scan_total offset 5m)
   for: 1m
   labels:
     severity: critical
@@ -135,7 +134,10 @@ sessions_limits:
 
 # Всплеск INVITE → расследование toll-fraud
 - alert: SIPInviteBurst
-  expr: rate(sip_exporter_invite_burst_total[5m]) > 0
+  expr: |
+    (increase(sip_exporter_invite_burst_total[5m]) > 0)
+    or
+    (sip_exporter_invite_burst_total > 0 unless sip_exporter_invite_burst_total offset 5m)
   for: 1m
   labels:
     severity: critical
@@ -160,9 +162,16 @@ sessions_limits:
 # False Answer Supervision → расследование биллинг-фрода
 - alert: SIPFalseAnswerSupervision
   expr: |
-    (rate(sip_exporter_fas_calls_total[5m]) > 0)
-    unless on()
-    (rate(sip_exporter_rtp_dropped_total[5m]) > 100)
+    (
+      (increase(sip_exporter_fas_calls_total[5m]) > 0)
+      or
+      (sip_exporter_fas_calls_total > 0 unless sip_exporter_fas_calls_total offset 5m)
+    )
+    unless on (job, instance)
+    (
+      rate(sip_exporter_rtp_dropped_total[5m]) > 0
+      or rate(sip_exporter_socket_packets_dropped_total[5m]) > 0
+    )
   for: 2m
   labels:
     severity: warning
@@ -188,7 +197,7 @@ sessions_limits:
 **Сканирование регистраций:**
 - Отслеживает только *успешные* (200 OK) регистрации. Для brute-force (401/403) используйте `register_failure_total{code="401"}` с алертом `SIPRegistrationBruteForce`.
 - SBC/прокси, распределяющий регистрации по экстеншенам, может вызывать ложные срабатывания. Повысьте порог.
-- Ботнеты с ротацией IP могут не достичь порога на один IP. Агрегируйте по всем IP в PromQL.
+- Распределённые сканы, в которых каждый IP остаётся ниже порога, этим сигналом не обнаруживаются. IP не экспортируется в лейблах, а подпороговые события не попадают в счётчик; агрегация PromQL не восстанавливает их. Для такого анализа нужны дополнительные внешние данные.
 
 **Смена страны регистрации:**
 - Легитимный роуминг вызывает сигнал — это намеренно, оператор разбирается.
@@ -196,7 +205,7 @@ sessions_limits:
 - Если предыдущая регистрация истекла по TTL до перерегистрации из другой страны → сигнала нет (нет базовой страны).
 
 **Всплеск INVITE:**
-- SBC/шлюз, мультиплексирующий абонентов через один IP, может превысить порог=100. Повысьте порог для этого источника.
+- SBC/шлюз с множеством абонентов может превысить порог=100. Повышение порога действует на весь exporter и снижает чувствительность ко всем источникам; индивидуальной настройки по IP нет.
 
 **False Answer Supervision:**
 - Неполный RTP-захват может дать false positive; коррелируйте сигнал с socket- и userspace-drop метриками.

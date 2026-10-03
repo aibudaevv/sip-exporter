@@ -44,7 +44,7 @@ a Linux host into Prometheus metrics and Grafana dashboards, without storing pac
 
 ## Key Features
 
-- 🌐 **Multi-interface monitoring** — capture SIP/RTP from multiple NICs simultaneously, each tagged with an `iface` label
+- 🌐 **Multi-interface monitoring** — capture SIP/RTP from multiple NICs; `iface` labels are available on raw INVITE and socket metrics
 - ⚡ **Kernel filtering** — an eBPF socket filter selects relevant traffic before userspace parsing
 - 🐳 **Single container deployment** — no external dependencies
 - 🔧 **Configurable SIP ports** — monitor custom ports via environment variables
@@ -74,15 +74,24 @@ Copy the [pinned production Compose example](examples/docker-compose.production.
 Set `SIP_EXPORTER_INTERFACE` to the host interface that carries both SIP signaling and RTP media.
 
 ```bash
-cp examples/docker-compose.production.yml docker-compose.yml
-SIP_EXPORTER_INTERFACE=eth0 docker compose up -d
+cp -n examples/docker-compose.production.yml docker-compose.production.yml
+```
+
+Add or update only the interface setting in `.env`, preserving any existing settings. Create the file if it does not exist:
+
+```dotenv
+SIP_EXPORTER_INTERFACE=eth0
+```
+
+```bash
+docker compose --env-file .env -f docker-compose.production.yml up -d
 curl http://localhost:10047/metrics
 ```
 
 The example includes a pinned release image, restart policy, healthcheck, read-only filesystem, and
 every runtime setting listed below with its default value.
 
-Access metrics at `http://localhost:10047/metrics`. A `/health` endpoint is also exposed (returns `200 OK` when alive, `503` otherwise) — used by the Dockerfile `HEALTHCHECK` and suitable for orchestrator liveness/readiness probes.
+Access metrics at `http://localhost:10047/metrics`. `/health` returns `200 OK` while the exporter is initialized and `503` otherwise. It does not verify packet flow, media visibility or processing progress; use the verification runbook for those checks.
 
 **Port migration:** new installations use `10047`. Existing deployments may keep the previous
 port by setting `SIP_EXPORTER_HTTP_PORT=2112` and keeping their scrape and healthcheck URLs aligned.
@@ -103,12 +112,9 @@ SIP + RTP Traffic → NIC → eBPF socket filter → AF_PACKET socket → Go pol
 
 ## Performance
 
-The release-verified envelope includes full-call traffic at 1,000 CPS under 1 CPU / 128 MiB,
-full-call traffic with concurrent Prometheus scrapes at 1,800 CPS under 2 CPU / 256 MiB, and a
-ten-minute soak at 500 CPS under 1 CPU / 128 MiB. These are profile-specific acceptance results,
-not universal production sizing guarantees.
-
-See the measured scenarios, integrity gates, environment and reproduction commands in
+Public performance results are published only after the final RTP profile has been run against the
+same immutable release image users can install. Development-image measurements are not presented
+as release capacity. See the required profile, integrity gates, and publication criteria in
 [docs/BENCHMARK.md](./docs/BENCHMARK.md).
 
 ## Install
@@ -139,7 +145,7 @@ Environment variables:
 * `SIP_EXPORTER_FRAUD_FAS_THRESHOLD` - False Answer Supervision: base sweep-path wait after a 200 OK without answer-side RTP (default 10s; the BYE path uses an independent 3s floor)
 * `SIP_EXPORTER_TELEMETRY` - anonymous usage telemetry, opt-out with `false` (default true)
 
-The container must run with `--privileged` and `--network host` (eBPF requires `CAP_BPF` and access to the network interface). See [Security](docs/SECURITY.md) for details on why this is safe.
+The container must run with `--privileged` and `--network host` (eBPF requires `CAP_BPF` and access to the network interface). See [Security](docs/SECURITY.md) for deployment privileges and security limitations.
 
 > ⚠️ **Multi-interface caveat:** do not specify interfaces that see the same traffic (bond parent + child, bridge + member, VLAN parent + subinterface, duplicate SPAN ports). Doing so will double-count metrics. When in doubt, list only physical NICs.
 
@@ -187,7 +193,7 @@ The carrier feature solves this by mapping IP subnets to operator names. Call me
 
 **How it works:**
 
-The exporter looks at the **source IP** of every SIP request and matches it against CIDR subnets in a YAML config. When UAC at `10.1.5.20` sends an INVITE, the exporter finds that `10.1.5.20` falls within `10.1.0.0/16` defined for carrier "telecom-alpha", and tags all metrics for this call — the INVITE itself, the 200 OK response, the BYE, even the dialog expiry — with `carrier="telecom-alpha"`.
+The exporter matches the source IP against configured CIDRs, then tries the destination IP as a fallback. An INVITE from `10.1.5.20` matching carrier subnet `10.1.0.0/16` gets `carrier="telecom-alpha"`. Correlated INVITE responses, dialog and media metrics inherit this context. Other raw SIP request/response counters can use their own packet context.
 
 This means:
 - INVITE from `10.1.5.20` → metrics labeled `carrier="telecom-alpha"`
@@ -222,7 +228,7 @@ sip_exporter_ser{carrier="other",ua_type="other",source_country="unknown",direct
 
 **Things to know:**
 
-- Carrier is determined at **request time** (INVITE/REGISTER/OPTIONS), not response time. If carrier-A sends INVITE and carrier-B answers 200 OK, all metrics still go to carrier-A — the operator who initiated the call
+- Correlated INVITE/REGISTER responses inherit the request carrier; ORD and dialog completion use saved context. This is not a blanket rule for every raw response counter.
 - If source IP doesn't match any CIDR, destination IP is tried. If neither matches → `carrier="other"`
 - When CIDRs overlap, **first match wins** — list specific subnets before broad ones
 - Without the config file, metrics carrying `carrier` use `carrier="other"` — nothing breaks
@@ -239,7 +245,7 @@ The exporter reads the `User-Agent` SIP header from each request and matches it 
 
 **How it works:**
 
-The exporter parses the `User-Agent` header of every SIP request and matches it against regex patterns in a YAML config. When a phone with `User-Agent: Yealink SIP-T46S 66.15.0.10` sends an INVITE, the exporter matches `^Yealink` and tags all metrics for this call with `ua_type="yealink"`.
+The initial INVITE User-Agent is matched against regex patterns. For example, `Yealink SIP-T46S 66.15.0.10` matches `^Yealink`: correlated INVITE responses, dialog and media metrics inherit `ua_type="yealink"`. Other packet counters can use the individual packet's User-Agent.
 
 This means:
 - INVITE from Yealink phone → metrics labeled `ua_type="yealink"`
@@ -277,7 +283,7 @@ sip_exporter_ser{carrier="telecom-alpha",ua_type="other",source_country="unknown
 
 **Things to know:**
 
-- UA type is determined at **request time** (INVITE/REGISTER/OPTIONS), using the same tracker mechanism as carrier. Responses inherit `ua_type` from the request tracker, not from the response's own headers
+- INVITE/REGISTER responses inherit the request `ua_type`. ORD and dialog metrics use saved context; other response counters can use the response header.
 - The `User-Agent` header is extracted from all SIP packets, but SIP responses typically use the `Server` header, so in practice only requests provide meaningful classification
 - If no pattern matches → `ua_type="other"`
 - When patterns overlap, **first match wins** — list specific patterns before broad ones
@@ -307,7 +313,7 @@ The exporter adds geographic context to SIP metrics via two labels:
 | Label | Method | Scope |
 |-------|--------|-------|
 | `source_country` | GeoIP lookup of source IP (MaxMind GeoLite2-Country) | Base/call-level SIP, RTP, and correlated RTCP metrics |
-| `destination_country` | E.164 phone-number prefix (embedded, no DB needed) | INVITE metrics only |
+| `destination_country` | E.164 phone-number prefix (embedded, no DB needed) | INVITE and completed-session traffic seconds |
 
 **source_country resolution:**
 1. `carrier.country` — optional field in `carriers.yaml`, overrides GeoIP (operator-curated)
@@ -325,7 +331,7 @@ Follow the [GeoIP setup guide](docs/geoip.md) to add the read-only database moun
 
 Full reference with formulas and PromQL examples: [docs/METRICS.md > Geo-Enrichment Labels](docs/METRICS.md#geo-enrichment-labels)
 
-Step-by-step setup (how to get and connect the MaxMind database): [`docs/geoip.md`](docs/geoip.md)
+Connecting an existing MaxMind database file: [`docs/geoip.md`](docs/geoip.md)
 
 ```promql
 # SER for calls to Russia
@@ -344,7 +350,7 @@ Metrics produced:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `sip_exporter_rtp_packets_total` | counter | RTP packets observed |
+| `sip_exporter_rtp_packets_total` | counter | counted correlated RTP packets, excluding duplicates and out-of-order packets |
 | `sip_exporter_rtp_packets_lost_total` | counter | packets lost (RFC 3550 sequence-gap accounting) |
 | `sip_exporter_rtp_jitter_milliseconds` | histogram | interarrival jitter (RFC 3550 A.8) |
 | `sip_exporter_rtp_mos_score` | histogram | MOS-LQ via ITU-T G.107 E-model (1.0–4.5) |
@@ -408,8 +414,8 @@ Test suite:
 
 ## Benchmark
 
-See [BENCHMARK.md](./docs/BENCHMARK.md) for the release-verified load envelope, methodology,
-acceptance gates and scope limitations.
+See [BENCHMARK.md](./docs/BENCHMARK.md) for the RTP test profile, publication criteria,
+reproduction command, and current result status.
 
 ## Alerting
 

@@ -131,6 +131,7 @@ func TestAlertRules(t *testing.T) {
 		{"SIPExporterDown", ""},
 		{"SIPExporterSocketDropsHigh", ""},
 		{"SIPExporterChannelSaturation", ""},
+		{"SIPExporterRTPUserspaceDrops", ""},
 		{"SIPExporterSERDegraded", ""},
 		{"SIPExporterRTPLossHigh", ""},
 		{"SIPExporterMissingRTPHigh", "instance, carrier, direction"},
@@ -146,6 +147,17 @@ func TestAlertRules(t *testing.T) {
 			t.Fatalf("alert %q clamps a rate denominator and distorts low traffic: %s",
 				name, got[name].Expr)
 		}
+	}
+	rtpDrops := got["SIPExporterRTPUserspaceDrops"]
+	if rtpDrops.Expr != "rate(sip_exporter_rtp_dropped_total[5m]) > 0" {
+		t.Fatalf("RTP userspace drop alert has unexpected expression: %s", rtpDrops.Expr)
+	}
+	if rtpDrops.For != "2m" {
+		t.Fatalf("RTP userspace drop alert for = %q, want 2m", rtpDrops.For)
+	}
+	if rtpDrops.Labels["severity"] != "warning" {
+		t.Fatalf("RTP userspace drop alert severity = %q, want warning",
+			rtpDrops.Labels["severity"])
 	}
 }
 
