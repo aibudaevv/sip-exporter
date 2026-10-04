@@ -5,6 +5,8 @@ package load
 import (
 	"errors"
 	"math"
+	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -142,6 +144,443 @@ func TestReleaseProfileSpecs(t *testing.T) {
 			require.Equal(t, tt.wantScrapes, tt.profile.RequireScrapes)
 			require.Equal(t, tt.wantBusiness, tt.profile.Business)
 		})
+	}
+}
+
+func TestMixedReleaseProfileSpecs(t *testing.T) {
+	tests := []struct {
+		name        string
+		profile     mixedReleaseProfileSpec
+		generators  []mixedGeneratorSpec
+		limits      WorkloadLimits
+		warmup      time.Duration
+		wantScrapes bool
+	}{
+		{
+			name:    "nominal",
+			profile: mixedNominalProfile(),
+			generators: []mixedGeneratorSpec{
+				{Name: "yealink", UserAgent: "Yealink SIP-T46S 66.15.0.10", Workload: WorkloadSpec{Calls: 750, Rate: 25}},
+				{Name: "grandstream", UserAgent: "Grandstream GXP2160 1.0.9.50", Workload: WorkloadSpec{Calls: 750, Rate: 25}},
+			},
+			limits: nominalLimits,
+		},
+		{
+			name:    "peak",
+			profile: mixedPeakProfile(),
+			generators: []mixedGeneratorSpec{
+				{Name: "yealink", UserAgent: "Yealink SIP-T46S 66.15.0.10", Workload: WorkloadSpec{Calls: 1200, Rate: 40}},
+				{Name: "grandstream", UserAgent: "Grandstream GXP2160 1.0.9.50", Workload: WorkloadSpec{Calls: 1200, Rate: 40}},
+			},
+			limits:      peakLimits,
+			wantScrapes: true,
+		},
+		{
+			name:    "soak",
+			profile: mixedSoakProfile(),
+			generators: []mixedGeneratorSpec{
+				{Name: "default", UserAgent: "sipp-rtp-uac", Workload: WorkloadSpec{Calls: 30000, Rate: 50}},
+			},
+			limits: nominalLimits,
+			warmup: time.Minute,
+		},
+		{
+			name:    "soak warmup",
+			profile: mixedSoakWarmupProfile(),
+			generators: []mixedGeneratorSpec{
+				{Name: "default", UserAgent: "sipp-rtp-uac", Workload: WorkloadSpec{Calls: 3000, Rate: 50}},
+			},
+			limits: nominalLimits,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.generators, tt.profile.Generators)
+			require.Equal(t, tt.limits, tt.profile.Limits)
+			require.Equal(t, 18*time.Second, tt.profile.MediaDuration)
+			require.Equal(t, tt.warmup, tt.profile.Warmup)
+			require.Equal(t, tt.wantScrapes, tt.profile.RequireScrapes)
+		})
+	}
+}
+
+func TestMixedReleaseRowMutationMatrix(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*mixedReleaseEvidence)
+		wantErr bool
+	}{
+		{name: "valid"},
+		{name: "RTP total lower boundary", mutate: func(e *mixedReleaseEvidence) {
+			e.ActualRTPPackets = 4233600
+			e.Row.Protocols.RTPPackets = 4233600
+		}},
+		{name: "RTP total upper boundary", mutate: func(e *mixedReleaseEvidence) {
+			e.ActualRTPPackets = 4406400
+			e.Row.Protocols.RTPPackets = 4406400
+		}},
+		{name: "RTP p95 lower boundary", mutate: func(e *mixedReleaseEvidence) {
+			e.ActualRTPPPSP95 = 129600
+		}},
+		{name: "RTP p95 upper boundary", mutate: func(e *mixedReleaseEvidence) {
+			e.ActualRTPPPSP95 = 158400
+		}},
+		{name: "scrape boundaries pass", mutate: func(e *mixedReleaseEvidence) {
+			e.Row.Scrapes = &ScrapeSummary{Count: 1, P50MS: 10, P95MS: 99.999, P99MS: 199.999}
+		}},
+		{name: "missing generator", mutate: func(e *mixedReleaseEvidence) {
+			e.Row.Generators = nil
+			e.GeneratorStarts = nil
+		}, wantErr: true},
+		{name: "one generator under rate", mutate: func(e *mixedReleaseEvidence) {
+			e.Row.Generators[1].Result.ActualRate = 39.19
+		}, wantErr: true},
+		{name: "generator failed call", mutate: func(e *mixedReleaseEvidence) {
+			e.Row.Generators[0].Result.FailedCalls = 1
+		}, wantErr: true},
+		{name: "generator start skew", mutate: func(e *mixedReleaseEvidence) {
+			e.GeneratorStarts[1] = e.GeneratorStarts[0].Add(600*time.Millisecond + time.Nanosecond)
+		}, wantErr: true},
+		{name: "SIP missing", mutate: func(e *mixedReleaseEvidence) {
+			e.Row.Capture = newCaptureResult(14400, 14399)
+			e.Row.Protocols.SIPPackets = 14399
+		}, wantErr: true},
+		{name: "SIP excess", mutate: func(e *mixedReleaseEvidence) {
+			e.Row.Capture = newCaptureResult(14400, 14401)
+			e.Row.Protocols.SIPPackets = 14401
+		}, wantErr: true},
+		{name: "SER below 100", mutate: func(e *mixedReleaseEvidence) {
+			e.SER = 99.999
+		}, wantErr: true},
+		{name: "RTP total below tolerance", mutate: func(e *mixedReleaseEvidence) {
+			e.ActualRTPPackets = 4233599
+			e.Row.Protocols.RTPPackets = 4233599
+		}, wantErr: true},
+		{name: "RTP total above tolerance", mutate: func(e *mixedReleaseEvidence) {
+			e.ActualRTPPackets = 4406401
+			e.Row.Protocols.RTPPackets = 4406401
+		}, wantErr: true},
+		{name: "RTP p95 below tolerance", mutate: func(e *mixedReleaseEvidence) {
+			e.ActualRTPPPSP95 = 129599
+		}, wantErr: true},
+		{name: "RTP p95 above tolerance", mutate: func(e *mixedReleaseEvidence) {
+			e.ActualRTPPPSP95 = 158401
+		}, wantErr: true},
+		{name: "socket drop", mutate: func(e *mixedReleaseEvidence) {
+			e.Row.Protocols.SocketDropped = 1
+		}, wantErr: true},
+		{name: "userspace RTP drop", mutate: func(e *mixedReleaseEvidence) {
+			e.Row.Resources.RTPDrops = 1
+		}, wantErr: true},
+		{name: "exporter error", mutate: func(e *mixedReleaseEvidence) {
+			e.Row.ErrorCount = 1
+		}, wantErr: true},
+		{name: "healthy RTP loss", mutate: func(e *mixedReleaseEvidence) {
+			e.RTPLost = 1
+		}, wantErr: true},
+		{name: "healthy RTP duplicate", mutate: func(e *mixedReleaseEvidence) {
+			e.RTPDuplicate = 1
+		}, wantErr: true},
+		{name: "healthy RTP out of order", mutate: func(e *mixedReleaseEvidence) {
+			e.RTPOutOfOrder = 1
+		}, wantErr: true},
+		{name: "resource gate", mutate: func(e *mixedReleaseEvidence) {
+			e.Row.Resources.CPUP95Percent = 80.000001
+		}, wantErr: true},
+		{name: "missing scrapes", mutate: func(e *mixedReleaseEvidence) {
+			e.Row.Scrapes = nil
+		}, wantErr: true},
+		{name: "scrape p95 boundary fails", mutate: func(e *mixedReleaseEvidence) {
+			e.Row.Scrapes = &ScrapeSummary{Count: 1, P50MS: 10, P95MS: 100, P99MS: 190}
+		}, wantErr: true},
+		{name: "scrape p99 boundary fails", mutate: func(e *mixedReleaseEvidence) {
+			e.Row.Scrapes = &ScrapeSummary{Count: 1, P50MS: 10, P95MS: 90, P99MS: 200}
+		}, wantErr: true},
+	}
+
+	profile := mixedPeakProfile()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			evidence := validMixedReleaseEvidence()
+			if tt.mutate != nil {
+				tt.mutate(&evidence)
+			}
+
+			err := validateMixedRelease(profile, evidence)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func validMixedReleaseEvidence() mixedReleaseEvidence {
+	started := time.Date(2026, time.October, 3, 12, 0, 0, 0, time.UTC)
+	firstPhases := phaseInterval(started, started.Add(48*time.Second))
+	secondPhases := phaseInterval(started.Add(600*time.Millisecond), started.Add(48*time.Second))
+	return mixedReleaseEvidence{
+		Row: releaseRowEvidence{
+			Generators: []releaseGeneratorEvidence{
+				{
+					Spec:   WorkloadSpec{Calls: 1200, Rate: 40},
+					Result: GeneratorResult{SuccessfulCalls: 1200, ActualRate: 40, Phases: firstPhases},
+				},
+				{
+					Spec:   WorkloadSpec{Calls: 1200, Rate: 40},
+					Result: GeneratorResult{SuccessfulCalls: 1200, ActualRate: 40, Phases: secondPhases},
+				},
+			},
+			Capture:   newCaptureResult(14400, 14400),
+			Protocols: ProtocolCounters{SIPPackets: 14400, RTPPackets: 4320000},
+			Resources: ResourceSummaryV2{Limits: peakLimits},
+			Limits:    peakLimits,
+			Business: map[string]releaseBusinessEvidence{
+				"calls": {Expected: 2400, Actual: 2400},
+			},
+			Scrapes: &ScrapeSummary{Count: 1, P50MS: 10, P95MS: 90, P99MS: 190},
+		},
+		SER:                100,
+		ExpectedRTPPackets: 4320000,
+		ActualRTPPackets:   4320000,
+		ExpectedRTPPPSP95:  144000,
+		ActualRTPPPSP95:    144000,
+		GeneratorStarts:    []time.Time{started, started.Add(600 * time.Millisecond)},
+	}
+}
+
+func TestMixedReleaseHarnessArguments(t *testing.T) {
+	ports := []mixedRTPPorts{
+		{UASSIP: "31001", UACSIP: "31002", UASMedia: "31003", UACMedia: "31004"},
+		{UASSIP: "31005", UACSIP: "31006", UASMedia: "31007", UACMedia: "31008"},
+	}
+	plans, err := mixedSippPlans(mixedPeakProfile(), ports)
+	require.NoError(t, err)
+	require.Len(t, plans, 2)
+
+	for i, plan := range plans {
+		require.Equal(t, ports[i], plan.Ports)
+		require.Contains(t, plan.UASArgs, ports[i].UASSIP)
+		require.Contains(t, plan.UASArgs, ports[i].UASMedia)
+		require.Contains(t, plan.UACArgs, ports[i].UACSIP)
+		require.Contains(t, plan.UACArgs, ports[i].UACMedia)
+		require.Equal(t, "127.0.0.1:"+ports[i].UASSIP, plan.UACArgs[len(plan.UACArgs)-1])
+		key := slices.Index(plan.UACArgs, "-key")
+		require.NotEqual(t, -1, key)
+		require.Less(t, key+2, len(plan.UACArgs))
+		require.Equal(t, "user_agent", plan.UACArgs[key+1])
+		require.Equal(t, mixedPeakProfile().Generators[i].UserAgent, plan.UACArgs[key+2])
+	}
+	require.NotEqual(t, plans[0].Ports, plans[1].Ports)
+}
+
+func TestMixedReleaseHarnessPortIsolation(t *testing.T) {
+	_, ports := allocateMixedRTPPorts(2)
+	require.Len(t, ports, 2)
+
+	reservedMedia := make(map[int]struct{})
+	for _, portSet := range ports {
+		for _, media := range []string{portSet.UASMedia, portSet.UACMedia} {
+			port, err := strconv.Atoi(media)
+			require.NoError(t, err)
+			reservedMedia[port] = struct{}{}
+			reservedMedia[port+2] = struct{}{}
+		}
+	}
+	for _, portSet := range ports {
+		for _, sip := range []string{portSet.UASSIP, portSet.UACSIP} {
+			port, err := strconv.Atoi(sip)
+			require.NoError(t, err)
+			_, conflicts := reservedMedia[port]
+			require.False(t, conflicts, "SIP port %d overlaps SIPp RTP reservation", port)
+		}
+	}
+}
+
+func TestMixedReleaseHarnessLifecycle(t *testing.T) {
+	ready := time.Date(2026, time.October, 3, 13, 0, 0, 0, time.UTC)
+	valid := func() mixedLifecycleEvidence {
+		return mixedLifecycleEvidence{
+			UASReady:          []time.Time{ready, ready.Add(time.Millisecond)},
+			MeasurementStart:  ready.Add(2 * time.Millisecond),
+			GeneratorStarts:   []time.Time{ready.Add(3 * time.Millisecond), ready.Add(500 * time.Millisecond)},
+			MeasurementEnd:    ready.Add(49 * time.Second),
+			EvidenceCollected: ready.Add(50 * time.Second),
+			CleanupStart:      ready.Add(51 * time.Second),
+			ScrapeInterval:    100 * time.Millisecond,
+		}
+	}
+	tests := []struct {
+		name   string
+		mutate func(*mixedLifecycleEvidence)
+	}{
+		{name: "measurement before readiness", mutate: func(e *mixedLifecycleEvidence) {
+			e.MeasurementStart = ready
+		}},
+		{name: "generator before measurement", mutate: func(e *mixedLifecycleEvidence) {
+			e.GeneratorStarts[0] = e.MeasurementStart.Add(-time.Nanosecond)
+		}},
+		{name: "generator start skew", mutate: func(e *mixedLifecycleEvidence) {
+			e.GeneratorStarts[1] = e.GeneratorStarts[0].Add(600*time.Millisecond + time.Nanosecond)
+		}},
+		{name: "evidence before measurement end", mutate: func(e *mixedLifecycleEvidence) {
+			e.EvidenceCollected = e.MeasurementEnd
+		}},
+		{name: "cleanup before evidence", mutate: func(e *mixedLifecycleEvidence) {
+			e.CleanupStart = e.EvidenceCollected
+		}},
+	}
+
+	require.NoError(t, validateMixedLifecycle(mixedPeakProfile(), valid()))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			evidence := valid()
+			tt.mutate(&evidence)
+			require.Error(t, validateMixedLifecycle(mixedPeakProfile(), evidence))
+		})
+	}
+}
+
+func TestMixedReleaseHarnessScrapeScheduling(t *testing.T) {
+	require.Equal(t, time.Duration(0), mixedScrapeInterval(mixedNominalProfile()))
+	require.Equal(t, 100*time.Millisecond, mixedScrapeInterval(mixedPeakProfile()))
+}
+
+func TestMixedReleaseHarnessWarmupPlanning(t *testing.T) {
+	_, ok := mixedWarmupPhase(mixedNominalProfile())
+	require.False(t, ok)
+
+	soak := mixedSoakProfile()
+	warmup, ok := mixedWarmupPhase(soak)
+	require.True(t, ok)
+	require.Equal(t, mixedSoakWarmupProfile(), warmup)
+	require.Equal(t, mixedSoakProfile(), soak, "warmup planning must not mutate measured profile")
+}
+
+func TestMixedReleaseScenarioContracts(t *testing.T) {
+	t.Run("dual UA business evidence is exact", func(t *testing.T) {
+		profile := mixedNominalProfile()
+		invites := []metricSample{
+			{name: "sip_exporter_invite_total", labels: map[string]string{
+				"carrier": "loopback-carrier", "ua_type": "yealink",
+			}, value: 750},
+			{name: "sip_exporter_invite_total", labels: map[string]string{
+				"carrier": "loopback-carrier", "ua_type": "grandstream",
+			}, value: 750},
+		}
+		ser := []metricSample{
+			{name: "sip_exporter_ser", labels: map[string]string{
+				"carrier": "loopback-carrier", "ua_type": "yealink",
+			}, value: 100},
+			{name: "sip_exporter_ser", labels: map[string]string{
+				"carrier": "loopback-carrier", "ua_type": "grandstream",
+			}, value: 100},
+		}
+
+		business := mixedDualUABusiness(invites, ser)
+		require.Equal(t, map[string]float64{
+			"invites_total": 1500, "invites_loopback_yealink": 750,
+			"invites_loopback_grandstream": 750, "ser_loopback_yealink": 100,
+			"ser_loopback_grandstream": 100, "unexpected_label_series": 0,
+		}, business)
+		require.NoError(t, validateMixedRelease(profile,
+			mixedReleaseEvidenceFromResult(profile, validMixedScenarioResult(profile), business)))
+
+		invites = append(invites, metricSample{name: "sip_exporter_invite_total",
+			labels: map[string]string{"carrier": "other", "ua_type": "other"}, value: 1})
+		business = mixedDualUABusiness(invites, ser)
+		require.Equal(t, 1.0, business["unexpected_label_series"])
+		require.Error(t, validateMixedRelease(profile,
+			mixedReleaseEvidenceFromResult(profile, validMixedScenarioResult(profile), business)))
+	})
+
+	t.Run("soak excludes warmup counters and samples", func(t *testing.T) {
+		profile := mixedSoakProfile()
+		result := validMixedScenarioResult(profile)
+		start := result.Load.Generator.Phases.MeasureStart
+		end := result.Load.Generator.Phases.MeasureEnd
+		result.InvitesBefore = 3000
+		result.InvitesAfter = 33000
+		result.Load.ResourceSamples.Resources = []resourceSample{
+			{At: start.Add(-time.Second), WorkingSetBytes: 1 << 20},
+			{At: start, WorkingSetBytes: 64 << 20},
+			{At: end.Add(-time.Minute), WorkingSetBytes: 72 << 20},
+			{At: end, WorkingSetBytes: 1 << 20},
+		}
+
+		require.Equal(t, 30000.0, mixedMeasuredInvites(result))
+		growth, err := summarizeMixedSoakWorkingSet(result)
+		require.NoError(t, err)
+		require.Equal(t, soakWorkingSetGrowth{
+			FirstMinuteMedianMB: 64, LastMinuteMedianMB: 72,
+			GrowthMB: 8, AllowedGrowthMB: 8,
+		}, growth)
+	})
+
+	t.Run("peak records mixed RTP and scrape evidence", func(t *testing.T) {
+		recorder, err := newRunRecorderV2(runModeTargeted, t.TempDir(),
+			validRunArtifactV2().Environment, "3addda1", time.Now())
+		require.NoError(t, err)
+		previous := activeRunRecorder
+		activeRunRecorder = recorder
+		t.Cleanup(func() { activeRunRecorder = previous })
+
+		t.Run("row", func(t *testing.T) {
+			beginScenario(t)
+			profile := mixedPeakProfile()
+			recordScenarioLimits(t, profile.Limits)
+			result := validMixedScenarioResult(profile)
+			business := map[string]float64{
+				"invites_total": 2400, "invites_loopback_yealink": 1200,
+				"invites_loopback_grandstream": 1200, "ser_loopback_yealink": 100,
+				"ser_loopback_grandstream": 100, "unexpected_label_series": 0,
+			}
+			recordMixedReleaseResult(t, result, business)
+		})
+
+		metrics := recorder.Snapshot().Results[0].Metrics
+		for _, name := range []string{
+			"rtp_packets", "rtp_pps_p95", "rtp_lost", "rtp_duplicate",
+			"rtp_out_of_order", "scrape_p50_ms", "scrape_p95_ms", "scrape_p99_ms",
+			"invites_loopback_yealink", "invites_loopback_grandstream",
+			"ser_loopback_yealink", "ser_loopback_grandstream",
+		} {
+			require.Contains(t, metrics, name)
+		}
+	})
+}
+
+func validMixedScenarioResult(profile mixedReleaseProfileSpec) mixedReleaseResult {
+	started := time.Date(2026, time.October, 3, 14, 0, 0, 0, time.UTC)
+	duration := releaseDuration + time.Duration(rtpMediaSeconds)*time.Second
+	if profile.Warmup != 0 {
+		duration = releaseSoakDuration + time.Duration(rtpMediaSeconds)*time.Second
+	}
+	generators := make([]GeneratorResult, len(profile.Generators))
+	for i, generator := range profile.Generators {
+		generatorStart := started.Add(time.Duration(i) * time.Millisecond)
+		generators[i] = GeneratorResult{
+			SuccessfulCalls: generator.Workload.Calls,
+			ActualRate:      generator.Workload.Rate,
+			Phases:          phaseInterval(generatorStart, started.Add(duration)),
+		}
+	}
+	expectedRTPPackets, expectedRTPPPS, err := mixedRTPExpectations(profile)
+	if err != nil {
+		panic(err)
+	}
+	expectedSIP := mixedExpectedSIPPackets(profile)
+	aggregate := aggregateMixedGenerators(generators)
+	return mixedReleaseResult{
+		Load: loadResult{
+			Generator: aggregate, Capture: newCaptureResult(expectedSIP, expectedSIP),
+			Protocols: ProtocolCounters{SIPPackets: expectedSIP, RTPPackets: expectedRTPPackets},
+			RTPPPSP95: expectedRTPPPS, Resources: ResourceSummaryV2{Limits: profile.Limits},
+		},
+		Generators: generators, Scrapes: &ScrapeSummary{Count: 10, P50MS: 10, P95MS: 20, P99MS: 30},
+		SER: 100,
 	}
 }
 

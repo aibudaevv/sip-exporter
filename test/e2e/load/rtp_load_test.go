@@ -92,11 +92,14 @@ func newRTPTestEnvWithLimits(
 	})
 
 	return &testEnv{
-		endpoint:          fmt.Sprintf("http://localhost:%s", httpPort),
-		sippPort:          uasSIP,
-		sippClientPort:    uacSIP,
-		uasMediaPort:      uasMedia,
-		uacMediaPort:      uacMedia,
+		endpoint:       fmt.Sprintf("http://localhost:%s", httpPort),
+		sippPort:       uasSIP,
+		sippClientPort: uacSIP,
+		uasMediaPort:   uasMedia,
+		uacMediaPort:   uacMedia,
+		rtpPorts: []mixedRTPPorts{{
+			UASSIP: uasSIP, UACSIP: uacSIP, UASMedia: uasMedia, UACMedia: uacMedia,
+		}},
 		exporterContainer: c,
 		limits:            limits,
 	}
@@ -157,6 +160,7 @@ func runSippRTPLoad(
 			"-r", strconv.Itoa(rate),
 			"-l", strconv.Itoa(rtpMaxConcurrent),
 			"-nr",
+			"-key", "user_agent", "sipp-rtp-uac",
 			"127.0.0.1:" + env.sippPort,
 		},
 		sippVol, "generator", true,
@@ -367,6 +371,7 @@ func TestBenchmarkMemoryPerRTPStream(t *testing.T) {
 						"-r", strconv.Itoa(rate),
 						"-l", strconv.Itoa(limit),
 						"-nr",
+						"-key", "user_agent", "sipp-rtp-uac",
 						"127.0.0.1:" + env.sippPort,
 					},
 					sippVol, "generator", false,

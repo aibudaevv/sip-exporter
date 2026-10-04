@@ -8,99 +8,73 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuildLoadModeSummaryCandidatePass(t *testing.T) {
+func TestBuildLoadModeSummaryReleaseOnlyPass(t *testing.T) {
 	root := t.TempDir()
-	runs := writeLoadModeRuns(t, root, runModeCandidate, 5)
-	aggregated, err := aggregateRunArtifacts(runModeCandidate, runs)
-	require.NoError(t, err)
-	baseline, err := buildCandidateBaseline(aggregated, time.Now())
-	require.NoError(t, err)
-	require.NoError(t, writeCandidateBaseline(root, baseline))
-	writeSummaryStage(t, root, "preflight", 0)
-	for run := 1; run <= 5; run++ {
-		writeSummaryStage(t, filepath.Join(root, "run-"+strconv.Itoa(run)), "go-test", 0)
-	}
-	writeSummaryStage(t, root, "finalize", 0)
+	writeReleaseResult(t, root, validReleaseRunForReport())
+	writeSummaryStage(t, filepath.Join(root, "run-1"), "go-test", 0)
 
-	summary, err := buildLoadModeSummary(root, runModeCandidate, "")
+	summary, accepted, err := buildLoadModeSummary(root)
+
 	require.NoError(t, err)
+	require.True(t, accepted)
 	require.Contains(t, string(summary), "# Load acceptance: PASS")
-	require.Contains(t, string(summary), "Runs: 5/5 complete")
-	require.Contains(t, string(summary), "baseline-candidate.json")
-	require.Contains(t, string(summary), "## Candidate baseline")
-	require.Contains(t, string(summary), "actual_cps")
+	require.Contains(t, string(summary), "absolute scenario gates; no baseline comparison")
+	require.Contains(t, string(summary), "## Scenarios")
+	require.Contains(t, string(summary), "## Measurements")
+	require.NotContains(t, string(summary), "Comparison")
+	require.NotContains(t, string(summary), "Accepted baseline")
+	require.NotContains(t, string(summary), "Candidate baseline")
 }
 
-func TestBuildLoadModeSummaryReportsMalformedResult(t *testing.T) {
+func TestBuildLoadModeSummaryReleaseOnlyRejectsMalformedArtifact(t *testing.T) {
 	root := t.TempDir()
-	writeSummaryStage(t, root, "preflight", 0)
-	writeSummaryStage(t, filepath.Join(root, "run-1"), "go-test", 1)
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "run-1"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "run-1", resultV2File), []byte("{"), 0o644))
+	writeSummaryStage(t, filepath.Join(root, "run-1"), "go-test", 0)
 
-	summary, err := buildLoadModeSummary(root, runModeRelease, "")
+	summary, accepted, err := buildLoadModeSummary(root)
+
 	require.NoError(t, err)
+	require.False(t, accepted)
 	require.Contains(t, string(summary), "# Load acceptance: FAIL")
-	require.Contains(t, string(summary), "run-1/result.json")
 	require.Contains(t, string(summary), "decode")
-	require.NotContains(t, string(summary), "run-2")
 }
 
-func TestBuildLoadModeSummaryReleasePassIncludesComparison(t *testing.T) {
+func TestBuildLoadModeSummaryReleaseOnlyRejectsFailedWorkload(t *testing.T) {
 	root := t.TempDir()
-	runs := writeLoadModeRuns(t, root, runModeRelease, 1)
-	aggregated, err := aggregateRunArtifacts(runModeRelease, runs)
+	writeReleaseResult(t, root, validReleaseRunForReport())
+	writeSummaryStage(t, filepath.Join(root, "run-1"), "go-test", 1)
+
+	summary, accepted, err := buildLoadModeSummary(root)
+
 	require.NoError(t, err)
-	baselinePath := filepath.Join(root, "accepted-baseline.json")
-	writeLoadModeBaseline(t, baselinePath, acceptedBaselineForRelease(aggregated))
-	writeSummaryStage(t, root, "preflight", 0)
+	require.False(t, accepted)
+	require.Contains(t, string(summary), "run-1 did not complete successfully")
+}
+
+func TestBuildLoadModeSummaryReleaseOnlyRejectsExtraRunDirectory(t *testing.T) {
+	root := t.TempDir()
+	writeReleaseResult(t, root, validReleaseRunForReport())
 	writeSummaryStage(t, filepath.Join(root, "run-1"), "go-test", 0)
-	writeSummaryStage(t, root, "finalize", 0)
+	require.NoError(t, os.Mkdir(filepath.Join(root, "run-2"), 0o755))
 
-	summary, err := buildLoadModeSummary(root, runModeRelease, baselinePath)
+	summary, accepted, err := buildLoadModeSummary(root)
+
 	require.NoError(t, err)
-	require.Contains(t, string(summary), "# Load acceptance: PASS")
-	require.Contains(t, string(summary), "## Comparison")
-	require.Contains(t, string(summary), "| OK |")
+	require.False(t, accepted)
+	require.Contains(t, string(summary), "unexpected load run")
 }
 
-func TestBuildLoadModeSummaryReleaseRegressionIncludesComparison(t *testing.T) {
-	root := t.TempDir()
-	runs := writeLoadModeRuns(t, root, runModeRelease, 1)
-	baselineAggregate, err := aggregateRunArtifacts(runModeRelease, runs)
+func writeReleaseResult(t *testing.T, root string, run RunArtifactV2) {
+	t.Helper()
+	data, err := json.Marshal(run)
 	require.NoError(t, err)
-	baselinePath := filepath.Join(root, "accepted-baseline.json")
-	writeLoadModeBaseline(t, baselinePath, acceptedBaselineForRelease(baselineAggregate))
-	for i := range runs {
-		runs[i].Results[0].Metrics["actual_cps"] = MetricEntry{Value: 1, Unit: "cps", Direction: dirHigherIsBetter}
-		data, err := json.Marshal(runs[i])
-		require.NoError(t, err)
-		require.NoError(t, os.WriteFile(filepath.Join(root, "run-"+strconv.Itoa(i+1), resultV2File), data, 0o644))
-	}
-	writeSummaryStage(t, root, "preflight", 0)
-	writeSummaryStage(t, filepath.Join(root, "run-1"), "go-test", 0)
-	writeSummaryStage(t, root, "finalize", 1)
-
-	summary, err := buildLoadModeSummary(root, runModeRelease, baselinePath)
-	require.NoError(t, err)
-	require.Contains(t, string(summary), "# Load acceptance: FAIL")
-	require.Contains(t, string(summary), "## Comparison")
-	require.Contains(t, string(summary), "REGRESSION")
-}
-
-func TestBuildLoadModeSummaryEscapesFailureCells(t *testing.T) {
-	root := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(root, "preflight.exit-code"), []byte("<broken>\n"), 0o644))
-
-	summary, err := buildLoadModeSummary(root, runModeRelease, "")
-	require.NoError(t, err)
-	require.NotContains(t, string(summary), "<broken>")
-	require.Contains(t, string(summary), "&lt;broken&gt;")
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "run-1"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "run-1", resultV2File), data, 0o644))
 }
 
 func writeSummaryStage(t *testing.T, root, stage string, exitCode int) {

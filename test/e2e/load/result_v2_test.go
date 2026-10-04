@@ -107,7 +107,7 @@ func (r RunArtifactV2) Validate() error {
 	if r.Version != resultSchemaVersion {
 		return fmt.Errorf("result schema version: got %d, want %d", r.Version, resultSchemaVersion)
 	}
-	if !r.Mode.valid() {
+	if !r.Mode.validArtifact() {
 		return fmt.Errorf("result mode: %q", r.Mode)
 	}
 	if r.ReleaseEligible != (r.Mode == runModeRelease) {
@@ -143,8 +143,12 @@ func (r RunArtifactV2) Validate() error {
 	return nil
 }
 
-func (m runMode) valid() bool {
+func (m runMode) validArtifact() bool {
 	return m == runModeTargeted || m == runModeRelease || m == runModeCandidate
+}
+
+func (m runMode) recordable() bool {
+	return m == runModeTargeted || m == runModeRelease
 }
 
 func (f EnvironmentFingerprint) validate() error {
@@ -287,7 +291,7 @@ func newRunRecorderV2(
 	if mode == "" {
 		return nil, nil
 	}
-	if !mode.valid() {
+	if !mode.recordable() {
 		return nil, fmt.Errorf("result mode: %q", mode)
 	}
 	if root == "" {
@@ -644,7 +648,7 @@ func loadRunModeFromEnvironment() (runMode, error) {
 	if mode == "" {
 		return "", nil
 	}
-	if !mode.valid() {
+	if !mode.recordable() {
 		return "", fmt.Errorf("%s: invalid mode %q", loadModeEnv, mode)
 	}
 	return mode, nil

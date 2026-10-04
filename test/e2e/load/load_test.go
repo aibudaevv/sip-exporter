@@ -65,6 +65,7 @@ type (
 		sippClientPort2   string
 		uasMediaPort      string
 		uacMediaPort      string
+		rtpPorts          []mixedRTPPorts
 		exporterContainer testcontainers.Container
 		limits            WorkloadLimits
 	}

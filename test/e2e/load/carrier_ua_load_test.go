@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestReleaseCarrierUA(t *testing.T) {
+func TestDiagnosticSIPCarrierUA(t *testing.T) {
 	profile := releaseCarrierUAProfile()
 	carriersYAML := `carriers:
   - name: "loopback-carrier"

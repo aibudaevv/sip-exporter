@@ -120,7 +120,7 @@ as release capacity. See the required profile, integrity gates, and publication 
 ## Install
 
 ```bash
-docker pull frzq/sip-exporter:1.11.0
+docker pull frzq/sip-exporter:1.11.1
 ```
 
 ### Configure

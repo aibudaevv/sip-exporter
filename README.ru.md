@@ -120,7 +120,7 @@ SIP + RTP-трафик → NIC → eBPF socket filter → AF_PACKET socket → G
 ## Установка
 
 ```bash
-docker pull frzq/sip-exporter:1.11.0
+docker pull frzq/sip-exporter:1.11.1
 ```
 
 ### Конфигурация

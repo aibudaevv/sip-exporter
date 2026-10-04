@@ -312,7 +312,8 @@ func validateAbsoluteResourceGates(summary ResourceSummaryV2) error {
 		return fmt.Errorf("GC max STW %.3f ms is not below 50 ms", summary.GCMaxSTWMS)
 	}
 	if summary.SocketDrops != 0 || summary.RTPDrops != 0 {
-		return fmt.Errorf("measurement contains drops")
+		return fmt.Errorf("measurement contains drops: socket=%.0f, rtp=%.0f",
+			summary.SocketDrops, summary.RTPDrops)
 	}
 	return nil
 }

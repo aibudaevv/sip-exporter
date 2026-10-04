@@ -782,6 +782,14 @@ func TestValidateAbsoluteResourceGatesUsesExactBoundaries(t *testing.T) {
 	}
 }
 
+func TestValidateAbsoluteResourceGatesReportsDropCounts(t *testing.T) {
+	summary := ResourceSummaryV2{Limits: peakLimits, SocketDrops: 3, RTPDrops: 5}
+
+	err := validateAbsoluteResourceGates(summary)
+
+	require.EqualError(t, err, "measurement contains drops: socket=3, rtp=5")
+}
+
 func TestValidateAbsoluteResourceGatesRejectsInvalidNumericDomains(t *testing.T) {
 	fields := []struct {
 		name string
