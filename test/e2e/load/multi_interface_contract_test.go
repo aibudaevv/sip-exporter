@@ -27,6 +27,10 @@ func TestSIPpContainerRequestNetworkMode(t *testing.T) {
 				t.Context(), t, nil, "/scenarios", "", false, tt.networkMode,
 			)
 			require.Equal(t, tt.want, req.NetworkMode)
+			require.NotNil(t, req.HostConfigModifier)
+			hostConfig := &container.HostConfig{}
+			req.HostConfigModifier(hostConfig)
+			require.Equal(t, tt.want, hostConfig.NetworkMode)
 		})
 	}
 }

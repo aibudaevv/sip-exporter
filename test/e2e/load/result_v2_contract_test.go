@@ -179,6 +179,19 @@ func TestDecodeRunArtifactV2RejectsNullReleaseEligible(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestDecodeRunArtifactV2AcceptsHistoricalCandidate(t *testing.T) {
+	run := validRunArtifactV2()
+	run.Mode = runModeCandidate
+	run.ReleaseEligible = false
+	data, err := json.Marshal(run)
+	require.NoError(t, err)
+
+	decoded, err := decodeRunArtifactV2(data)
+
+	require.NoError(t, err)
+	require.Equal(t, runModeCandidate, decoded.Mode)
+}
+
 func TestRunRecorderV2DisabledWithoutMode(t *testing.T) {
 	recorder, err := newRunRecorderV2("", t.TempDir(), validRunArtifactV2().Environment,
 		"a104fd2", time.Now())
@@ -553,7 +566,7 @@ func TestLoadRunModeFromEnvironment(t *testing.T) {
 		{name: "unset"},
 		{name: "targeted", value: "targeted", want: runModeTargeted},
 		{name: "release", value: "release", want: runModeRelease},
-		{name: "candidate", value: "candidate", want: runModeCandidate},
+		{name: "candidate is retired", value: "candidate", wantErr: true},
 		{name: "unknown", value: "smoke", wantErr: true},
 	}
 

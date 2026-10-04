@@ -1,0 +1,235 @@
+# Expressions prefixed doc:/alert: are loaded from EN/RU Markdown by TestDocumentedPromQL.
+rule_files:
+  - prometheus-recording-rules.yml
+  - prometheus-alerts.yml
+  - documented-alerts.yml
+evaluation_interval: 30s
+tests:
+  - name: complete INVITE failure without a success series
+    interval: 30s
+    input_series:
+      - series: 'sip_exporter_invite_total{instance="failed",carrier="a",direction="inbound"}'
+        values: '0+30x40'
+      - series: 'sip_exporter_invite_3xx_total{instance="failed",carrier="a",direction="inbound"}'
+        values: '0+0x40'
+    promql_expr_test:
+      - expr: sip_exporter:ser_percent:5m
+        eval_time: 20m
+        exp_samples:
+          - labels: '{__name__="sip_exporter:ser_percent:5m",instance="failed",carrier="a",direction="inbound"}'
+            value: 0
+      - expr: sip_exporter:asr_percent:5m
+        eval_time: 20m
+        exp_samples:
+          - labels: '{__name__="sip_exporter:asr_percent:5m",instance="failed",carrier="a",direction="inbound"}'
+            value: 0
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: SIPExporterSERDegraded
+        exp_alerts:
+          - exp_labels: {instance: failed, carrier: a, direction: inbound, severity: warning}
+            exp_annotations:
+              summary: SIP session establishment ratio is degraded
+              description: SER is below 90% during meaningful call traffic. Check SIP response codes, downstream reachability, and recent routing changes.
+              runbook_url: https://github.com/aibudaevv/sip-exporter/blob/master/docs/ALERTING.md#production-alert-pack
+  - name: healthy traffic and idle target do not alert
+    interval: 30s
+    input_series:
+      - series: 'sip_exporter_invite_total{instance="healthy",carrier="a",direction="inbound"}'
+        values: '0+30x40'
+      - series: 'sip_exporter_invite_200_total{instance="healthy",carrier="a",direction="inbound"}'
+        values: '0+30x40'
+      - series: 'sip_exporter_invite_3xx_total{instance="healthy",carrier="a",direction="inbound"}'
+        values: '0+0x40'
+      - series: 'sip_exporter_invite_total{instance="idle",carrier="a",direction="inbound"}'
+        values: '0+0x40'
+    alert_rule_test:
+      - {eval_time: 20m, alertname: SIPExporterSERDegraded, exp_alerts: []}
+  - name: published arithmetic and label matching
+    interval: 1m
+    input_series:
+      - series: 'sip_exporter_asr{carrier="a",direction="inbound"}'
+        values: '90+0x60'
+      - series: 'sip_exporter_asr{carrier="b",direction="inbound"}'
+        values: '90+0x60'
+      - series: 'sip_exporter_invite_total{carrier="a",direction="inbound"}'
+        values: '0+100x60'
+      - series: 'sip_exporter_invite_total{carrier="b",direction="inbound"}'
+        values: '0+100x60'
+      - series: 'sip_exporter_invite_200_total{carrier="a",direction="inbound"}'
+        values: '0+90x60'
+      - series: 'sip_exporter_invite_200_total{carrier="b",direction="inbound"}'
+        values: '0+90x60'
+      - series: 'sip_exporter_short_calls_total{carrier="a",threshold="20"}'
+        values: '0+1x60'
+      - series: 'sip_exporter_sdc_total{carrier="a"}'
+        values: '0+2x60'
+      - series: 'sip_exporter_ser{carrier="carrier-a",direction="inbound"}'
+        values: '90+0x60'
+      - series: 'sip_exporter_ser{carrier="carrier-b",direction="inbound"}'
+        values: '80+0x60'
+      - series: 'sip_exporter_billable_seconds_total{carrier="a"}'
+        values: '0+60x60'
+      - series: 'sip_exporter_vq_mos_lq_bucket{le="2.5"}'
+        values: '0+0x60'
+      - series: 'sip_exporter_vq_mos_lq_bucket{le="3"}'
+        values: '0+10x60'
+      - series: sip_exporter_vq_mos_lq_count
+        values: '0+10x60'
+    promql_expr_test:
+      - expr: doc:asr-direction
+        eval_time: 10m
+        exp_samples: [{labels: '{direction="inbound"}', value: 90}]
+      - expr: doc:short-call-percent
+        eval_time: 10m
+        exp_samples: [{labels: '{carrier="a"}', value: 50}]
+      - expr: doc:compare-carriers
+        eval_time: 10m
+        exp_samples: [{labels: '{direction="inbound"}', value: 10}]
+      - expr: doc:traffic-minutes
+        eval_time: 60m
+        exp_samples: [{labels: '{carrier="a"}', value: 60}]
+      - expr: doc:low-mos-percent
+        eval_time: 10m
+        exp_samples: [{labels: '{}', value: 100}]
+  - name: first fraud events and sensor-local capture suppression
+    interval: 1m
+    input_series:
+      - series: 'sip_exporter_register_scan_total{job="sip-exporter",instance="healthy",carrier="a"}'
+        values: '_ _ 1 1 1 1 1'
+      - series: 'sip_exporter_invite_burst_total{job="sip-exporter",instance="healthy",carrier="a"}'
+        values: '_ _ 1 1 1 1 1'
+      - series: 'sip_exporter_fas_calls_total{job="sip-exporter",instance="healthy",carrier="a"}'
+        values: '_ _ 1 1 1 1 1'
+      - series: 'sip_exporter_fas_calls_total{job="sip-exporter",instance="overloaded",carrier="a"}'
+        values: '_ _ 1 1 1 1 1'
+      - series: 'sip_exporter_rtp_dropped_total{job="sip-exporter",instance="overloaded"}'
+        values: '0+12000x6'
+    promql_expr_test:
+      - expr: alert:SIPRegistrationScan
+        eval_time: 4m
+        exp_samples: [{labels: '{__name__="sip_exporter_register_scan_total",job="sip-exporter",instance="healthy",carrier="a"}', value: 1}]
+      - expr: alert:SIPInviteBurst
+        eval_time: 4m
+        exp_samples: [{labels: '{__name__="sip_exporter_invite_burst_total",job="sip-exporter",instance="healthy",carrier="a"}', value: 1}]
+      - expr: alert:SIPFalseAnswerSupervision
+        eval_time: 4m
+        exp_samples: [{labels: '{__name__="sip_exporter_fas_calls_total",job="sip-exporter",instance="healthy",carrier="a"}', value: 1}]
+  - name: INVITE-only trunk and auth challenges have no registration failure
+    interval: 1m
+    input_series:
+      - series: 'sip_exporter_register_success_ratio{instance="a",carrier="a"}'
+        values: '0+0x10'
+      - series: 'sip_exporter_register_failure_total{instance="a",carrier="a",code="401"}'
+        values: '0+60x10'
+      - series: 'sip_exporter_register_failure_total{instance="a",carrier="a",code="407"}'
+        values: '0+60x10'
+      - series: 'sip_exporter_register_failure_total{instance="a",carrier="a",code="302"}'
+        values: '0+60x10'
+    promql_expr_test:
+      - {expr: 'alert:SIPRegistrationSuccessLow', eval_time: 10m, exp_samples: []}
+  - name: registration terminal failures and successes are evaluated independently
+    interval: 1m
+    input_series:
+      - series: 'sip_exporter_register_failure_total{job="sip-exporter",instance="failed",carrier="a",code="403"}'
+        values: '0+60x10'
+      - series: 'sip_exporter_register_success_total{job="sip-exporter",instance="healthy",carrier="a"}'
+        values: '0+60x10'
+      - series: 'sip_exporter_register_success_total{job="sip-exporter",instance="mixed",carrier="a"}'
+        values: '0+15x10'
+      - series: 'sip_exporter_register_failure_total{job="sip-exporter",instance="mixed",carrier="a",code="403"}'
+        values: '0+45x10'
+    promql_expr_test:
+      - expr: alert:SIPRegistrationSuccessLow
+        eval_time: 10m
+        exp_samples:
+          - {labels: '{job="sip-exporter",instance="failed",carrier="a"}', value: 0}
+          - {labels: '{job="sip-exporter",instance="mixed",carrier="a"}', value: 25}
+  - name: repeated fraud events and independent kernel and userspace drop suppression
+    interval: 1m
+    input_series:
+      - series: 'sip_exporter_register_scan_total{job="sip-exporter",instance="healthy",carrier="a"}'
+        values: '0+60x10'
+      - series: 'sip_exporter_invite_burst_total{job="sip-exporter",instance="healthy",carrier="a"}'
+        values: '0+60x10'
+      - series: 'sip_exporter_fas_calls_total{job="sip-exporter",instance="healthy",carrier="a"}'
+        values: '0+60x10'
+      - series: 'sip_exporter_fas_calls_total{job="sip-exporter",instance="kernel",carrier="a"}'
+        values: '0+60x10'
+      - series: 'sip_exporter_socket_packets_dropped_total{job="sip-exporter",instance="kernel",iface="eth0"}'
+        values: '0+1x10'
+      - series: 'sip_exporter_fas_calls_total{job="sip-exporter",instance="userspace",carrier="a"}'
+        values: '0+60x10'
+      - series: 'sip_exporter_rtp_dropped_total{job="sip-exporter",instance="userspace"}'
+        values: '0+1x10'
+      - series: 'sip_exporter_register_scan_total{job="sip-exporter",instance="idle",carrier="a"}'
+        values: '0+0x10'
+      - series: 'sip_exporter_invite_burst_total{job="sip-exporter",instance="idle",carrier="a"}'
+        values: '0+0x10'
+      - series: 'sip_exporter_fas_calls_total{job="sip-exporter",instance="idle",carrier="a"}'
+        values: '0+0x10'
+    promql_expr_test:
+      - expr: alert:SIPRegistrationScan
+        eval_time: 10m
+        exp_samples: [{labels: '{job="sip-exporter",instance="healthy",carrier="a"}', value: 300}]
+      - expr: alert:SIPInviteBurst
+        eval_time: 10m
+        exp_samples: [{labels: '{job="sip-exporter",instance="healthy",carrier="a"}', value: 300}]
+      - expr: alert:SIPFalseAnswerSupervision
+        eval_time: 10m
+        exp_samples: [{labels: '{job="sip-exporter",instance="healthy",carrier="a"}', value: 300}]
+  - name: completed-session ratios are independent of new INVITE volume
+    interval: 30s
+    input_series:
+      - series: 'sip_exporter_invite_total{instance="busy",carrier="a",direction="inbound"}'
+        values: '0+6000x40'
+      - series: 'sip_exporter_sdc_total{instance="busy",carrier="a",direction="inbound"}'
+        values: '0+30x40'
+      - series: 'sip_exporter_sessions_missing_rtp_total{instance="busy",carrier="a",direction="inbound"}'
+        values: '0+3x40'
+      - series: 'sip_exporter_rtp_oneway_calls_total{instance="busy",carrier="a",direction="inbound"}'
+        values: '0+3x40'
+      - series: 'sip_exporter_sdc_total{instance="idle",carrier="a",direction="inbound"}'
+        values: '0+0x40'
+      - series: 'sip_exporter_sessions_missing_rtp_total{instance="idle",carrier="a",direction="inbound"}'
+        values: '0+0x40'
+      - series: 'sip_exporter_rtp_oneway_calls_total{instance="idle",carrier="a",direction="inbound"}'
+        values: '0+0x40'
+      - series: 'sip_exporter_sdc_total{instance="healthy",carrier="a",direction="inbound"}'
+        values: '0+30x40'
+      - series: 'sip_exporter_sessions_missing_rtp_total{instance="healthy",carrier="a",direction="inbound"}'
+        values: '0+1x40'
+      - series: 'sip_exporter_rtp_oneway_calls_total{instance="healthy",carrier="a",direction="inbound"}'
+        values: '0+1x40'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="SIPExporterMissingRTPHigh",alertstate="firing"}'
+        eval_time: 20m
+        exp_samples:
+          - labels: '{__name__="ALERTS",alertname="SIPExporterMissingRTPHigh",alertstate="firing",severity="warning",instance="busy",carrier="a",direction="inbound"}'
+            value: 1
+      - expr: 'ALERTS{alertname="SIPExporterOneWayRTPHigh",alertstate="firing"}'
+        eval_time: 20m
+        exp_samples:
+          - labels: '{__name__="ALERTS",alertname="SIPExporterOneWayRTPHigh",alertstate="firing",severity="warning",instance="busy",carrier="a",direction="inbound"}'
+            value: 1
+  - name: session duration uses completed observations rather than new answers
+    interval: 1m
+    input_series:
+      - series: 'sip_exporter_spd_sum{job="sip-exporter",instance="a",carrier="short"}'
+        values: '0+1200x20'
+      - series: 'sip_exporter_spd_count{job="sip-exporter",instance="a",carrier="short"}'
+        values: '0+60x20'
+      - series: 'sip_exporter_invite_200_total{job="sip-exporter",instance="a",carrier="short"}'
+        values: '0+6000x20'
+      - series: 'sip_exporter_spd_sum{job="sip-exporter",instance="a",carrier="healthy"}'
+        values: '0+3600x20'
+      - series: 'sip_exporter_spd_count{job="sip-exporter",instance="a",carrier="healthy"}'
+        values: '0+60x20'
+      - series: 'sip_exporter_spd_sum{job="sip-exporter",instance="a",carrier="idle"}'
+        values: '0+0x20'
+      - series: 'sip_exporter_spd_count{job="sip-exporter",instance="a",carrier="idle"}'
+        values: '0+0x20'
+    promql_expr_test:
+      - expr: alert:SIPSessionDurationLow
+        eval_time: 20m
+        exp_samples: [{labels: '{job="sip-exporter",instance="a",carrier="short"}', value: 20}]

@@ -85,6 +85,26 @@ func TestTrackerLearnSourceAlias(t *testing.T) {
 			sourcePort: 4100,
 		},
 		{
+			name: "different fallback source IP is rejected",
+			endpoints: []MediaEndpoint{
+				{IP: "peer.invalid", Port: 4000},
+				{IP: "matched.invalid", Port: 5000},
+			},
+			matched:    MediaEndpoint{IP: "matched.invalid", Port: 5000},
+			sourceIP:   "other.invalid",
+			sourcePort: 4100,
+		},
+		{
+			name: "mixed IPv4 and fallback source IP is rejected",
+			endpoints: []MediaEndpoint{
+				{IP: "10.0.0.1", Port: 4000},
+				{IP: "10.0.0.2", Port: 5000},
+			},
+			matched:    MediaEndpoint{IP: "10.0.0.2", Port: 5000},
+			sourceIP:   "peer.invalid",
+			sourcePort: 4100,
+		},
+		{
 			name: "unchanged source port is rejected",
 			endpoints: []MediaEndpoint{
 				{IP: "10.0.0.1", Port: 4000},
@@ -199,7 +219,8 @@ func TestTrackerRegisterTransfersLearnedAliasToExplicitEndpoint(t *testing.T) {
 }
 
 func TestTrackerCanLearnSourceAliasOwner(t *testing.T) {
-	matched := endpointKey{ip: "10.0.0.2", port: 5000}
+	const matchedIP = "10.0.0.2"
+	matched := newBinaryEndpointKey(matchedIP, 5000)
 	tests := []struct {
 		name  string
 		setup func(*Tracker)
@@ -208,7 +229,7 @@ func TestTrackerCanLearnSourceAliasOwner(t *testing.T) {
 		{
 			name: "matching unique owner",
 			setup: func(tr *Tracker) {
-				tr.Register(matched.ip, matched.port, sampleLabels("call-1"))
+				tr.Register(matchedIP, matched.port, sampleLabels("call-1"))
 			},
 			want: true,
 		},
@@ -219,21 +240,21 @@ func TestTrackerCanLearnSourceAliasOwner(t *testing.T) {
 		{
 			name: "two owners",
 			setup: func(tr *Tracker) {
-				tr.Register(matched.ip, matched.port, sampleLabels("call-1"))
-				tr.Register(matched.ip, matched.port, sampleLabels("call-2"))
+				tr.Register(matchedIP, matched.port, sampleLabels("call-1"))
+				tr.Register(matchedIP, matched.port, sampleLabels("call-2"))
 			},
 		},
 		{
 			name: "foreign unique owner",
 			setup: func(tr *Tracker) {
-				tr.Register(matched.ip, matched.port, sampleLabels("call-2"))
+				tr.Register(matchedIP, matched.port, sampleLabels("call-2"))
 			},
 		},
 		{
 			name: "shared owner removal restores eligibility",
 			setup: func(tr *Tracker) {
-				tr.Register(matched.ip, matched.port, sampleLabels("call-1"))
-				tr.Register(matched.ip, matched.port, sampleLabels("call-2"))
+				tr.Register(matchedIP, matched.port, sampleLabels("call-1"))
+				tr.Register(matchedIP, matched.port, sampleLabels("call-2"))
 				tr.Unregister("call-2")
 			},
 			want: true,

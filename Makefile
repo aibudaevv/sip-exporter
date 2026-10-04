@@ -2,9 +2,13 @@ version := $(shell cat VERSION)
 GOLANGCI_LINT_VERSION := v2.9.0
 .DEFAULT_GOAL := docker_build
 
-.PHONY: build docker_build ebpf_compile go_build clean ebpf_log lint lint-deps vet imports test test-e2e test-e2e-run test-rtp test-rtp-run test-load test-load-run test-load-rtp test-load-helper test-load-targeted test-load-release test-load-candidate test-all vulncheck trivy-fs trivy-image security
+.PHONY: build docker_build ebpf_compile go_build clean ebpf_log lint lint-deps vet imports test test-e2e test-e2e-run test-rtp test-rtp-run test-load test-load-contracts test-load-diagnostic test-load-run test-load-rtp test-load-helper test-load-targeted test-load-release test-load-report test-all vulncheck trivy-fs trivy-image security
 
-load_release_tests := ^(TestReleaseFullCallNominal|TestReleaseSoak|TestReleaseINVITEFlood|TestReleaseConcurrentDialogs|TestReleaseCarrierUA|TestReleaseMultiInterface|TestReleaseFullCallPeak|TestReleaseVQMixed)$$
+load_release_tests := ^(TestReleaseMixedNominal|TestReleaseMixedSoak|TestReleaseINVITEFlood|TestReleaseConcurrentDialogs|TestReleaseMultiInterface|TestReleaseMixedPeak|TestReleaseVQMixed)$$
+load_diagnostic_sip_tests := ^(TestDiagnosticSIPFullCallNominal|TestDiagnosticSIPSoak|TestDiagnosticSIPFullCallPeak|TestDiagnosticSIPCarrierUA)$$
+load_diagnostic_rtp_tests := ^(TestLoadFullCallWithRTP|TestBenchmarkMemoryPerRTPStream)$$
+load_diagnostic_resource_tests := ^(TestBenchmarkMemoryPerDialog|TestBenchmarkGCPauseDuration|TestLoadMultiInterface|TestLoadVQScenarios)$$
+load_workload_tests := ^(TestReleaseMixedNominal|TestReleaseMixedSoak|TestReleaseINVITEFlood|TestReleaseConcurrentDialogs|TestReleaseMultiInterface|TestReleaseMixedPeak|TestReleaseVQMixed|TestDiagnosticSIPFullCallNominal|TestDiagnosticSIPSoak|TestDiagnosticSIPFullCallPeak|TestDiagnosticSIPCarrierUA|TestLoadFullCallWithRTP|TestBenchmarkMemoryPerRTPStream|TestBenchmarkMemoryPerDialog|TestBenchmarkGCPauseDuration|TestLoadMultiInterface|TestLoadVQScenarios)$$
 load_make := $(MAKE)
 load_make_prefix := +@
 load_make_short_flags := $(filter-out --%,$(firstword $(MAKEFLAGS)))
@@ -27,6 +31,10 @@ ebpf_log:
 test:
 	go test -v ./...
 
+.PHONY: test-docs-promql
+test-docs-promql:
+	SIP_EXPORTER_TEST_PROMQL=true go test -v -count=1 -run '^TestDocumentedPromQL$$' ./examples
+
 test-all: docker_build
 	@echo "=== Unit tests ==="
 	go test -v ./internal/... ./pkg/...
@@ -37,8 +45,11 @@ test-all: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
 		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 1 -timeout 15m ./test/e2e/rtp/
 	@echo "=== Load tests ==="
-	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
-		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m ./test/e2e/load/...
+	env -u SIP_EXPORTER_LOAD_MODE -u SIP_EXPORTER_LOAD_ARTIFACT_DIR \
+		SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) TESTCONTAINERS_VERBOSE=false \
+		go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -skip "$(load_workload_tests)" ./test/e2e/load/...
+	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) TESTCONTAINERS_VERBOSE=false \
+		go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run "$(load_release_tests)" ./test/e2e/load/...
 	@echo "=== All tests passed ==="
 
 test-e2e: docker_build
@@ -61,8 +72,24 @@ test-rtp-run: docker_build
 		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 1 -failfast -timeout 30s -run "$(TEST)" ./test/e2e/rtp/
 
 test-load: docker_build
-	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
-		TESTCONTAINERS_VERBOSE=false go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m ./test/e2e/load/...
+	env -u SIP_EXPORTER_LOAD_MODE -u SIP_EXPORTER_LOAD_ARTIFACT_DIR \
+		SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) TESTCONTAINERS_VERBOSE=false \
+		go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -skip "$(load_workload_tests)" ./test/e2e/load/...
+	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) TESTCONTAINERS_VERBOSE=false \
+		go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run "$(load_release_tests)" ./test/e2e/load/...
+
+test-load-contracts: docker_build
+	env -u SIP_EXPORTER_LOAD_MODE -u SIP_EXPORTER_LOAD_ARTIFACT_DIR \
+		SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) TESTCONTAINERS_VERBOSE=false \
+		go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -skip "$(load_workload_tests)" ./test/e2e/load/...
+
+test-load-diagnostic: docker_build
+	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) TESTCONTAINERS_VERBOSE=false \
+		go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run "$(load_diagnostic_sip_tests)" ./test/e2e/load/...
+	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) TESTCONTAINERS_VERBOSE=false \
+		go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run "$(load_diagnostic_rtp_tests)" ./test/e2e/load/...
+	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) TESTCONTAINERS_VERBOSE=false \
+		go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run "$(load_diagnostic_resource_tests)" ./test/e2e/load/...
 
 test-load-run: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
@@ -73,14 +100,7 @@ test-load-helper: docker_build
 	env -u SIP_EXPORTER_LOAD_MODE -u SIP_EXPORTER_LOAD_ARTIFACT_DIR \
 		SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \
 		TESTCONTAINERS_VERBOSE=false \
-		SIP_EXPORTER_LOAD_FINALIZE_MODE="$(SIP_EXPORTER_LOAD_FINALIZE_MODE)" \
-		SIP_EXPORTER_LOAD_FINALIZE_ARTIFACT_DIR="$(ARTIFACT_DIR)" \
-		SIP_EXPORTER_LOAD_FINALIZE_BASELINE="$(BASELINE)" \
-		SIP_EXPORTER_LOAD_PREFLIGHT_MODE="$(SIP_EXPORTER_LOAD_PREFLIGHT_MODE)" \
-		SIP_EXPORTER_LOAD_PREFLIGHT_BASELINE="$(BASELINE)" \
-		SIP_EXPORTER_LOAD_SUMMARY_MODE="$(SIP_EXPORTER_LOAD_SUMMARY_MODE)" \
 		SIP_EXPORTER_LOAD_SUMMARY_ARTIFACT_DIR="$(ARTIFACT_DIR)" \
-		SIP_EXPORTER_LOAD_SUMMARY_BASELINE="$(BASELINE)" \
 		go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run "$(TEST)" ./test/e2e/load/...
 
 test-load-targeted: docker_build
@@ -94,41 +114,17 @@ test-load-targeted: docker_build
 
 test-load-release: docker_build
 	@test -n "$(ARTIFACT_DIR)" || (echo "ARTIFACT_DIR is required"; exit 2)
-	@test -n "$(BASELINE)" || (echo "BASELINE is required"; exit 2)
 	@mkdir -p "$(ARTIFACT_DIR)"
-	$(load_make_prefix)ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" bash -o pipefail -c 'SIP_EXPORTER_LOAD_PREFLIGHT_MODE=release $(load_make) test-load-helper TEST="^TestPreflightLoadMode$$" ARTIFACT_DIR="$$ARTIFACT_DIR" BASELINE="$$BASELINE" version="$(version)" 2>&1 | tee "$$ARTIFACT_DIR/preflight.log"'; status=$$?; \
-	printf '%s\n' $$status > "$(ARTIFACT_DIR)/preflight.exit-code"; \
-	if test $$status -ne 0; then SIP_EXPORTER_LOAD_SUMMARY_MODE=release $(load_make) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" version="$(version)"; exit $$status; fi
-	$(load_make_prefix)status=0; for run in 1; do \
-		mkdir -p "$(ARTIFACT_DIR)/run-$$run"; \
-		ARTIFACT_DIR="$(ARTIFACT_DIR)" RUN="$$run" TEST_PATTERN="$(load_release_tests)" bash -o pipefail -c 'SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) TESTCONTAINERS_VERBOSE=false SIP_EXPORTER_LOAD_MODE=release SIP_EXPORTER_LOAD_ARTIFACT_DIR="$$ARTIFACT_DIR/run-$$RUN" go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run "$$TEST_PATTERN" ./test/e2e/load/... 2>&1 | tee "$$ARTIFACT_DIR/run-$$RUN/go-test.log"'; code=$$?; \
-		printf '%s\n' $$code > "$(ARTIFACT_DIR)/run-$$run/go-test.exit-code"; \
-		if test $$code -ne 0; then status=$$code; break; fi; \
-	done; \
-	if test $$status -ne 0; then SIP_EXPORTER_LOAD_SUMMARY_MODE=release $(load_make) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" version="$(version)"; exit $$status; fi
-	$(load_make_prefix)ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" bash -o pipefail -c 'SIP_EXPORTER_LOAD_FINALIZE_MODE=release $(load_make) test-load-helper TEST="^TestFinalizeLoadMode$$" ARTIFACT_DIR="$$ARTIFACT_DIR" BASELINE="$$BASELINE" version="$(version)" 2>&1 | tee "$$ARTIFACT_DIR/finalize.log"'; status=$$?; \
-	printf '%s\n' $$status > "$(ARTIFACT_DIR)/finalize.exit-code"; \
-	SIP_EXPORTER_LOAD_SUMMARY_MODE=release $(load_make) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" BASELINE="$(BASELINE)" version="$(version)"; summary_status=$$?; \
-	if test $$status -eq 0 && test $$summary_status -ne 0; then exit $$summary_status; fi; exit $$status
+	$(load_make_prefix)status=0; \
+	mkdir -p "$(ARTIFACT_DIR)/run-1"; \
+	ARTIFACT_DIR="$(ARTIFACT_DIR)" bash -o pipefail -c 'SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) TESTCONTAINERS_VERBOSE=false SIP_EXPORTER_LOAD_MODE=release SIP_EXPORTER_LOAD_ARTIFACT_DIR="$$ARTIFACT_DIR/run-1" go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run "$(load_release_tests)" ./test/e2e/load/... 2>&1 | tee "$$ARTIFACT_DIR/run-1/go-test.log"'; status=$$?; \
+	printf '%s\n' $$status > "$(ARTIFACT_DIR)/run-1/go-test.exit-code"; \
+	$(load_make) test-load-report ARTIFACT_DIR="$(ARTIFACT_DIR)" version="$(version)"; report_status=$$?; \
+	if test $$status -ne 0; then exit $$status; fi; exit $$report_status
 
-test-load-candidate: docker_build
+test-load-report: docker_build
 	@test -n "$(ARTIFACT_DIR)" || (echo "ARTIFACT_DIR is required"; exit 2)
-	@test -z "$(BASELINE)" || (echo "BASELINE is not accepted for candidate mode"; exit 2)
-	@mkdir -p "$(ARTIFACT_DIR)"
-	$(load_make_prefix)ARTIFACT_DIR="$(ARTIFACT_DIR)" bash -o pipefail -c 'SIP_EXPORTER_LOAD_PREFLIGHT_MODE=candidate $(load_make) test-load-helper TEST="^TestPreflightLoadMode$$" ARTIFACT_DIR="$$ARTIFACT_DIR" version="$(version)" 2>&1 | tee "$$ARTIFACT_DIR/preflight.log"'; status=$$?; \
-	printf '%s\n' $$status > "$(ARTIFACT_DIR)/preflight.exit-code"; \
-	if test $$status -ne 0; then SIP_EXPORTER_LOAD_SUMMARY_MODE=candidate $(load_make) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" version="$(version)"; exit $$status; fi
-	$(load_make_prefix)status=0; for run in 1 2 3 4 5; do \
-		mkdir -p "$(ARTIFACT_DIR)/run-$$run"; \
-		ARTIFACT_DIR="$(ARTIFACT_DIR)" RUN="$$run" TEST_PATTERN="$(load_release_tests)" bash -o pipefail -c 'SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) TESTCONTAINERS_VERBOSE=false SIP_EXPORTER_LOAD_MODE=candidate SIP_EXPORTER_LOAD_ARTIFACT_DIR="$$ARTIFACT_DIR/run-$$RUN" go test -tags=e2e -v -count=1 -parallel 1 -timeout 30m -run "$$TEST_PATTERN" ./test/e2e/load/... 2>&1 | tee "$$ARTIFACT_DIR/run-$$RUN/go-test.log"'; code=$$?; \
-		printf '%s\n' $$code > "$(ARTIFACT_DIR)/run-$$run/go-test.exit-code"; \
-		if test $$code -ne 0; then status=$$code; break; fi; \
-	done; \
-	if test $$status -ne 0; then SIP_EXPORTER_LOAD_SUMMARY_MODE=candidate $(load_make) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" version="$(version)"; exit $$status; fi
-	$(load_make_prefix)ARTIFACT_DIR="$(ARTIFACT_DIR)" bash -o pipefail -c 'SIP_EXPORTER_LOAD_FINALIZE_MODE=candidate $(load_make) test-load-helper TEST="^TestFinalizeLoadMode$$" ARTIFACT_DIR="$$ARTIFACT_DIR" version="$(version)" 2>&1 | tee "$$ARTIFACT_DIR/finalize.log"'; status=$$?; \
-	printf '%s\n' $$status > "$(ARTIFACT_DIR)/finalize.exit-code"; \
-	SIP_EXPORTER_LOAD_SUMMARY_MODE=candidate $(load_make) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" version="$(version)"; summary_status=$$?; \
-	if test $$status -eq 0 && test $$summary_status -ne 0; then exit $$summary_status; fi; exit $$status
+	$(load_make_prefix)$(load_make) test-load-helper TEST='^TestSummarizeLoadMode$$' ARTIFACT_DIR="$(ARTIFACT_DIR)" version="$(version)"
 
 test-load-rtp: docker_build
 	SIP_EXPORTER_E2E_IMAGE=sip-exporter:$(version) \

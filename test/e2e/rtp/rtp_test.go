@@ -182,11 +182,22 @@ func waitForCaptureReady(t *testing.T, endpoint, sipPorts string) {
 	defer sender.Close()
 
 	message := fmt.Sprintf("OPTIONS sip:ready@127.0.0.1:%s SIP/2.0\r\nFrom: readiness <sip:readiness@127.0.0.1>;tag=ready\r\nTo: service <sip:service@127.0.0.1:%s>\r\nCall-ID: capture-ready-%s\r\nCSeq: 1 OPTIONS\r\nUser-Agent: readiness\r\nContent-Length: 0\r\n\r\n", sipPort, sipPort, sipPort)
+	_, err = sender.Write([]byte(message))
+	require.NoError(t, err)
 	require.Eventually(t, func() bool {
-		_, err = sender.Write([]byte(message))
-		require.NoError(t, err)
 		return metricExists(t, endpoint, "sip_exporter_options_total")
 	}, 5*time.Second, 100*time.Millisecond, "AF_PACKET capture must be ready before sending test traffic")
+}
+
+func TestCaptureReadyHasNoDeferredOptions(t *testing.T) {
+	ports := allocatePortsN(2)
+	endpoint := startExporter(t.Context(), t, ports[0], ports[1], testInterface, "")
+	before := getMetricByLabel(t, endpoint, "sip_exporter_options_total")
+
+	require.Never(t, func() bool {
+		return getMetricByLabel(t, endpoint, "sip_exporter_options_total") != before
+	}, 200*time.Millisecond, 20*time.Millisecond,
+		"capture readiness must not leave an OPTIONS marker in flight")
 }
 
 // startExporterWithCarrierUA is like startExporter but additionally bind-mounts
@@ -414,6 +425,9 @@ func TestRTPReachesAppWithCapture(t *testing.T) {
 		before, after, delta)
 	require.GreaterOrEqual(t, delta, 3.0,
 		"RTP packets must reach the exporter socket when capture is enabled on a registered endpoint")
+	require.True(t, metricExists(t, endpoint, "sip_exporter_rtp_kernel_timestamp_missing_total"))
+	require.Zero(t, getMetricByLabel(t, endpoint, "sip_exporter_rtp_kernel_timestamp_missing_total"),
+		"TPACKET_V3 frames must preserve the kernel receive timestamp")
 
 	wait()
 }

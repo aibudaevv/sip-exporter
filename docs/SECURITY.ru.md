@@ -11,7 +11,7 @@ sip-exporter — это eBPF-сенсор с открытым исходным �
 поиска пакетов. Метрики QoE описывают только трафик, видимый сенсору, и не гарантируют сквозное
 качество для абонента.
 
-## Почему требуется `--privileged`
+## Привилегии поддерживаемого развёртывания
 
 SIP-exporter использует **eBPF** (extended Berkeley Packet Filter), подключённый к сокетам `AF_PACKET` для захвата SIP-трафика напрямую в ядре Linux. Для этого требуются три конкретные capabilities:
 
@@ -21,11 +21,11 @@ SIP-exporter использует **eBPF** (extended Berkeley Packet Filter), п
 | `CAP_NET_RAW` | Создание raw-сокета `AF_PACKET` (`SOCK_RAW`) | `internal/exporter/exporter.go` — `unix.Socket(AF_PACKET, SOCK_RAW, ...)` |
 | `CAP_NET_ADMIN` | Запрос принудительного размера receive-буфера сокета | `internal/exporter/exporter.go` — `SO_RCVBUFFORCE` с fallback на `SO_RCVBUF` |
 
-Эти capabilities доступны только root (`UID 0`), поэтому требуется `--privileged`.
+Поддерживаемый Docker-пример запускается от root с `privileged: true`. Текущая реализация явно требует UID 0 при инициализации. Linux capabilities могут выдаваться независимо от UID; из этого не следует универсальная необходимость `--privileged`. Минимальный набор capabilities и ограничений контейнера здесь не проверен.
 
 ### Почему `network_mode: host`
 
-Захват пакетов через `AF_PACKET` требует прямого доступа к сетевому интерфейсу хоста. Bridge-сеть видит только виртуальный интерфейс контейнера, а не реальный SIP-трафик на физическом NIC. Обойти это нельзя — это фундаментальное требование пассивного сетевого мониторинга.
+Захват через `AF_PACKET` требует доступа к наблюдаемому интерфейсу. Обычная bridge-сеть контейнера показывает его виртуальный интерфейс, а не NIC хоста. В поддерживаемом Docker-примере доступ обеспечивается через `network_mode: host`; другие сетевые схемы требуют отдельной проверки.
 
 ## Что контейнер делает с привилегиями
 
@@ -33,7 +33,7 @@ SIP-exporter использует **eBPF** (extended Berkeley Packet Filter), п
 
 1. **Загружает** eBPF socket filter в ядро (один раз, при запуске)
 2. **Создаёт** `AF_PACKET` raw-сокет, привязанный к указанному сетевому интерфейсу
-3. **Читает** пакеты из сокета в Go-канал (буфер 10 000 пакетов)
+3. **Принимает** пакеты в ограниченную очередь обработки; в текущей ветке используется TPACKET_V3 ring и очередь пакетов с приоритетом SIP
 4. **Парсит** SIP-заголовки (метод, статус, Call-ID, From/To tags, CSeq, Session-Expires), фиксированные RTP-заголовки (12 байт: версия, payload type, sequence, timestamp, SSRC) и RTCP report blocks
 5. **Экспортирует** метрики в Prometheus через HTTP-эндпоинт `/metrics`
 
@@ -81,7 +81,7 @@ SIP-exporter использует **eBPF** (extended Berkeley Packet Filter), п
 | `carrier` | CIDR-матч source IP по `carriers.yaml` | Большинство SIP-, RTP- и скоррелированных RTCP-метрик | `telecom-alpha` |
 | `ua_type` | Классификация User-Agent (`user_agents.yaml`) | Базовые/call-level SIP-, RTP- и скоррелированные RTCP-метрики | `yealink` |
 | `source_country` | `carrier.country` → MaxMind GeoIP(src IP) → `unknown` | Базовые/call-level SIP-, RTP- и скоррелированные RTCP-метрики | `RU` |
-| `destination_country` | E.164-префикс вызываемого номера (встроенная таблица) | Только INVITE-метрики | `US` |
+| `destination_country` | E.164-префикс вызываемого номера (встроенная таблица) | Raw-метрики INVITE и `billable_seconds_total` | `US` |
 | `caller_host`, `called_host` | Host-часть SIP-URI из From/To | Только INVITE-метрики (**opt-in**, по умолчанию выкл.) | `10.0.0.5`, `sip.example.com` |
 | `codec` | RTP payload type / SDP `a=rtpmap` | RTP- и скоррелированные RTCP-метрики качества | `G.711` |
 | `direction` | Тип пакета от ядра | SIP- и RTP-метрики трафика | `inbound` |
@@ -100,7 +100,7 @@ SIP-exporter использует **eBPF** (extended Berkeley Packet Filter), п
 | Приложение | Один статически слинкованный бинарник на Go и eBPF object-файл |
 | Volumes | Writable `sip-exporter-state:/var/lib/sip-exporter` для telemetry-ID; опциональные конфигурационные и timezone mounts — только для чтения |
 | Сеть | Входящие HTTP-эндпоинты `/metrics` и `/health` (порт 10047 по умолчанию); опциональная исходящая телеметрия |
-| Процессы | Один процесс приложения; shell- и daemon-процессы не запускаются |
+| Процессы | Один основной процесс приложения; healthcheck периодически запускает wget, а shell-form проверка Dockerfile также запускает shell |
 
 > **Замечание по безопасности — неаутентифицированные эндпоинты:** `/metrics` и `/health` регистрируются без middleware аутентификации или авторизации (`internal/server/server.go:102-103`). Любой, кто может достучаться до порта `10047`, может прочитать все экспортируемые метрики. Сейчас сервис слушает все интерфейсы и не имеет настройки bind-address; в недоверенных сетях закройте порт `10047` файрволом либо поставьте перед ним reverse-proxy с аутентификацией.
 
@@ -123,20 +123,9 @@ eBPF-фильтр — это [~166 строк на C](../internal/bpf/sip.c). О
 
 **Ключевой момент:** eBPF-фильтр — это *socket filter*, а не *tc/XDP filter*. Он только управляет тем, какие пакеты копируются в буфер приложения. Отброшенные пакеты **не** теряются — они продолжают путь по сетевому стеку к адресату. Фильтр не может модифицировать или блокировать трафик.
 
-## Отраслевой стандарт
+## Границы привилегий
 
-Запуск с привилегиями для eBPF-мониторинга — стандартная практика:
-
-| Проект | Назначение | Привилегированный? |
-|---|---|---|
-| [Cilium](https://github.com/cilium/cilium) | eBPF-сеть и безопасность | Да |
-| [Falco](https://github.com/falcosecurity/falco) | Мониторинг системных вызовов через eBPF | Да |
-| [Pixie](https://github.com/pixie-io/pixie) | eBPF-наблюдаемость Kubernetes | Да |
-| [kubectl-trace](https://github.com/iovisor/kubectl-trace) | eBPF-трейсинг | Да |
-| [Parca](https://github.com/parca-dev/parca) | eBPF-профилирование | Да |
-| **SIP-exporter** | Мониторинг SIP-трафика через eBPF | Да |
-
-Все eBPF-инструменты требуют `CAP_BPF` / `CAP_SYS_ADMIN` для загрузки программ в ядро. Это ограничение на уровне ядра, а не контейнера.
+`privileged: true` даёт контейнеру широкие полномочия. Пассивная работа socket filter описывает поведение приложения, но не ограничивает возможности скомпрометированного процесса. Ограничьте доступ к хосту и HTTP-порту, используйте доверенный образ и своевременные обновления.
 
 ## Автоматическое сканирование уязвимостей
 
@@ -144,8 +133,10 @@ eBPF-фильтр — это [~166 строк на C](../internal/bpf/sip.c). О
 
 | Сканер | Что проверяет | Частота |
 |---|---|---|
-| [Go Vulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) | Go-зависимости по Go Vulnerability Database | Каждый push + ежедневно |
-| [Trivy](https://trivy.dev) | Образ контейнера (пакеты ОС + Go-бинарники) по базам CVE | Каждый push + ежедневно |
+| [Go Vulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) | Go-зависимости по Go Vulnerability Database | Push/PR в выбранные ветки + ежедневно |
+| [Trivy](https://trivy.dev) | Образ контейнера (пакеты ОС + Go-бинарники) по базам CVE | Push/PR в выбранные ветки + ежедневно |
+
+Push-проверки включены для `main`, `master`, `develop` и `ab/**`; PR-проверки — для целевых `main`, `master`, `develop`. Прямой push в `feature/**` сам по себе эти проверки не запускает.
 
 Результаты загружаются в [вкладку Security на GitHub](https://github.com/aibudaevv/sip-exporter/security).
 

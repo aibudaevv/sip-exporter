@@ -32,6 +32,16 @@ groups:
           description: "The internal packet channel is over 80% full. Sustained capture load can cause RTP packets to be dropped in userspace."
           runbook_url: "https://github.com/aibudaevv/sip-exporter/blob/master/docs/ALERTING.md#production-alert-pack"
 
+      - alert: SIPExporterRTPUserspaceDrops
+        expr: rate(sip_exporter_rtp_dropped_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SIP Exporter is dropping RTP in userspace"
+          description: "RTP packet admission is dropping data in userspace. Treat RTP QoE, FAS, and media-presence signals as incomplete; reduce traffic per sensor or increase processing capacity."
+          runbook_url: "https://github.com/aibudaevv/sip-exporter/blob/master/docs/ALERTING.md#production-alert-pack"
+
       - alert: SIPExporterSERDegraded
         expr: sip_exporter:ser_percent:5m < 90 and on (instance, carrier, direction) sip_exporter:invite_rate:5m >= 0.1
         for: 10m
@@ -55,25 +65,25 @@ groups:
       - alert: SIPExporterMissingRTPHigh
         expr: |
           100 * sum by (instance, carrier, direction) (rate(sip_exporter_sessions_missing_rtp_total[5m]))
-          / sum by (instance, carrier, direction) (rate(sip_exporter_invite_total[5m])) > 5
-          and on (instance, carrier, direction) sum by (instance, carrier, direction) (rate(sip_exporter_invite_total[5m])) >= 0.1
+          / sum by (instance, carrier, direction) (rate(sip_exporter_sdc_total[5m])) > 5
+          and on (instance, carrier, direction) sum by (instance, carrier, direction) (rate(sip_exporter_sdc_total[5m])) >= 0.1
         for: 10m
         labels:
           severity: warning
         annotations:
           summary: "Completed SIP dialogs frequently have no RTP"
-          description: "More than 5% of dialogs with SDP end without observed RTP. Check SDP reachability, RTP filtering, and capture topology."
+          description: "More than 5% of all completed sessions had SDP but no observed RTP. Check SDP reachability, RTP filtering, and capture topology."
           runbook_url: "https://github.com/aibudaevv/sip-exporter/blob/master/docs/ALERTING.md#production-alert-pack"
 
       - alert: SIPExporterOneWayRTPHigh
         expr: |
           100 * sum by (instance, carrier, direction) (rate(sip_exporter_rtp_oneway_calls_total[5m]))
-          / sum by (instance, carrier, direction) (rate(sip_exporter_invite_total[5m])) > 5
-          and on (instance, carrier, direction) sum by (instance, carrier, direction) (rate(sip_exporter_invite_total[5m])) >= 0.1
+          / sum by (instance, carrier, direction) (rate(sip_exporter_sdc_total[5m])) > 5
+          and on (instance, carrier, direction) sum by (instance, carrier, direction) (rate(sip_exporter_sdc_total[5m])) >= 0.1
         for: 10m
         labels:
           severity: warning
         annotations:
           summary: "Completed SIP dialogs frequently have one-way RTP"
-          description: "More than 5% of dialogs have RTP in only one direction. Check NAT, SDP addresses, and whether both media directions reach the capture point."
+          description: "More than 5% of all completed sessions had RTP in only one direction. Check NAT, SDP addresses, and whether both media directions reach the capture point."
           runbook_url: "https://github.com/aibudaevv/sip-exporter/blob/master/docs/ALERTING.md#production-alert-pack"

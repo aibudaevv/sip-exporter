@@ -24,15 +24,6 @@ type (
 		Unit      string  `json:"unit"`
 		Direction string  `json:"direction"`
 	}
-
-	ComparisonStatus string
-)
-
-const (
-	StatusOK          ComparisonStatus = "OK"
-	StatusRegression  ComparisonStatus = "REGRESSION"
-	StatusImprovement ComparisonStatus = "IMPROVEMENT"
-	StatusNew         ComparisonStatus = "NEW"
 )
 
 var activeRunRecorder *runRecorderV2

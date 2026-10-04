@@ -535,11 +535,15 @@ func requireEndpoint(t *testing.T, e *exporter, ip string, port uint16, want boo
 }
 
 func makeRTPPayloadSeq(ssrc uint32, seq uint16) []byte {
+	return makeRTPPayloadSeqTimestamp(ssrc, seq, 160)
+}
+
+func makeRTPPayloadSeqTimestamp(ssrc uint32, seq uint16, timestamp uint32) []byte {
 	p := make([]byte, 12)
 	p[0] = 0x80
 	p[1] = 0x00
 	binary.BigEndian.PutUint16(p[2:4], seq)
-	binary.BigEndian.PutUint32(p[4:8], 160)
+	binary.BigEndian.PutUint32(p[4:8], timestamp)
 	binary.BigEndian.PutUint32(p[8:12], ssrc)
 	return p
 }
@@ -585,6 +589,105 @@ func TestRTPHandleRTPBranches(t *testing.T) {
 	// 4. Duplicate (seq=5): Counted=false → UpdateRTPPackets NOT called
 	e.handleRTP(net.IPv4(10, 0, 0, 1), 5004, net.IPv4(0, 0, 0, 0), 0, makeRTPPayloadSeq(0xAA, 5))
 	require.Equal(t, 2, mm.rtpPacketsCalls, "duplicate must not be counted")
+}
+
+func TestRTPMetricHandlePreservesPacketOutcomes(t *testing.T) {
+	tests := []struct {
+		name           string
+		sequences      []uint16
+		wantPackets    int
+		wantPDVSamples int
+		wantDuplicates int
+		wantReorders   int
+		wantLossCalls  int
+		wantLost       uint64
+	}{
+		{name: "first packet", sequences: []uint16{1}, wantPackets: 1},
+		{name: "second forward packet", sequences: []uint16{1, 2}, wantPackets: 2, wantPDVSamples: 1},
+		{name: "duplicate", sequences: []uint16{1, 1}, wantPackets: 1, wantDuplicates: 1},
+		{name: "reorder", sequences: []uint16{5, 3}, wantPackets: 1, wantReorders: 1},
+		{
+			name: "new loss", sequences: []uint16{1, 5}, wantPackets: 2, wantPDVSamples: 1,
+			wantLossCalls: 1, wantLost: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mm := &mockMetricser{}
+			e := &exporter{
+				services:     services{metricser: mm, dialoger: &mockDialoger{}},
+				mediaTracker: mediatracker.NewTracker(rtpStreamTTL),
+				pktTimestamp: time.Unix(1_700_000_000, 0),
+			}
+			e.mediaTracker.Register("10.0.0.1", 5004, mediatracker.MediaLabels{
+				Carrier: "carrier-a", UAType: "yealink", SourceCountry: "US", Direction: "inbound",
+				CallID: "call-metrics", SDPCodecs: map[uint8]string{0: "PCMU"},
+				ClockRates: map[uint8]uint32{0: 8000},
+			})
+
+			for i, sequence := range tt.sequences {
+				e.pktTimestamp = time.Unix(1_700_000_000, 0).Add(time.Duration(i) * 45 * time.Millisecond)
+				_, err := e.handleRTPIPv4(
+					[4]byte{10, 0, 0, 1}, 5004, [4]byte{}, 0,
+					makeRTPPayloadSeqTimestamp(0xAABB, sequence, uint32(i+1)*160),
+				)
+				require.NoError(t, err)
+			}
+
+			require.Equal(t, 1, mm.rtpBindCalls)
+			require.Equal(t, [][5]string{{"carrier-a", "yealink", "PCMU", "US", "inbound"}}, mm.rtpBindLabels)
+			require.Equal(t, tt.wantPackets, mm.rtpPacketsCalls)
+			require.Equal(t, tt.wantPDVSamples, mm.rtpPDVCalls)
+			if tt.wantPDVSamples > 0 {
+				require.InDelta(t, 25, mm.rtpPDVValue, 0.0001)
+			}
+			require.Equal(t, tt.wantDuplicates, mm.rtpDuplicateCalls)
+			require.Equal(t, tt.wantReorders, mm.rtpOutOfOrderCalls)
+			require.Equal(t, tt.wantLossCalls, mm.rtpLossCalls)
+			require.Equal(t, tt.wantLost, mm.rtpLossValue)
+		})
+	}
+}
+
+func TestRTPMetricHandleCacheUsesEveryLabel(t *testing.T) {
+	base := mediatracker.MediaLabels{
+		Carrier: "carrier-a", UAType: "yealink", SourceCountry: "US", Direction: "inbound",
+		SDPCodecs: map[uint8]string{0: "PCMU"}, ClockRates: map[uint8]uint32{0: 8000},
+	}
+	tests := []mediatracker.MediaLabels{
+		base,
+		base,
+		{Carrier: "carrier-b", UAType: "yealink", SourceCountry: "US", Direction: "inbound",
+			SDPCodecs: base.SDPCodecs, ClockRates: base.ClockRates},
+		{Carrier: "carrier-a", UAType: "polycom", SourceCountry: "US", Direction: "inbound",
+			SDPCodecs: base.SDPCodecs, ClockRates: base.ClockRates},
+		{Carrier: "carrier-a", UAType: "yealink", SourceCountry: "DE", Direction: "inbound",
+			SDPCodecs: base.SDPCodecs, ClockRates: base.ClockRates},
+		{Carrier: "carrier-a", UAType: "yealink", SourceCountry: "US", Direction: "outbound",
+			SDPCodecs: base.SDPCodecs, ClockRates: base.ClockRates},
+		{Carrier: "carrier-a", UAType: "yealink", SourceCountry: "US", Direction: "inbound",
+			SDPCodecs: map[uint8]string{0: "PCMA"}, ClockRates: base.ClockRates},
+	}
+
+	mm := &mockMetricser{}
+	e := &exporter{
+		services:     services{metricser: mm, dialoger: &mockDialoger{}},
+		mediaTracker: mediatracker.NewTracker(rtpStreamTTL),
+		pktTimestamp: time.Unix(1_700_000_000, 0),
+	}
+	for i, labels := range tests {
+		labels.CallID = fmt.Sprintf("call-%d", i)
+		ip := fmt.Sprintf("10.0.0.%d", i+1)
+		e.mediaTracker.Register(ip, 5004, labels)
+		_, err := e.handleRTP(
+			net.ParseIP(ip), 5004, net.IPv4zero, 0,
+			makeRTPPayloadSeq(uint32(i+1), 1),
+		)
+		require.NoError(t, err)
+	}
+
+	require.Equal(t, 6, mm.rtpBindCalls, "same labels share one handle; each independently changed label binds another")
 }
 
 func TestRTPSourceAliasLearning(t *testing.T) {

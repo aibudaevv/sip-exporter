@@ -369,7 +369,7 @@ func releaseRowFromLoad(
 	}
 }
 
-func TestReleaseFullCallNominal(t *testing.T) {
+func TestDiagnosticSIPFullCallNominal(t *testing.T) {
 	profile := releaseFullCallNominalProfile()
 	beginScenario(t)
 	env := newTestEnvWithLimits(t.Context(), t, profile.Limits)
@@ -384,7 +384,7 @@ func TestReleaseFullCallNominal(t *testing.T) {
 	recordReleaseResult(t, result, map[string]float64{"invites": invites, "ser": ser}, nil)
 }
 
-func TestReleaseSoak(t *testing.T) {
+func TestDiagnosticSIPSoak(t *testing.T) {
 	profile := releaseSoakProfile()
 	beginScenario(t)
 	env := newTestEnvWithLimits(t.Context(), t, profile.Limits)

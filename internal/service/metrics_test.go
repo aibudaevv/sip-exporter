@@ -2834,7 +2834,7 @@ func TestMetricsBillableSeconds(t *testing.T) {
 }
 
 // TestRTPKernelTimestampMissing verifies the counter increments when the
-// SO_TIMESTAMPNS cmsg is absent and PDV falls back to time.Now() — a sign the
+// kernel packet-ring timestamp is absent and PDV falls back to time.Now() — a sign the
 // kernel did not supply a receive timestamp and PDV readings may be unreliable.
 func TestRTPKernelTimestampMissing(t *testing.T) {
 	m := NewTestMetricser().(*metrics)

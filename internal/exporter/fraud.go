@@ -182,8 +182,9 @@ type fasEntry struct {
 // fasEndpoint identifies a media endpoint (IP:port) registered from SDP, used to
 // gate FAS clearing by the originating SDP side (offer vs answer).
 type fasEndpoint struct {
-	ip   string
-	port uint16
+	fallbackIP string
+	ip         uint32
+	port       uint16
 }
 
 func toOfferSet(eps []fasEndpoint) map[fasEndpoint]struct{} {

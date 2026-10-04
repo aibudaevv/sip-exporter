@@ -1,6 +1,6 @@
 # Проверка установки и runbook пустого дашборда
 
-Используйте этот runbook после развёртывания [production Compose-примера](../examples/docker-compose.production.yml). Он проверяет путь от экспортёра до Grafana и не выводит SIP payload, Call-ID или endpoint-лейблы.
+Используйте эту инструкцию после развёртывания [production Compose-примера](../examples/docker-compose.production.yml). Она проверяет путь от экспортёра до Grafana. Диагностические запросы ниже не выводят SIP-содержимое; логи могут содержать Call-ID и другие чувствительные данные — не публикуйте их без удаления таких данных.
 
 ## Первый полезный дашборд
 
@@ -28,18 +28,18 @@
 <a id="verify-container"></a>
 ## 1. Проверка контейнера и health
 
-Выполните из каталога с `docker-compose.yml`:
+Выполните из каталога с `docker-compose.production.yml` и `.env`, подготовленными по Quick Start. Настройка `SIP_EXPORTER_INTERFACE` должна оставаться в `.env` и для последующих команд:
 
 ```bash
-docker compose ps
+docker compose --env-file .env -f docker-compose.production.yml ps
 curl -fsS http://127.0.0.1:10047/health
 curl -fsS http://127.0.0.1:10047/metrics | grep '^sip_exporter_build_info'
 ```
 
-Ожидаемый результат: сервис запущен, `/health` отвечает успешно, последняя команда выводит build-info метрику. Если проверка не прошла, посмотрите только эксплуатационные логи:
+Ожидаемый результат: сервис запущен, `/health` отвечает успешно, последняя команда выводит build-info. Успешный `/health` подтверждает инициализацию, но не полноту захвата. Если проверка не прошла, изучите логи локально; даже при `info` они могут содержать Call-ID:
 
 ```bash
-docker compose logs --tail=100 sip-exporter
+docker compose --env-file .env -f docker-compose.production.yml logs --tail=100 sip-exporter
 ```
 
 Убедитесь, что `SIP_EXPORTER_INTERFACE` — NIC с production-трафиком. Контейнеру нужны `network_mode: host` и `privileged: true`; не включайте `SIP_EXPORTER_IGNORE_OUTGOING` вне loopback-тестов.
@@ -56,22 +56,24 @@ http://<exporter-host>:10047/metrics
 В представлении статуса targets scraper'а он должен быть `UP`. В Grafana Explore выберите тот же datasource и выполните запрос:
 
 ```promql
-up{job="sip-exporter"}
+up{job="sip-exporter",instance="sensor:10047"}
 ```
 
-Если в scrape-конфигурации другое имя job, замените `sip-exporter`. Успешный локальный `curl` при target down означает, что scraper не достигает хоста: проверьте адрес, порт `10047`, firewall и network namespace. Не диагностируйте SIP-захват, пока target не станет `UP`.
+Во всех запросах замените `sensor:10047` на точное значение лейбла `instance` нужного сенсора, а при необходимости — имя `job`. Локальный `curl` и удалённый scrape используют разные сетевые пути: при target down проверьте адрес, порт, firewall и сообщение ошибки на странице targets. К диагностике SIP переходите после появления `UP`.
 
 <a id="verify-sip"></a>
 ## 3. Проверка захвата SIP
 
-Совершите один тестовый вызов по наблюдаемому production-пути, затем выполните запросы:
+На новом сенсоре совершите первый тестовый вызов, чтобы появились серии с нужными лейблами. Дождитесь минимум двух успешных scrape, затем совершите второй вызов и дождитесь следующего scrape. Проверьте рост счётчиков:
 
 ```promql
-sum(increase(sip_exporter_socket_packets_received_total[5m]))
-sum(increase(sip_exporter_invite_total[5m]))
+sum(increase(sip_exporter_socket_packets_received_total{job="sip-exporter",instance="sensor:10047"}[5m]))
+sum(increase(sip_exporter_invite_total{job="sip-exporter",instance="sensor:10047"}[5m]))
 ```
 
 Socket counter доказывает, что пакеты достигли AF_PACKET socket. Положительный рост INVITE доказывает, что SIP INVITE был распарсен. Если socket counter равен нулю, выберите верный NIC и проверьте, что хост пересылает или терминирует этот трафик. Если он растёт, но INVITE нет, проверьте UDP-транспорт и `SIP_EXPORTER_SIP_PORTS`; SIP по TCP/TLS не захватывается.
+
+`increase()` не восстанавливает события, случившиеся до первого измерения новой серии. Пустой результат или нулевой рост после единственного звонка ещё не доказывает отсутствие захвата. При необходимости посмотрите текущее значение `sip_exporter_invite_total` с теми же фильтрами и повторите контрольный вызов.
 
 <a id="verify-dialog-sdp"></a>
 ## 4. Проверка видимости диалога и SDP
@@ -79,14 +81,14 @@ Socket counter доказывает, что пакеты достигли AF_PAC
 Во время активного отвеченного вызова выполните запросы:
 
 ```promql
-sum(sip_exporter_active_dialogs)
-sum(sip_exporter_active_trackers{type="rtp"})
+sum(sip_exporter_active_dialogs{job="sip-exporter",instance="sensor:10047"})
+sum(sip_exporter_active_trackers{job="sip-exporter",instance="sensor:10047",type="rtp"})
 ```
 
 После завершившегося вызова выполните запрос:
 
 ```promql
-sum(increase(sip_exporter_sessions_missing_rtp_total[15m]))
+sum(increase(sip_exporter_sessions_missing_rtp_total{job="sip-exporter",instance="sensor:10047"}[15m]))
 ```
 
 Активный dialog подтверждает наблюдение INVITE/200 OK. `sessions_missing_rtp_total` растёт только после завершения dialog с SDP media endpoints, когда RTP не был замечен. Если SIP есть, но media correlation нет, убедитесь, что оба направления SIP, финальные IPv4/UDP endpoints из SDP и медиа проходят одним поддерживаемым путём. RTP без видимого SIP не коррелируется: media endpoints экспортёр узнаёт из SDP.
@@ -97,11 +99,11 @@ sum(increase(sip_exporter_sessions_missing_rtp_total[15m]))
 Во время передачи медиа выполните запросы:
 
 ```promql
-sum(increase(sip_exporter_rtp_packets_total[5m]))
-sum(sip_exporter_rtp_active_streams)
+sum(increase(sip_exporter_rtp_packets_total{job="sip-exporter",instance="sensor:10047"}[5m]))
+sum(sip_exporter_rtp_active_streams{job="sip-exporter",instance="sensor:10047"})
 ```
 
-Оба значения должны быть положительными для активного вызова с видимым медиа. Если SIP и dialogs работают, но RTP остаётся нулевым, медиа может обходить хост, NAT может менять source port (symmetric RTP), SDP может отличаться от наблюдаемого endpoint, либо доступна только зеркальная/SPAN-копия. Переместите сенсор на forwarding host, где видны SIP и оба направления RTP, прежде чем трактовать пустые RTP-панели как качество голоса.
+Во время достаточно долгого контрольного вызова число активных RTP-потоков должно стать положительным; рост `rtp_packets_total` требует нескольких scrape. Если SIP виден, а RTP — нет, проверьте маршрут медиа и соответствие SDP наблюдаемым адресам. Поддерживается обучение изменённого source-порта при неизменном IP и однозначной корреляции; смена IP и неоднозначные общие endpoints не поддерживаются. Разместите сенсор там, где видны SIP и оба направления RTP, согласно матрице поддерживаемых топологий.
 
 <a id="verify-drops"></a>
 ## 6. Проверка качества данных и drops
@@ -109,12 +111,12 @@ sum(sip_exporter_rtp_active_streams)
 До реакции на панели качества, фрода или one-way media выполните запросы:
 
 ```promql
-sum(rate(sip_exporter_socket_packets_dropped_total[5m]))
-sum(rate(sip_exporter_rtp_dropped_total[5m]))
-100 * sum(rate(sip_exporter_socket_packets_dropped_total[5m])) / sum(rate(sip_exporter_socket_packets_received_total[5m]))
-sip_exporter_channel_length / clamp_min(sip_exporter_channel_capacity, 1)
+sum(rate(sip_exporter_socket_packets_dropped_total{job="sip-exporter",instance="sensor:10047"}[5m]))
+sum(rate(sip_exporter_rtp_dropped_total{job="sip-exporter",instance="sensor:10047"}[5m]))
+100 * sum(rate(sip_exporter_socket_packets_dropped_total{job="sip-exporter",instance="sensor:10047"}[5m])) / sum(rate(sip_exporter_socket_packets_received_total{job="sip-exporter",instance="sensor:10047"}[5m]))
+sip_exporter_channel_length{job="sip-exporter",instance="sensor:10047"} / clamp_min(sip_exporter_channel_capacity{job="sip-exporter",instance="sensor:10047"}, 1)
 ```
 
-Socket drops означают переполнение kernel receive buffer; RTP drops — заполнение внутреннего userspace channel. Channel ratio около `1` означает устойчивую saturation. Уменьшите трафик на сенсор, устраните захват через дублирующие интерфейсы или обеспечьте хост достаточным CPU, прежде чем доверять derived RTP loss, MOS, FAS, missing-RTP или one-way-RTP сигналам.
+`socket_packets_dropped_total` показывает потери в приёмном буфере ядра. `rtp_dropped_total` показывает RTP-пакеты, которые приложение не приняло в очередь из-за недостатка места или приоритета ожидающего SIP. Длина очереди обновляется периодически и может не показать короткий всплеск; положительный счётчик потерь надёжнее этого снимка. Уменьшите нагрузку на сенсор, устраните двойной захват через интерфейсы или увеличьте доступную производительность. До устранения потерь выводы о качестве RTP, MOS, FAS и отсутствии медиа ненадёжны.
 
 См. [Метрики](METRICS.ru.md), [Алертинг](ALERTING.ru.md) и [Grafana-дашборд](../examples/grafana-dashboard.json) для определений метрик и алертов.

@@ -45,7 +45,7 @@ sip-exporter — это eBPF-сенсор с открытым исходным �
 
 ## Возможности
 
-- 🌐 **Мониторинг нескольких интерфейсов** — захват SIP/RTP с нескольких NIC одновременно, каждый помечается лейблом `iface`
+- 🌐 **Мониторинг нескольких интерфейсов** — одновременный захват SIP/RTP с нескольких NIC; лейбл `iface` доступен у raw INVITE и socket-метрик
 - ⚡ **Фильтрация в ядре** — eBPF socket filter отбирает нужный трафик до разбора в userspace
 - 🐳 **Один контейнер** — никаких внешних зависимостей
 - 🔧 **Настраиваемые SIP-порты** — мониторинг нестандартных портов через переменные окружения
@@ -75,15 +75,24 @@ sip-exporter — это eBPF-сенсор с открытым исходным �
 на хост. Задайте `SIP_EXPORTER_INTERFACE` — интерфейс, через который проходят SIP-сигнализация и RTP-медиа.
 
 ```bash
-cp examples/docker-compose.production.yml docker-compose.yml
-SIP_EXPORTER_INTERFACE=eth0 docker compose up -d
+cp -n examples/docker-compose.production.yml docker-compose.production.yml
+```
+
+В `.env` добавьте или обновите только настройку интерфейса; остальные существующие значения сохраните. Если файла нет, создайте его:
+
+```dotenv
+SIP_EXPORTER_INTERFACE=eth0
+```
+
+```bash
+docker compose --env-file .env -f docker-compose.production.yml up -d
 curl http://localhost:10047/metrics
 ```
 
 Пример содержит pinned image, политику перезапуска, healthcheck, read-only filesystem и все
 перечисленные ниже runtime-параметры с их значениями по умолчанию.
 
-Метрики доступны на `http://localhost:10047/metrics`.
+Метрики доступны на `http://localhost:10047/metrics`. `/health` возвращает `200 OK`, пока экспортёр инициализирован, иначе `503`. Этот endpoint не проверяет наличие трафика, видимость RTP или продвижение обработки; для этого используйте инструкцию проверки установки.
 
 **Миграция порта:** новые установки используют `10047`. Существующие установки могут сохранить
 предыдущий порт через `SIP_EXPORTER_HTTP_PORT=2112`, согласовав с ним scrape URL и healthcheck.
@@ -102,18 +111,16 @@ SIP + RTP-трафик → NIC → eBPF socket filter → AF_PACKET socket → G
 
 ## Производительность
 
-Проверенный release-профиль включает full-call трафик на 1 000 CPS под лимитами 1 CPU / 128 MiB,
-full-call трафик с параллельными Prometheus scrape на 1 800 CPS под лимитами 2 CPU / 256 MiB и
-десятиминутный soak на 500 CPS под лимитами 1 CPU / 128 MiB. Это результаты конкретных профилей
-приёмки, а не универсальная гарантия production sizing.
-
-Измеренные сценарии, проверки целостности, окружение и команды воспроизведения описаны в
-[docs/BENCHMARK.md](./docs/BENCHMARK.md).
+Публичные результаты производительности публикуются только после прогона финального RTP-профиля
+на том же неизменяемом релизном образе, который устанавливают пользователи. Измерения образов
+разработки не выдаются за производительность релиза. Требуемый профиль, проверки целостности и
+критерии публикации описаны в
+[docs/BENCHMARK.ru.md](./docs/BENCHMARK.ru.md).
 
 ## Установка
 
 ```bash
-docker pull frzq/sip-exporter:1.11.0
+docker pull frzq/sip-exporter:1.11.1
 ```
 
 ### Конфигурация
@@ -187,7 +194,7 @@ docker pull frzq/sip-exporter:1.11.0
 
 **Как это работает:**
 
-Экспортер анализирует **source IP** каждого SIP-запроса и сопоставляет его с CIDR-подсетями из конфигурации. Когда UAC с адресом `10.1.5.20` отправляет INVITE, экспортер определяет, что `10.1.5.20` входит в подсеть `10.1.0.0/16`, заданную для carrier "telecom-alpha", и помечает все метрики этого звонка — сам INVITE, ответ 200 OK, BYE и даже истечение диалога — лейблом `carrier="telecom-alpha"`.
+Экспортёр сопоставляет IP источника с CIDR-подсетями конфигурации, затем при необходимости проверяет IP назначения. INVITE от `10.1.5.20`, попавший в сеть оператора `10.1.0.0/16`, получает `carrier="telecom-alpha"`. Этот контекст наследуют связанные ответы INVITE, метрики диалога и медиа. Счётчики других SIP-запросов и ответов могут использовать собственный контекст пакета.
 
 Это означает:
 - INVITE от `10.1.5.20` → метрики с `carrier="telecom-alpha"`
@@ -222,7 +229,7 @@ sip_exporter_ser{carrier="other",ua_type="other",source_country="unknown",direct
 
 **Важно знать:**
 
-- Carrier определяется в момент **запроса** (INVITE/REGISTER/OPTIONS), а не ответа. Если carrier-A отправил INVITE, а carrier-B ответил 200 OK — все метрики относятся к carrier-A, инициатору звонка
+- Связанные ответы INVITE/REGISTER наследуют carrier запроса; для ORD и завершения диалога используется сохранённый контекст. Это не общее правило для всех счётчиков ответов.
 - Если source IP не входит ни в одну CIDR-подсеть, проверяется destination IP. Если и он не найден → `carrier="other"`
 - При пересекающихся CIDR **побеждает первое совпадение** — указывайте более специфичные подсети перед широкими
 - Без файла конфигурации метрики с `carrier` используют `carrier="other"` — ничего не ломается
@@ -239,7 +246,7 @@ sip_exporter_ser{carrier="other",ua_type="other",source_country="unknown",direct
 
 **Как это работает:**
 
-Экспортер парсит заголовок `User-Agent` каждого SIP-запроса и сопоставляет его с regex-паттернами из конфигурации. Когда телефон с `User-Agent: Yealink SIP-T46S 66.15.0.10` отправляет INVITE, экспортер находит совпадение с паттерном `^Yealink` и помечает все метрики этого звонка лейблом `ua_type="yealink"`.
+User-Agent исходного INVITE сопоставляется с regex-паттернами. Например, `Yealink SIP-T46S 66.15.0.10` соответствует `^Yealink`: связанные ответы INVITE, диалог и медиа наследуют `ua_type="yealink"`. Другие счётчики пакетов могут использовать User-Agent самого пакета.
 
 Это означает:
 - INVITE от телефона Yealink → метрики с `ua_type="yealink"`
@@ -277,7 +284,7 @@ sip_exporter_ser{carrier="telecom-alpha",ua_type="other",source_country="unknown
 
 **Важно знать:**
 
-- Тип устройства определяется в момент **запроса** (INVITE/REGISTER/OPTIONS), используя тот же механизм трекера, что и carrier. Ответы наследуют `ua_type` из трекера запроса, а не из собственных заголовков ответа
+- Ответы INVITE/REGISTER наследуют `ua_type` запроса. ORD и метрики диалога используют сохранённый контекст; остальные счётчики ответов могут использовать заголовок ответа.
 - Заголовок `User-Agent` извлекается из всех SIP-пакетов, но SIP-ответы обычно используют заголовок `Server`, поэтому на практике только запросы дают осмысленную классификацию
 - Если ни один паттерн не совпал → `ua_type="other"`
 - При пересечении паттернов **побеждает первое совпадение** — указывайте специфичные паттерны перед широкими
@@ -307,7 +314,7 @@ sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
 | Лейбл | Метод | Область |
 |-------|-------|---------|
 | `source_country` | GeoIP-лукап source IP (MaxMind GeoLite2-Country) | Базовые/call-level SIP-, RTP- и скоррелированные RTCP-метрики |
-| `destination_country` | Префикс E.164 номера (embedded, без БД) | Только INVITE-метрики |
+| `destination_country` | Префикс E.164 номера (embedded, без БД) | INVITE и накопленные секунды завершённых сессий |
 
 **Разрешение source_country:**
 1. `carrier.country` — опциональное поле в `carriers.yaml`, приоритет над GeoIP (оператор знает лучше)
@@ -325,7 +332,7 @@ sum by (carrier, ua_type) (rate(sip_exporter_invite_total[5m]))
 
 Полный справочник с формулами и примерами PromQL: [docs/METRICS.ru.md > Лейблы геообогащения](docs/METRICS.ru.md#лейблы-геообогащения)
 
-Пошаговая настройка (как получить и подключить базу MaxMind): [`docs/geoip.ru.md`](docs/geoip.ru.md)
+Подключение имеющегося файла базы MaxMind: [`docs/geoip.ru.md`](docs/geoip.ru.md)
 
 ```promql
 # SER для звонков в Россию
@@ -344,7 +351,7 @@ sum by (destination_country) (rate(sip_exporter_invite_total[5m]))
 
 | Метрика | Тип | Описание |
 |--------|------|-------------|
-| `sip_exporter_rtp_packets_total` | counter | количество RTP-пакетов |
+| `sip_exporter_rtp_packets_total` | counter | учтённые пакеты связанного RTP-потока, кроме дубликатов и пакетов вне порядка |
 | `sip_exporter_rtp_packets_lost_total` | counter | потерянные пакеты (по seq-gap RFC 3550) |
 | `sip_exporter_rtp_jitter_milliseconds` | histogram | межпакетный джиттер (RFC 3550 A.8) |
 | `sip_exporter_rtp_mos_score` | histogram | MOS-LQ по E-model ITU-T G.107 (1.0–4.5) |
@@ -407,8 +414,8 @@ sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
 
 ## Нагрузочное тестирование
 
-В [BENCHMARK.md](./docs/BENCHMARK.md) приведены проверенный release-профиль нагрузки, методика,
-пороги приёмки и ограничения применимости результатов.
+В [BENCHMARK.ru.md](./docs/BENCHMARK.ru.md) приведены RTP-профиль, критерии публикации,
+команда воспроизведения и текущий статус результатов.
 
 ## Алертинг
 

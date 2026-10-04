@@ -63,6 +63,7 @@ type (
 		DelayVariationMs   float64 // raw per-packet PDV (|arrivalDelta − tsDelta|, ms) of the last forward packet; not updated on duplicate/reorder (only emitted when Counted)
 		StreamPacketsTotal uint64  // stream's total forward-counted packets after this Observe
 		MatchedIP          string  // IP of the correlated media endpoint the stream is keyed by (dst-first, then src)
+		MatchedIPv4        [4]byte // binary IPv4 companion used by the packet hot path
 		MatchedPort        uint16  // port of the correlated media endpoint (companion of MatchedIP)
 		MatchedBy          string  // which candidate matched: "dst" (local receive endpoint) or "src" (sender, NAT fallback)
 		Codec              string  // resolved codec name
@@ -99,21 +100,16 @@ type (
 		CallID   string
 	}
 
-	endpointKey struct {
-		ip   string
-		port uint16
-	}
-
 	rtcpMediaEntry struct {
 		callID      string
-		rtpEndpoint endpointKey
+		rtpEndpoint binaryEndpointKey
 	}
 
 	// streamKey identifies one RTP flow: a media endpoint plus an SSRC. SSRCs are
 	// only unique within a flow, so keying by SSRC alone would collide when two
 	// dialogs reuse an SSRC within the TTL window.
 	streamKey struct {
-		endpoint endpointKey
+		endpoint binaryEndpointKey
 		ssrc     uint32
 	}
 
@@ -122,16 +118,16 @@ type (
 	Tracker struct {
 		mu             sync.Mutex
 		streams        map[streamKey]*streamEntry
-		media          map[endpointKey]MediaLabels
-		mediaOwners    map[endpointKey][]string
-		callMedia      map[string]map[endpointKey]MediaLabels
-		callMediaOrder map[string][]endpointKey
-		sourceAliases  map[string]map[endpointKey]endpointKey
-		mediaAliases   map[endpointKey]MediaLabels
-		rtcpMedia      map[endpointKey]rtcpMediaEntry // RTCP endpoints for BPF cleanup and RTCP→RTP correlation
-		rtcpOwners     map[endpointKey][]string
-		callRTCP       map[string]map[endpointKey]rtcpMediaEntry
-		callRTP        map[string]map[endpointKey]struct{} // per-CallID endpoints that ever had RTP (TTL-independent)
+		media          map[binaryEndpointKey]MediaLabels
+		mediaOwners    map[binaryEndpointKey][]string
+		callMedia      map[string]map[binaryEndpointKey]MediaLabels
+		callMediaOrder map[string][]binaryEndpointKey
+		sourceAliases  map[string]map[binaryEndpointKey]binaryEndpointKey
+		mediaAliases   map[binaryEndpointKey]MediaLabels
+		rtcpMedia      map[binaryEndpointKey]rtcpMediaEntry // RTCP endpoints for BPF cleanup and RTCP→RTP correlation
+		rtcpOwners     map[binaryEndpointKey][]string
+		callRTCP       map[string]map[binaryEndpointKey]rtcpMediaEntry
+		callRTP        map[string]map[binaryEndpointKey]struct{} // per-CallID endpoints that ever had RTP (TTL-independent)
 
 		dialogRTPObserved map[string]bool
 
@@ -163,16 +159,16 @@ type (
 func NewTracker(ttl time.Duration) *Tracker {
 	return &Tracker{
 		streams:        make(map[streamKey]*streamEntry),
-		media:          make(map[endpointKey]MediaLabels),
-		mediaOwners:    make(map[endpointKey][]string),
-		callMedia:      make(map[string]map[endpointKey]MediaLabels),
-		callMediaOrder: make(map[string][]endpointKey),
-		sourceAliases:  make(map[string]map[endpointKey]endpointKey),
-		mediaAliases:   make(map[endpointKey]MediaLabels),
-		rtcpMedia:      make(map[endpointKey]rtcpMediaEntry),
-		rtcpOwners:     make(map[endpointKey][]string),
-		callRTCP:       make(map[string]map[endpointKey]rtcpMediaEntry),
-		callRTP:        make(map[string]map[endpointKey]struct{}),
+		media:          make(map[binaryEndpointKey]MediaLabels),
+		mediaOwners:    make(map[binaryEndpointKey][]string),
+		callMedia:      make(map[string]map[binaryEndpointKey]MediaLabels),
+		callMediaOrder: make(map[string][]binaryEndpointKey),
+		sourceAliases:  make(map[string]map[binaryEndpointKey]binaryEndpointKey),
+		mediaAliases:   make(map[binaryEndpointKey]MediaLabels),
+		rtcpMedia:      make(map[binaryEndpointKey]rtcpMediaEntry),
+		rtcpOwners:     make(map[binaryEndpointKey][]string),
+		callRTCP:       make(map[string]map[binaryEndpointKey]rtcpMediaEntry),
+		callRTP:        make(map[string]map[binaryEndpointKey]struct{}),
 
 		dialogRTPObserved: make(map[string]bool),
 
@@ -200,9 +196,9 @@ func (t *Tracker) SetTTL(ttl time.Duration) {
 // Register associates a media endpoint (IP:port) with SIP-dialog labels and
 // reports whether the dialog newly owns the endpoint or displaced a learned alias.
 func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) RegisterResult {
+	key := newBinaryEndpointKey(ip, port)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	key := endpointKey{ip: ip, port: port}
 	result := RegisterResult{}
 	if aliasLabels, occupied := t.mediaAliases[key]; occupied {
 		for peer, alias := range t.sourceAliases[aliasLabels.CallID] {
@@ -227,7 +223,7 @@ func (t *Tracker) Register(ip string, port uint16, labels MediaLabels) RegisterR
 		}
 	}
 	if t.callMedia[labels.CallID] == nil {
-		t.callMedia[labels.CallID] = make(map[endpointKey]MediaLabels)
+		t.callMedia[labels.CallID] = make(map[binaryEndpointKey]MediaLabels)
 	}
 	_, owned := t.callMedia[labels.CallID][key]
 	t.callMedia[labels.CallID][key] = labels
@@ -247,15 +243,16 @@ func (t *Tracker) RegisterRTCP(
 	rtpIP string, rtpPort uint16,
 	callID string,
 ) bool {
+	key := newBinaryEndpointKey(ip, port)
+	rtpEndpoint := newBinaryEndpointKey(rtpIP, rtpPort)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	key := endpointKey{ip: ip, port: port}
 	entry := rtcpMediaEntry{
 		callID:      callID,
-		rtpEndpoint: endpointKey{ip: rtpIP, port: rtpPort},
+		rtpEndpoint: rtpEndpoint,
 	}
 	if t.callRTCP[callID] == nil {
-		t.callRTCP[callID] = make(map[endpointKey]rtcpMediaEntry)
+		t.callRTCP[callID] = make(map[binaryEndpointKey]rtcpMediaEntry)
 	}
 	_, owned := t.callRTCP[callID][key]
 	t.callRTCP[callID][key] = entry
@@ -302,13 +299,13 @@ func (t *Tracker) OwnedEndpoints(callID string) []MediaEndpoint {
 
 	var owned []MediaEndpoint
 	for k := range t.callMedia[callID] {
-		owned = append(owned, MediaEndpoint{IP: k.ip, Port: k.port})
+		owned = append(owned, MediaEndpoint{IP: k.ipString(), Port: k.port})
 	}
 	for _, alias := range t.sourceAliases[callID] {
-		owned = append(owned, MediaEndpoint{IP: alias.ip, Port: alias.port})
+		owned = append(owned, MediaEndpoint{IP: alias.ipString(), Port: alias.port})
 	}
 	for k := range t.callRTCP[callID] {
-		owned = append(owned, MediaEndpoint{IP: k.ip, Port: k.port})
+		owned = append(owned, MediaEndpoint{IP: k.ipString(), Port: k.port})
 	}
 	return owned
 }
@@ -316,7 +313,7 @@ func (t *Tracker) OwnedEndpoints(callID string) []MediaEndpoint {
 func (t *Tracker) removeCallMedia(callID string) []MediaEndpoint {
 	var deleted []MediaEndpoint
 	for k := range t.callMedia[callID] {
-		deleted = append(deleted, MediaEndpoint{IP: k.ip, Port: k.port})
+		deleted = append(deleted, MediaEndpoint{IP: k.ipString(), Port: k.port})
 		t.mediaOwners[k] = removeOwner(t.mediaOwners[k], callID)
 		if len(t.mediaOwners[k]) == 0 {
 			delete(t.mediaOwners, k)
@@ -329,13 +326,13 @@ func (t *Tracker) removeCallMedia(callID string) []MediaEndpoint {
 	delete(t.callMedia, callID)
 	delete(t.callMediaOrder, callID)
 	for _, alias := range t.sourceAliases[callID] {
-		deleted = append(deleted, MediaEndpoint{IP: alias.ip, Port: alias.port})
+		deleted = append(deleted, MediaEndpoint{IP: alias.ipString(), Port: alias.port})
 		delete(t.mediaAliases, alias)
 	}
 	delete(t.sourceAliases, callID)
 
 	for k := range t.callRTCP[callID] {
-		deleted = append(deleted, MediaEndpoint{IP: k.ip, Port: k.port})
+		deleted = append(deleted, MediaEndpoint{IP: k.ipString(), Port: k.port})
 		t.rtcpOwners[k] = removeOwner(t.rtcpOwners[k], callID)
 		if len(t.rtcpOwners[k]) == 0 {
 			delete(t.rtcpOwners, k)
@@ -375,57 +372,61 @@ func removeOwner(owners []string, callID string) []string {
 func (t *Tracker) LearnSourceAlias(
 	callID, matchedIP string, matchedPort uint16, sourceIP string, sourcePort uint16,
 ) (MediaEndpoint, bool) {
+	matched := newBinaryEndpointKey(matchedIP, matchedPort)
+	source := newBinaryEndpointKey(sourceIP, sourcePort)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.learnSourceAlias(
-		callID,
-		endpointKey{ip: matchedIP, port: matchedPort},
-		endpointKey{ip: sourceIP, port: sourcePort},
-	)
+	alias := t.learnSourceAlias(callID, matched, source)
+	if alias == nil {
+		return MediaEndpoint{}, false
+	}
+	return *alias, true
 }
 
-func (t *Tracker) learnSourceAlias(callID string, matched, source endpointKey) (MediaEndpoint, bool) {
+func (t *Tracker) learnSourceAlias(
+	callID string, matched, source binaryEndpointKey,
+) *MediaEndpoint {
 	endpoints := t.callMediaOrder[callID]
 	if len(endpoints) != aliasEndpointCount || !t.canLearnSourceAlias(callID, matched) {
-		return MediaEndpoint{}, false
+		return nil
 	}
 
 	peer := endpoints[0]
 	if peer == matched {
 		peer = endpoints[1]
 	} else if endpoints[1] != matched {
-		return MediaEndpoint{}, false
+		return nil
 	}
-	if peer.ip != source.ip || peer.port == source.port {
-		return MediaEndpoint{}, false
+	if !peer.sameIP(source) || peer.port == source.port {
+		return nil
 	}
 	if _, exists := t.media[source]; exists {
-		return MediaEndpoint{}, false
+		return nil
 	}
 	if _, exists := t.mediaAliases[source]; exists {
-		return MediaEndpoint{}, false
+		return nil
 	}
 	if t.sourceAliases[callID] == nil {
-		t.sourceAliases[callID] = make(map[endpointKey]endpointKey)
+		t.sourceAliases[callID] = make(map[binaryEndpointKey]binaryEndpointKey)
 	}
 	if _, exists := t.sourceAliases[callID][peer]; exists {
-		return MediaEndpoint{}, false
+		return nil
 	}
 	t.sourceAliases[callID][peer] = source
 	t.mediaAliases[source] = t.callMedia[callID][peer]
-	return MediaEndpoint{IP: source.ip, Port: source.port}, true
+	return &MediaEndpoint{IP: source.ipString(), Port: source.port}
 }
 
-func (t *Tracker) canLearnSourceAlias(callID string, matched endpointKey) bool {
+func (t *Tracker) canLearnSourceAlias(callID string, matched binaryEndpointKey) bool {
 	owners := t.mediaOwners[matched]
 	return len(owners) == 1 && owners[0] == callID
 }
 
 // Lookup resolves a media endpoint to its labels.
 func (t *Tracker) Lookup(ip string, port uint16) (MediaLabels, bool) {
+	key := newBinaryEndpointKey(ip, port)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	key := endpointKey{ip: ip, port: port}
 	l, ok := t.media[key]
 	if !ok {
 		l, ok = t.mediaAliases[key]
@@ -438,24 +439,21 @@ func (t *Tracker) Lookup(ip string, port uint16) (MediaLabels, bool) {
 // the endpoint key used for flow identity, and which candidate matched ("dst" or
 // "src") so FAS side-gating can reject src-fallback matches on offer endpoints.
 func (t *Tracker) lookupLabels(
-	srcIP string, srcPort uint16,
-	dstIP string, dstPort uint16,
-) (MediaLabels, endpointKey, string, bool) {
-	dst := endpointKey{ip: dstIP, port: dstPort}
+	src, dst binaryEndpointKey,
+) (MediaLabels, binaryEndpointKey, string, bool) {
 	if l, ok := t.media[dst]; ok {
 		return l, dst, matchedByDst, true
 	}
 	if l, ok := t.mediaAliases[dst]; ok {
 		return l, dst, matchedByDst, true
 	}
-	src := endpointKey{ip: srcIP, port: srcPort}
 	if l, ok := t.media[src]; ok {
 		return l, src, matchedBySrc, true
 	}
 	if l, ok := t.mediaAliases[src]; ok {
 		return l, src, matchedBySrc, true
 	}
-	return MediaLabels{}, endpointKey{}, "", false
+	return MediaLabels{}, binaryEndpointKey{}, "", false
 }
 
 // Observe ingests an RTP packet. Correlation tries the destination endpoint
@@ -467,10 +465,38 @@ func (t *Tracker) Observe(
 	dstIP string, dstPort uint16,
 	h rtp.Header, arrival time.Time,
 ) (ObserveResult, bool) {
+	src := newBinaryEndpointKey(srcIP, srcPort)
+	dst := newBinaryEndpointKey(dstIP, dstPort)
+	result, ok := t.observe(src, dst, h, arrival)
+	if !ok {
+		return ObserveResult{}, false
+	}
+	result.MatchedIP = dstIP
+	if result.MatchedBy == matchedBySrc {
+		result.MatchedIP = srcIP
+	}
+	return result, true
+}
+
+// ObserveIPv4 ingests an RTP packet without rendering packet addresses as strings.
+func (t *Tracker) ObserveIPv4(
+	srcIP [4]byte, srcPort uint16,
+	dstIP [4]byte, dstPort uint16,
+	h rtp.Header, arrival time.Time,
+) (ObserveResult, bool) {
+	return t.observe(
+		newIPv4EndpointKey(srcIP, srcPort), newIPv4EndpointKey(dstIP, dstPort), h, arrival,
+	)
+}
+
+func (t *Tracker) observe(
+	src, dst binaryEndpointKey,
+	h rtp.Header, arrival time.Time,
+) (ObserveResult, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	labels, ep, matchedBy, ok := t.lookupLabels(srcIP, srcPort, dstIP, dstPort)
+	labels, ep, matchedBy, ok := t.lookupLabels(src, dst)
 	if !ok {
 		return ObserveResult{}, false
 	}
@@ -492,7 +518,7 @@ func (t *Tracker) Observe(
 		t.streams[key] = entry
 		t.ssrcIndex[h.SSRC] = append(t.ssrcIndex[h.SSRC], key)
 		if t.callRTP[labels.CallID] == nil {
-			t.callRTP[labels.CallID] = make(map[endpointKey]struct{})
+			t.callRTP[labels.CallID] = make(map[binaryEndpointKey]struct{})
 		}
 		t.callRTP[labels.CallID][ep] = struct{}{}
 		t.dialogRTPObserved[labels.CallID] = true
@@ -510,16 +536,13 @@ func (t *Tracker) Observe(
 	counted := entry.state.packetsTotal > prevTotal
 	var learned *MediaEndpoint
 	if counted && matchedBy == matchedByDst {
-		if alias, learnedOK := t.learnSourceAlias(labels.CallID, ep, endpointKey{ip: srcIP, port: srcPort}); learnedOK {
-			learned = &alias
-		}
+		learned = t.learnSourceAlias(labels.CallID, ep, src)
 	}
 
 	var lostDelta uint64
 	if entry.state.packetsLost >= prevLost {
 		lostDelta = entry.state.packetsLost - prevLost
 	}
-
 	return ObserveResult{
 		Counted:            counted,
 		Duplicate:          entry.state.packetsDuplicate > prevDup,
@@ -527,7 +550,7 @@ func (t *Tracker) Observe(
 		Lost:               lostDelta,
 		DelayVariationMs:   entry.state.lastPacketDelayVariationMs,
 		StreamPacketsTotal: entry.state.packetsTotal,
-		MatchedIP:          ep.ip,
+		MatchedIPv4:        ep.ipv4,
 		MatchedPort:        ep.port,
 		MatchedBy:          matchedBy,
 		Codec:              codec,
@@ -639,9 +662,11 @@ func (t *Tracker) LookupBySSRC(
 	srcIP string, srcPort uint16,
 	dstIP string, dstPort uint16,
 ) (RTCPContext, bool) {
+	src := newBinaryEndpointKey(srcIP, srcPort)
+	dst := newBinaryEndpointKey(dstIP, dstPort)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	e := t.selectStream(ssrc, srcIP, srcPort, dstIP, dstPort)
+	e := t.selectStream(ssrc, src, dst)
 	if e == nil {
 		return RTCPContext{}, false
 	}
@@ -666,9 +691,29 @@ func (t *Tracker) RecordRTCP(
 	srcIP string, srcPort uint16,
 	dstIP string, dstPort uint16,
 ) (RTCPContext, uint64, bool) {
+	src := newBinaryEndpointKey(srcIP, srcPort)
+	dst := newBinaryEndpointKey(dstIP, dstPort)
+	return t.recordRTCP(ssrc, cumulative, src, dst)
+}
+
+// RecordRTCPIPv4 correlates an RTCP report without rendering packet addresses as strings.
+func (t *Tracker) RecordRTCPIPv4(
+	ssrc uint32, cumulative int32,
+	srcIP [4]byte, srcPort uint16,
+	dstIP [4]byte, dstPort uint16,
+) (RTCPContext, uint64, bool) {
+	return t.recordRTCP(
+		ssrc, cumulative, newIPv4EndpointKey(srcIP, srcPort), newIPv4EndpointKey(dstIP, dstPort),
+	)
+}
+
+func (t *Tracker) recordRTCP(
+	ssrc uint32, cumulative int32,
+	src, dst binaryEndpointKey,
+) (RTCPContext, uint64, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	e := t.selectStream(ssrc, srcIP, srcPort, dstIP, dstPort)
+	e := t.selectStream(ssrc, src, dst)
 	if e == nil {
 		return RTCPContext{}, 0, false
 	}
@@ -701,17 +746,13 @@ func (t *Tracker) RecordRTCP(
 // attributing it to an arbitrary stream's labels. Caller holds t.mu.
 func (t *Tracker) selectStream(
 	ssrc uint32,
-	srcIP string, srcPort uint16,
-	dstIP string, dstPort uint16,
+	src, dst binaryEndpointKey,
 ) *streamEntry {
 	keys, ok := t.ssrcIndex[ssrc]
 	if !ok || len(keys) == 0 {
 		return nil
 	}
-	for _, ep := range []endpointKey{
-		{ip: dstIP, port: dstPort},
-		{ip: srcIP, port: srcPort},
-	} {
+	for _, ep := range []binaryEndpointKey{dst, src} {
 		if rtcp, found := t.rtcpMedia[ep]; found {
 			ep = rtcp.rtpEndpoint
 		}

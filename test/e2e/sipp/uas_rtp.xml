@@ -39,10 +39,10 @@
     <recv request="ACK" crlf="true"/>
     <nop>
         <action>
-            <exec rtp_stream="/build/pcap/g711a.pcap"/>
+            <exec rtp_stream="/build/pcap/g711a.pcap,-1,8"/>
         </action>
     </nop>
-    <pause milliseconds="8000"/>
+    <pause milliseconds="18000"/>
     <recv request="BYE" crlf="true"/>
     <send>
         <![CDATA[

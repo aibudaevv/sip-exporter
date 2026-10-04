@@ -1,6 +1,6 @@
 # Fraud Detection
 
-> **Version:** sip-exporter v1.9.0
+> **Scope:** signal-only monitoring; confirm the installed version via `sip_exporter_build_info`.
 >
 > sip-exporter provides **signal-only** fraud detection. It does not block or
 > intercept traffic. It exports Prometheus counter/gauge metrics that increment
@@ -114,15 +114,15 @@ sessions_limits:
 
 ## Alerts
 
-> **Note on `rate()`:** `rate(counter[5m]) > 0` stays true for ~5 minutes after
-> a signal. The `for: 1m` clause reduces noise from transient spikes.
-> The country-change expression combines `increase()` for repeat events with an exact-label
-> new-series branch, so the first event and later increments are both detected per direction.
+> **First event:** these counters appear only after an event. `rate()` alone misses a first scrape that is already positive. The examples combine growth over five minutes with a newly observed positive series, preserving all labels. After monitoring recovers, an old positive counter can also appear new; corroborate event timing separately. `for` sets notification delay, not an event count. Capture drops suppress FAS only for the same `job, instance`.
 
 ```yaml
 # Registration scan → credential stuffing investigation
 - alert: SIPRegistrationScan
-  expr: rate(sip_exporter_register_scan_total[5m]) > 0
+  expr: |
+    (increase(sip_exporter_register_scan_total[5m]) > 0)
+    or
+    (sip_exporter_register_scan_total > 0 unless sip_exporter_register_scan_total offset 5m)
   for: 1m
   labels:
     severity: critical
@@ -132,7 +132,10 @@ sessions_limits:
 
 # INVITE burst → toll-fraud investigation
 - alert: SIPInviteBurst
-  expr: rate(sip_exporter_invite_burst_total[5m]) > 0
+  expr: |
+    (increase(sip_exporter_invite_burst_total[5m]) > 0)
+    or
+    (sip_exporter_invite_burst_total > 0 unless sip_exporter_invite_burst_total offset 5m)
   for: 1m
   labels:
     severity: critical
@@ -157,9 +160,16 @@ sessions_limits:
 # False Answer Supervision → billing-fraud investigation
 - alert: SIPFalseAnswerSupervision
   expr: |
-    (rate(sip_exporter_fas_calls_total[5m]) > 0)
-    unless on()
-    (rate(sip_exporter_rtp_dropped_total[5m]) > 100)
+    (
+      (increase(sip_exporter_fas_calls_total[5m]) > 0)
+      or
+      (sip_exporter_fas_calls_total > 0 unless sip_exporter_fas_calls_total offset 5m)
+    )
+    unless on (job, instance)
+    (
+      rate(sip_exporter_rtp_dropped_total[5m]) > 0
+      or rate(sip_exporter_socket_packets_dropped_total[5m]) > 0
+    )
   for: 2m
   labels:
     severity: warning
@@ -185,7 +195,7 @@ sessions_limits:
 **Register scan:**
 - Only tracks *successful* (200 OK) registrations. For brute-force (401/403), use `register_failure_total{code="401"}` with `SIPRegistrationBruteForce` alert.
 - SBC/proxy round-robining registrations across extensions may trigger false positives. Raise threshold.
-- Rotating-source botnets may not reach per-IP threshold. Aggregate across IPs in PromQL.
+- Distributed scans that stay below the threshold for each IP are not detected by this signal. IPs are not exported as labels and subthreshold events never increment the counter; PromQL aggregation cannot recover them. Use additional external evidence for that analysis.
 
 **Country change:**
 - Legitimate roaming triggers a signal — intentional, operator investigates.
@@ -193,7 +203,7 @@ sessions_limits:
 - If previous registration TTL expired before re-registration from a new country → no signal (no baseline).
 
 **INVITE burst:**
-- SBC/gateway multiplexing many subscribers through one IP may exceed threshold=100. Raise threshold for that source.
+- An SBC/gateway serving many subscribers can exceed threshold=100. Raising the threshold affects the entire exporter and reduces sensitivity for every source; there is no per-IP threshold setting.
 
 **False Answer Supervision:**
 - Incomplete RTP capture can produce false positives; correlate with socket and userspace drop metrics.

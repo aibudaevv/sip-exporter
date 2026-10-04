@@ -109,7 +109,7 @@ func validateScrapeGates(summary ScrapeSummary) error {
 	return nil
 }
 
-func TestReleaseFullCallPeak(t *testing.T) {
+func TestDiagnosticSIPFullCallPeak(t *testing.T) {
 	profile := releaseFullCallPeakProfile()
 	beginScenario(t)
 	env := newTestEnvWithLimits(t.Context(), t, profile.Limits)

@@ -48,7 +48,7 @@ SIP metrics use a multi-layer label model. Most SIP metrics include **four base 
 | `ua_type` | Base SIP tier | UA type from config | `User-Agent` header → regex mapping, resolved at request time |
 | `source_country` | Base SIP tier | ISO 3166-1 alpha-2 | Country of the calling device. See [Geo-Enrichment Labels](#geo-enrichment-labels) |
 | `direction` | Base SIP tier | `inbound` or `outbound` | Traffic direction from the server's perspective. See [Direction Label](#direction-label) |
-| `destination_country` | INVITE raw only | ISO alpha-2 or `"unknown"` | Destination country from E.164 phone-number prefix. See [Geo-Enrichment Labels](#geo-enrichment-labels) |
+| `destination_country` | INVITE raw and `billable_seconds_total` | ISO alpha-2 or `"unknown"` | Destination country from E.164 phone-number prefix. See [Geo-Enrichment Labels](#geo-enrichment-labels) |
 | `caller_host` | INVITE raw only (**opt-in**) | IP or domain | Host part of the `From` SIP URI |
 | `called_host` | INVITE raw only (**opt-in**) | IP or domain | Host part of the `To` SIP URI |
 | `iface` | INVITE raw and socket self-monitoring | Interface name | Configured capture interface, for example `ens3` |
@@ -92,7 +92,7 @@ sip_exporter_ser{carrier="carrier-a",ua_type="yealink",source_country="RU",direc
 The following metrics are system-level and do not include either label:
 
 - `sip_exporter_system_error_total` — internal exporter errors (not SIP traffic)
-- `sip_exporter_packets_total` — counts all parsed SIP packets regardless of source
+- `sip_exporter_packets_total` — parsed SIP packets, excluding recognized INVITE retransmissions
 
 ### Default behavior
 
@@ -101,7 +101,7 @@ The following metrics are system-level and do not include either label:
 
 ### Carrier Label
 
-The `carrier` label identifies the network operator that **initiated** the SIP transaction. It is resolved from the source IP address of the **request** (INVITE, REGISTER, OPTIONS) and propagated to all related responses and dialog lifecycle events via tracker.
+The `carrier` label maps a packet's source IP to a configured network operator. Correlated INVITE/REGISTER responses inherit the request's carrier; dialog lifecycle and RTP metrics use the initial INVITE context. Other raw packet counters use the packet source. See the resolution algorithm below for details.
 
 ### Configuration
 
@@ -146,7 +146,7 @@ See [`examples/carriers.yaml`](../examples/carriers.yaml) for a complete example
 
 ### Resolution algorithm
 
-Carrier is determined at **request time** and inherited by all responses in the same transaction:
+Correlated INVITE/REGISTER responses inherit the request carrier. Other raw response counters use packet IP resolution; delay and dialog-completion metrics use their saved context:
 
 ```
 1. SIP request arrives (INVITE/REGISTER/OPTIONS):
@@ -157,10 +157,10 @@ Carrier is determined at **request time** and inherited by all responses in the 
    - Carrier saved in tracker by Call-ID
 
 2. SIP response arrives:
-   - Carrier retrieved from tracker (by Call-ID), NOT from response IP
+   - For INVITE/REGISTER, carrier is retrieved from the tracker by Call-ID
    - INVITE responses → carrier from inviteTracker
    - REGISTER responses → carrier from registerTracker
-   - OPTIONS responses → carrier from optionsTracker
+   - OPTIONS: optionsTracker carrier for ORD only; raw responses use packet IP
    - If tracker entry expired (TTL 60s) → falls back to response packet IP
 
 3. Dialog lifecycle:
@@ -174,7 +174,7 @@ Carrier is determined at **request time** and inherited by all responses in the 
 | Metric | Carrier source | Meaning |
 |--------|---------------|---------|
 | `invite_total{carrier}` | INVITE sender IP | How many calls this carrier initiated |
-| `200_total{carrier}` | Request tracker | How many 200 OK for this carrier's transactions |
+| `200_total{carrier}` | INVITE/REGISTER tracker; otherwise packet IP | How many 200 OK for this carrier's transactions |
 | `sessions{carrier}` | INVITE tracker → dialog | Active dialogs initiated by this carrier |
 | SER, SEER, ISA, SCR, ASR, NER | INVITE tracker | Quality of calls initiated by this carrier |
 | RRD | Register tracker | Registration delay for this carrier |
@@ -184,7 +184,7 @@ Carrier is determined at **request time** and inherited by all responses in the 
 | ORD | Options tracker | OPTIONS response delay for this carrier |
 | LRD | Register tracker | Registration redirect delay for this carrier |
 | `system_error_total` | No carrier | System-level errors |
-| `packets_total` | No carrier | All SIP packets |
+| `packets_total` | No carrier | Counted SIP packets, excluding recognized INVITE retransmissions |
 
 ### Example scenario
 
@@ -201,7 +201,7 @@ INVITE                  | 10.0.1.5   | carrier-A         | IP → tracker
 200 OK                  | 10.0.2.5   | carrier-A         | inviteTracker
 ACK                     | 10.0.1.5   | carrier-A         | IP (request)
 BYE                     | 10.0.1.5   | carrier-A         | IP (request)
-200 OK to BYE           | 10.0.2.5   | carrier-A         | dialog entry
+200 OK to BYE           | 10.0.2.5   | carrier-B         | response IP (counter); completion uses carrier-A
 
 Result:
   invite_total{carrier="carrier-A",ua_type="yealink"} += 1
@@ -222,7 +222,7 @@ Carrier-B metrics: only response counters for non-tracked packets (if any)
 
 ## User-Agent Type Label
 
-The `ua_type` label identifies the **type of SIP device** that sent the request, based on the `User-Agent` header. It is resolved from the header value using regex patterns defined in a YAML config, and propagated to all related responses and dialog lifecycle events via the same tracker mechanism as `carrier`.
+The `ua_type` label classifies the `User-Agent` header using regex patterns from a YAML config. Correlated INVITE/REGISTER responses inherit the request's type; dialog lifecycle and RTP metrics use the initial INVITE context. Other raw packet counters classify the packet's own header, falling back to `other` when absent or unmatched.
 
 **Why it matters:**
 - Different SIP devices have different failure patterns — IP phones fail differently than softphones or SBCs
@@ -279,7 +279,7 @@ See [`examples/user_agents.yaml`](../examples/user_agents.yaml) for a complete e
 
 ### Resolution algorithm
 
-UA type is determined at **request time** and inherited by all responses in the same transaction, using the same tracker mechanism as `carrier`:
+Correlated INVITE/REGISTER responses inherit the request `ua_type`. Other raw response counters use the packet User-Agent; delay and lifecycle metrics use saved context:
 
 ```
 1. SIP request arrives (INVITE/REGISTER/OPTIONS):
@@ -289,10 +289,10 @@ UA type is determined at **request time** and inherited by all responses in the 
    - ua_type saved in tracker by Call-ID (alongside carrier)
 
 2. SIP response arrives:
-   - ua_type retrieved from tracker (by Call-ID), NOT from response packet
+   - For INVITE/REGISTER, ua_type is retrieved from the tracker by Call-ID
    - INVITE responses → ua_type from inviteTracker
    - REGISTER responses → ua_type from registerTracker
-   - OPTIONS responses → ua_type from optionsTracker
+   - OPTIONS: optionsTracker ua_type for ORD only; raw responses use the packet header
    - If tracker entry expired (TTL 60s) → falls back to response packet's User-Agent
    - If response has no User-Agent → ua_type="other"
 
@@ -307,7 +307,7 @@ UA type is determined at **request time** and inherited by all responses in the 
 | Metric | UA type source | Meaning |
 |--------|---------------|---------|
 | `invite_total{ua_type}` | INVITE User-Agent header | How many calls this device type initiated |
-| `200_total{ua_type}` | Request tracker | How many 200 OK for this device type's transactions |
+| `200_total{ua_type}` | INVITE/REGISTER tracker; otherwise packet header | How many 200 OK for this device type's transactions |
 | `sessions{ua_type}` | INVITE tracker → dialog | Active dialogs from this device type |
 | SER, SEER, ISA, SCR, ASR, NER | INVITE tracker | Quality of calls from this device type |
 | RRD | Register tracker | Registration delay for this device type |
@@ -317,7 +317,7 @@ UA type is determined at **request time** and inherited by all responses in the 
 | ORD | Options tracker | OPTIONS response delay for this device type |
 | LRD | Register tracker | Registration redirect delay for this device type |
 | `system_error_total` | No ua_type | System-level errors |
-| `packets_total` | No ua_type | All SIP packets |
+| `packets_total` | No ua_type | Counted SIP packets, excluding recognized INVITE retransmissions |
 
 ### Example scenario
 
@@ -335,7 +335,7 @@ INVITE                      | Yealink SIP-T46S 66.15  | yealink          | heade
 200 OK                      | (none / Server header)  | yealink          | inviteTracker
 ACK                         | Yealink SIP-T46S 66.15  | yealink          | header (request)
 BYE                         | Yealink SIP-T46S 66.15  | yealink          | header (request)
-200 OK to BYE               | (none / Server header)  | yealink          | dialog entry
+200 OK to BYE               | (none / Server header)  | other            | response header; completion uses yealink
 
 Result:
   invite_total{carrier="...",ua_type="yealink"} += 1
@@ -366,7 +366,7 @@ sip_exporter_ser{carrier="carrier-a",ua_type="yealink"}
 
 # Compare Yealink vs Grandstream on same carrier
 sip_exporter_ser{carrier="carrier-a",ua_type="yealink"}
-  - sip_exporter_ser{carrier="carrier-a",ua_type="grandstream"}
+  - ignoring (ua_type) sip_exporter_ser{carrier="carrier-a",ua_type="grandstream"}
 
 # Active sessions by device type (across all carriers)
 sum by (ua_type) (sip_exporter_sessions)
@@ -422,7 +422,7 @@ GeoIP for source IP, phone-number prefix for destination — two independent met
 
 - **E.164 table** is embedded in the binary (generated from Google libphonenumber `PhoneNumberMetadata.xml`, Apache 2.0). **No database download required** — unlike GeoIP
 - Correctly handles multi-national codes: `+1212...`→US, `+1416...`→CA (Toronto), `+7727...`→KZ (Almaty), `+7495...`→RU
-- **INVITE-only**: `destination_country` appears only on `invite_total` and `invite_200_total` (not on response counters, SER/SCR, RTP, etc.)
+- `destination_country` is exposed by `invite_total`, `invite_200_total` and `billable_seconds_total`. Response counters, SER/SCR and RTP do not carry it.
 
 **Config:**
 
@@ -491,7 +491,7 @@ For responses, the direction is inverted: a response arriving at our interface m
 - `inbound` — someone is calling us (incoming calls, registrations from devices, OPTIONS from peers)
 - `outbound` — we are calling out (outgoing calls, outgoing registrations, outgoing OPTIONS)
 
-All packets within the same call carry the same `direction` value.
+Dialog, RTP/RTCP metrics and correlated INVITE responses inherit the initial INVITE direction. Raw SIP request counters use the individual packet direction; for example, a BYE sent by the answering side can have a different `direction`.
 
 **Requirements:**
 
@@ -501,7 +501,11 @@ All packets within the same call carry the same `direction` value.
 **PromQL examples:**
 ```promql
 # ASR separately for inbound vs outbound calls
-sum by (direction) (sip_exporter_asr)
+# example: asr-direction
+100 * (
+  sum by (direction) (rate(sip_exporter_invite_200_total[5m]))
+  or 0 * sum by (direction) (rate(sip_exporter_invite_total[5m]))
+) / sum by (direction) (rate(sip_exporter_invite_total[5m]))
 
 # INVITE rate by direction
 sum by (direction) (rate(sip_exporter_invite_total[5m]))
@@ -534,7 +538,7 @@ topk(10, sum by (destination_country) (rate(sip_exporter_invite_total[5m])))
 
 ---
 
-`sip_exporter_packets_total`: total number of parsed SIP packets (requests + responses). **No `carrier` or `ua_type` label.**
+`sip_exporter_packets_total`: SIP packets counted by request/response handlers. Recognized INVITE retransmissions increment `sip_retransmission_total` instead and are excluded from this counter. **No labels.**
 
 ## Active sessions
 
@@ -655,7 +659,7 @@ topk(5, sum by (code) (rate(sip_exporter_register_failure_total[5m])))
 
 ## Fraud Detection
 
-Fraud signals detect suspicious patterns: registration scanning (one IP registering many accounts), geographic impossibility (same account from different countries), INVITE flooding (one IP sending a burst of calls), and False Answer Supervision (answered calls that never carry media). The signaling heuristics are scoped per `carrier,source_country,direction` — `ua_type` is intentionally omitted because attackers vary their User-Agent. **FAS is the exception**: it is a call-level signal measured at the 200 OK, where the answering endpoint's `ua_type` is meaningful, so it carries the full `carrier,ua_type,source_country,direction` set.
+Fraud signals flag successful registrations of many accounts from one IP, registration country changes, INVITE bursts and missing answer-side RTP. They require investigation and do not prove fraud. Signaling counters use `carrier,source_country,direction`; FAS additionally inherits `ua_type` from the initial INVITE, identifying the call initiator rather than the answering device.
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
@@ -729,7 +733,7 @@ rate(sip_exporter_fas_calls_total[5m])
 
 #### FAS limitations
 
-This is a **signaling-only heuristic**. True FAS detection requires decoding the audio stream and recognizing ringing/two-tone patterns in the "answered" media (e.g. Europe/UK ringing tones) — out of scope for a Prometheus exporter (won't fix). Known limitations:
+This heuristic uses SIP signaling and observed RTP, but does not decode audio. It detects answered calls without the expected media, not proof of fraud. Recognizing ringing tones or silence inside received audio is outside its scope. Known limitations:
 
 - **Adversarial defeat is inherent.** A party that controls the answering endpoint can send a short RTP burst (≥2 packets) to cancel the signal. The ≥2-packet gate only raises the bar against accidental/coincidental clears, not a determined adversary.
 - **Side-gated clearing (answer-side media required).** FAS is cleared only when media from the *answering* side is observed (it arrives at the offer/caller endpoint). Media from the *calling* side does **not** defeat FAS — a fraudster's false 200 OK can no longer be masked by the victim's own upstream RTP. This requires the INVITE offer SDP to have been cached; if the INVITE was not seen (exporter started mid-call, late offer), the originating side cannot be determined and FAS falls back to any-media-clears. Under NAT that remaps the answering side's source port, side detection degrades gracefully to that same fallback.
@@ -737,8 +741,8 @@ This is a **signaling-only heuristic**. True FAS detection requires decoding the
 - **Short dead-air calls reported at BYE.** A call that answered with no answer-side RTP and ends via BYE before the sweep threshold is reported at teardown when answer→BYE ≥ `fasByeFloor` (3 s), covering the common FAS pattern where the caller hangs up on dead air. Shorter calls (immediate abandonment) are excluded.
 - **Re-INVITE un-hold blind spot.** If the initial 200 OK carried held SDP (`c=0.0.0.0`, no pending entry created) and a later re-INVITE offers real media, the call is never FAS-tracked. Rare (hold→unhold without any prior RTP).
 - **No audio-content analysis.** A fraudster streaming silence or comfort noise passes the media-established check.
-- **RTP capture dependency.** FAS reliability equals RTP capture completeness. SIP packets use a blocking channel send (never dropped); RTP packets use a non-blocking send and are dropped when the channel is full (`rtp_dropped_total`). Correlate `rate(sip_exporter_rtp_dropped_total[5m])` with `fas_calls_total` before alerting — a spike in drops during high traffic can cause false FAS positives by losing the answer-side RTP.
-- **One-way media false positives.** Servers that never send answer-side RTP (voicemail, IVR, paging, announcement playback) will trigger FAS by design. Tune the threshold or exclude these endpoints via alerting rules.
+- **RTP capture dependency.** FAS reliability equals RTP capture completeness. SIP batches wait for userspace packet capacity; RTP admission is non-blocking and rejects packets when capacity is insufficient or an already-waiting SIP batch has priority (`rtp_dropped_total`). Correlate `rate(sip_exporter_rtp_dropped_total[5m])` with `fas_calls_total` before alerting — a spike in drops during high traffic can cause false FAS positives by losing the answer-side RTP.
+- **One-way media false positives.** Legitimate receive-only answering endpoints can trigger FAS because they do not send answer-side RTP. Account for such services in alert routing; per-endpoint filtering requires labels that identify those services.
 
 ## Capacity Monitoring
 
@@ -759,7 +763,7 @@ sessions_limits:
     limit: 1000
 ```
 
-- Utilization is computed on every scrape: `active_sessions(carrier) / limit × 100`
+- Utilization is updated periodically, approximately once per second: `active_sessions(carrier) / limit × 100`; a scrape returns the last sampled value.
 - Capped at 100 (over-limit shown as 100, not >100) — this hides severity of oversubscription; use the raw `sip_exporter_sessions` gauge to detect extreme overage
 - Carriers without a configured limit are omitted (gauge not emitted)
 - Carriers with `limit: 0` are also omitted (treated as "no limit", not "0% / blocked")
@@ -780,10 +784,11 @@ sip_exporter_sessions_utilization > 90
 **PromQL examples:**
 ```promql
 # Short call rate (< 20s) as percentage of completed sessions
-rate(sip_exporter_short_calls_total{threshold="20"}[5m]) / rate(sip_exporter_sdc_total[5m]) * 100
+# example: short-call-percent
+rate(sip_exporter_short_calls_total{threshold="20"}[5m]) / ignoring (threshold) rate(sip_exporter_sdc_total[5m]) * 100
 
 # Absolute count of sub-60s calls per carrier
-sum by (carrier) (rate(sip_exporter_short_calls_total{threshold="60"}[1h]))
+sum by (carrier) (increase(sip_exporter_short_calls_total{threshold="60"}[1h]))
 ```
 
 ## Traffic Minutes by Destination
@@ -795,15 +800,18 @@ sum by (carrier) (rate(sip_exporter_short_calls_total{threshold="60"}[1h]))
 **PromQL examples:**
 ```promql
 # Traffic minutes/min by destination (top 10)
-topk(10, sum by (destination_country) (rate(sip_exporter_billable_seconds_total[5m]) / 60))
+topk(10, sum by (destination_country) (rate(sip_exporter_billable_seconds_total[5m])))
 
-# ACD (average call duration) by destination in minutes
-sum by (destination_country) (rate(sip_exporter_billable_seconds_total[15m])) / 60
-  / sum by (destination_country) (rate(sip_exporter_invite_200_total[15m]))
+# Mean completed session duration by carrier, in minutes (including expiry)
+sum by (carrier) (rate(sip_exporter_spd_sum[15m]))
+  / sum by (carrier) (rate(sip_exporter_spd_count[15m])) / 60
 
 # Traffic minutes per carrier per hour
-sum by (carrier) (increase(sip_exporter_billable_seconds_total[1h])) / 3600
+# example: traffic-minutes
+sum by (carrier) (increase(sip_exporter_billable_seconds_total[1h])) / 60
 ```
+
+The mean duration above describes completed SIP sessions, including expiry. Exact per-destination ACD is unavailable because completed-session counts do not carry `destination_country`. Dividing completed seconds by new INVITE answers mixes different call populations.
 
 ## RTP media metrics
 
@@ -834,7 +842,7 @@ counted; RTP without a correlated dialog is dropped.
 
 `{carrier="...",ua_type="...",codec="...",source_country="..."}` — `codec` is the RTP payload-type name resolved from SDP `a=rtpmap` (e.g. `PCMU`, `PCMA`, `opus`) with a static fallback table (RFC 3551). `source_country` is inherited from the SIP dialog (resolved at INVITE time).
 
-`sip_exporter_rtp_packets_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: total number of RTP packets observed.
+`sip_exporter_rtp_packets_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: correlated RTP packets accepted by stream sequence accounting. Duplicate and out-of-order packets are counted separately and excluded here. This is not the total UDP traffic at the interface.
 
 `sip_exporter_rtp_packets_lost_total{carrier,ua_type,codec,source_country,direction}` *(counter)*: packets detected as lost via RTP sequence-number gaps.
 
@@ -844,7 +852,7 @@ counted; RTP without a correlated dialog is dropped.
 
 `sip_exporter_rtp_jitter_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 0.1..500 ms)*: smoothed interarrival jitter (RFC 3550 A.8).
 
-`sip_exporter_rtp_pdv_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1..500 ms)*: Packet Delay Variation — the **raw** per-packet deviation `|arrivalDelta − tsDelta|` (unsmoothed), **observed per RTP packet** (parity with VoIPMonitor, which buckets each packet's deviation from the expected 20 ms spacing). Unlike `rtp_jitter_milliseconds` (an EWMA that smooths over spikes), PDV is the instantaneous per-packet deviation, so its histogram captures the true delay-variation distribution including transient spikes. Only forward (counted) packets contribute; reorder/duplicate do not (their timestamp delta is not a forward delta). The first packet of each stream (and after a stream restart) is skipped — it has no baseline to compute a delta. The arrival timestamp is the kernel `SO_TIMESTAMPNS` receive time (captured on the AF_PACKET socket), so Go scheduler/GC processing delay does not affect the measurement; if the timestamp is absent, `rtp_kernel_timestamp_missing_total` is incremented. Because the formula uses consecutive-packet deltas `(Rj−Ri)−(Sj−Si)` (the same drift-cancelling form as RFC 3550 jitter), it is immune to sender/receiver clock drift. The `direction` label reflects the SIP dialog direction (inbound/outbound), not the media direction — both forward and reverse streams of a call are aggregated into the same histogram (asymmetric delay is averaged out).
+`sip_exporter_rtp_pdv_milliseconds{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1..500 ms)*: unsmoothed inter-packet deviation `|arrivalDelta − tsDelta|`. Unlike smoothed jitter, it preserves individual delay spikes. Only packets advancing the sequence contribute; duplicates, reordered packets and the first packet of a stream do not. Arrival time comes from kernel metadata (TPACKET_V3 in the current branch); a missing timestamp increments `rtp_kernel_timestamp_missing_total`. Interval differences cancel a constant clock offset, but not different clock frequencies. `direction` describes the SIP dialog: both RTP directions contribute to the same histogram, so their asymmetry cannot be isolated from it.
 
 `sip_exporter_rtp_mos_score{carrier,ua_type,codec,source_country,direction}` *(histogram, buckets 1.0..5.0)*: MOS-LQ estimated via the ITU-T G.107 E-model with a 60 ms jitter buffer assumption.
 
@@ -932,8 +940,8 @@ Self-monitoring metrics provide visibility into the exporter's internal health. 
 |--------|------|-------------|
 | `sip_exporter_socket_packets_received_total{iface}` | CounterVec | Total packets received from kernel AF_PACKET socket per interface |
 | `sip_exporter_socket_packets_dropped_total{iface}` | CounterVec | Total packets dropped by kernel due to socket receive buffer overflow per interface |
-| `sip_exporter_rtp_dropped_total` | Counter | Total RTP packets dropped in userspace when the internal messages channel is full |
-| `sip_exporter_rtp_kernel_timestamp_missing_total` | Counter | RTP packets where the kernel `SO_TIMESTAMPNS` was absent and PDV fell back to processing time (a growing rate means unreliable PDV readings) |
+| `sip_exporter_rtp_dropped_total` | Counter | Total RTP packets rejected by userspace packet-batch admission because packet capacity was insufficient or an already-waiting SIP batch had priority |
+| `sip_exporter_rtp_kernel_timestamp_missing_total` | Counter | RTP packets where the kernel packet-ring timestamp was absent and PDV fell back to processing time (a growing rate means unreliable PDV readings) |
 | `sip_exporter_channel_length` | Gauge | Current number of packets in the internal messages channel buffer |
 | `sip_exporter_channel_capacity` | Gauge | Capacity of the internal messages channel buffer (constant: 10000) |
 | `sip_exporter_parse_errors_total{type="..."}` | CounterVec | Total packet parse errors by type |
@@ -982,7 +990,7 @@ sum(rate(sip_exporter_parse_errors_total[5m]))
 
 ### Channel Buffer
 
-`sip_exporter_channel_length` shows how many packets are buffered in the internal channel between the socket reader and the SIP parser. If this approaches `channel_capacity` (10000), the exporter cannot keep up with packet arrival rate and may lose packets at the kernel level.
+`sip_exporter_channel_length` shows the sampled current packet occupancy of the internal channel between the socket reader and parser. Scrapes can miss brief admission bursts, so the gauge may stay below `channel_capacity` (10000) even while `sip_exporter_rtp_dropped_total` increases. A positive RTP drop rate is authoritative evidence of userspace loss; sustained backpressure can also lead to kernel socket drops. Interpret the userspace and kernel drop counters separately.
 
 **PromQL examples:**
 ```promql
@@ -1034,7 +1042,8 @@ sip_exporter_ser
 sip_exporter_ser{ua_type="yealink"}
 
 # Compare SER across carriers
-sip_exporter_ser{carrier="carrier-a"} - sip_exporter_ser{carrier="carrier-b"}
+# example: compare-carriers
+sip_exporter_ser{carrier="carrier-a"} - ignoring (carrier) sip_exporter_ser{carrier="carrier-b"}
 ```
 
 Metrics defined in [RFC 6076](https://datatracker.ietf.org/doc/html/rfc6076):
@@ -1703,8 +1712,9 @@ histogram_quantile(0.95, sum(rate(sip_exporter_vq_rtd_ms_bucket[5m])) by (le))
 # Average MOS Listening Quality
 rate(sip_exporter_vq_mos_lq_sum[5m]) / rate(sip_exporter_vq_mos_lq_count[5m])
 
-# Percentage of calls with MOS below 3.0
-sum(rate(sip_exporter_vq_mos_lq_bucket{le="2.5"}[5m]))
+# Percentage of quality reports with MOS <= 3.0
+# example: low-mos-percent
+sum(rate(sip_exporter_vq_mos_lq_bucket{le="3"}[5m]))
   / sum(rate(sip_exporter_vq_mos_lq_count[5m])) * 100
 ```
 

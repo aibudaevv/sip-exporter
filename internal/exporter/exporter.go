@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -39,8 +40,6 @@ var (
 const (
 	ethPAll                   = 0x0003
 	readBufSize               = 65536
-	tsCmsgLen                 = 16 // sizeof struct timespec (SCM_TIMESTAMPNS payload) on 64-bit linux
-	tsCmsgHdr                 = 16 // sizeof struct Cmsghdr on 64-bit linux (Len 8 + Level 4 + Type 4)
 	defaultRegisterTTL        = 60 * time.Second
 	defaultInviteTTL          = 60 * time.Second
 	defaultOptionsTTL         = 60 * time.Second
@@ -177,12 +176,7 @@ type (
 	sockEntry struct {
 		fd    int
 		iface string
-	}
-	rawPacket struct {
-		data    []byte
-		iface   string
-		pkttype uint8
-		ts      time.Time // kernel SO_TIMESTAMPNS receive time (zero → fallback to time.Now())
+		ring  *packetRing
 	}
 	rtpEndpointKey struct {
 		IP   uint32
@@ -192,6 +186,13 @@ type (
 	rtpAliasKey struct {
 		endpoint rtpEndpointKey
 		callID   string
+	}
+	rtpMetricLabels struct {
+		carrier       string
+		uaType        string
+		codec         string
+		sourceCountry string
+		direction     string
 	}
 	rtpEndpointMap interface {
 		Update(key, value any, flags ebpf.MapUpdateFlags) error
@@ -204,16 +205,16 @@ type (
 
 		dirtyRTPEndpoints map[rtpEndpointKey]bool
 		rtpAliasLabels    map[rtpAliasKey][2]string
+		rtpMetricHandles  map[rtpMetricLabels]service.RTPMetricser
 
 		rtpEndpointMutex  sync.Mutex
 		mediaLifecycleMu  sync.Mutex
 		dialogLifecycleMu sync.Mutex
 		socks             []sockEntry
-		messages          chan *rawPacket
+		packetBatches     *packetBatchQueue
 		done              chan struct{}
 		wg                sync.WaitGroup
 		closeOnce         sync.Once
-		packetPool        sync.Pool
 		sipPortSets       [][]uint16
 		services          services
 		carrierResolver   *carriers.Resolver
@@ -224,13 +225,13 @@ type (
 		vqHandler         *vq.Handler
 		mediaTracker      *mediatracker.Tracker
 		// pktSrcIP is written in parseRawPacket and read in handleMessage.
-		// Both run synchronously in the readPackets goroutine — no mutex needed.
+		// Both run synchronously in the packet consumer goroutine — no mutex needed.
 		// If packet parsing becomes parallel (worker pool), thread srcIP as a
 		// parameter instead of using this shared field.
 		pktSrcIP              string
 		pktIface              string
 		pktType               uint8
-		pktTimestamp          time.Time // packet capture timestamp (SO_TIMESTAMPNS) for PDV
+		pktTimestamp          time.Time // kernel packet-ring capture timestamp for PDV
 		registerScanTracker   *registerScanTracker
 		inviteBurstTracker    *inviteBurstTracker
 		fasTracker            *fasTracker
@@ -315,7 +316,6 @@ func NewExporter(deps Deps) Exporter {
 		registerScanTracker:   newRegisterScanTracker(deps.FraudRegScanThreshold, deps.FraudRegScanWindow),
 		inviteBurstTracker:    newInviteBurstTracker(deps.FraudInviteBurstThreshold, deps.FraudInviteBurstWindow),
 		fasTracker:            newFasTracker(deps.FraudFASThreshold),
-		messages:              make(chan *rawPacket, messagesChanSize),
 		done:                  make(chan struct{}),
 		rtpEndpointRefs:       make(map[rtpEndpointKey]uint),
 		dirtyRTPEndpoints:     make(map[rtpEndpointKey]bool),
@@ -327,12 +327,10 @@ func NewExporter(deps Deps) Exporter {
 		closedInviteCalls:     make(map[string]time.Time),
 		optionsTracker:        make(map[string]optionsEntry),
 		byeTracker:            make(map[string]byeEntry),
-		packetPool: sync.Pool{
-			New: func() any {
-				return &rawPacket{data: make([]byte, 0, readBufSize)}
-			},
-		},
 	}
+	e.packetBatches = newPacketBatchQueue(messagesChanSize, func() {
+		e.services.metricser.RTPDropped()
+	})
 	if e.registerScanTracker == nil {
 		zap.L().Warn("fraud register scan detection disabled: threshold and window must be > 0",
 			zap.Int("threshold", deps.FraudRegScanThreshold),
@@ -375,7 +373,7 @@ func (e *exporter) Initialize(cfg InitConfig) error {
 	// releaseAll rolls back every resource allocated so far on failure.
 	releaseAll := func() {
 		for _, s := range createdSocks {
-			_ = unix.Close(s.fd)
+			_ = s.ring.close()
 		}
 		for _, c := range collections {
 			c.Close()
@@ -409,10 +407,16 @@ func (e *exporter) Initialize(cfg InitConfig) error {
 			releaseAll()
 			return fmt.Errorf("interface %s: %w", ifaceName, sockErr)
 		}
+		ring, ringErr := setupPacketRing(sock, defaultPacketRingGeometry(), linuxPacketRingSetupOps())
+		if ringErr != nil {
+			coll.Close()
+			releaseAll()
+			return fmt.Errorf("interface %s: %w", ifaceName, ringErr)
+		}
 
 		collections = append(collections, coll)
 		rtpEndpointsMaps = append(rtpEndpointsMaps, rtpMap)
-		createdSocks = append(createdSocks, sockEntry{fd: sock, iface: ifaceName})
+		createdSocks = append(createdSocks, sockEntry{fd: sock, iface: ifaceName, ring: ring})
 	}
 
 	e.collections = collections
@@ -511,10 +515,6 @@ func createSocketForInterface(ifaceName string, progFD int, ignoreOutgoing bool)
 		return 0, fmt.Errorf("failed to attach BPF program: %w", err)
 	}
 
-	if err = unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_TIMESTAMPNS, 1); err != nil {
-		return 0, fmt.Errorf("failed to set SO_TIMESTAMPNS: %w", err)
-	}
-
 	zap.L().Info("eBPF program attached to AF_PACKET socket",
 		zap.String("interface", ifaceName))
 
@@ -549,6 +549,12 @@ func extractIPs(ipHeader []byte) (net.IP, net.IP) {
 	srcIP := net.IPv4(ipHeader[12], ipHeader[13], ipHeader[14], ipHeader[15])
 	dstIP := net.IPv4(ipHeader[16], ipHeader[17], ipHeader[18], ipHeader[19])
 	return srcIP, dstIP
+}
+
+func ipv4Bytes(ip net.IP) [4]byte {
+	var result [4]byte
+	copy(result[:], ip.To4())
+	return result
 }
 
 func (e *exporter) resolveCarrier(ipHeader []byte) (string, string) {
@@ -611,7 +617,7 @@ func directionFromPkttype(pkttype uint8, isResponse bool) string {
 
 func (e *exporter) startWorkers() {
 	e.wg.Add(1)
-	go e.readPackets()
+	go e.readPacketRuns()
 	for i := range e.socks {
 		e.wg.Add(1)
 		go e.readSocket(i)
@@ -625,7 +631,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	e.services.metricser.UpdateChannelCapacity(cap(e.messages))
+	e.services.metricser.UpdateChannelCapacity(e.packetBatches.accounting.capacity())
 
 	for {
 		select {
@@ -670,7 +676,7 @@ func (e *exporter) sipDialogMetricsUpdate() {
 		e.services.metricser.UpdateActiveRegistrations(e.registrationCounts())
 
 		e.services.metricser.SocketStats(e.readSocketStats())
-		e.services.metricser.UpdateChannelLength(len(e.messages))
+		e.services.metricser.UpdateChannelLength(e.packetBatches.accounting.length())
 		e.updateTrackerSizes()
 		e.updateRTPMetrics()
 		e.services.metricser.UpdateActiveDialogs(s)
@@ -739,15 +745,21 @@ func (e *exporter) cleanupInviteTracker() {
 func (e *exporter) Close() {
 	e.closeOnce.Do(func() {
 		e.initialized.Store(false)
+		if e.packetBatches != nil {
+			e.packetBatches.stop()
+		}
 		close(e.done)
+		e.wg.Wait()
 		for _, c := range e.collections {
 			c.Close()
 		}
 		for _, s := range e.socks {
+			if s.ring != nil {
+				_ = s.ring.close()
+				continue
+			}
 			_ = unix.Close(s.fd)
 		}
-		e.wg.Wait()
-		close(e.messages)
 	})
 }
 
@@ -776,38 +788,52 @@ func (e *exporter) readSocketStats() []service.SocketStat {
 	return stats
 }
 
-func (e *exporter) readPackets() {
+func (e *exporter) readPacketRuns() {
 	defer e.wg.Done()
 	for {
 		select {
 		case <-e.done:
+			e.releaseQueuedPacketRuns()
 			return
-		case pkt, ok := <-e.messages:
-			if !ok {
-				return
-			}
-			e.pktIface = pkt.iface
-			e.pktType = pkt.pkttype
-			e.pktTimestamp = pkt.ts
-			if errType, err := e.parseRawPacket(pkt.data); err != nil {
-				e.services.metricser.SystemError()
-				e.services.metricser.ParseError(errType)
-				zap.L().Error("parse err", zap.Error(err))
-			}
-			e.packetPool.Put(pkt)
+		default:
+		}
+		select {
+		case <-e.done:
+			e.releaseQueuedPacketRuns()
+			return
+		case run := <-e.packetBatches.runs:
+			e.processPacketRingRun(run)
 		}
 	}
 }
 
-func (e *exporter) acquireBuf() *rawPacket {
-	b, ok := e.packetPool.Get().(*rawPacket)
-	if !ok {
-		b = &rawPacket{}
+func (e *exporter) releaseQueuedPacketRuns() {
+	for {
+		select {
+		case run := <-e.packetBatches.runs:
+			run.release()
+		default:
+			return
+		}
 	}
-	return b
 }
 
-// handleReadError classifies a unix.Read error from readSocket. Returns true
+func (e *exporter) processPacketRingRun(run *packetRingFrameRun) {
+	defer run.release()
+	e.pktIface = run.iface
+	for _, frame := range run.frames {
+		run.dequeueFrame()
+		e.pktType = frame.pkttype
+		e.pktTimestamp = frame.ts
+		if errType, err := e.parseRawPacket(frame.data); err != nil {
+			e.services.metricser.SystemError()
+			e.services.metricser.ParseError(errType)
+			zap.L().Error("parse err", zap.Error(err))
+		}
+	}
+}
+
+// handleReadError classifies an error while waiting for packet-ring readiness. Returns true
 // if the goroutine should stop (return); false to continue the read loop.
 // SystemError is incremented for unexpected transient errors.
 func (e *exporter) handleReadError(err error) bool {
@@ -830,90 +856,79 @@ func (e *exporter) handleReadError(err error) bool {
 	return false
 }
 
-// parseTimestampNS extracts the kernel SO_TIMESTAMPNS receive timestamp from a
-// Recvmsg out-of-band buffer. Returns the zero time when the cmsg is absent or
-// malformed so the caller falls back to time.Now(). Parses the Cmsghdr + timespec
-// layout directly (no unix.ParseSocketControlMessage) to avoid per-packet heap
-// allocation on the hot path.
-func parseTimestampNS(oob []byte) time.Time {
-	if len(oob) < tsCmsgHdr+tsCmsgLen {
-		return time.Time{}
-	}
-	if int32(binary.NativeEndian.Uint32(oob[8:12])) != unix.SOL_SOCKET {
-		return time.Time{}
-	}
-	if int32(binary.NativeEndian.Uint32(oob[12:16])) != unix.SCM_TIMESTAMPNS {
-		return time.Time{}
-	}
-	sec := int64(binary.NativeEndian.Uint64(oob[tsCmsgHdr : tsCmsgHdr+8]))
-	nsec := int64(binary.NativeEndian.Uint64(oob[tsCmsgHdr+8 : tsCmsgHdr+tsCmsgLen]))
-	return time.Unix(sec, nsec)
-}
-
 func (e *exporter) readSocket(idx int) {
 	defer e.wg.Done()
-	entry := e.socks[idx]
-	buf := make([]byte, readBufSize)
-	oob := make([]byte, unix.CmsgSpace(tsCmsgLen))
+	e.readPacketRing(e.socks[idx], e.sipPortSets[idx], waitPacketRing)
+}
 
+func (e *exporter) readPacketRing(
+	entry sockEntry, ports []uint16, wait func(int) error,
+) {
+	var blockIndex uint32
+	borrowedBlocks := newPacketRingBorrowedBlocks(entry.ring.blockCount)
 	for {
-		n, oobn, _, from, err := unix.Recvmsg(entry.fd, buf, oob, 0)
+		block, physicalIndex, keepReading, err := e.nextPacketRingBlock(
+			entry.ring, blockIndex, &borrowedBlocks, wait)
 		if err != nil {
-			if e.handleReadError(err) {
-				return
-			}
-			select {
-			case <-e.done:
-				return
-			default:
-				continue
-			}
+			e.services.metricser.SystemError()
+			zap.L().Error("decode packet ring block", zap.Error(err))
+			return
 		}
-
-		if n == 0 {
-			continue
+		if !keepReading {
+			return
 		}
-
-		pkt := e.acquireBuf()
-		pkt.data = append(pkt.data[:0], buf[:n]...)
-		pkt.iface = entry.iface
-		pkt.ts = parseTimestampNS(oob[:oobn])
-		if sa, ok := from.(*unix.SockaddrLinklayer); ok {
-			pkt.pkttype = sa.Pkttype
-		} else {
-			pkt.pkttype = unix.PACKET_HOST
+		borrowedBlocks.track(&block, physicalIndex)
+		keepReading, consumeErr := e.consumePacketRingBlock(block, entry.iface, ports)
+		blockIndex++
+		if consumeErr != nil {
+			e.services.metricser.SystemError()
+			zap.L().Error("iterate packet ring block", zap.Error(consumeErr))
 		}
-
-		zap.L().Debug("packet from socket", zap.Int("len", n))
-
-		if !e.sendPacket(pkt, e.sipPortSets[idx]) {
+		if !keepReading {
 			return
 		}
 	}
 }
 
-// sendPacket routes a packet to the messages channel. SIP packets (matching one
-// of ports) use a blocking send — they must not be starved by RTP flood.
-// All other packets (RTP) use a non-blocking send — dropped when the channel
-// is full. Returns false if shutdown was signaled.
-func (e *exporter) sendPacket(pkt *rawPacket, ports []uint16) bool {
-	if isSIPPacket(pkt.data, ports) {
+func (e *exporter) nextPacketRingBlock(
+	ring *packetRing,
+	blockIndex uint32,
+	borrowedBlocks *packetRingBorrowedBlocks,
+	wait func(int) error,
+) (packetRingBlock, uint32, bool, error) {
+	physicalIndex := blockIndex % ring.blockCount
+	if !borrowedBlocks.waitUntilReusable(e.done, physicalIndex) {
+		return packetRingBlock{}, 0, false, nil
+	}
+	for {
 		select {
-		case e.messages <- pkt:
 		case <-e.done:
-			return false
+			return packetRingBlock{}, 0, false, nil
+		default:
 		}
-		return true
+		block, ready, err := ring.decodeBlock(blockIndex)
+		if err != nil {
+			return packetRingBlock{}, 0, false, err
+		}
+		if ready {
+			return block, physicalIndex, true, nil
+		}
+		if borrowedBlocks.count != 0 {
+			if !borrowedBlocks.waitForRelease(e.done) {
+				return packetRingBlock{}, 0, false, nil
+			}
+			continue
+		}
+		if err = wait(ring.fd); err != nil && e.handleReadError(err) {
+			return packetRingBlock{}, 0, false, nil
+		}
 	}
-	select {
-	case e.messages <- pkt:
-	case <-e.done:
-		return false
-	default:
-		e.services.metricser.RTPDropped()
-		e.packetPool.Put(pkt)
-	}
-	return true
+}
+
+func (e *exporter) consumePacketRingBlock(
+	block packetRingBlock, iface string, ports []uint16,
+) (bool, error) {
+	return e.packetBatches.enqueueBlock(block, iface, ports)
 }
 
 // isSIPPacket does a quick L4 port check to classify a packet as SIP (one of
@@ -1037,10 +1052,6 @@ func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 		return parseErrTypeL3, err
 	}
 
-	carrier, carrierCountry := e.resolveCarrier(ipHeader)
-	sourceCountry := e.resolveSourceCountry(carrierCountry, ipHeader)
-	e.pktSrcIP = net.IPv4(ipHeader[12], ipHeader[13], ipHeader[14], ipHeader[15]).String()
-
 	if ipHeader[9] != ipProtoUDP {
 		return parseErrTypeL4, errors.New("not UDP packet")
 	}
@@ -1063,11 +1074,12 @@ func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 	if sipData[0]&rtpVersionMask == rtpVersion2Prefix {
 		srcPort := binary.BigEndian.Uint16(packet[udpOffset : udpOffset+2])
 		dstPort := binary.BigEndian.Uint16(packet[udpOffset+2 : udpOffset+4])
-		srcIP, dstIP := extractIPs(ipHeader)
+		srcIP := [4]byte{ipHeader[12], ipHeader[13], ipHeader[14], ipHeader[15]}
+		dstIP := [4]byte{ipHeader[16], ipHeader[17], ipHeader[18], ipHeader[19]}
 		if isRTCPPayload(sipData) {
-			return e.handleRTCP(srcIP, srcPort, dstIP, dstPort, sipData)
+			return e.handleRTCPIPv4(srcIP, srcPort, dstIP, dstPort, sipData)
 		}
-		return e.handleRTP(srcIP, srcPort, dstIP, dstPort, sipData)
+		return e.handleRTPIPv4(srcIP, srcPort, dstIP, dstPort, sipData)
 	}
 
 	if len(sipData) < minSIPDataLen {
@@ -1077,6 +1089,10 @@ func (e *exporter) parseRawPacket(packet []byte) (string, error) {
 	if !isSIPMethod(sipData) {
 		return parseErrTypeSIP, errors.New("not a SIP packet")
 	}
+
+	carrier, carrierCountry := e.resolveCarrier(ipHeader)
+	sourceCountry := e.resolveSourceCountry(carrierCountry, ipHeader)
+	e.pktSrcIP = net.IPv4(ipHeader[12], ipHeader[13], ipHeader[14], ipHeader[15]).String()
 
 	zap.L().Debug("packet raw", zap.ByteString("sip_data", sipData))
 
@@ -1225,9 +1241,9 @@ func nowNTP32(t time.Time) uint32 {
 // stream's labels. RTT is computed as (now_NTP32 − LSR − DLSR) and skipped when
 // LSR or DLSR is zero (no prior SR) or the result is negative (clock skew). Blocks whose
 // SSRC is not tracked are dropped — consistent with RTP correlation.
-func (e *exporter) handleRTCP(
-	srcIP net.IP, srcPort uint16,
-	dstIP net.IP, dstPort uint16,
+func (e *exporter) handleRTCPIPv4(
+	srcIP [4]byte, srcPort uint16,
+	dstIP [4]byte, dstPort uint16,
 	payload []byte,
 ) (string, error) {
 	reports, err := rtcp.Parse(payload)
@@ -1245,10 +1261,8 @@ func (e *exporter) handleRTCP(
 		ts = time.Now()
 	}
 	nowNTP := nowNTP32(ts)
-	sIP, dIP := srcIP.String(), dstIP.String()
-
 	for _, rep := range reports {
-		e.handleRTCPReport(rep, nowNTP, sIP, srcPort, dIP, dstPort)
+		e.handleRTCPReport(rep, nowNTP, srcIP, srcPort, dstIP, dstPort)
 	}
 	return "", nil
 }
@@ -1256,9 +1270,9 @@ func (e *exporter) handleRTCP(
 func (e *exporter) handleRTCPReport(
 	report rtcp.Report,
 	nowNTP uint32,
-	srcIP string,
+	srcIP [4]byte,
 	srcPort uint16,
-	dstIP string,
+	dstIP [4]byte,
 	dstPort uint16,
 ) {
 	reportType := "rr"
@@ -1266,12 +1280,14 @@ func (e *exporter) handleRTCPReport(
 		reportType = "sr"
 	}
 	for _, block := range report.Blocks {
-		ctx, lossDelta, ok := e.mediaTracker.RecordRTCP(
+		ctx, lossDelta, ok := e.mediaTracker.RecordRTCPIPv4(
 			block.SSRC, block.CumulativeLost, srcIP, srcPort, dstIP, dstPort)
 		if !ok {
 			e.services.metricser.UpdateRTCPOrphan()
 			zap.L().Debug("RTCP orphan: SSRC not tracked at this endpoint",
-				zap.Uint32("ssrc", block.SSRC), zap.String("src", srcIP), zap.String("dst", dstIP))
+				zap.Uint32("ssrc", block.SSRC),
+				zap.String("src", netip.AddrFrom4(srcIP).String()),
+				zap.String("dst", netip.AddrFrom4(dstIP).String()))
 			continue
 		}
 		carrier, uaType, codec := ctx.Labels.Carrier, ctx.Labels.UAType, ctx.Codec
@@ -1314,6 +1330,32 @@ func (e *exporter) handleRTP(
 	dstIP net.IP, dstPort uint16,
 	payload []byte,
 ) (string, error) {
+	return e.handleRTPIPv4(ipv4Bytes(srcIP), srcPort, ipv4Bytes(dstIP), dstPort, payload)
+}
+
+func (e *exporter) rtpMetricHandle(res mediatracker.ObserveResult) service.RTPMetricser {
+	labels := rtpMetricLabels{
+		carrier: res.Carrier, uaType: res.UAType, codec: res.Codec,
+		sourceCountry: res.SourceCountry, direction: res.Direction,
+	}
+	if handle, ok := e.rtpMetricHandles[labels]; ok {
+		return handle
+	}
+	handle := e.services.metricser.BindRTPMetrics(
+		labels.carrier, labels.uaType, labels.codec, labels.sourceCountry, labels.direction,
+	)
+	if e.rtpMetricHandles == nil {
+		e.rtpMetricHandles = make(map[rtpMetricLabels]service.RTPMetricser)
+	}
+	e.rtpMetricHandles[labels] = handle
+	return handle
+}
+
+func (e *exporter) handleRTPIPv4(
+	srcIP [4]byte, srcPort uint16,
+	dstIP [4]byte, dstPort uint16,
+	payload []byte,
+) (string, error) {
 	header, err := rtp.ParseHeader(payload)
 	if err != nil {
 		zap.L().Debug("RTP header parse skipped", zap.Error(err))
@@ -1331,7 +1373,7 @@ func (e *exporter) handleRTP(
 		e.services.metricser.RTPKernelTimestampMissing()
 	}
 	e.mediaLifecycleMu.Lock()
-	res, ok := e.mediaTracker.Observe(srcIP.String(), srcPort, dstIP.String(), dstPort, header, arrival)
+	res, ok := e.mediaTracker.ObserveIPv4(srcIP, srcPort, dstIP, dstPort, header, arrival)
 	if res.LearnedEndpoint != nil {
 		e.retainRTPEndpoint(res.LearnedEndpoint.IP, res.LearnedEndpoint.Port)
 		key, _ := ipPortToKey(res.LearnedEndpoint.IP, res.LearnedEndpoint.Port)
@@ -1348,18 +1390,14 @@ func (e *exporter) handleRTP(
 	}
 	if res.Counted {
 		e.fasTracker.clearIfAnswerMedia(
-			res.CallID, fasEndpoint{ip: res.MatchedIP, port: res.MatchedPort}, res.StreamPacketsTotal, res.MatchedBy,
+			res.CallID,
+			fasEndpoint{ip: binary.BigEndian.Uint32(res.MatchedIPv4[:]), port: res.MatchedPort},
+			res.StreamPacketsTotal, res.MatchedBy,
 		)
-		e.services.metricser.UpdateRTPPackets(res.Carrier, res.UAType, res.Codec, res.SourceCountry, res.Direction)
+		rtpMetrics := e.rtpMetricHandle(res)
+		rtpMetrics.UpdateRTPPackets()
 		if res.StreamPacketsTotal > 1 {
-			e.services.metricser.UpdateRTPPDV(
-				res.Carrier,
-				res.UAType,
-				res.Codec,
-				res.SourceCountry,
-				res.Direction,
-				res.DelayVariationMs,
-			)
+			rtpMetrics.UpdateRTPPDV(res.DelayVariationMs)
 		}
 	}
 	if res.Duplicate {
@@ -1730,9 +1768,7 @@ func (e *exporter) handleInvite200OK(
 	if hasOfferSDP {
 		eps, _ := e.registerMediaEndpoints(offerSDP, labels)
 		mediaEndpoints += len(eps)
-		for _, ep := range eps {
-			offerEndpoints = append(offerEndpoints, fasEndpoint{ip: ep.IP, port: ep.Port})
-		}
+		offerEndpoints = appendFASOfferEndpoints(offerEndpoints, eps)
 	}
 	answerSRTP := false
 	if hasAnswerSDP {
@@ -1749,6 +1785,17 @@ func (e *exporter) handleInvite200OK(
 		e.fasTracker.updateOffer(callID, offerEndpoints, answerSRTP)
 	}
 	return nil
+}
+
+func appendFASOfferEndpoints(dst []fasEndpoint, endpoints []mediatracker.MediaEndpoint) []fasEndpoint {
+	for _, ep := range endpoints {
+		if key, ok := ipPortToKey(ep.IP, ep.Port); ok {
+			dst = append(dst, fasEndpoint{ip: key.IP, port: key.Port})
+			continue
+		}
+		dst = append(dst, fasEndpoint{fallbackIP: ep.IP, port: ep.Port})
+	}
+	return dst
 }
 
 func (e *exporter) handleBye200OK(packet dto.Packet, _ string) error {
