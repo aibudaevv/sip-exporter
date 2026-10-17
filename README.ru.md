@@ -397,7 +397,7 @@ sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
 Об уязвимостях сообщайте приватно по [Security Policy](.github/SECURITY.md).
 
 ### Требования
-- Go 1.26.6+
+- Go 1.26.9+
 - Clang/LLVM (для компиляции eBPF)
 - Ядро Linux с поддержкой eBPF
 - Права root (требуются для eBPF и packet socket)
