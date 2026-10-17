@@ -396,7 +396,7 @@ Before contributing, read the [Contributing Guide](CONTRIBUTING.md) and
 [Security Policy](.github/SECURITY.md).
 
 ### Requirements
-- Go 1.26.6+
+- Go 1.26.9+
 - Clang/LLVM (for eBPF compilation)
 - golangci-lint v2.9.0 and goimports (for `make lint` / `make imports`)
 - Linux kernel with eBPF support
