@@ -1,6 +1,6 @@
 module github.com/aibudaevv/sip-exporter
 
-go 1.26.9
+go 1.26.11
 
 require (
 	github.com/cilium/ebpf v0.22.0
