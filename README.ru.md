@@ -120,7 +120,7 @@ SIP + RTP-трафик → NIC → eBPF socket filter → AF_PACKET socket → G
 ## Установка
 
 ```bash
-docker pull frzq/sip-exporter:1.11.2
+docker pull frzq/sip-exporter:1.11.3
 ```
 
 ### Конфигурация
@@ -397,7 +397,7 @@ sum by (carrier) (rate(sip_exporter_rtp_packets_lost_total[5m]))
 Об уязвимостях сообщайте приватно по [Security Policy](.github/SECURITY.md).
 
 ### Требования
-- Go 1.26.9+
+- Go 1.26.11+
 - Clang/LLVM (для компиляции eBPF)
 - Ядро Linux с поддержкой eBPF
 - Права root (требуются для eBPF и packet socket)

@@ -120,7 +120,7 @@ as release capacity. See the required profile, integrity gates, and publication 
 ## Install
 
 ```bash
-docker pull frzq/sip-exporter:1.11.2
+docker pull frzq/sip-exporter:1.11.3
 ```
 
 ### Configure
@@ -396,7 +396,7 @@ Before contributing, read the [Contributing Guide](CONTRIBUTING.md) and
 [Security Policy](.github/SECURITY.md).
 
 ### Requirements
-- Go 1.26.9+
+- Go 1.26.11+
 - Clang/LLVM (for eBPF compilation)
 - golangci-lint v2.9.0 and goimports (for `make lint` / `make imports`)
 - Linux kernel with eBPF support
